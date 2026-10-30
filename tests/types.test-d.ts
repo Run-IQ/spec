@@ -135,6 +135,7 @@ describe('ExecutableRule types (A6)', () => {
     expectTypeOf(validateRuleDefinition).returns.toEqualTypeOf<{
       valid: boolean;
       errors: string[];
+      issues: { path: string; message: string }[];
     }>();
   });
 });

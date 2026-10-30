@@ -94,5 +94,6 @@ function fail(path: string, what: string): never {
   throw new SpecError(
     'NON_SERIALIZABLE',
     `Value at "${path || '(root)'}" cannot be serialized to canonical JSON: ${what}`,
+    path,
   );
 }

@@ -1,10 +1,24 @@
 import { toJsonValue } from '../canonical.js';
+import { SpecError } from '../errors.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
+
+/** One problem found by `validateRuleDefinition`: the field path (`''` for the whole value). */
+export interface RuleValidationIssue {
+  path: string;
+  message: string;
+}
+
+class Issues {
+  readonly list: RuleValidationIssue[] = [];
+  add(path: string, message: string): void {
+    this.list.push({ path, message });
+  }
+}
 
 /**
  * Checks a rule definition without throwing and reports every problem found. Accepts exactly
@@ -14,27 +28,39 @@ const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
  * non-JSON values (Map, Set, class instances, functions, `NaN`, `Infinity`...).
  *
  * `checksum` is ignored, as in normalize.
+ *
+ * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
+ * the path of the offending field (`params.rates[1]`, `dimensions.country`; `''` when the
+ * value itself is not an object).
  */
-export function validateRuleDefinition(value: unknown): { valid: boolean; errors: string[] } {
-  const errors: string[] = [];
+export function validateRuleDefinition(value: unknown): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
+  const errors = new Issues();
   if (!isPlainObject(value)) {
-    return { valid: false, errors: ['a rule definition must be a plain object'] };
+    errors.add('', 'a rule definition must be a plain object');
+    return result(errors);
   }
 
   checkNonEmptyString(value.id, 'id', errors);
-  if (!isRuleVersion(value.version)) errors.push('version must be a positive integer');
+  if (!isRuleVersion(value.version)) errors.add('version', 'version must be a positive integer');
   checkNonEmptyString(value.model, 'model', errors);
-  if (value.params === undefined) errors.push('params is required');
+  if (value.params === undefined) errors.add('params', 'params is required');
   else checkJson(value.params, 'params', errors);
   if (typeof value.priority !== 'number' || !Number.isFinite(value.priority)) {
-    errors.push('priority must be a finite number');
+    errors.add('priority', 'priority must be a finite number');
   }
 
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
   const until =
     value.effectiveUntil == null ? null : checkDate(value.effectiveUntil, 'effectiveUntil', errors);
   if (from !== undefined && until != null && until.getTime() <= from.getTime()) {
-    errors.push('effectiveUntil must be after effectiveFrom: the window would be empty');
+    errors.add(
+      'effectiveUntil',
+      'effectiveUntil must be after effectiveFrom: the window would be empty',
+    );
   }
 
   if (value.condition != null) checkCondition(value.condition, errors);
@@ -50,59 +76,82 @@ export function validateRuleDefinition(value: unknown): { valid: boolean; errors
     checkJson(value[key], key, errors);
   }
 
-  return { valid: errors.length === 0, errors };
+  return result(errors);
 }
 
-function checkNonEmptyString(value: unknown, field: string, errors: string[]): void {
-  if (typeof value !== 'string' || value === '') errors.push(`${field} must be a non-empty string`);
+function result(issues: Issues): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
+  return {
+    valid: issues.list.length === 0,
+    errors: issues.list.map((i) => i.message),
+    issues: issues.list,
+  };
 }
 
-function checkJson(value: unknown, field: string, errors: string[]): void {
-  try {
-    toJsonValue(value, field);
-  } catch (error) {
-    errors.push((error as Error).message);
+function checkNonEmptyString(value: unknown, field: string, errors: Issues): void {
+  if (typeof value !== 'string' || value === '') {
+    errors.add(field, `${field} must be a non-empty string`);
   }
 }
 
-function checkDate(value: unknown, field: string, errors: string[]): Date | undefined {
+function checkJson(value: unknown, field: string, errors: Issues): void {
+  try {
+    toJsonValue(value, field);
+  } catch (error) {
+    errors.add(pathOf(error, field), (error as Error).message);
+  }
+}
+
+function checkDate(value: unknown, field: string, errors: Issues): Date | undefined {
   try {
     return parseRuleDate(value, field);
   } catch (error) {
-    errors.push((error as Error).message);
+    errors.add(pathOf(error, field), (error as Error).message);
     return undefined;
   }
 }
 
-function checkCondition(value: unknown, errors: string[]): void {
+function checkCondition(value: unknown, errors: Issues): void {
   if (!isPlainObject(value)) {
-    errors.push('condition must be an object { dsl, value }');
+    errors.add('condition', 'condition must be an object { dsl, value }');
     return;
   }
   for (const key of Object.keys(value)) {
-    if (key !== 'dsl' && key !== 'value') errors.push(`condition has an unknown key "${key}"`);
+    if (key !== 'dsl' && key !== 'value') {
+      errors.add(`condition.${key}`, `condition has an unknown key "${key}"`);
+    }
   }
   checkNonEmptyString(value.dsl, 'condition.dsl', errors);
-  if (value.value === undefined) errors.push('condition.value is required');
+  if (value.value === undefined) errors.add('condition.value', 'condition.value is required');
   else checkJson(value.value, 'condition.value', errors);
 }
 
-function checkDimensions(value: unknown, errors: string[]): void {
+function checkDimensions(value: unknown, errors: Issues): void {
   if (!isPlainObject(value)) {
-    errors.push('dimensions must be an object of strings');
+    errors.add('dimensions', 'dimensions must be an object of strings');
     return;
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
-    if (v != null && typeof v !== 'string') errors.push(`dimensions.${key} must be a string`);
+    if (v != null && typeof v !== 'string') {
+      errors.add(`dimensions.${key}`, `dimensions.${key} must be a string`);
+    }
   }
 }
 
-function checkTags(value: unknown, errors: string[]): void {
+function checkTags(value: unknown, errors: Issues): void {
   if (
     !Array.isArray(value) ||
     !Array.from(value as unknown[]).every((t) => typeof t === 'string')
   ) {
-    errors.push('tags must be an array of strings');
+    errors.add('tags', 'tags must be an array of strings');
   }
+}
+
+/** Path of a `SpecError` about one value, else the checked field. */
+function pathOf(error: unknown, field: string): string {
+  return error instanceof SpecError && error.path ? error.path : field;
 }

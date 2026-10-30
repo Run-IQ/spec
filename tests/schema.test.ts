@@ -132,7 +132,7 @@ describe('validateRuleDefinition, JSON schema and normalize agree', () => {
   });
 
   it.each(VALID)('accepts %s', (_name, value) => {
-    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [] });
+    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [], issues: [] });
     expect(schemaAccepts(value)).toBe(true);
     expect(normalizeAccepts(value)).toBe(true);
   });
@@ -236,6 +236,36 @@ describe('validateRuleDefinition beyond JSON', () => {
     expect(errors.join('\n')).toMatch(/id/);
     expect(errors.join('\n')).toMatch(/priority/);
     expect(errors.join('\n')).toMatch(/dimensions\.country/);
+  });
+
+  it('returns structured issues alongside the error strings', () => {
+    const result = validateRuleDefinition({
+      ...base,
+      id: 1,
+      params: { rates: [0.1, Number.NaN] },
+      effectiveUntil: '2024-01-01',
+      dimensions: { country: 1 },
+      condition: { dsl: 'jsonlogic' },
+    });
+    expect(result.valid).toBe(false);
+    expect(result.issues.map((i) => i.path)).toEqual([
+      'id',
+      'params.rates[1]',
+      'effectiveUntil',
+      'condition.value',
+      'dimensions.country',
+    ]);
+    expect(result.errors).toEqual(result.issues.map((i) => i.message));
+  });
+
+  it('gives an empty path to a problem with the whole value', () => {
+    expect(validateRuleDefinition(1).issues).toEqual([
+      { path: '', message: 'a rule definition must be a plain object' },
+    ]);
+  });
+
+  it('returns no issue for a valid definition', () => {
+    expect(validateRuleDefinition(base)).toEqual({ valid: true, errors: [], issues: [] });
   });
 
   it('never throws', () => {
