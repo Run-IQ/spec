@@ -87,7 +87,7 @@ function normalizeDimensions(value: unknown): Record<string, string> {
   const out: Record<string, string> = {};
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
-    if (v === undefined) continue;
+    if (v == null) continue; // null or undefined: the dimension is unset
     if (typeof v !== 'string') invalidRule(`dimensions.${key} must be a string`);
     defineField(out, key, v);
   }

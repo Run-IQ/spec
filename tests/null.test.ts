@@ -100,6 +100,45 @@ describe('top-level null means absent (A3: independent of how a database writes 
   });
 });
 
+describe('a null dimension value means the dimension is unset', () => {
+  it('{country: null}, {} and absent dimensions give the same checksum and fingerprint', () => {
+    const asNull = { ...minimal, dimensions: { country: null } } as unknown as RuleDefinitionInput;
+    const empty = { ...minimal, dimensions: {} };
+    expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(empty));
+    expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(minimal));
+    expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(empty));
+    expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(minimal));
+  });
+
+  it('drops only the null key', () => {
+    const def = normalizeRuleDefinition({
+      ...minimal,
+      dimensions: { country: 'TG', category: null },
+    } as unknown as RuleDefinitionInput);
+    expect(def.dimensions).toEqual({ country: 'TG' });
+    expect(
+      computeRuleChecksum({
+        ...minimal,
+        dimensions: { country: 'TG', category: null },
+      } as unknown as RuleDefinitionInput),
+    ).toBe(computeRuleChecksum({ ...minimal, dimensions: { country: 'TG' } }));
+  });
+
+  it.each([
+    ['a number', 1],
+    ['a boolean', false],
+    ['an object', { a: 'b' }],
+    ['an array', ['TG']],
+  ])('still rejects %s', (_label, value) => {
+    expect(() =>
+      normalizeRuleDefinition({
+        ...minimal,
+        dimensions: { country: value },
+      } as unknown as RuleDefinitionInput),
+    ).toThrow(expect.objectContaining({ code: 'INVALID_RULE' }));
+  });
+});
+
 describe('nested null stays data', () => {
   it('inside params', () => {
     expect(computeRuleChecksum({ ...minimal, params: { amount: 10, cap: null } })).not.toBe(

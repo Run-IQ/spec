@@ -43,7 +43,9 @@ export interface RuleDefinitionBase {
  * `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`, `sourceRef`) and every
  * extension field, `null`, `undefined` and absence are the same input, so the checksum and
  * fingerprint do not depend on how a database writes empty columns. Normalization drops them,
- * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). Below the top
+ * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). A `null`
+ * value inside `dimensions` likewise means the dimension is unset and its key is dropped
+ * (other non-string values throw). Below the top
  * level (inside `params`, `condition.value`, `exceptions` and extension values), and for the
  * required `params` itself, `null` is data and is kept.
  */
@@ -68,7 +70,8 @@ export interface RuleDefinitionInputBase {
   /** Same forms as `effectiveFrom`; absent, `undefined` or `null` means no end. */
   readonly effectiveUntil?: Date | string | null | undefined;
   readonly output?: string | null | undefined;
-  readonly dimensions?: Readonly<Record<string, string>> | null | undefined;
+  /** A `null` or `undefined` value means the dimension is unset: the key is dropped. */
+  readonly dimensions?: Readonly<Record<string, string | null | undefined>> | null | undefined;
   readonly tags?: readonly string[] | null | undefined;
   readonly dominanceGroup?: string | null | undefined;
   readonly exceptions?: unknown;
