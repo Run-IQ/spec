@@ -17,6 +17,7 @@ export interface RuleCondition {
  */
 export interface RuleDefinitionBase {
   id: string;
+  /** Positive integer. */
   version: number;
   model: string;
   params: JsonValue;
@@ -102,3 +103,8 @@ export const RESERVED_RULE_FIELDS: readonly string[] = [
   'sourceRef',
   'checksum',
 ];
+
+/** A rule version is a positive integer (`1`, `2`, ...). */
+export function isRuleVersion(value: unknown): value is number {
+  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+}

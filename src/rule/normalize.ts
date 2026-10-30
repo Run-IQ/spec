@@ -2,7 +2,7 @@ import { toJsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
-import { RESERVED_RULE_FIELDS } from './definition.js';
+import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
@@ -19,7 +19,8 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - extension fields are kept at the top level.
  *
  * Never mutates `input`; the result shares no reference with it.
- * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field or when
+ * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
+ * positive integer), or when
  * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
  * `NON_SERIALIZABLE`.
  */
@@ -38,7 +39,7 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
 
   const out: Record<string, unknown> = {
     id: requireString(input.id, 'id'),
-    version: requireNumber(input.version, 'version'),
+    version: requireVersion(input.version),
     model: requireString(input.model, 'model'),
     params: requireParams(input.params),
     priority: requireNumber(input.priority, 'priority'),
@@ -106,6 +107,11 @@ function normalizeTags(value: unknown): string[] {
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value === '') invalidRule(`${field} must be a non-empty string`);
+  return value;
+}
+
+function requireVersion(value: unknown): number {
+  if (!isRuleVersion(value)) invalidRule('version must be a positive integer');
   return value;
 }
 
