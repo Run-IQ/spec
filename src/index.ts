@@ -1,3 +1,13 @@
+/**
+ * @run-iq/spec: the canonical form of a Run-IQ rule, its checksum and its fingerprint.
+ *
+ * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
+ * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
+ * `DateTime`, Map or Set are refused with `SpecError` (`NON_SERIALIZABLE`): convert them to
+ * JSON (for example a decimal string) before calling. Strings are not Unicode-normalized.
+ *
+ * @packageDocumentation
+ */
 export { canonicalize } from './canonical.js';
 export type { JsonValue } from './canonical.js';
 export { SpecError } from './errors.js';

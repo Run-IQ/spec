@@ -120,6 +120,21 @@ describe('canonicalize', () => {
     }
   });
 
+  it('applies no Unicode normalization: strings are data', () => {
+    expect(canonicalize('\u00e9')).not.toBe(canonicalize('e\u0301'));
+  });
+
+  it('refuses a Decimal-like class instance: the caller converts it to JSON', () => {
+    class Decimal {
+      constructor(readonly value: string) {}
+      toJSON(): string {
+        return this.value;
+      }
+    }
+    expect(() => canonicalize({ amount: new Decimal('1.10') })).toThrow(nonSerializable);
+    expect(canonicalize({ amount: '1.10' })).toBe('{"amount":"1.10"}');
+  });
+
   it('does not use toJSON', () => {
     expect(() => canonicalize({ toJSON: () => 'x' })).toThrow(nonSerializable);
   });

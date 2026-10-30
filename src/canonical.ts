@@ -12,6 +12,12 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * Throws `SpecError` (`NON_SERIALIZABLE`) for `NaN`, `±Infinity`, bigints, functions, symbols,
  * an invalid `Date`, a circular reference, `undefined` at the top level, and any object that
  * is not a plain object, an array or a `Date` (Map, Set, class instances...). `toJSON` is ignored.
+ *
+ * Strings are data, as in JCS (RFC 8785): no Unicode normalization is applied, so `"é"`
+ * written precomposed (U+00E9) and decomposed (U+0065 U+0301) give different output.
+ *
+ * Values such as `Decimal` (decimal.js) or Luxon `DateTime` are class instances and are
+ * refused: the caller must convert them to JSON (a string or number) first.
  */
 export function canonicalize(value: unknown): string {
   return canonicalizeAt(value, '');
