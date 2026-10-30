@@ -23,7 +23,11 @@ export function canonicalize(value: unknown): string {
   return canonicalizeAt(value, '');
 }
 
-/** `canonicalize`, with `path` used as the root name in error messages. */
+/**
+ * `canonicalize`, with `path` used as the root name in error messages and in
+ * `SpecError.path`: `canonicalizeAt({ score: Infinity }, 'metadata')` reports
+ * `metadata.score`.
+ */
 export function canonicalizeAt(value: unknown, path: string): string {
   return write(value, path, new Set());
 }

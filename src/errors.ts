@@ -4,9 +4,9 @@ export type SpecErrorCode = 'NON_SERIALIZABLE' | 'INVALID_DATE' | 'INVALID_RULE'
 export class SpecError extends Error {
   readonly code: SpecErrorCode;
   /**
-   * Path of the value `canonicalize` could not serialize (`params.rates[1]`), set only on
-   * those `NON_SERIALIZABLE` errors, whichever function called `canonicalize`. Absent on
-   * every other error.
+   * Path of the value `canonicalize` (or `canonicalizeAt`) could not serialize
+   * (`params.rates[1]`), set only on those `NON_SERIALIZABLE` errors, whichever function
+   * called it. Absent on every other error.
    */
   readonly path?: string;
 

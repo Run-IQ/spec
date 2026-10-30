@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, SpecError } from '../src/index.js';
+import { canonicalize, canonicalizeAt, SpecError } from '../src/index.js';
 
 const nonSerializable = expect.objectContaining({ code: 'NON_SERIALIZABLE' });
 
@@ -137,5 +137,24 @@ describe('canonicalize', () => {
 
   it('does not use toJSON', () => {
     expect(() => canonicalize({ toJSON: () => 'x' })).toThrow(nonSerializable);
+  });
+});
+
+describe('canonicalizeAt', () => {
+  it('serialises like canonicalize', () => {
+    expect(canonicalizeAt({ b: 1, a: [true] }, 'metadata')).toBe(canonicalize({ b: 1, a: [true] }));
+  });
+
+  it('names the offending value from the given root', () => {
+    expect(() => canonicalizeAt({ score: Infinity }, 'metadata')).toThrow(
+      expect.objectContaining({
+        code: 'NON_SERIALIZABLE',
+        path: 'metadata.score',
+        message: expect.stringContaining('"metadata.score"'),
+      }),
+    );
+    expect(() => canonicalizeAt(new Map(), 'metadata')).toThrow(
+      expect.objectContaining({ path: 'metadata' }),
+    );
   });
 });
