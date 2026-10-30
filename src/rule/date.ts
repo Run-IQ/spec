@@ -10,6 +10,9 @@ const DATE_TIME =
  * - a valid `Date`, from any realm;
  * - `YYYY-MM-DD`, read as UTC midnight;
  * - an ISO 8601 date-time WITH `Z` or a `±HH:MM` offset (seconds and fraction optional).
+ *   Fractional seconds take 1 to 9 digits; digits beyond the millisecond are TRUNCATED, not
+ *   rounded (`.123456` → `.123`), because `Date` and the canonical ISO form stop at the
+ *   millisecond and databases such as Postgres emit microseconds.
  *
  * Anything else throws `SpecError` (`INVALID_DATE`), including a date-time without a time
  * zone, whose meaning would depend on the machine's time zone.

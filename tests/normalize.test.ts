@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { normalizeRuleDefinition, SpecError } from '../src/index.js';
+import { computeRuleChecksum, normalizeRuleDefinition, SpecError } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
@@ -132,6 +132,31 @@ describe('normalizeRuleDefinition: dates (A1)', () => {
       normalizeRuleDefinition({ ...base, effectiveFrom: '2000-01-01', effectiveUntil: input })
         .effectiveUntil,
     ).toBe(expected);
+  });
+
+  it.each([
+    [
+      'microseconds (as Postgres writes them)',
+      '2025-03-15T10:20:30.123456Z',
+      '2025-03-15T10:20:30.123Z',
+    ],
+    ['nanoseconds', '2025-03-15T10:20:30.123456789+00:00', '2025-03-15T10:20:30.123Z'],
+    ['no rounding up', '2025-03-15T10:20:30.999999Z', '2025-03-15T10:20:30.999Z'],
+    ['one digit', '2025-03-15T10:20:30.5Z', '2025-03-15T10:20:30.500Z'],
+  ])('truncates fractional seconds beyond milliseconds: %s', (_label, input, expected) => {
+    expect(normalizeRuleDefinition({ ...base, effectiveFrom: input }).effectiveFrom).toBe(expected);
+  });
+
+  it('two inputs differing only below the millisecond give the same checksum', () => {
+    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-03-15T10:20:30.123456Z' })).toBe(
+      computeRuleChecksum({ ...base, effectiveFrom: '2025-03-15T10:20:30.123Z' }),
+    );
+  });
+
+  it('rejects more than nine fractional digits', () => {
+    expect(() =>
+      normalizeRuleDefinition({ ...base, effectiveFrom: '2025-03-15T10:20:30.1234567890Z' }),
+    ).toThrow(invalidDate);
   });
 
   it('accepts a Date', () => {
