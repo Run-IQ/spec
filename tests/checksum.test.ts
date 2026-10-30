@@ -95,6 +95,24 @@ describe('verifyRuleChecksum', () => {
     ).toBe(true);
   });
 
+  it('compares exact lowercase hex: an uppercase copy does not match', () => {
+    const checksum = computeRuleChecksum(base);
+    expect(verifyRuleChecksum({ ...base, checksum: checksum.toUpperCase() })).toBe(false);
+  });
+
+  it.each([
+    ['missing', undefined],
+    ['null', null],
+    ['a number', 123],
+    ['an object', { value: 'x' }],
+  ])('throws INVALID_RULE when checksum is %s', (_label, checksum) => {
+    expect(() =>
+      verifyRuleChecksum({ ...base, checksum } as unknown as Parameters<
+        typeof verifyRuleChecksum
+      >[0]),
+    ).toThrow(expect.objectContaining({ code: 'INVALID_RULE' }));
+  });
+
   it('refuses a tampered rule', () => {
     const checksum = computeRuleChecksum(base);
     expect(
