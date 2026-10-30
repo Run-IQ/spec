@@ -17,6 +17,16 @@
         "default": "./dist/index.cjs"
       }
     },
+    "./canonical": {
+      "import": {
+        "types": "./dist/canonical.d.ts",
+        "default": "./dist/canonical.js"
+      },
+      "require": {
+        "types": "./dist/canonical.d.cts",
+        "default": "./dist/canonical.cjs"
+      }
+    },
     "./schema/rule-definition.schema.json": "./schema/rule-definition.schema.json"
   },
   "files": [

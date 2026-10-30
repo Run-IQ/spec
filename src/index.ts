@@ -23,6 +23,7 @@ export type {
   RuleDefinitionInputBase,
 } from './rule/definition.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
+export { canonicalRulePayload } from './rule/payload.js';
 export { computeRuleChecksum, verifyRuleChecksum } from './rule/checksum.js';
 export { computeRuleFingerprint } from './rule/fingerprint.js';
 export { isEffectiveAt } from './rule/effective.js';

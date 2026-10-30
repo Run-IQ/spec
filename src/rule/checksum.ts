@@ -1,16 +1,15 @@
-import { canonicalize } from '../canonical.js';
 import { SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from './definition.js';
-import { normalizeRuleDefinition } from './normalize.js';
+import { canonicalRulePayload } from './payload.js';
 
 /**
  * Integrity seal of a rule: lowercase sha256 hex of
- * `canonicalize(normalizeRuleDefinition(input))`.
+ * `canonicalRulePayload(input)`, that is `canonicalize(normalizeRuleDefinition(input))`.
  * Covers every content field, identity and dates included; ignores `checksum`.
  */
 export function computeRuleChecksum(input: RuleDefinitionInput): string {
-  return sha256Hex(canonicalize(normalizeRuleDefinition(input)));
+  return sha256Hex(canonicalRulePayload(input));
 }
 
 /**
