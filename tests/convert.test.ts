@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
@@ -192,3 +193,43 @@ describe('fromStoredRecord: errors name the rule and the reason (A7)', () => {
     }
   });
 });
+
+describe('fromStoredRecord: the payload must be canonical', () => {
+  const record = storedRecordOf(base);
+  const parsed = JSON.parse(record.payload) as Record<string, unknown>;
+  const reversed = Object.fromEntries(Object.entries(parsed).reverse());
+  const variants: [string, string][] = [
+    ['reordered keys', JSON.stringify(reversed)],
+    ['a date-only date', record.payload.replace('2025-01-01T00:00:00.000Z', '2025-01-01')],
+    ['unsorted and duplicate tags', record.payload.replace('["b2c","vat"]', '["vat","b2c","vat"]')],
+    [
+      'an embedded checksum field',
+      record.payload.replace('{', `{"checksum":"${record.checksum}",`),
+    ],
+    ['a null extension', record.payload.replace('{', '{"extra":null,')],
+    ['duplicate JSON keys', record.payload.replace('"model":', '"model":"OTHER","model":')],
+  ];
+
+  it('a record produced by toStoredPayload passes', () => {
+    expect(fromStoredRecord(record).checksum).toBe(record.checksum);
+  });
+
+  it.each(variants)('rejects %s, whichever checksum the record holds', (_name, payload) => {
+    expect(payload).not.toBe(record.payload);
+    // Same content once normalized: only the canonical check can catch it.
+    expect(canonicalize(normalizeRuleDefinition(JSON.parse(payload)))).toBe(record.payload);
+    for (const checksum of [record.checksum, sha256(payload)]) {
+      const error = thrown(() => fromStoredRecord({ ...record, checksum, payload }));
+      expect(error.code).toBe('INVALID_RULE');
+      expect(error.message).toContain('vat-std@2: payload is not canonical');
+    }
+  });
+
+  it('the checksum is the sha256 of the stored payload', () => {
+    expect(record.checksum).toBe(sha256(record.payload));
+  });
+});
+
+function sha256(text: string): string {
+  return createHash('sha256').update(text, 'utf8').digest('hex');
+}
