@@ -37,11 +37,6 @@ export function parseRuleDate(value: unknown, field: string): Date {
   return invalid(field, JSON.stringify(value));
 }
 
-/** `parseRuleDate(...).toISOString()`. */
-export function toIsoRuleDate(value: unknown, field: string): string {
-  return parseRuleDate(value, field).toISOString();
-}
-
 function build(
   raw: string,
   field: string,

@@ -181,7 +181,7 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
     });
 
     it('different effectiveFrom', () => {
-      expect(fp({ ...rich, effectiveFrom: '2030-06-15T12:00:00+02:00' })).toBe(fp(rich));
+      expect(fp({ ...rich, effectiveFrom: '2025-06-15T12:00:00+02:00' })).toBe(fp(rich));
     });
 
     it('different effectiveUntil, including null and absent', () => {
@@ -397,7 +397,13 @@ describe('computeRuleFingerprint vs checksum', () => {
   });
 
   it('two copies of a rule under another id and window share the fingerprint, not the checksum', () => {
-    const copy = { ...rich, id: 'copy', version: 1, effectiveFrom: '2027-01-01' };
+    const copy = {
+      ...rich,
+      id: 'copy',
+      version: 1,
+      effectiveFrom: '2027-01-01',
+      effectiveUntil: null,
+    };
     expect(fp(copy)).toBe(fp(rich));
     expect(cs(copy)).not.toBe(cs(rich));
   });

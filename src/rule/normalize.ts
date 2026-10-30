@@ -1,6 +1,6 @@
 import { isPlainObject, toJsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
-import { toIsoRuleDate } from './date.js';
+import { parseRuleDate } from './date.js';
 import { RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 
@@ -18,11 +18,22 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - extension fields are kept at the top level.
  *
  * Never mutates `input`; the result shares no reference with it.
- * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field, `INVALID_DATE`,
+ * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field or when
+ * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
  * `NON_SERIALIZABLE`.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
+
+  const from = parseRuleDate(input.effectiveFrom, 'effectiveFrom');
+  const until =
+    input.effectiveUntil == null ? null : parseRuleDate(input.effectiveUntil, 'effectiveUntil');
+  if (until !== null && until.getTime() <= from.getTime()) {
+    invalidRule(
+      `effectiveUntil (${until.toISOString()}) must be after effectiveFrom (${from.toISOString()}): ` +
+        'the window [effectiveFrom, effectiveUntil) would be empty',
+    );
+  }
 
   const out: Record<string, unknown> = {
     id: requireString(input.id, 'id'),
@@ -30,9 +41,8 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
     model: requireString(input.model, 'model'),
     params: requireParams(input.params),
     priority: requireNumber(input.priority, 'priority'),
-    effectiveFrom: toIsoRuleDate(input.effectiveFrom, 'effectiveFrom'),
-    effectiveUntil:
-      input.effectiveUntil == null ? null : toIsoRuleDate(input.effectiveUntil, 'effectiveUntil'),
+    effectiveFrom: from.toISOString(),
+    effectiveUntil: until === null ? null : until.toISOString(),
     dimensions: normalizeDimensions(input.dimensions),
     tags: normalizeTags(input.tags),
   };

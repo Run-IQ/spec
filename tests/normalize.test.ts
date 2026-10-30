@@ -128,9 +128,10 @@ describe('normalizeRuleDefinition: dates (A1)', () => {
     ['leap day', '2024-02-29', '2024-02-29T00:00:00.000Z'],
   ])('accepts %s', (_label, input, expected) => {
     expect(normalizeRuleDefinition({ ...base, effectiveFrom: input }).effectiveFrom).toBe(expected);
-    expect(normalizeRuleDefinition({ ...base, effectiveUntil: input }).effectiveUntil).toBe(
-      expected,
-    );
+    expect(
+      normalizeRuleDefinition({ ...base, effectiveFrom: '2000-01-01', effectiveUntil: input })
+        .effectiveUntil,
+    ).toBe(expected);
   });
 
   it('accepts a Date', () => {
@@ -172,6 +173,33 @@ describe('normalizeRuleDefinition: dates (A1)', () => {
       normalizeRuleDefinition({ ...base, effectiveFrom: 0 } as unknown as RuleDefinitionInput),
     ).toThrow(invalidDate);
     expect(() => normalizeRuleDefinition(without(base, 'effectiveFrom'))).toThrow(invalidDate);
+  });
+});
+
+describe('normalizeRuleDefinition: validity window [from, until)', () => {
+  it('rejects effectiveUntil equal to effectiveFrom (the window would be empty)', () => {
+    expect(() => normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01' })).toThrow(
+      invalidRule,
+    );
+    expect(() =>
+      normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01T01:00:00+01:00' }),
+    ).toThrow(invalidRule);
+  });
+
+  it('rejects effectiveUntil before effectiveFrom', () => {
+    expect(() => normalizeRuleDefinition({ ...base, effectiveUntil: '2024-12-31' })).toThrow(
+      invalidRule,
+    );
+    expect(() =>
+      normalizeRuleDefinition({ ...base, effectiveUntil: '2024-12-31T23:59:59.999Z' }),
+    ).toThrow(invalidRule);
+  });
+
+  it('accepts effectiveUntil one millisecond after effectiveFrom', () => {
+    expect(
+      normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01T00:00:00.001Z' })
+        .effectiveUntil,
+    ).toBe('2025-01-01T00:00:00.001Z');
   });
 });
 
