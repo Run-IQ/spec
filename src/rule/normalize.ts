@@ -1,5 +1,6 @@
-import { isPlainObject, toJsonValue } from '../canonical.js';
+import { toJsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
+import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';

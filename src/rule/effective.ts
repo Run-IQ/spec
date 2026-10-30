@@ -1,4 +1,5 @@
 import { SpecError } from '../errors.js';
+import { dateTimeOf } from '../values.js';
 import { parseRuleDate } from './date.js';
 
 /**
@@ -14,10 +15,10 @@ export function isEffectiveAt(
   },
   at: Date,
 ): boolean {
-  if (!(at instanceof Date) || Number.isNaN(at.getTime())) {
+  const time = dateTimeOf(at);
+  if (time === undefined || Number.isNaN(time)) {
     throw new SpecError('INVALID_DATE', 'at must be a valid Date');
   }
-  const time = at.getTime();
   const from = parseRuleDate(rule.effectiveFrom, 'effectiveFrom').getTime();
   if (time < from) return false;
   if (rule.effectiveUntil == null) return true;

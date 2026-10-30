@@ -1,10 +1,11 @@
 import { SpecError } from './errors.js';
+import { dateTimeOf, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
 
 /**
  * Canonical JSON: object keys sorted by UTF-16 code unit at every depth, no whitespace.
- * - `Date` becomes its ISO string;
+ * - a `Date` (from any realm) becomes its ISO string;
  * - an `undefined` property is omitted, an `undefined` (or hole) in an array becomes `null`;
  * - `-0` is written `0`.
  *
@@ -45,9 +46,10 @@ function write(value: unknown, path: string, ancestors: Set<object>): string {
 }
 
 function writeObject(value: object, path: string, ancestors: Set<object>): string {
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) fail(path, 'an invalid Date');
-    return JSON.stringify(value.toISOString());
+  const time = dateTimeOf(value);
+  if (time !== undefined) {
+    if (Number.isNaN(time)) fail(path, 'an invalid Date');
+    return JSON.stringify(new Date(time).toISOString());
   }
   if (ancestors.has(value)) fail(path, 'a circular reference');
 
@@ -75,13 +77,6 @@ function writeObject(value: object, path: string, ancestors: Set<object>): strin
   }
   ancestors.delete(value);
   return out;
-}
-
-/** A plain object: `{}` literal, `Object.create(null)`, or one from another realm. */
-export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto: unknown = Object.getPrototypeOf(value);
-  return proto === null || Object.getPrototypeOf(proto) === null;
 }
 
 function constructorName(value: object): string {

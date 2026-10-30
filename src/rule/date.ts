@@ -1,4 +1,5 @@
 import { SpecError } from '../errors.js';
+import { dateTimeOf } from '../values.js';
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
@@ -6,7 +7,7 @@ const DATE_TIME =
 
 /**
  * Parses a rule date. Accepted forms only:
- * - a valid `Date`;
+ * - a valid `Date`, from any realm;
  * - `YYYY-MM-DD`, read as UTC midnight;
  * - an ISO 8601 date-time WITH `Z` or a `±HH:MM` offset (seconds and fraction optional).
  *
@@ -14,9 +15,10 @@ const DATE_TIME =
  * zone, whose meaning would depend on the machine's time zone.
  */
 export function parseRuleDate(value: unknown, field: string): Date {
-  if (value instanceof Date) {
-    if (Number.isNaN(value.getTime())) invalid(field, 'an invalid Date');
-    return new Date(value.getTime());
+  const time = dateTimeOf(value);
+  if (time !== undefined) {
+    if (Number.isNaN(time)) invalid(field, 'an invalid Date');
+    return new Date(time);
   }
   if (typeof value !== 'string') invalid(field, `a value of type ${typeof value}`);
 
