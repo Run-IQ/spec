@@ -158,3 +158,33 @@ describe('canonicalizeAt', () => {
     );
   });
 });
+
+describe('SpecError identity', () => {
+  it('brands instances without an enumerable property', () => {
+    const error = new SpecError('NON_SERIALIZABLE', 'x', 'a.b');
+    expect(error).toBeInstanceOf(SpecError);
+    expect(error).toBeInstanceOf(Error);
+    const brand = Symbol.for('@run-iq/spec/SpecError');
+    expect(Object.getOwnPropertyDescriptor(error, brand)).toMatchObject({
+      value: true,
+      enumerable: false,
+    });
+    expect(Object.keys(error)).not.toContain(brand);
+    expect(Object.getOwnPropertySymbols({ ...error })).not.toContain(brand);
+  });
+
+  it('a plain Error is not a SpecError', () => {
+    expect(new Error('x')).not.toBeInstanceOf(SpecError);
+    expect(Object.assign(new Error('x'), { name: 'SpecError' })).not.toBeInstanceOf(SpecError);
+    expect(null).not.toBeInstanceOf(SpecError);
+  });
+
+  it('a subclass keeps code, path and its own instanceof', () => {
+    class MyError extends SpecError {}
+    const mine = new MyError('INVALID_DATE', 'x', 'effectiveFrom');
+    expect(mine).toBeInstanceOf(MyError);
+    expect(mine).toBeInstanceOf(SpecError);
+    expect(mine).toMatchObject({ code: 'INVALID_DATE', path: 'effectiveFrom', name: 'SpecError' });
+    expect(new SpecError('INVALID_DATE', 'x')).not.toBeInstanceOf(MyError);
+  });
+});

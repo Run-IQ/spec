@@ -29,6 +29,13 @@
     },
     "./schema/rule-definition.schema.json": "./schema/rule-definition.schema.json"
   },
+  "typesVersions": {
+    "*": {
+      "canonical": [
+        "./dist/canonical.d.ts"
+      ]
+    }
+  },
   "files": [
     "dist",
     "schema"
