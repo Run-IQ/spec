@@ -12,7 +12,8 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - dates become full UTC ISO strings (see `parseRuleDate` for the accepted forms);
  * - defaults are made explicit: `effectiveUntil: null`, `dimensions: {}`, `tags: []`;
  * - `tags` are sorted and deduplicated;
- * - `checksum` and every `undefined` property are removed;
+ * - `checksum` is removed, and so is every top-level optional or extension field that is
+ *   `null` or `undefined` (see `RuleDefinition`); nested `undefined` properties are dropped;
  * - nested values become plain JSON (`Date` to ISO string, `undefined` dropped);
  * - extension fields are kept at the top level.
  *
@@ -36,17 +37,17 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
     tags: normalizeTags(input.tags),
   };
 
-  if (input.condition !== undefined) out.condition = normalizeCondition(input.condition);
+  if (input.condition != null) out.condition = normalizeCondition(input.condition);
   for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
     const value = input[field];
-    if (value !== undefined) out[field] = requireString(value, field);
+    if (value != null) out[field] = requireString(value, field);
   }
-  if (input.exceptions !== undefined) out.exceptions = toJsonValue(input.exceptions, 'exceptions');
+  if (input.exceptions != null) out.exceptions = toJsonValue(input.exceptions, 'exceptions');
 
   for (const key of Object.keys(input)) {
     if (RESERVED.has(key)) continue;
     const value = input[key];
-    if (value !== undefined) defineField(out, key, toJsonValue(value, key));
+    if (value != null) defineField(out, key, toJsonValue(value, key));
   }
 
   return out as RuleDefinition;
@@ -70,7 +71,7 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
 }
 
 function normalizeDimensions(value: unknown): Record<string, string> {
-  if (value === undefined) return {};
+  if (value == null) return {};
   if (!isPlainObject(value)) invalidRule('dimensions must be an object of strings');
   const out: Record<string, string> = {};
   for (const key of Object.keys(value).sort()) {
@@ -83,7 +84,7 @@ function normalizeDimensions(value: unknown): Record<string, string> {
 }
 
 function normalizeTags(value: unknown): string[] {
-  if (value === undefined) return [];
+  if (value == null) return [];
   if (!Array.isArray(value)) invalidRule('tags must be an array of strings');
   const tags: unknown[] = Array.from(value);
   for (const tag of tags) {
