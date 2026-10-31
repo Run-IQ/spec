@@ -168,17 +168,22 @@ function requireDate(at: unknown): void {
 
 /** The input values, sorted without duplicates; never empty. */
 function readInput(input: unknown): string[] {
+  if (typeof input === 'string') return checkInput([input], input);
   let list: unknown[];
-  if (typeof input === 'string') list = [input];
-  else if (!Array.isArray(input)) {
-    throw new SpecError('INVALID_INPUT', 'input must be a value or an array of values');
-  } else {
-    try {
-      list = Array.from(input);
-    } catch (error) {
-      throw new SpecError('INVALID_INPUT', unreadableMessage('input', error));
+  try {
+    if (!Array.isArray(input)) {
+      throw new SpecError('INVALID_INPUT', 'input must be a value or an array of values');
     }
+    list = Array.from(input);
+  } catch (error) {
+    if (error instanceof SpecError) throw error;
+    throw new SpecError('INVALID_INPUT', unreadableMessage('input', error));
   }
+  return checkInput(list, input);
+}
+
+/** The values of `list` checked, sorted without duplicates; never empty. */
+function checkInput(list: readonly unknown[], input: unknown): string[] {
   if (list.length === 0) {
     throw new SpecError('INVALID_INPUT', 'a dimension input must hold at least one value');
   }

@@ -537,6 +537,11 @@ describe('matchDimension', () => {
     // The types refuse a number; a caller without types can still pass one.
     const number = 1 as unknown as string;
     const shape = specError(() => matchDimension('FR', number, '2026-01-01', tables));
+    const { proxy, revoke } = Proxy.revocable(['FR'], {});
+    revoke();
+    const revoked = specError(() => matchDimension('FR', proxy, '2026-01-01', tables));
+    expect(revoked.code).toBe('INVALID_INPUT');
+    expect(revoked.message).toMatch(/^input could not be read: /);
     expect(shape.code).toBe('INVALID_INPUT');
     expect(shape.message).toBe('input must be a value or an array of values');
   });

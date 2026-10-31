@@ -6,7 +6,7 @@ import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
-import { readLimits } from './limits.js';
+import { readLimits, STEPS_PER_NODE } from './limits.js';
 import type { Limits, ReferentialLimits } from './limits.js';
 import { ALWAYS, sweepNesting } from './nesting.js';
 import type { Edge, Work } from './nesting.js';
@@ -58,8 +58,9 @@ type Add = (path: string, message: string) => void;
  *   the same sweep from heights kept per group and recomputed only where a membership changed
  *   (`group nesting deeper than 64`);
  * - work: the sweep counts its steps (each edge read, each height marked or recomputed) and
- *   stops past `maxSteps` (default 100 per allowed node: 10 000 000) with `referential too
- *   complex: more than <n> steps`, so that no document costs minutes of work;
+ *   stops past `maxSteps` (default 100 per node counted, so that validity never depends on the
+ *   configured `maxNodes`) with `referential too complex: more than <n> steps`, so that no
+ *   document costs minutes of work;
  * - no text with a lone UTF-16 surrogate.
  *
  * Each property is read once. A property that cannot be read (a getter or a Proxy trap that
@@ -128,7 +129,8 @@ function check(
   value: unknown,
   limits: Limits,
 ): { issues: RuleValidationIssue[]; normal: Referential | undefined; steps: number } {
-  const work: Work = { steps: 0, limit: limits.maxSteps };
+  // The budget is set once the nodes are counted (`readReferential`).
+  const work: Work = { steps: 0, limit: 0 };
   const issues: RuleValidationIssue[] = [];
   const add: Add = (path, message) => {
     issues.push({ path, message });
@@ -206,6 +208,7 @@ function readReferential(
     add('', `referential too large: ${nodes} nodes`);
     return undefined;
   }
+  work.limit = limits.maxSteps ?? STEPS_PER_NODE * Math.max(nodes, 1);
 
   const codeNames = new Set<string>();
   const normalCodes: Record<string, Period[]> = {};
@@ -243,7 +246,7 @@ function readReferential(
     if (found.cycle !== undefined) add('groups', found.cycle);
     if (found.tooDeep) add('groups', `group nesting deeper than ${limits.maxDepth}`);
     if (found.tooComplex) {
-      add('groups', `referential too complex: more than ${limits.maxSteps} steps`);
+      add('groups', `referential too complex: more than ${work.limit} steps`);
     }
   }
 

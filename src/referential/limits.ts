@@ -6,7 +6,7 @@ export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
 export const DEFAULT_MAX_GROUP_DEPTH = 64;
 /** Highest `maxDepth` accepted: deeper nesting has no use and only costs. */
 export const MAX_GROUP_DEPTH_CEILING = 1024;
-/** Default step budget of the cycle and depth sweep, per allowed node. */
+/** Default step budget of the cycle and depth sweep, per node of the referential. */
 export const STEPS_PER_NODE = 100;
 
 /**
@@ -19,9 +19,13 @@ export interface ReferentialLimits {
   /** Most groups on one chain of nesting at any date; default 64, at most 1 024. */
   maxDepth?: number;
   /**
-   * Most elementary steps of the cycle and depth sweep of `validateReferential`; default
-   * `100 × maxNodes` (10 000 000 by default). Beyond it the referential is refused as too
-   * complex, so that no document can cost minutes of work.
+   * Most elementary steps of the cycle and depth sweep of `validateReferential`. By default
+   * 100 per node the referential actually has (code periods, groups and members counted), not
+   * per node `maxNodes` allows: a referential's validity and digest never depend on the
+   * headroom an integrator configures. Beyond it the referential is refused as too complex
+   * (`referential too complex: more than <n> steps`), so that no document can cost minutes of
+   * work (at most 10 000 000 steps under the default `maxNodes`). An explicit value overrides
+   * the default.
    */
   maxSteps?: number;
 }
@@ -30,7 +34,8 @@ export interface ReferentialLimits {
 export interface Limits {
   maxNodes: number;
   maxDepth: number;
-  maxSteps: number;
+  /** The explicit override; `undefined` for 100 per node counted. */
+  maxSteps: number | undefined;
 }
 
 /**
@@ -39,8 +44,13 @@ export interface Limits {
  * `maxDepth` above 1 024.
  */
 export function readLimits(options: unknown): Limits {
-  if (options === undefined)
-    return defaults(DEFAULT_MAX_REFERENTIAL_NODES, DEFAULT_MAX_GROUP_DEPTH);
+  if (options === undefined) {
+    return {
+      maxNodes: DEFAULT_MAX_REFERENTIAL_NODES,
+      maxDepth: DEFAULT_MAX_GROUP_DEPTH,
+      maxSteps: undefined,
+    };
+  }
   if (options === null || typeof options !== 'object') {
     throw new SpecError('INVALID_REFERENTIAL', 'options must be an object');
   }
@@ -62,12 +72,8 @@ export function readLimits(options: unknown): Limits {
       `maxDepth must be at most ${MAX_GROUP_DEPTH_CEILING}`,
     );
   }
-  const limits = defaults(nodes, depth);
-  return { ...limits, maxSteps: positive(maxSteps, limits.maxSteps, 'maxSteps') };
-}
-
-function defaults(maxNodes: number, maxDepth: number): Limits {
-  return { maxNodes, maxDepth, maxSteps: STEPS_PER_NODE * maxNodes };
+  const steps = maxSteps === undefined ? undefined : positive(maxSteps, 0, 'maxSteps');
+  return { maxNodes: nodes, maxDepth: depth, maxSteps: steps };
 }
 
 function positive(value: unknown, fallback: number, name: string): number {

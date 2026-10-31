@@ -544,15 +544,20 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     );
   });
 
-  it('defaults maxSteps to 100 steps per allowed node, and stops there', () => {
+  it('defaults maxSteps to 100 steps per node counted, whatever maxNodes allows', () => {
     // A shape whose sweep is quadratic: each of 1 000 days re-marks the 1 000 groups of HUB.
     const r = toggledHub(1000, 1000);
     const nodes = 2 * 1000 + 2 * 1000 + 3;
-    expect(validateReferential(r)).toEqual([]);
-    expect(validateReferential(r, { maxNodes: nodes })).toEqual([
+    const refused = [
       { path: 'groups', message: `referential too complex: more than ${100 * nodes} steps` },
-    ]);
-    expect(referentialCheckSteps(r, { maxNodes: nodes })).toBe(100 * nodes + 1);
+    ];
+    // Validity and digest do not depend on the headroom an integrator configures.
+    expect(validateReferential(r)).toEqual(refused);
+    expect(validateReferential(r, { maxNodes: nodes })).toEqual(refused);
+    expect(validateReferential(r, { maxNodes: 1_000_000 })).toEqual(refused);
+    expect(referentialCheckSteps(r)).toBe(100 * nodes + 1);
+    // maxSteps stays an explicit override.
+    expect(validateReferential(r, { maxSteps: 3_000_000 })).toEqual([]);
   });
 
   it('refuses invalid options with a SpecError, never a raw error (M3)', () => {
