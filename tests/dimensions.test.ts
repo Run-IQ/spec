@@ -6,7 +6,7 @@ import {
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import { REFUSED_DIMENSIONS } from './dimension-cases.js';
-import { specError } from './helpers.js';
+import { expectRuleRefused, specError } from './helpers.js';
 
 const base = {
   id: 'r1',
@@ -161,5 +161,42 @@ describe('dimension specs: refused', () => {
     expect(normalizeRuleDefinition(rule as unknown as RuleDefinitionInput).dimensions).toEqual({
       regime: 'A',
     });
+  });
+});
+
+describe('dimension names starting with $ are reserved (review I1)', () => {
+  const RESERVED = 'must not start with "$": dimension names starting with "$" are reserved';
+
+  it('refuses one in the rule dimensions, with its path', () => {
+    expectRuleRefused(
+      { ...base, dimensions: { pays: 'FR', $pays: 'FR' } },
+      'dimensions.$pays',
+      `dimensions.$pays ${RESERVED}`,
+    );
+  });
+
+  it('refuses one in a selector', () => {
+    const targets = { dimensions: { $pays: 'FR' } };
+    expectRuleRefused(
+      { ...base, exceptions: [{ kind: 'inhibit', targets }] },
+      'exceptions[0].targets.dimensions.$pays',
+      `exceptions[0].targets.dimensions.$pays ${RESERVED}`,
+    );
+  });
+
+  it('refuses one in forEach.dimensions, with the same shape', () => {
+    expectRuleRefused(
+      { ...base, forEach: { path: '/l', key: 'id', dimensions: { $pays: '/pays' } } },
+      'forEach.dimensions.$pays',
+      `forEach.dimensions.$pays ${RESERVED}`,
+    );
+  });
+
+  it('refuses one even unset: the name itself is reserved (schema agreement)', () => {
+    expectRuleRefused(
+      { ...base, dimensions: { $pays: null } },
+      'dimensions.$pays',
+      `dimensions.$pays ${RESERVED}`,
+    );
   });
 });

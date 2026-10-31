@@ -1,10 +1,12 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { SpecError, unreadableMessage } from '../errors.js';
+import { DEFAULT_OUTPUT } from '../decision/output.js';
+import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
-import { readDimensionSpec } from './dimensions.js';
+import { readDimensionSpec, reservedDimensionNameMessage } from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
@@ -40,6 +42,7 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  *   and deduplicated, an empty `except` and `match: 'any'` dropped, `{ anyOf: [v] }` written `v`;
  * - `tags` are sorted and deduplicated;
  * - `ruleSet: 'local'` is dropped, as absent: a local rule has no rule set (D-4);
+ * - `output: 'value'` (the default output; `rgpd:value` in a rule of `rgpd` too) is dropped;
  * - a name qualified by the rule's own rule set is written bare (`rgpd:x` in a rule of `rgpd`
  *   is `x`, D-37), in `output`, `shortCircuit` outputs and selector `ids` and `outputs`;
  * - `forEach` takes its normal form (`ForEach`): a `key` list whose names are all equal is
@@ -119,7 +122,10 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
   if (typeof out.output === 'string') {
     const problem = citedNameProblem(out.output, 'output', 'output');
     if (problem !== undefined) invalidRule(problem);
-    out.output = shortestFrom(ruleSet, out.output);
+    const output = shortestFrom(ruleSet, out.output);
+    // The default output is written as its absence: one rule, one checksum.
+    if (output === DEFAULT_OUTPUT) delete out.output;
+    else out.output = output;
   }
   if (input.exceptions != null) {
     const read = readRuleExceptions(
@@ -214,6 +220,7 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   const out: Record<string, DimensionSpec> = {};
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
+    if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
     if (v == null) continue; // null or undefined: the dimension is unset
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
     const problems: RuleValidationIssue[] = [];

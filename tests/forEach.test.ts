@@ -68,6 +68,28 @@ describe('forEach: refused forms', () => {
       'forEach.orderBy[0].type',
       'forEach.orderBy[0].dir',
       'forEach.groupBy',
+      'forEach.orderBy',
+    ]);
+  });
+
+  it('reports every problem of segments, facts included (review M3)', () => {
+    const forEach = { segments: { from: '/$dates/a', until: '/$dates/a', facts: [3, '/$x'] } };
+    expect(validateRuleDefinition(rule(forEach)).issues).toEqual([
+      {
+        path: 'forEach.segments.until',
+        message:
+          'forEach.segments.until must differ from forEach.segments.from: ' +
+          'the period would be empty',
+      },
+      {
+        path: 'forEach.segments.facts[0]',
+        message: 'forEach.segments.facts[0] must be a JSON pointer: got a value of type number',
+      },
+      {
+        path: 'forEach.segments.facts[1]',
+        message:
+          'forEach.segments.facts[1] must point into the input data: "$x" is an engine variable',
+      },
     ]);
   });
 

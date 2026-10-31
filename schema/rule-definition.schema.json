@@ -125,13 +125,16 @@
       ]
     },
     "dimensions": {
-      "description": "One dimension spec per dimension; a null value means the dimension is unset.",
+      "description": "One dimension spec per dimension; a null value means the dimension is unset. Dimension names starting with $ are reserved (even unset).",
       "anyOf": [
         {
           "type": "null"
         },
         {
           "type": "object",
+          "propertyNames": {
+            "pattern": "^(?!\\$)"
+          },
           "additionalProperties": {
             "anyOf": [
               {
@@ -472,6 +475,9 @@
         },
         "dimensions": {
           "type": "object",
+          "propertyNames": {
+            "pattern": "^(?!\\$)"
+          },
           "additionalProperties": {
             "$ref": "#/$defs/dimensionSpec"
           }
@@ -738,6 +744,19 @@
                 ],
                 "properties": {
                   "dimensions": {},
+                  "groupBy": {}
+                }
+              }
+            },
+            {
+              "description": "groupBy excludes orderBy for now: the order of groups is not defined yet.",
+              "not": {
+                "required": [
+                  "orderBy",
+                  "groupBy"
+                ],
+                "properties": {
+                  "orderBy": {},
                   "groupBy": {}
                 }
               }

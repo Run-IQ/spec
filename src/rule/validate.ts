@@ -1,11 +1,12 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
-import { readDimensionSpec } from './dimensions.js';
+import { readDimensionSpec, reservedDimensionNameMessage } from './dimensions.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
@@ -258,6 +259,10 @@ function checkDimensions(value: unknown, errors: Issues): void {
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
+    if (isReservedName(key)) {
+      errors.add(`dimensions.${key}`, reservedDimensionNameMessage(`dimensions.${key}`));
+      continue;
+    }
     if (v == null) continue; // the dimension is unset: normalize drops the key
     if (hasLoneSurrogate(key)) errors.add('dimensions', dimensionKeyMessage(key));
     else readDimensionSpec(v, `dimensions.${key}`, (path, message) => errors.add(path, message));

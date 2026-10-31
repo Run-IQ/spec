@@ -236,3 +236,12 @@ export function sameDimensionSpec(a: unknown, b: unknown): boolean {
 function sameList(a: readonly string[], b: readonly string[]): boolean {
   return a.length === b.length && a.every((v, i) => v === b[i]);
 }
+
+/**
+ * Internal: the message refusing a dimension name starting with `$` at `path` (rule
+ * `dimensions`, selector `dimensions`, `forEach.dimensions`): every name starting with `$` is
+ * the engine's (D-3).
+ */
+export function reservedDimensionNameMessage(path: string): string {
+  return `${path} must not start with "$": dimension names starting with "$" are reserved`;
+}

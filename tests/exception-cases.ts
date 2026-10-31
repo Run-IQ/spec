@@ -67,6 +67,13 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'exceptions[0].targets.ruleSets must be an array of non-empty strings',
   ],
   [
+    'a selector with a reserved dimension name (I1)',
+    [{ kind: 'inhibit', targets: { dimensions: { $pays: 'FR' } } }],
+    'exceptions[0].targets.dimensions.$pays',
+    'exceptions[0].targets.dimensions.$pays must not start with "$": ' +
+      'dimension names starting with "$" are reserved',
+  ],
+  [
     'a non-array',
     { kind: 'inhibit', targets: { ids: ['a'] } },
     'exceptions',

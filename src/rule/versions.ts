@@ -181,8 +181,9 @@ function readRule(
     throw new SpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
   }
   const set = ruleSet == null ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
-  if (!isRuleSetId(set))
+  if (!isRuleSetId(set)) {
     throw new SpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet', set));
+  }
   const window = resolveWindow(fields, zone, prefix);
   const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
   // The default reference date is the absent one, as normalization writes it.

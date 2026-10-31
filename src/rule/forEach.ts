@@ -4,6 +4,7 @@ import { comparePointers, parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { isReservedName } from '../reserved.js';
 import { typeName } from '../values.js';
+import { reservedDimensionNameMessage } from './dimensions.js';
 
 /** The types an order key compares its values as (`OrderKey`). */
 export type OrderKeyType = 'number' | 'decimal' | 'date' | 'dateTime' | 'string';
@@ -41,7 +42,12 @@ export interface OrderKey {
  * - `recurse`: a JSON pointer into the element to its child list, walked at every depth (G-18);
  * - `groupBy`: a JSON pointer into the element; one instance per group of equal values (G-17).
  *   `recurse` and `groupBy` exclude each other; a group has no single element, so `groupBy`
- *   excludes `dimensions` (and `effectiveOn: '/$item/…'`).
+ *   excludes `dimensions` (and `effectiveOn: '/$item/…'`). `groupBy` also excludes `orderBy`
+ *   for now: the order of groups is not defined yet (accepting it later is additive).
+ *
+ * A literal segment of `path` made of digits (`/foyers/0/personnes`) is accepted here: an object
+ * key may be digits, which no static check can tell from a list index. `core` refuses, at
+ * evaluation, a path step that indexes into a list (a subject never holds an index, D-2).
  *
  * Time segments `{ segments: { from, until, facts } }` (G-15): the period from `from` to `until`
  * (two named dates `/$dates/<name>`, different) cut where the facts of `facts` (JSON pointers
@@ -124,6 +130,13 @@ function readCollection(value: JsonObject, fail: Add): Collection | undefined {
     value.groupBy === undefined ? undefined : readMember(value.groupBy, 'forEach.groupBy', fail);
   if (value.recurse !== undefined && value.groupBy !== undefined) {
     fail('forEach.groupBy', 'forEach.recurse and forEach.groupBy cannot be combined');
+  }
+  if (value.orderBy !== undefined && value.groupBy !== undefined) {
+    fail(
+      'forEach.orderBy',
+      'forEach.orderBy cannot be combined with forEach.groupBy: ' +
+        'the order of groups is not defined yet',
+    );
   }
   if (value.dimensions !== undefined && value.groupBy !== undefined) {
     fail(
@@ -267,7 +280,7 @@ function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer
     if (name === '') {
       fail(at, `${at} must not have an empty dimension name`);
     } else if (isReservedName(name)) {
-      fail(here, `${here} must not start with "$": dimension names starting with "$" are reserved`);
+      fail(here, reservedDimensionNameMessage(here));
     } else {
       const pointer = readMember(value[name], here, fail);
       if (pointer !== undefined) entries.push([name, pointer]);
@@ -322,12 +335,13 @@ function readSegmentsForm(
   }
   const from = readNamedDate(segments.from, `${at}.from`, fail);
   const until = readNamedDate(segments.until, `${at}.until`, fail);
-  if (from !== undefined && from === until) {
+  const empty = from !== undefined && from === until;
+  if (empty) {
     fail(`${at}.until`, `${at}.until must differ from ${at}.from: the period would be empty`);
-    return undefined;
   }
+  // Read even after a problem above, so that every problem is reported at once.
   const facts = readFacts(segments.facts, `${at}.facts`, fail);
-  if (from === undefined || until === undefined || facts === undefined) return undefined;
+  if (empty || from === undefined || until === undefined || facts === undefined) return undefined;
   return { segments: { from, until, facts } };
 }
 

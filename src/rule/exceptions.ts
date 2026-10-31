@@ -1,7 +1,13 @@
 import type { JsonValue } from '../canonical.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
 import { quoteText, SpecError } from '../errors.js';
-import { readDimensionSpec, sameDimensionSpec } from './dimensions.js';
+import { isReservedName } from '../reserved.js';
+import { isPlainObject, typeName } from '../values.js';
+import {
+  readDimensionSpec,
+  reservedDimensionNameMessage,
+  sameDimensionSpec,
+} from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import {
   citedNameProblem,
@@ -65,9 +71,20 @@ export const EXCEPTION_MODEL = '@run-iq/exception';
  * `carrier`, the rule's id and output (the default output `value` when it names none) by the
  * rule's own rule set (`<pack>:value` for a pack rule without output). A selector that
  * constrains no field matches nothing; validation refuses it anyway. Dimension specs are
- * compared in normal form, so `{ anyOf: ['FR'] }` and `'FR'` are the same. Throws `SpecError`
- * (`INVALID_RULE`) when a compared dimension spec is invalid, or when `rule.ruleSet` or
- * `carrier` is not a rule set id.
+ * compared in normal form, so `{ anyOf: ['FR'] }` and `'FR'` are the same.
+ *
+ * Throws `SpecError` (`INVALID_RULE`), whatever the selector would match:
+ * - `rule ruleSet "X" is not a rule set id (…)` / `carrier ruleSet "X" is not a rule set id
+ *   (…)` for a rule set that is not a rule set id;
+ * - `rule.id must be a non-empty string`, `rule.model must be a non-empty string`,
+ *   `rule.tags must be an array of strings`, `rule.output must be a string when present`,
+ *   `rule.dimensions must be an object of dimension specs` for a malformed rule;
+ * - `selector.<field> must be an array of strings` for `ids`, `tags`, `outputs`, `models` or
+ *   `ruleSets` present but not an array of strings, and `selector.dimensions must be an object
+ *   of dimension specs`;
+ * - `qualifyName: …` for a rule id holding `:` (not a bare name);
+ * - the message of `readDimensionSpec` for an invalid compared dimension spec.
+ * The rule and the selector are read as given: a getter or a Proxy that throws is not caught.
  */
 export function matchesSelector(
   rule: {
@@ -84,6 +101,8 @@ export function matchesSelector(
   const ruleSet = rule.ruleSet ?? LOCAL_RULE_SET;
   requireRuleSet(ruleSet, 'rule ruleSet');
   requireRuleSet(carrier, 'carrier ruleSet');
+  requireRule(rule);
+  requireSelector(selector);
   if (!constrains(selector)) return false;
   const { ids, tags, dimensions, outputs, models } = selector;
   const targeted = selector.ruleSets?.length ? selector.ruleSets : [carrier];
@@ -115,6 +134,50 @@ function requireRuleSet(value: unknown, what: string): void {
       `${what} ${text} is not a rule set id (${RULE_SET_GRAMMAR})`,
     );
   }
+}
+
+/** The fields of `rule` that `matchesSelector` reads, checked before any comparison. */
+function requireRule(rule: unknown): void {
+  const fields: Record<string, unknown> = isPlainObject(rule) ? rule : {};
+  const nonEmpty = (field: string): void => {
+    const value = fields[field];
+    if (typeof value !== 'string' || value === '') {
+      selectorError(`rule.${field} must be a non-empty string`);
+    }
+  };
+  nonEmpty('id');
+  nonEmpty('model');
+  if (!isStringArray(fields.tags)) selectorError('rule.tags must be an array of strings');
+  if (fields.output !== undefined && typeof fields.output !== 'string') {
+    selectorError('rule.output must be a string when present');
+  }
+  if (!isPlainObject(fields.dimensions)) {
+    selectorError('rule.dimensions must be an object of dimension specs');
+  }
+}
+
+/** The shape of `selector`, checked before any comparison. */
+function requireSelector(selector: unknown): void {
+  if (!isPlainObject(selector)) {
+    selectorError(`selector must be an object, got a value of type ${typeName(selector)}`);
+  }
+  for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
+    const value = selector[field];
+    if (value !== undefined && !isStringArray(value)) {
+      selectorError(`selector.${field} must be an array of strings`);
+    }
+  }
+  if (selector.dimensions !== undefined && !isPlainObject(selector.dimensions)) {
+    selectorError('selector.dimensions must be an object of dimension specs');
+  }
+}
+
+function isStringArray(value: unknown): value is string[] {
+  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+}
+
+function selectorError(message: string): never {
+  throw new SpecError('INVALID_RULE', message);
 }
 
 /** Every exception kind. Internal: not exported from the package. */
@@ -310,6 +373,20 @@ function readSelector(
       }
     });
   }
+  if (valid && carrier !== undefined && lists.outputs !== undefined) {
+    // A rule of any targeted set may feed an output of its own set or of the carrier's.
+    const reachable = new Set([carrier, ...(ruleSets ?? [])]);
+    lists.outputs.forEach((name, i) => {
+      const set = ruleSetOf(carrier, name);
+      if (!reachable.has(set)) {
+        fail(
+          `${path}.outputs[${i}]`,
+          `${path}.outputs[${i}] names an output of ${quoteText(set)}, a rule set the ` +
+            'selector does not target',
+        );
+      }
+    });
+  }
 
   const selector: RuleSelector = {};
   for (const field of SELECTOR_LISTS) {
@@ -388,6 +465,10 @@ function readDimensions(
   }
   const entries: [string, DimensionSpec][] = [];
   for (const key of Object.keys(value).sort()) {
+    if (isReservedName(key)) {
+      fail(`${path}.${key}`, reservedDimensionNameMessage(`${path}.${key}`));
+      continue;
+    }
     const spec = readDimensionSpec(value[key], `${path}.${key}`, fail);
     if (spec !== undefined) entries.push([key, spec]);
   }

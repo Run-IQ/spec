@@ -361,6 +361,18 @@ export const REFUSED_FOR_EACH: [string, unknown, string, string][] = [
       'a group has no single element to read them from',
   ],
   [
+    'orderBy and groupBy together (review M4)',
+    {
+      path: '/operations',
+      key: 'id',
+      groupBy: '/client',
+      orderBy: [{ path: '/date', type: 'date', dir: 'asc' }],
+    },
+    'forEach.orderBy',
+    'forEach.orderBy cannot be combined with forEach.groupBy: ' +
+      'the order of groups is not defined yet',
+  ],
+  [
     'segments with a path',
     { path: '/a', segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } },
     'forEach.path',

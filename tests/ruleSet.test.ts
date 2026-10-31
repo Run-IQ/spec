@@ -13,7 +13,7 @@ import {
   RESERVED_RULE_FIELDS,
   validateRuleDefinition,
 } from '../src/index.js';
-import type { RuleDefinitionInput, VersionedRuleWindow } from '../src/index.js';
+import type { RuleDefinitionInput, RuleSelector, VersionedRuleWindow } from '../src/index.js';
 import { BASE_RULE, expectRuleRefused, fixedCalendar, specError } from './helpers.js';
 
 const RULE_SET_ID = 'ruleSet must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$';
@@ -148,6 +148,26 @@ describe('the ruleSet field', () => {
   });
 });
 
+describe('the default output (review M6)', () => {
+  it("drops output 'value', the default: absent and 'value' are one rule", () => {
+    const explicit = { ...BASE_RULE, output: 'value' };
+    expect(normalizeRuleDefinition(explicit)).not.toHaveProperty('output');
+    expect(computeRuleChecksum(explicit)).toBe(computeRuleChecksum(BASE_RULE));
+  });
+
+  it('drops the default output of a pack, written qualified by the pack', () => {
+    const packed = { ...BASE_RULE, ruleSet: 'rgpd' };
+    const qualified = { ...packed, output: 'rgpd:value' };
+    expect(normalizeRuleDefinition(qualified)).not.toHaveProperty('output');
+    expect(computeRuleChecksum(qualified)).toBe(computeRuleChecksum(packed));
+  });
+
+  it("keeps another rule set's value, which is not the default", () => {
+    const local = { ...BASE_RULE, output: 'rgpd:value' };
+    expect(normalizeRuleDefinition(local).output).toBe('rgpd:value');
+  });
+});
+
 describe('rule ids (D-4)', () => {
   it('refuses ":" in an id', () => {
     expectRuleRefused({ ...BASE_RULE, id: 'rgpd:R1' }, 'id', 'id must not contain ":"');
@@ -270,6 +290,44 @@ describe('selectors with ruleSets', () => {
     expect(matchesSelector(packDefault, both)).toBe(true);
   });
 
+  it.each([
+    [{ ids: 'R1' }, 'selector.ids must be an array of strings'],
+    [{ outputs: 'x' }, 'selector.outputs must be an array of strings'],
+    [{ tags: ['t'], ruleSets: 'local' }, 'selector.ruleSets must be an array of strings'],
+    [{ tags: [1] }, 'selector.tags must be an array of strings'],
+    [{ models: null }, 'selector.models must be an array of strings'],
+    [{ dimensions: ['FR'] }, 'selector.dimensions must be an object of dimension specs'],
+  ])(
+    'refuses the malformed selector %j with a typed SpecError (review M2)',
+    (s: unknown, message) => {
+      const local = { id: 'R1', tags: ['t'], dimensions: {}, model: 'M' };
+      // Hostile input on purpose: a JavaScript caller can pass any shape.
+      const selector = s as RuleSelector;
+      expect(specError(() => matchesSelector(local, selector))).toMatchObject({
+        code: 'INVALID_RULE',
+        message,
+      });
+    },
+  );
+
+  it.each([
+    [{ id: 1 }, 'rule.id must be a non-empty string'],
+    [{ tags: 't' }, 'rule.tags must be an array of strings'],
+    [{ model: null }, 'rule.model must be a non-empty string'],
+    [{ output: 3 }, 'rule.output must be a string when present'],
+    [{ dimensions: null }, 'rule.dimensions must be an object of dimension specs'],
+    [{ id: 'a:b' }, 'qualifyName: "a:b" is not a bare name: it is empty or holds ":"'],
+  ])('refuses the malformed rule %j with a typed SpecError (review M2)', (patch, message) => {
+    // Hostile input on purpose: a JavaScript caller can pass any shape.
+    const rule = { id: 'R1', tags: ['t'], dimensions: {}, model: 'M', ...patch } as Parameters<
+      typeof matchesSelector
+    >[0];
+    expect(specError(() => matchesSelector(rule, { ids: ['R1'] }))).toMatchObject({
+      code: 'INVALID_RULE',
+      message,
+    });
+  });
+
   it('refuses an invalid rule set with a SpecError', () => {
     const rule = { id: 'R1', ruleSet: 'Bad', tags: [], dimensions: {}, model: 'M' };
     expect(specError(() => matchesSelector(rule, { ids: ['R1'] }))).toMatchObject({
@@ -354,6 +412,27 @@ describe('selectors with ruleSets', () => {
     ],
   ])('refuses the selector %j', (targets, path, message) => {
     expectRuleRefused(inhibit(targets), path, message);
+  });
+
+  it.each([
+    [{ outputs: ['interne:taux'] }, undefined, 'interne'],
+    [{ ruleSets: ['rgpd'], outputs: ['interne:taux'] }, undefined, 'interne'],
+    [{ ruleSets: ['local'], outputs: ['interne:taux'] }, 'rgpd', 'interne'],
+  ])('refuses a selector output that can never match: %j in %s (review M1)', (t, set, named) => {
+    expectRuleRefused(
+      inhibit(t, set),
+      'exceptions[0].targets.outputs[0]',
+      `exceptions[0].targets.outputs[0] names an output of "${named}", a rule set the ` +
+        'selector does not target',
+    );
+  });
+
+  it("accepts outputs of the carrier's own rule set or of a targeted one (review M1)", () => {
+    expect(
+      validateRuleDefinition(inhibit({ ruleSets: ['interne'], outputs: ['interne:taux'] })),
+    ).toEqual({ valid: true, errors: [], issues: [] });
+    const own = inhibit({ ruleSets: ['local'], outputs: ['rgpd:x', 'y'] }, 'rgpd');
+    expect(validateRuleDefinition(own)).toEqual({ valid: true, errors: [], issues: [] });
   });
 
   it('accepts ids of every targeted rule set', () => {
