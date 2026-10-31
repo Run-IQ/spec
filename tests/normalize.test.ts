@@ -420,6 +420,52 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     expect(issues[0]?.message.length).toBeLessThan(250);
   });
 
+  it("drops effectiveOn '/$dates/effective', the default: absent and default are one rule", () => {
+    const explicit = { ...base, effectiveOn: '/$dates/effective' };
+    expect(normalizeRuleDefinition(explicit)).not.toHaveProperty('effectiveOn');
+    expect(computeRuleChecksum(explicit)).toBe(computeRuleChecksum(base));
+    expect(validateRuleDefinition(explicit).valid).toBe(true);
+  });
+
+  it('reads forEach once: a getter that changes its answer gives a rule that stays valid', () => {
+    let reads = 0;
+    const rule = {
+      ...base,
+      effectiveOn: '/$item/x',
+      get forEach(): unknown {
+        return reads++ === 0 ? { path: '/x' } : null;
+      },
+    };
+    const out = normalizeRuleDefinition(rule);
+    expect(out.forEach).toEqual({ path: '/x' });
+    expect(normalizeRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition(out).valid).toBe(true);
+    reads = 0;
+    expect(validateRuleDefinition(rule).valid).toBe(true);
+  });
+
+  it('checks forEach.segments on the copy it keeps', () => {
+    let reads = 0;
+    const forEach = {
+      get segments(): unknown {
+        return reads++ === 0 ? { from: '/a' } : null;
+      },
+    };
+    const rule = { ...base, effectiveOn: '/$segment/from', forEach };
+    const outcome = (() => {
+      try {
+        return normalizeRuleDefinition(rule);
+      } catch (error) {
+        return error;
+      }
+    })();
+    if (outcome instanceof SpecError) {
+      expect(outcome.message).toBe('effectiveOn reads $segment without segments');
+    } else {
+      expect(validateRuleDefinition(outcome).valid).toBe(true);
+    }
+  });
+
   it('timeZone and effectiveOn enter the checksum', () => {
     const h = computeRuleChecksum(base);
     expect(computeRuleChecksum({ ...base, timeZone: 'Europe/Paris' })).not.toBe(h);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { findOverlappingVersions } from '../src/index.js';
+import { findOverlappingVersions, windowContains } from '../src/index.js';
 import type { CivilCalendar } from '../src/index.js';
 import { fixedCalendar, specError } from './helpers.js';
 
@@ -106,14 +106,95 @@ describe('findOverlappingVersions', () => {
     ]);
   });
 
-  it('an absent effectiveOn differs from an explicit one', () => {
+  it("an absent effectiveOn is the default '/$dates/effective'", () => {
     const rules = [
       rule(1, '2020-01-01', '2024-01-01'),
       rule(2, '2024-01-01', null, { effectiveOn: '/$dates/effective' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    const other = [rule(1, '2020-01-01', '2024-01-01'), { ...rules[1]!, effectiveOn: '/$dates/x' }];
+    expect(findOverlappingVersions(other, 'UTC', fixedCalendar)).toEqual([
       { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'effectiveOn' },
     ]);
+  });
+
+  it('reports versions true on one civil day in far zones, apart in instants', () => {
+    // v1 covers 2026-01-01 in +14:00; v2 starts during 2025-12-31 in -12:00, so the whole of
+    // 2026-01-01 there is in v2: a civil reference date 2026-01-01 applies both.
+    const civilAndInstant = [
+      rule(1, '2026-01-01', '2026-01-02', { timeZone: '+14:00' }),
+      rule(2, '2026-01-01T10:00:00.000Z', null, { timeZone: '-12:00' }),
+    ];
+    expect(findOverlappingVersions(civilAndInstant, 'UTC', fixedCalendar)).toEqual([
+      overlap([1, 2]),
+    ]);
+    const instants = [
+      rule(1, '2025-01-01T00:00:00.000Z', '2026-01-01T11:00:00.000Z', { timeZone: '+14:00' }),
+      rule(2, '2026-01-01T11:00:00.000Z', null, { timeZone: '-12:00' }),
+    ];
+    expect(findOverlappingVersions(instants, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    const named = [
+      rule(1, '2025-01-01', '2026-01-01', { timeZone: 'Pacific/Kiritimati' }),
+      rule(2, '2025-12-31T10:00:00.000Z', null, { timeZone: 'Pacific/Niue' }),
+    ];
+    expect(findOverlappingVersions(named, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+  });
+
+  it('agrees with a brute force "both true on some reference date"', () => {
+    let seed = 20261031;
+    // mulberry32: a small seeded generator, so the test is the same on every run.
+    const random = (n: number): number => {
+      seed = (seed + 0x6d2b79f5) | 0;
+      let t = Math.imul(seed ^ (seed >>> 15), seed | 1);
+      t ^= t + Math.imul(t ^ (t >>> 7), t | 61);
+      return ((t ^ (t >>> 14)) >>> 0) % n;
+    };
+    const zones = ['UTC', '+14:00', '-12:00', '+05:30', '-03:00'];
+    const day = (i: number): string =>
+      new Date(Date.UTC(2026, 0, 1 + i)).toISOString().slice(0, 10);
+    const half = (i: number): string =>
+      new Date(Date.UTC(2026, 0, 1) + i * 1_800_000).toISOString();
+    const randomRule = (version: number): TestRule => {
+      const timeZone = zones[random(zones.length)] ?? 'UTC';
+      if (random(2) === 0) {
+        const from = random(20);
+        const until = random(8) === 0 ? null : day(from + 1 + random(2));
+        return rule(version, day(from), until, { timeZone });
+      }
+      const from = random(20 * 48);
+      const until = random(8) === 0 ? null : half(from + 1 + random(2 * 48));
+      return rule(version, half(from), until, { timeZone });
+    };
+    const civilRefs = Array.from({ length: 28 }, (_, i) => day(i - 4));
+    const instantRefs = Array.from({ length: 28 * 48 }, (_, i) => half(i - 4 * 48));
+    let overlaps = 0;
+    for (let n = 0; n < 300; n++) {
+      const pair = [randomRule(1), randomRule(2)];
+      const both = [...civilRefs, ...instantRefs].some((at) =>
+        pair.every((r) => windowContains(r, at, 'UTC', fixedCalendar) === true),
+      );
+      if (both) overlaps++;
+      const found = findOverlappingVersions(pair, 'UTC', fixedCalendar);
+      expect(found, JSON.stringify(pair)).toEqual(both ? [overlap([1, 2])] : []);
+    }
+    // Both answers are well represented.
+    expect(overlaps).toBeGreaterThan(60);
+    expect(overlaps).toBeLessThan(240);
+  });
+
+  it('decides windows at the edges of the years 0000 and 9999', () => {
+    const rules = [
+      rule(1, '0000-01-01T00:00:00.000Z', '0000-01-01T00:30:00.000Z', { timeZone: '-01:00' }),
+      rule(2, '0000-01-01', null, { timeZone: '+01:00' }),
+    ];
+    // v2 starts at -0001-12-31T23:00Z, before every instant: it covers all of v1.
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    const late = [
+      rule(1, '9999-12-31T22:00:00.000Z', null, { timeZone: '+05:00' }),
+      rule(2, '2026-01-01', '9999-12-31', { timeZone: '+05:00' }),
+    ];
+    // v2 ends at 9999-12-30T19:00Z, before v1 starts; v1 is true on no day of 0000-9999.
+    expect(findOverlappingVersions(late, 'UTC', fixedCalendar)).toEqual([]);
   });
 
   it('sorts by rule set, id, then versions, smaller version first', () => {

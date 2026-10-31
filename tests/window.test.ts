@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { SpecError, windowContains } from '../src/index.js';
+import { isEffectiveAt, SpecError, windowContains } from '../src/index.js';
 import type { CivilCalendar } from '../src/index.js';
 import { fixedCalendar, specError, transitionCalendar } from './helpers.js';
 
@@ -147,6 +147,49 @@ describe('windowContains: accepted forms', () => {
   });
 });
 
+describe('windowContains: the edges of the years 0000 and 9999', () => {
+  it('a local day before 0000-01-01 is before every civil bound', () => {
+    const rule = open('0000-01-01', null, '-01:00');
+    expect(windowContains(rule, '0000-01-01T00:30:00.000Z', 'UTC', fixedCalendar)).toBe(false);
+    expect(windowContains(rule, '0000-01-01T01:00:00.000Z', 'UTC', fixedCalendar)).toBe(true);
+  });
+
+  it('a local day after 9999-12-31 is after every civil bound', () => {
+    const rule = open('2026-01-01', '9999-12-31', '+01:00');
+    expect(windowContains(rule, '9999-12-30T22:59:59.999Z', 'UTC', fixedCalendar)).toBe(true);
+    expect(windowContains(rule, '9999-12-31T23:30:00.000Z', 'UTC', fixedCalendar)).toBe(false);
+    const open9999 = open('9999-12-31', null, '+01:00');
+    expect(windowContains(open9999, '9999-12-31T23:30:00.000Z', 'UTC', fixedCalendar)).toBe(true);
+  });
+
+  it('an instant bound whose local day is out of range still compares with a civil date', () => {
+    // In -01:00, 0000-01-01T00:00Z is -0001-12-31 23:00: the bound is before 0000-01-01.
+    const before = open('0000-01-01T00:00:00.000Z', null, '-01:00');
+    expect(windowContains(before, '0000-01-01', 'UTC', fixedCalendar)).toBe(true);
+    // In +01:00, the day 0000-01-01 starts at -0001-12-31T23:00Z: 00:00Z does not start it.
+    const cut = open('0000-01-01T00:00:00.000Z', null, '+01:00');
+    expect(windowContains(cut, '0000-01-01', 'UTC', fixedCalendar)).toBe('unknown');
+    expect(windowContains(cut, '0000-01-02', 'UTC', fixedCalendar)).toBe(true);
+    const until = open('2026-01-01T00:00:00.000Z', '9999-12-31T23:30:00.000Z', '+01:00');
+    expect(windowContains(until, '9999-12-31', 'UTC', fixedCalendar)).toBe(true);
+  });
+
+  it('isEffectiveAt decides instead of throwing', () => {
+    const early = { effectiveFrom: '0000-01-01', effectiveUntil: null, timeZone: '-01:00' };
+    expect(isEffectiveAt(early, new Date('0000-01-01T00:30:00.000Z'))).toBe(false);
+    const late = { effectiveFrom: '2026-01-01', effectiveUntil: '9999-12-31', timeZone: '+01:00' };
+    expect(isEffectiveAt(late, new Date('9999-12-31T23:30:00.000Z'))).toBe(false);
+  });
+
+  it('refuses an expanded calendar answer that is in fact in range', () => {
+    const lying: CivilCalendar = { ...fixedCalendar, toCivilDate: () => '+002026-01-01' };
+    expect(
+      specError(() => windowContains(open('2026-01-01'), '2026-01-01T00:00:00.000Z', 'UTC', lying))
+        .code,
+    ).toBe('INVALID_DATE');
+  });
+});
+
 describe('windowContains: refusals', () => {
   const rule = open('2026-01-01');
   const zones = 'UTC, ±HH:MM or an IANA name Area/Location';
@@ -225,13 +268,13 @@ describe('windowContains: refusals', () => {
     );
   });
 
-  it('turns a calendar that throws into INVALID_DATE, and keeps its SpecError', () => {
+  it('turns a calendar that throws into INVALID_DATE, keeping the message of its SpecError', () => {
     const throwing: CivilCalendar = {
       toCivilDate: () => {
         throw new Error('no data for "Europe/Paris"');
       },
       startOfDay: () => {
-        throw new SpecError('INVALID_DATE', 'own error');
+        throw new SpecError('INVALID_RULE', 'own error');
       },
     };
     const error = specError(() =>
@@ -248,8 +291,8 @@ describe('windowContains: refusals', () => {
           ...fixedCalendar,
           startOfDay: throwing.startOfDay,
         }),
-      ).message,
-    ).toBe('own error');
+      ),
+    ).toMatchObject({ code: 'INVALID_DATE', message: 'own error' });
   });
 
   it('refuses a calendar without its functions, or unreadable', () => {

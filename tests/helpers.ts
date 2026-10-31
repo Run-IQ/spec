@@ -19,6 +19,8 @@ const NAMED_OFFSETS: Readonly<Record<string, number>> = {
   UTC: 0,
   'Europe/Paris': 60,
   'Pacific/Noumea': 660,
+  'Pacific/Kiritimati': 840,
+  'Pacific/Niue': -660,
 };
 
 function offsetOf(zone: string): number {
@@ -29,13 +31,16 @@ function offsetOf(zone: string): number {
   return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes));
 }
 
+/** The date part of the ISO form, expanded (`-000001-12-31`) outside the years 0000 to 9999. */
 function civilOf(time: number): string {
-  return new Date(time).toISOString().slice(0, 10);
+  return new Date(time).toISOString().split('T')[0] ?? '';
 }
 
 /**
  * A test calendar without any time zone database: `Europe/Paris` is `+01:00` all year,
- * `Pacific/Noumea` `+11:00`, `UTC` `+00:00`, and a `±HH:MM` zone is its own offset. With a fixed
+ * `Pacific/Noumea` `+11:00`, `Pacific/Kiritimati` `+14:00`, `Pacific/Niue` `-11:00`, `UTC`
+ * `+00:00`, and a `±HH:MM` zone is its own offset. Outside the years 0000 to 9999 it answers in
+ * the expanded ISO form, as `CivilCalendar` asks. With a fixed
  * offset every day has a midnight, so `startOfDay` (the FIRST instant of the civil day) is
  * always local midnight. A day without midnight is covered by `transitionCalendar`.
  */

@@ -3,13 +3,24 @@ import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from './definition.js';
 import { normalizeRuleDefinition } from './normalize.js';
 
-/** Identity and validity window: left out of the fingerprint. `checksum` is already dropped. */
-const NON_CONTENT_FIELDS = ['id', 'version', 'effectiveFrom', 'effectiveUntil'] as const;
+/**
+ * Identity and validity window (its bounds, time zone and reference date say WHEN a rule applies,
+ * not WHAT it does): left out of the fingerprint. `checksum` is already dropped.
+ */
+const NON_CONTENT_FIELDS = [
+  'id',
+  'version',
+  'effectiveFrom',
+  'effectiveUntil',
+  'timeZone',
+  'effectiveOn',
+] as const;
 
 /**
  * Content fingerprint of a rule: sha256 hex of the canonical NORMALIZED definition without
- * `id`, `version`, `effectiveFrom`, `effectiveUntil` and `checksum`. Two rules with the same
- * content under another id, version or window share it; it goes through the same
+ * `id`, `version`, `effectiveFrom`, `effectiveUntil`, `timeZone`, `effectiveOn` and `checksum`.
+ * Two rules with the same content under another id, version or window (time zone and reference
+ * date included) share it; it goes through the same
  * normalization as the checksum, so it does not depend on how the data is written.
  */
 export function computeRuleFingerprint(input: RuleDefinitionInput): string {

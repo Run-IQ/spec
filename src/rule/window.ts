@@ -7,7 +7,7 @@ import {
   requireTimeZone,
   startOfDayIn,
 } from '../time/civil.js';
-import type { CivilCalendar, CivilDate, Instant } from '../time/civil.js';
+import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { isPlainObject, typeName } from '../values.js';
 
 /**
@@ -63,8 +63,8 @@ export function windowContains(
   }
   const window = resolveWindow(fields, zone, '');
   const ref = readReferenceDate(at, 'at');
-  let refDay: CivilDate | undefined;
-  const dayOfRef = (): CivilDate => (refDay ??= civilDateIn(calendar, ref, window.zone));
+  let refDay: CivilDate | Beyond | undefined;
+  const dayOfRef = (): CivilDate | Beyond => (refDay ??= civilDateIn(calendar, ref, window.zone));
 
   const from = position(window.from, ref, window.zone, calendar, dayOfRef);
   if (from === 'before') return false;
@@ -76,14 +76,16 @@ export function windowContains(
 
 /**
  * Where `ref` lies against `bound`: `'before'` it, `'notBefore'` (at or after it), or
- * `'unknown'` (a civil day that holds an instant bound which does not start it).
+ * `'unknown'` (a civil day that holds an instant bound which does not start it). A local day
+ * outside the years 0000 to 9999 (`BEFORE_ALL`, `AFTER_ALL`) compares as text before, or after,
+ * every civil date, so it is decided, never refused.
  */
 function position(
   bound: CivilDate | Instant,
   ref: CivilDate | Instant,
   zone: string,
   calendar: CivilCalendar,
-  dayOfRef: () => CivilDate,
+  dayOfRef: () => CivilDate | Beyond,
 ): 'before' | 'notBefore' | 'unknown' {
   const civilBound = isCivilDate(bound);
   if (civilBound === isCivilDate(ref)) return ref < bound ? 'before' : 'notBefore';
@@ -152,6 +154,12 @@ export function windowShapeProblem(
     'the window [effectiveFrom, effectiveUntil) would be empty'
   );
 }
+
+/**
+ * Internal: the default `effectiveOn`, the decision's reference date. Normalization drops it, so
+ * an absent `effectiveOn` and this one are the same rule, with the same checksum.
+ */
+export const DEFAULT_EFFECTIVE_ON = '/$dates/effective';
 
 const EFFECTIVE_ON_START = 'effectiveOn must start with /$dates/, /$item/ or /$segment/';
 

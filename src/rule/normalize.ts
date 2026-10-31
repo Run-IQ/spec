@@ -9,7 +9,12 @@ import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
 import type { RuleValidationIssue } from './validate.js';
-import { effectiveOnContextProblem, readEffectiveOn, readRuleWindow } from './window.js';
+import {
+  DEFAULT_EFFECTIVE_ON,
+  effectiveOnContextProblem,
+  readEffectiveOn,
+  readRuleWindow,
+} from './window.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 
@@ -19,6 +24,7 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - a civil bound `YYYY-MM-DD` stays civil; an instant bound becomes its canonical form
  *   `YYYY-MM-DDTHH:MM:SS.sssZ` (D-13; see `toReferenceDate` for the accepted forms);
  * - `timeZone` is written by `normalizeTimeZone` (`+00:00` and `-00:00` become `UTC`);
+ * - `effectiveOn: '/$dates/effective'`, the default reference date, is dropped, as absent;
  * - defaults are made explicit: `effectiveUntil: null`, `dimensions: {}`, `tags: []`;
  * - `tags` are sorted and deduplicated;
  * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs` and `models` are
@@ -72,13 +78,10 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     tags: normalizeTags(input.tags),
   };
 
-  if (input.timeZone != null) out.timeZone = requireTimeZone(input.timeZone, 'INVALID_RULE');
-  if (input.effectiveOn != null) {
-    const pointer = readEffectiveOn(input.effectiveOn);
-    const problem = effectiveOnContextProblem(pointer, input.forEach);
-    if (problem !== undefined) invalidRule(problem);
-    out.effectiveOn = pointer;
-  }
+  const timeZone = input.timeZone;
+  if (timeZone != null) out.timeZone = requireTimeZone(timeZone, 'INVALID_RULE');
+  const effectiveOnInput = input.effectiveOn;
+  const effectiveOn = effectiveOnInput == null ? undefined : readEffectiveOn(effectiveOnInput);
   if (input.condition != null) out.condition = normalizeCondition(input.condition);
   for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
     const value = input[field];
@@ -100,6 +103,15 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     if (value == null) continue;
     if (hasLoneSurrogate(key)) invalidRule(extensionKeyMessage(key));
     defineField(out, key, readJson(value, key));
+  }
+
+  // Checked on the copy the result keeps (`forEach` is read once), so the result is valid.
+  if (effectiveOn !== undefined) {
+    const forEach = Object.hasOwn(out, 'forEach') ? out.forEach : undefined;
+    const problem = effectiveOnContextProblem(effectiveOn, forEach);
+    if (problem !== undefined) invalidRule(problem);
+    // The default reference date is written as its absence: one rule, one checksum.
+    if (effectiveOn !== DEFAULT_EFFECTIVE_ON) out.effectiveOn = effectiveOn;
   }
 
   return out as RuleDefinition;

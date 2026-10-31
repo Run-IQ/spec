@@ -187,6 +187,11 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
   });
 
   describe('identity and validity window are left out', () => {
+    it('different timeZone or effectiveOn: they say when, not what', () => {
+      expect(fp({ ...rich, timeZone: 'Europe/Paris' })).toBe(fp(rich));
+      expect(fp({ ...rich, effectiveOn: '/$dates/facture' })).toBe(fp(rich));
+    });
+
     it('different id', () => {
       expect(fp({ ...rich, id: 'other' })).toBe(fp(rich));
     });

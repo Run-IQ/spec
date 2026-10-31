@@ -99,7 +99,8 @@ function definitionIssues(value: unknown): {
   if (value.timeZone != null && !isTimeZone(value.timeZone)) {
     errors.add('timeZone', timeZoneMessage(value.timeZone));
   }
-  if (value.effectiveOn != null) checkEffectiveOn(value.effectiveOn, value.forEach, errors);
+  const effectiveOn = value.effectiveOn;
+  const pointer = effectiveOn == null ? undefined : checkEffectiveOn(effectiveOn, errors);
 
   if (value.condition != null) checkCondition(value.condition, errors);
   for (const field of OPTIONAL_STRINGS) {
@@ -113,10 +114,26 @@ function definitionIssues(value: unknown): {
   if (value.exceptions != null) checkExceptions(value.exceptions, errors);
   for (const issue of exceptionModelIssues(value)) errors.add(issue.path, issue.message);
 
+  // Each extension is read once; `forEach` is checked against the copy normalize would keep.
+  let forEach: JsonValue | undefined;
+  let forEachReadable = true;
   for (const key of Object.keys(value)) {
-    if (RESERVED.has(key) || value[key] == null) continue;
-    if (hasLoneSurrogate(key)) errors.add('', extensionKeyMessage(key));
-    else checkJson(value[key], key, errors);
+    if (RESERVED.has(key)) continue;
+    const extension = value[key];
+    if (extension == null) continue;
+    if (hasLoneSurrogate(key)) {
+      errors.add('', extensionKeyMessage(key));
+      continue;
+    }
+    const json = toJsonOrIssue(extension, key, errors);
+    if (key === 'forEach') {
+      forEach = json;
+      forEachReadable = json !== undefined;
+    }
+  }
+  if (pointer !== undefined && forEachReadable) {
+    const problem = effectiveOnContextProblem(pointer, forEach);
+    if (problem !== undefined) errors.add('effectiveOn', problem);
   }
 
   return result(errors);
@@ -179,11 +196,12 @@ function checkDate(value: unknown, field: string, errors: Issues): CivilDate | I
   }
 }
 
-function checkEffectiveOn(value: unknown, forEach: unknown, errors: Issues): void {
-  const problem =
-    effectiveOnIssue(value) ??
-    (typeof value === 'string' ? effectiveOnContextProblem(value, forEach) : undefined);
-  if (problem !== undefined) errors.add('effectiveOn', problem);
+/** The pointer of a valid `effectiveOn` shape, or `undefined` after recording why not. */
+function checkEffectiveOn(value: unknown, errors: Issues): string | undefined {
+  const problem = effectiveOnIssue(value);
+  if (problem === undefined && typeof value === 'string') return value;
+  errors.add('effectiveOn', problem ?? '');
+  return undefined;
 }
 
 function checkCondition(value: unknown, errors: Issues): void {

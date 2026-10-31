@@ -1,9 +1,15 @@
 import { escapeText, SpecError, unreadableMessage } from '../errors.js';
-import { isCivilDate, requireTimeZone, startOfDayIn } from '../time/civil.js';
-import type { CivilCalendar, CivilDate, Instant } from '../time/civil.js';
+import {
+  civilDateIn,
+  isCivilDate,
+  nextCivilDate,
+  requireTimeZone,
+  startOfDayIn,
+} from '../time/civil.js';
+import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 import { isRuleVersion } from './definition.js';
-import { readEffectiveOn, resolveWindow } from './window.js';
+import { DEFAULT_EFFECTIVE_ON, readEffectiveOn, resolveWindow } from './window.js';
 import type { ResolvedWindow, RuleWindow } from './window.js';
 
 /** One rule version as `findOverlappingVersions` reads it. */
@@ -38,13 +44,15 @@ interface Version {
  * versions (UTF-16 code unit order for texts). Rules are grouped by (`ruleSet`, `id`), an
  * absent rule set being `'local'`: the same `id` in two rule sets is two rules. Within a group,
  * every pair is checked (the cost is quadratic in the versions of one `id` only):
- * - two different `effectiveOn` (an absent one differs from any pointer): `'effectiveOn'`, since
- *   the windows of versions that read different dates cannot be compared;
- * - else two windows that overlap: `'overlap'`. Each version keeps its own time zone (its
- *   `timeZone`, else `timeZone`). Civil windows of one time zone compare as civil dates; instant
- *   windows as instants; otherwise every civil bound becomes its `startOfDay` in its version's
- *   time zone and the windows compare as instants (D-13). Two civil windows in different time
- *   zones overlap when they share an instant or a civil day.
+ * - two different `effectiveOn` (absent and the default `/$dates/effective` are the same):
+ *   `'effectiveOn'`, since the windows of versions that read different dates cannot be compared;
+ * - else two windows that can both be true on some reference date: `'overlap'`. Each version
+ *   keeps its own time zone (its `timeZone`, else `timeZone`). Windows of one form and one time
+ *   zone compare directly (civil dates, or instants). Otherwise the pair overlaps when the
+ *   windows share an instant (a civil bound being its `startOfDay` in its version's time zone,
+ *   D-13) or a civil day on which each is wholly true in its own time zone (an instant window
+ *   `[a, b)` covers the days from the day of `a`, or the next one when `a` does not start it,
+ *   to the day of `b`, excluded). Days and instants outside the years 0000 to 9999 are decided.
  *
  * Throws `SpecError`: `INVALID_DATE` for an invalid `timeZone`, a bound `toReferenceDate`
  * refuses or a calendar that fails; `INVALID_RULE` for a list that is not an array or cannot be
@@ -169,35 +177,59 @@ function readRule(
   }
   const set = ruleSet == null ? 'local' : requireText(ruleSet, 'ruleSet');
   const window = resolveWindow(fields, zone, prefix);
-  const pointer = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
+  const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
+  // The default reference date is the absent one, as normalization writes it.
+  const pointer = read === DEFAULT_EFFECTIVE_ON ? undefined : read;
   return { ruleSet: set, id: ruleId, name, version: { version, window, effectiveOn: pointer } };
 }
 
-/** Whether two windows share an instant, or (two civil windows) a civil day. */
+/**
+ * Whether some reference date makes both windows true (D-13, extended): a common instant, or a
+ * common civil day on which each window is wholly true in its own time zone. Two windows of one
+ * form and one time zone compare directly; otherwise both checks are made.
+ */
 function overlaps(a: ResolvedWindow, b: ResolvedWindow, calendar: CivilCalendar): boolean {
   const civilA = isCivilDate(a.from);
-  const civilB = isCivilDate(b.from);
-  if (civilA && civilB) {
-    if (intervalsMeet(a.from, a.until, b.from, b.until)) return true;
-    if (a.zone === b.zone) return false;
-  } else if (!civilA && !civilB) {
+  if (a.zone === b.zone && civilA === isCivilDate(b.from)) {
     return intervalsMeet(a.from, a.until, b.from, b.until);
   }
-  const start = (bound: CivilDate | Instant, zone: string): Instant =>
+  const start = (bound: CivilDate | Instant, zone: string): Instant | Beyond =>
     isCivilDate(bound) ? startOfDayIn(calendar, bound, zone) : bound;
-  const end = (bound: CivilDate | Instant | null, zone: string): Instant | null =>
+  const end = (bound: CivilDate | Instant | null, zone: string): Instant | Beyond | null =>
     bound === null ? null : start(bound, zone);
-  return intervalsMeet(
-    start(a.from, a.zone),
-    end(a.until, a.zone),
-    start(b.from, b.zone),
-    end(b.until, b.zone),
+  return (
+    intervalsMeet(
+      start(a.from, a.zone),
+      end(a.until, a.zone),
+      start(b.from, b.zone),
+      end(b.until, b.zone),
+    ) || intervalsMeet(...civilDays(a, calendar), ...civilDays(b, calendar))
   );
 }
 
-/** Half-open intervals `[f1, u1)` and `[f2, u2)` of same-form texts share a point. */
+/**
+ * The civil days `[first, end)` on which `window` is true for a civil reference date, in its own
+ * time zone, as `windowContains` decides it: civil bounds as they are; for an instant window
+ * `[a, b)`, from the day of `a` (the next day when `a` does not start it) to the day of `b`.
+ */
+function civilDays(window: ResolvedWindow, calendar: CivilCalendar): [string, string | null] {
+  if (isCivilDate(window.from)) return [window.from, window.until];
+  const day = civilDateIn(calendar, window.from, window.zone);
+  const first =
+    !isCivilDate(day) || startOfDayIn(calendar, day, window.zone) === window.from
+      ? day
+      : nextCivilDate(day);
+  const end = window.until === null ? null : civilDateIn(calendar, window.until, window.zone);
+  return [first, end];
+}
+
+/**
+ * Two half-open intervals `[f1, u1)` and `[f2, u2)` of same-form texts (`null`: no end) are
+ * both non-empty and share a point.
+ */
 function intervalsMeet(f1: string, u1: string | null, f2: string, u2: string | null): boolean {
-  return (u2 === null || f1 < u2) && (u1 === null || f2 < u1);
+  const nonEmpty = (u1 === null || f1 < u1) && (u2 === null || f2 < u2);
+  return nonEmpty && (u2 === null || f1 < u2) && (u1 === null || f2 < u1);
 }
 
 function compareText(a: string, b: string): number {

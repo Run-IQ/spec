@@ -24,7 +24,11 @@ export type Instant = string;
  *   as in Chile): then it is the first local time that exists (01:00). For a day skipped as a
  *   whole (Samoa, 2011-12-30), it is the start of the next day that exists.
  *
- * Both are called with a valid, normalized time zone (`UTC`, `±HH:MM` or an IANA name).
+ * Both are called with a valid, normalized time zone (`UTC`, `±HH:MM` or an IANA name). Near
+ * the ends of the years 0000 to 9999, the answer can fall outside them (`0000-01-01T00:30Z` is
+ * -0001-12-31 in `-01:00`): write it in the expanded ISO 8601 form `Date.prototype.toISOString`
+ * uses (`-000001-12-31`, `-000001-12-31T23:00:00.000Z`, `+010000-01-01`). It is then before, or
+ * after, every civil date and instant of the years 0000 to 9999.
  */
 export interface CivilCalendar {
   toCivilDate(at: Instant, timeZone: string): CivilDate;
@@ -205,33 +209,69 @@ export function requireTimeZone(
 }
 
 /**
- * Internal: `calendar.toCivilDate(at, zone)`, checked. Whatever goes wrong becomes `SpecError`
- * (`INVALID_DATE`): a missing method, a throw (a `SpecError` it throws is kept), a result that
- * is not a civil date.
+ * Internal: a day or an instant outside the years 0000 to 9999, as the calendar functions below
+ * give it: `''` is before every civil date and every canonical instant, `'~'` after every one,
+ * so the text order of comparisons stays the time order.
  */
-export function civilDateIn(calendar: CivilCalendar, at: Instant, zone: string): CivilDate {
+export const BEFORE_ALL = '';
+export const AFTER_ALL = '~';
+export type Beyond = typeof BEFORE_ALL | typeof AFTER_ALL;
+
+const EXPANDED_DATE = /^([+-])(\d{6})-(\d{2})-(\d{2})$/;
+const EXPANDED_INSTANT = /^([+-])(\d{6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
+
+/** `''` or `'~'` for an expanded ISO text whose year really is outside 0000 to 9999. */
+function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
+  if (typeof value !== 'string') return undefined;
+  const match = form.exec(value);
+  if (match === null) return undefined;
+  const year = Number(`${match[1] ?? ''}${match[2] ?? ''}`);
+  return year < 0 ? BEFORE_ALL : year > 9999 ? AFTER_ALL : undefined;
+}
+
+/**
+ * Internal: `calendar.toCivilDate(at, zone)`, checked: a civil date, or `BEFORE_ALL` /
+ * `AFTER_ALL` for an expanded date outside the years 0000 to 9999. Whatever goes wrong becomes
+ * `SpecError` (`INVALID_DATE`): a missing method, a throw (a `SpecError` keeps its message), a
+ * result that is neither.
+ */
+export function civilDateIn(
+  calendar: CivilCalendar,
+  at: Instant,
+  zone: string,
+): CivilDate | Beyond {
   const day = callCalendar(calendar, 'toCivilDate', at, zone);
-  if (!isCivilDate(day)) {
-    throw new SpecError(
-      'INVALID_DATE',
-      `calendar.toCivilDate returned ${describeResult(day)} for ${at} in ${zone}: ` +
-        'not a civil date YYYY-MM-DD',
-    );
-  }
-  return day;
+  if (isCivilDate(day)) return day;
+  const beyond = beyondOf(day, EXPANDED_DATE);
+  if (beyond !== undefined) return beyond;
+  throw new SpecError(
+    'INVALID_DATE',
+    `calendar.toCivilDate returned ${describeResult(day)} for ${at} in ${zone}: ` +
+      'not a civil date YYYY-MM-DD',
+  );
 }
 
 /** Internal: `calendar.startOfDay(day, zone)`, checked like `civilDateIn`. */
-export function startOfDayIn(calendar: CivilCalendar, day: CivilDate, zone: string): Instant {
+export function startOfDayIn(
+  calendar: CivilCalendar,
+  day: CivilDate,
+  zone: string,
+): Instant | Beyond {
   const start = callCalendar(calendar, 'startOfDay', day, zone);
-  if (!isInstant(start)) {
-    throw new SpecError(
-      'INVALID_DATE',
-      `calendar.startOfDay returned ${describeResult(start)} for ${day} in ${zone}: ` +
-        'not a canonical instant YYYY-MM-DDTHH:MM:SS.sssZ',
-    );
-  }
-  return start;
+  if (isInstant(start)) return start;
+  const beyond = beyondOf(start, EXPANDED_INSTANT);
+  if (beyond !== undefined) return beyond;
+  throw new SpecError(
+    'INVALID_DATE',
+    `calendar.startOfDay returned ${describeResult(start)} for ${day} in ${zone}: ` +
+      'not a canonical instant YYYY-MM-DDTHH:MM:SS.sssZ',
+  );
+}
+
+/** Internal: the civil date after `day`, or `AFTER_ALL` after 9999-12-31. */
+export function nextCivilDate(day: CivilDate): CivilDate | Beyond {
+  if (day === '9999-12-31') return AFTER_ALL;
+  return new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
 }
 
 function callCalendar(
@@ -247,7 +287,8 @@ function callCalendar(
     }
     return (call as (v: string, z: string) => unknown).call(calendar, value, zone);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
+    // A calendar's own SpecError keeps its message, under the calendar's code.
+    if (error instanceof SpecError) throw new SpecError('INVALID_DATE', error.message);
     throw new SpecError(
       'INVALID_DATE',
       `calendar.${method} failed for ${value} in ${zone}: ${escapeText(describeError(error))}`,
@@ -262,7 +303,7 @@ function describeResult(value: unknown): string {
 /**
  * Internal: a calendar for `UTC` and fixed offsets `±HH:MM` only, exact without any time zone
  * database. An IANA name throws `SpecError` (`INVALID_DATE`) naming `user`, which needs a real
- * calendar. A civil date outside the years 0000 to 9999 throws too.
+ * calendar. Outside the years 0000 to 9999 it answers in the expanded ISO form.
  */
 export function fixedOffsetCalendar(user: string): CivilCalendar {
   const offsetOf = (zone: string): number => {
@@ -277,22 +318,9 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
     return offset * 60_000;
   };
   return {
-    toCivilDate: (at, zone) => {
-      const local = Date.parse(at) + offsetOf(zone);
-      if (local < MIN_TIME || local > MAX_TIME) {
-        throw new SpecError('INVALID_DATE', `${at} in ${zone} is outside the years 0000 to 9999`);
-      }
-      return new Date(local).toISOString().slice(0, 10);
-    },
-    startOfDay: (day, zone) => {
-      const start = Date.parse(`${day}T00:00:00.000Z`) - offsetOf(zone);
-      if (start < MIN_TIME || start > MAX_TIME) {
-        throw new SpecError(
-          'INVALID_DATE',
-          `the start of ${day} in ${zone} is outside the years 0000 to 9999`,
-        );
-      }
-      return new Date(start).toISOString();
-    },
+    toCivilDate: (at, zone) =>
+      new Date(Date.parse(at) + offsetOf(zone)).toISOString().split('T')[0] ?? '',
+    startOfDay: (day, zone) =>
+      new Date(Date.parse(`${day}T00:00:00.000Z`) - offsetOf(zone)).toISOString(),
   };
 }
