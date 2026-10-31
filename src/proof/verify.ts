@@ -75,8 +75,9 @@ function verify(p: unknown, options: unknown): ProofVerification {
   if (!proof) return { status: 'invalid', issues: errors };
 
   const findings: Finding[] = [];
-  if (contentDigest(proof) !== proof.digest)
+  if (contentDigest(proof) !== proof.digest) {
     findings.push({ message: 'digest mismatch', invalid: true });
+  }
   for (const message of inconsistencies(proof)) findings.push({ message, invalid: true });
   if (options !== undefined && !isPlainObject(options)) {
     findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });

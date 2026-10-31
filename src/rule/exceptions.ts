@@ -1,6 +1,6 @@
 import type { JsonValue } from '../canonical.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { quoteText, SpecError } from '../errors.js';
+import { quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { isPlainObject, typeName } from '../values.js';
 import {
@@ -34,8 +34,10 @@ import type { RuleValidationIssue } from './validate.js';
  * Rule sets (D-37): `ruleSets` lists the rule sets whose rules the selector targets (`local` for
  * the rules without a rule set); absent, only the rule set of the rule that carries the
  * exception (the carrier). `ids` and `outputs` are names cited from the carrier: bare, they
- * designate its rule set; qualified (`rgpd:profilage`), the named one. An id must belong to a
- * targeted rule set (validation refuses one that cannot match). In normal form, names qualified
+ * designate its rule set; qualified (`rgpd:profilage`), the named one. Validation refuses a name
+ * that cannot match (D-23): an id must belong to a targeted rule set; an output must belong to
+ * a targeted rule set or, when a pack is targeted, to any rule set but `local` (a pack may import
+ * another rule set, never `local`). In normal form, names qualified
  * by the carrier's own rule set are written bare, and `ruleSets` listing only it is dropped.
  */
 export interface RuleSelector {
@@ -74,17 +76,20 @@ export const EXCEPTION_MODEL = '@run-iq/exception';
  * compared in normal form, so `{ anyOf: ['FR'] }` and `'FR'` are the same.
  *
  * Throws `SpecError` (`INVALID_RULE`), whatever the selector would match:
+ * - `rule must be a plain object` for a rule that is not one;
+ * - `rule could not be read: …` / `selector could not be read: …` when reading the rule or the
+ *   selector throws (a throwing getter, a Proxy trap, a revoked Proxy); both are copied once,
+ *   before any comparison;
  * - `rule ruleSet "X" is not a rule set id (…)` / `carrier ruleSet "X" is not a rule set id
  *   (…)` for a rule set that is not a rule set id;
  * - `rule.id must be a non-empty string`, `rule.model must be a non-empty string`,
  *   `rule.tags must be an array of strings`, `rule.output must be a string when present`,
  *   `rule.dimensions must be an object of dimension specs` for a malformed rule;
- * - `selector.<field> must be an array of strings` for `ids`, `tags`, `outputs`, `models` or
- *   `ruleSets` present but not an array of strings, and `selector.dimensions must be an object
- *   of dimension specs`;
+ * - `selector must be an object, got a value of type …`, `selector.<field> must be an array of
+ *   strings` for `ids`, `tags`, `outputs`, `models` or `ruleSets` present but not an array of
+ *   strings, and `selector.dimensions must be an object of dimension specs`;
  * - `qualifyName: …` for a rule id holding `:` (not a bare name);
- * - the message of `readDimensionSpec` for an invalid compared dimension spec.
- * The rule and the selector are read as given: a getter or a Proxy that throws is not caught.
+ * - the message of `readDimensionSpec` for an invalid or unreadable compared dimension spec.
  */
 export function matchesSelector(
   rule: {
@@ -98,35 +103,44 @@ export function matchesSelector(
   selector: RuleSelector,
   carrier: string = LOCAL_RULE_SET,
 ): boolean {
-  const ruleSet = rule.ruleSet ?? LOCAL_RULE_SET;
-  requireRuleSet(ruleSet, 'rule ruleSet');
+  const target = readOnce('rule', () => copyRule(rule));
+  const wanted = readOnce('selector', () => copySelector(selector));
+  const { ruleSet } = target;
   requireRuleSet(carrier, 'carrier ruleSet');
-  requireRule(rule);
-  requireSelector(selector);
-  if (!constrains(selector)) return false;
-  const { ids, tags, dimensions, outputs, models } = selector;
-  const targeted = selector.ruleSets?.length ? selector.ruleSets : [carrier];
-  if (!targeted.includes(ruleSet)) return false;
+  if (!constrains(wanted)) return false;
+  const { ids, tags, dimensions, outputs, models } = wanted;
+  const targeted = new Set(wanted.ruleSets?.length ? wanted.ruleSets : [carrier]);
+  if (!targeted.has(ruleSet)) return false;
   if (ids?.length) {
-    const id = qualifyName(ruleSet, rule.id);
+    const id = qualifyName(ruleSet, target.id);
     if (!ids.some((name) => qualifiedFrom(carrier, name) === id)) return false;
   }
-  if (tags?.length && !tags.some((tag) => rule.tags.includes(tag))) return false;
+  if (tags?.length && !tags.some((tag) => target.tags.includes(tag))) return false;
   if (outputs?.length) {
-    const output = qualifiedFrom(ruleSet, rule.output ?? DEFAULT_OUTPUT);
+    const output = qualifiedFrom(ruleSet, target.output ?? DEFAULT_OUTPUT);
     if (!outputs.some((name) => qualifiedFrom(carrier, name) === output)) return false;
   }
-  if (models?.length && !models.includes(rule.model)) return false;
+  if (models?.length && !models.includes(target.model)) return false;
   if (dimensions) {
     for (const [key, value] of Object.entries(dimensions)) {
-      if (!Object.hasOwn(rule.dimensions, key)) return false;
-      if (!sameDimensionSpec(rule.dimensions[key], value)) return false;
+      if (!Object.hasOwn(target.dimensions, key)) return false;
+      if (!sameDimensionSpec(target.dimensions[key], value)) return false;
     }
   }
   return true;
 }
 
-function requireRuleSet(value: unknown, what: string): void {
+/** Runs `read`, turning anything but a `SpecError` it throws into an unreadable `subject`. */
+function readOnce<T>(subject: string, read: () => T): T {
+  try {
+    return read();
+  } catch (error) {
+    if (error instanceof SpecError) throw error;
+    throw new SpecError('INVALID_RULE', unreadableMessage(subject, error));
+  }
+}
+
+function requireRuleSet(value: unknown, what: string): asserts value is string {
   if (!isRuleSetId(value)) {
     const text = typeof value === 'string' ? quoteText(value) : 'value';
     throw new SpecError(
@@ -136,40 +150,63 @@ function requireRuleSet(value: unknown, what: string): void {
   }
 }
 
-/** The fields of `rule` that `matchesSelector` reads, checked before any comparison. */
-function requireRule(rule: unknown): void {
-  const fields: Record<string, unknown> = isPlainObject(rule) ? rule : {};
-  const nonEmpty = (field: string): void => {
-    const value = fields[field];
-    if (typeof value !== 'string' || value === '') {
-      selectorError(`rule.${field} must be a non-empty string`);
-    }
-  };
-  nonEmpty('id');
-  nonEmpty('model');
-  if (!isStringArray(fields.tags)) selectorError('rule.tags must be an array of strings');
-  if (fields.output !== undefined && typeof fields.output !== 'string') {
-    selectorError('rule.output must be a string when present');
-  }
-  if (!isPlainObject(fields.dimensions)) {
-    selectorError('rule.dimensions must be an object of dimension specs');
-  }
+/** What `matchesSelector` reads of a rule. */
+interface RuleCopy {
+  id: string;
+  ruleSet: string;
+  tags: string[];
+  dimensions: Record<string, unknown>;
+  output: string | undefined;
+  model: string;
 }
 
-/** The shape of `selector`, checked before any comparison. */
-function requireSelector(selector: unknown): void {
+/** The fields of `rule` that `matchesSelector` reads, checked and copied once. */
+function copyRule(rule: unknown): RuleCopy {
+  if (!isPlainObject(rule)) selectorError('rule must be a plain object');
+  const { id, tags, dimensions, output, model } = rule;
+  const ruleSet = rule.ruleSet ?? LOCAL_RULE_SET;
+  requireRuleSet(ruleSet, 'rule ruleSet');
+  if (typeof id !== 'string' || id === '') selectorError('rule.id must be a non-empty string');
+  if (typeof model !== 'string' || model === '') {
+    selectorError('rule.model must be a non-empty string');
+  }
+  if (!isStringArray(tags)) selectorError('rule.tags must be an array of strings');
+  if (output !== undefined && typeof output !== 'string') {
+    selectorError('rule.output must be a string when present');
+  }
+  if (!isPlainObject(dimensions)) {
+    selectorError('rule.dimensions must be an object of dimension specs');
+  }
+  return { id, ruleSet, tags: [...tags], dimensions: copyEntries(dimensions), output, model };
+}
+
+/** The fields of `selector` that `matchesSelector` reads, checked and copied once. */
+function copySelector(selector: unknown): RuleSelector {
   if (!isPlainObject(selector)) {
     selectorError(`selector must be an object, got a value of type ${typeName(selector)}`);
   }
+  const copy: RuleSelector = {};
   for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
     const value = selector[field];
-    if (value !== undefined && !isStringArray(value)) {
-      selectorError(`selector.${field} must be an array of strings`);
+    if (value === undefined) continue;
+    if (!isStringArray(value)) selectorError(`selector.${field} must be an array of strings`);
+    copy[field] = [...value];
+  }
+  const dimensions = selector.dimensions;
+  if (dimensions !== undefined) {
+    if (!isPlainObject(dimensions)) {
+      selectorError('selector.dimensions must be an object of dimension specs');
     }
+    // Unchecked here on purpose: `sameDimensionSpec` checks (and safely reads) each compared
+    // spec, refusing an invalid one with `INVALID_RULE`.
+    copy.dimensions = copyEntries(dimensions) as Record<string, DimensionSpec>;
   }
-  if (selector.dimensions !== undefined && !isPlainObject(selector.dimensions)) {
-    selectorError('selector.dimensions must be an object of dimension specs');
-  }
+  return copy;
+}
+
+/** A shallow copy of the own enumerable entries of `value`, as data (`__proto__` included). */
+function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
+  return Object.fromEntries(Object.keys(value).map((key) => [key, value[key]]));
 }
 
 function isStringArray(value: unknown): value is string[] {
@@ -280,13 +317,52 @@ export function normalizedOutput(output: unknown, ruleSet: string | undefined): 
   if (typeof output !== 'string' || citedNameProblem(output, 'output', 'output') !== undefined) {
     return output;
   }
-  if (ruleSet === undefined)
+  if (ruleSet === undefined) {
     return output.includes(':') || output === DEFAULT_OUTPUT ? undefined : output;
+  }
   const shortest = shortestFrom(ruleSet, output);
   return shortest === DEFAULT_OUTPUT ? undefined : shortest;
 }
 
 type Add = (path: string, message: string) => void;
+
+/**
+ * Refuses the selector names that no targeted rule can ever match (D-23), bare names being
+ * resolved in `carrier`. An id of rule set S names a rule of S: S must be targeted. An output of
+ * S is fed by the rules of S or by the packs that import S, and a pack never imports `local`
+ * (a certified pack cannot depend on uncorrected content): S must be targeted, or not `local`
+ * with at least one targeted pack.
+ */
+function checkReach(
+  lists: Partial<Record<(typeof SELECTOR_LISTS)[number], string[]>>,
+  targetedList: readonly string[],
+  carrier: string,
+  path: string,
+  fail: Add,
+): void {
+  const targeted = new Set(targetedList);
+  const packTargeted = targetedList.some((set) => set !== LOCAL_RULE_SET);
+  lists.ids?.forEach((name, i) => {
+    const set = ruleSetOf(carrier, name);
+    if (!targeted.has(set)) {
+      fail(
+        `${path}.ids[${i}]`,
+        `${path}.ids[${i}] names a rule of ${quoteText(set)}, a rule set the selector does ` +
+          'not target',
+      );
+    }
+  });
+  lists.outputs?.forEach((name, i) => {
+    const set = ruleSetOf(carrier, name);
+    if (!targeted.has(set) && (set === LOCAL_RULE_SET || !packTargeted)) {
+      fail(
+        `${path}.outputs[${i}]`,
+        `${path}.outputs[${i}] names an output of ${quoteText(set)}, a rule set the ` +
+          'selector does not target',
+      );
+    }
+  });
+}
 
 function readException(
   item: JsonValue,
@@ -379,32 +455,8 @@ function readSelector(
     }
     lists[field] = list;
   }
-  if (valid && carrier !== undefined && lists.ids !== undefined) {
-    const targeted = ruleSets?.length ? ruleSets : [carrier];
-    lists.ids.forEach((name, i) => {
-      const set = ruleSetOf(carrier, name);
-      if (!targeted.includes(set)) {
-        fail(
-          `${path}.ids[${i}]`,
-          `${path}.ids[${i}] names a rule of ${quoteText(set)}, a rule set the selector does ` +
-            'not target',
-        );
-      }
-    });
-  }
-  if (valid && carrier !== undefined && lists.outputs !== undefined) {
-    // A rule of any targeted set may feed an output of its own set or of the carrier's.
-    const reachable = new Set([carrier, ...(ruleSets ?? [])]);
-    lists.outputs.forEach((name, i) => {
-      const set = ruleSetOf(carrier, name);
-      if (!reachable.has(set)) {
-        fail(
-          `${path}.outputs[${i}]`,
-          `${path}.outputs[${i}] names an output of ${quoteText(set)}, a rule set the ` +
-            'selector does not target',
-        );
-      }
-    });
+  if (valid && carrier !== undefined) {
+    checkReach(lists, ruleSets?.length ? ruleSets : [carrier], carrier, path, fail);
   }
 
   const selector: RuleSelector = {};

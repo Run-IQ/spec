@@ -215,8 +215,9 @@ function readReferential(
   if (codes !== undefined) {
     for (const [code, periods] of codes) {
       codeNames.add(code);
-      if (periods !== undefined)
+      if (periods !== undefined) {
         defineField(normalCodes, code, checkPeriods(periods, `codes.${code}`, add));
+      }
     }
   }
   if (groups === undefined) return undefined;

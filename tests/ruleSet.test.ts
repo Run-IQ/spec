@@ -328,6 +328,50 @@ describe('selectors with ruleSets', () => {
     });
   });
 
+  it('refuses a rule that is not a plain object (review round 4)', () => {
+    // Hostile input on purpose: a JavaScript caller can pass any shape.
+    for (const rule of [null, 'R1', [], new Map()]) {
+      const hostile = rule as unknown as Parameters<typeof matchesSelector>[0];
+      expect(specError(() => matchesSelector(hostile, { ids: ['R1'] }))).toMatchObject({
+        code: 'INVALID_RULE',
+        message: 'rule must be a plain object',
+      });
+    }
+  });
+
+  it('turns a throwing getter, a throwing proxy or a revoked proxy into a SpecError', () => {
+    const local = { id: 'R1', tags: ['t'], dimensions: {}, model: 'M' };
+    const boom = (): never => {
+      throw new Error('boom');
+    };
+    const getter = Object.defineProperty({ ...local }, 'tags', { get: boom, enumerable: true });
+    const trap = new Proxy(local, { get: boom });
+    const revocable = Proxy.revocable(local, {});
+    revocable.revoke();
+    const throwingSelector = Object.defineProperty({}, 'ids', { get: boom, enumerable: true });
+    const deepSelector = { dimensions: new Proxy({}, { ownKeys: boom }) };
+    const cases: [unknown, unknown, string][] = [
+      [getter, { ids: ['R1'] }, 'rule could not be read: boom'],
+      [trap, { ids: ['R1'] }, 'rule could not be read: boom'],
+      [local, throwingSelector, 'selector could not be read: boom'],
+      [local, deepSelector, 'selector could not be read: boom'],
+      [
+        local,
+        new Proxy({ ids: ['R1'] }, { getPrototypeOf: boom }),
+        'selector could not be read: boom',
+      ],
+    ];
+    for (const [rule, selector, message] of cases) {
+      const call = (): boolean =>
+        // Hostile input on purpose: a JavaScript caller can pass any shape.
+        matchesSelector(rule as typeof local, selector as RuleSelector);
+      expect(specError(call)).toMatchObject({ code: 'INVALID_RULE', message });
+    }
+    const revoked = specError(() => matchesSelector(revocable.proxy, { ids: ['R1'] }));
+    expect(revoked.code).toBe('INVALID_RULE');
+    expect(revoked.message.startsWith('rule could not be read: ')).toBe(true);
+  });
+
   it('refuses an invalid rule set with a SpecError', () => {
     const rule = { id: 'R1', ruleSet: 'Bad', tags: [], dimensions: {}, model: 'M' };
     expect(specError(() => matchesSelector(rule, { ids: ['R1'] }))).toMatchObject({
@@ -416,8 +460,11 @@ describe('selectors with ruleSets', () => {
 
   it.each([
     [{ outputs: ['interne:taux'] }, undefined, 'interne'],
-    [{ ruleSets: ['rgpd'], outputs: ['interne:taux'] }, undefined, 'interne'],
     [{ ruleSets: ['local'], outputs: ['interne:taux'] }, 'rgpd', 'interne'],
+    [{ ruleSets: ['local'], outputs: ['rgpd:x'] }, 'rgpd', 'rgpd'],
+    [{ ruleSets: ['local'], outputs: ['y'] }, 'rgpd', 'rgpd'],
+    [{ ruleSets: ['rgpd'], outputs: ['t'] }, undefined, 'local'],
+    [{ ruleSets: ['local'], outputs: ['autre:z'] }, undefined, 'autre'],
   ])('refuses a selector output that can never match: %j in %s (review M1)', (t, set, named) => {
     expectRuleRefused(
       inhibit(t, set),
@@ -427,13 +474,22 @@ describe('selectors with ruleSets', () => {
     );
   });
 
-  it("accepts outputs of the carrier's own rule set or of a targeted one (review M1)", () => {
-    expect(
-      validateRuleDefinition(inhibit({ ruleSets: ['interne'], outputs: ['interne:taux'] })),
-    ).toEqual({ valid: true, errors: [], issues: [] });
-    const own = inhibit({ ruleSets: ['local'], outputs: ['rgpd:x', 'y'] }, 'rgpd');
-    expect(validateRuleDefinition(own)).toEqual({ valid: true, errors: [], issues: [] });
-  });
+  it.each([
+    [{ ruleSets: ['interne'], outputs: ['interne:taux'] }, undefined],
+    [{ ruleSets: ['rgpd'], outputs: ['interne:t'] }, undefined],
+    [{ outputs: ['y', 'interne:z'] }, 'rgpd'],
+    [{ ruleSets: ['rgpd', 'local'], outputs: ['autre:z', 't'] }, undefined],
+    [{ ruleSets: ['local', 'rgpd'], outputs: ['y'] }, 'rgpd'],
+  ])(
+    'accepts a reachable selector output: %j in %s (D-23: a pack may import any set but local)',
+    (t, set) => {
+      expect(validateRuleDefinition(inhibit(t, set))).toEqual({
+        valid: true,
+        errors: [],
+        issues: [],
+      });
+    },
+  );
 
   it('accepts ids of every targeted rule set', () => {
     const targets = { ruleSets: ['rgpd', 'local'], ids: ['R1', 'rgpd:R2'] };

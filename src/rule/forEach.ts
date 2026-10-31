@@ -42,8 +42,9 @@ export interface OrderKey {
  * - `recurse`: a JSON pointer into the element to its child list, walked at every depth (G-18);
  * - `groupBy`: a JSON pointer into the element; one instance per group of equal values (G-17).
  *   `recurse` and `groupBy` exclude each other; a group has no single element, so `groupBy`
- *   excludes `dimensions` (and `effectiveOn: '/$item/…'`). `groupBy` also excludes `orderBy`
- *   for now: the order of groups is not defined yet (accepting it later is additive).
+ *   excludes non-empty `dimensions` (and `effectiveOn: '/$item/…'`). `groupBy` also excludes
+ *   a non-empty `orderBy` for now: the order of groups is not defined yet (accepting it later
+ *   is additive). Empty `orderBy` and `dimensions` mean absent and go with `groupBy`.
  *
  * A literal segment of `path` made of digits (`/foyers/0/personnes`) is accepted here: an object
  * key may be digits, which no static check can tell from a list index. `core` refuses, at
@@ -131,14 +132,15 @@ function readCollection(value: JsonObject, fail: Add): Collection | undefined {
   if (value.recurse !== undefined && value.groupBy !== undefined) {
     fail('forEach.groupBy', 'forEach.recurse and forEach.groupBy cannot be combined');
   }
-  if (value.orderBy !== undefined && value.groupBy !== undefined) {
+  // Empty means absent (normal form): only a non-empty orderBy or dimensions meets groupBy.
+  if (isNonEmpty(value.orderBy) && value.groupBy !== undefined) {
     fail(
       'forEach.orderBy',
       'forEach.orderBy cannot be combined with forEach.groupBy: ' +
         'the order of groups is not defined yet',
     );
   }
-  if (value.dimensions !== undefined && value.groupBy !== undefined) {
+  if (isNonEmpty(value.dimensions) && value.groupBy !== undefined) {
     fail(
       'forEach.dimensions',
       'forEach.dimensions cannot be combined with forEach.groupBy: ' +
@@ -153,6 +155,15 @@ function readCollection(value: JsonObject, fail: Add): Collection | undefined {
   if (recurse !== undefined) out.recurse = recurse;
   if (groupBy !== undefined) out.groupBy = groupBy;
   return out;
+}
+
+/**
+ * True for a non-empty list or object. `[]` and `{}` mean absent; a value of another type is
+ * refused on its own (so it does not meet `groupBy` too, as in the JSON Schema).
+ */
+function isNonEmpty(value: JsonValue | undefined): boolean {
+  if (Array.isArray(value)) return value.length > 0;
+  return isJsonObject(value) && Object.keys(value).length > 0;
 }
 
 /** The number of levels of a valid `forEach.path`, or `undefined` after reporting why not. */

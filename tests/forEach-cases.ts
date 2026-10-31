@@ -7,6 +7,16 @@
 export const ACCEPTED_FOR_EACH: [string, unknown, unknown][] = [
   ['one level', { path: '/enfants', key: 'id' }, { path: '/enfants', key: 'id' }],
   [
+    'groupBy with an empty orderBy, as absent (review round 4)',
+    { path: '/operations', key: 'id', groupBy: '/client', orderBy: [] },
+    { path: '/operations', key: 'id', groupBy: '/client' },
+  ],
+  [
+    'groupBy with empty dimensions, as absent (review round 4)',
+    { path: '/operations', key: 'id', groupBy: '/client', dimensions: {} },
+    { path: '/operations', key: 'id', groupBy: '/client' },
+  ],
+  [
     'two levels, one key per level',
     { path: '/foyers/*/personnes', key: ['fid', 'pid'] },
     { path: '/foyers/*/personnes', key: ['fid', 'pid'] },

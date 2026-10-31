@@ -344,7 +344,9 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
 
   it('the schema documents the validator-only exception model output check', () => {
     expect(JSON.stringify(schema)).toMatch(/exception.*value.*qualified by another rule set/);
-    expect(JSON.stringify(schema)).toMatch(/selector's outputs name outputs.*any other is refused/);
+    expect(JSON.stringify(schema)).toMatch(
+      /selector's outputs name outputs.*any rule set but local.*any other is refused/,
+    );
   });
 
   it('validator-only: rejects a selector whose except repeats anyOf (the schema cannot)', () => {

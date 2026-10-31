@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/rule-definition.schema.json",
   "title": "Run-IQ rule definition",
-  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output (the default output value, or <own rule set>:value, means absent). The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Some rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value; a forEach.key list holds one name per level (one more than the '*' segments of forEach.path); each forEach.orderBy path appears once; forEach.segments.from and forEach.segments.until differ; a selector's ids name rules of the rule sets it targets (its ruleSets, else the rule's own rule set): an id of a rule set the selector does not target is refused; a selector's outputs name outputs of the rule's own rule set or of a rule set it targets: any other is refused; on a rule of the reserved model @run-iq/exception, an output value qualified by another rule set than the rule's own is refused (only the default output, value or <own rule set>:value, means absent).",
+  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output (the default output value, or <own rule set>:value, means absent). The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Some rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value; a forEach.key list holds one name per level (one more than the '*' segments of forEach.path); each forEach.orderBy path appears once; forEach.segments.from and forEach.segments.until differ; a selector's ids name rules of the rule sets it targets (its ruleSets, else the rule's own rule set): an id of a rule set the selector does not target is refused; a selector's outputs name outputs of a rule set it targets or, when it targets a pack, of any rule set but local (a pack never imports local): any other is refused; on a rule of the reserved model @run-iq/exception, an output value qualified by another rule set than the rule's own is refused (only the default output, value or <own rule set>:value, means absent).",
   "type": "object",
   "required": [
     "id",
@@ -747,27 +747,33 @@
               }
             },
             {
-              "description": "A group has no single element: groupBy excludes dimensions.",
+              "description": "A group has no single element: groupBy excludes non-empty dimensions ({} means absent).",
               "not": {
                 "required": [
                   "dimensions",
                   "groupBy"
                 ],
                 "properties": {
-                  "dimensions": {},
+                  "dimensions": {
+                    "type": "object",
+                    "minProperties": 1
+                  },
                   "groupBy": {}
                 }
               }
             },
             {
-              "description": "groupBy excludes orderBy for now: the order of groups is not defined yet.",
+              "description": "groupBy excludes a non-empty orderBy for now: the order of groups is not defined yet ([] means absent).",
               "not": {
                 "required": [
                   "orderBy",
                   "groupBy"
                 ],
                 "properties": {
-                  "orderBy": {},
+                  "orderBy": {
+                    "type": "array",
+                    "minItems": 1
+                  },
                   "groupBy": {}
                 }
               }
