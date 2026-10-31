@@ -1,4 +1,3 @@
-import { toJsonDocument } from '../canonical.js';
 import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages } from '../issues.js';
@@ -23,8 +22,8 @@ interface Finding {
  * 1. The shape (`validateProof`). A malformed proof is `invalid` with the validation messages,
  *    and nothing else is checked. A `format` outside `PROOF_FORMATS` gives the single
  *    issue `unknown format: <format>`: this version cannot read a later format. The proof is
- *    then read once into a plain-JSON snapshot (each property read exactly once), validated
- *    again, and every later check runs on that snapshot only.
+ *    read once (each property read and counted exactly once) into a plain-JSON snapshot built
+ *    from the very values checked, and every later check runs on that snapshot only.
  * 2. The digest, recomputed from the content: `digest mismatch` makes it `invalid`.
  * 3. Internal consistency: every rule the proof cites (in `applied`, `skipped`, `exceptions`,
  *    output `contributors` and exception `affected`) must be listed in `rules`, otherwise
@@ -121,17 +120,16 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   };
 
   const items = readList(rules, 'rules');
-  if (typeof items === 'string') return [{ message: items, invalid: true }];
+  if (!Array.isArray(items)) return [{ message: items.message, invalid: true }];
   const given = new Map<string, string>();
   items.forEach((rule, i) => {
     let key: string;
     let checksum: string;
     try {
-      // One JSON snapshot of the rule (each property read once), then its canonical payload.
-      // canonicalRulePayload validates any value; the cast only lets it be called.
-      const payload = canonicalRulePayload(
-        toJsonDocument(rule, `rules[${i}]`) as RuleDefinitionInput,
-      );
+      // Read and counted as `canonicalRulePayload` reads any rule, so `verifyProof` accepts a
+      // rule exactly when `computeRuleChecksum` does. It validates any value; the cast only
+      // lets it be called.
+      const payload = canonicalRulePayload(rule as RuleDefinitionInput);
       // The payload is the canonical JSON of a normalized definition.
       const definition = JSON.parse(payload) as RuleDefinition;
       key = `${definition.id}@${definition.version}`;

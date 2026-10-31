@@ -295,7 +295,7 @@ export function readVersionGroups(
       throw newSpecError('INVALID_RULE', 'rules must be an array of rules');
     }
     const read = readList(rules, 'rules');
-    if (typeof read === 'string') throw newSpecError('INVALID_RULE', read);
+    if (!Array.isArray(read)) throw newSpecError('INVALID_RULE', read.message);
     items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;

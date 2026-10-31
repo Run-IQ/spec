@@ -5,15 +5,31 @@ import { isReservedOutputName } from '../decision/output.js';
 import { citeName, newSpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
+import { readProofInput } from '../input/validate.js';
 import { readUnsignedProof } from './validate.js';
+import { ownCopy, withValueBudget } from '../values.js';
 
 /**
  * The digest a proof keeps in place of its input: `sha256Hex(canonicalize(input))`. Key order
- * and `undefined` members do not change it. Throws `SpecError` (`NON_SERIALIZABLE`, with the
- * path) for a value that has no JSON form.
+ * does not change it. `input` is read once and checked as `validateProofInput` checks it: it
+ * refuses exactly what that validator refuses, with `SpecError` (`INVALID_INPUT`, `invalid
+ * input: <first problem>`, the problem's path as `path`), never a raw error. The digest is
+ * computed from the copy read, each value counted once.
  */
 export function computeInputDigest(input: ProofInput): string {
-  return sha256Hex(canonicalize(input));
+  return withValueBudget(() => {
+    const { issues, snapshot } = readProofInput(input);
+    const [first] = issues;
+    if (first !== undefined || snapshot === undefined) {
+      throw newSpecError(
+        'INVALID_INPUT',
+        `invalid input: ${first?.message ?? 'unreadable'}`,
+        first?.path,
+      );
+    }
+    // The copy's values were counted when they were read from `input`.
+    return sha256Hex(ownCopy(() => canonicalize(snapshot)));
+  });
 }
 
 /**
@@ -31,6 +47,10 @@ export function computeInputDigest(input: ProofInput): string {
  * `output name reserved: ...`, `decimal value not canonical: ...`).
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
+  return withValueBudget(() => seal(p));
+}
+
+function seal(p: UnsignedProof): DecisionProof {
   const { proof, errors } = readUnsignedProof(p);
   if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
   const [inconsistency] = inconsistencies(proof);
@@ -45,7 +65,8 @@ export function sealProof(p: UnsignedProof): DecisionProof {
  * snapshot (`readDecisionProof`, `readUnsignedProof`), never a caller's live object.
  */
 export function contentDigest(p: UnsignedProof): string {
-  return sha256Hex(canonicalize(proofContent(p)));
+  // The snapshot's values were counted when they were read from the caller.
+  return sha256Hex(ownCopy(() => canonicalize(proofContent(p))));
 }
 
 /**

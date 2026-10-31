@@ -1,6 +1,13 @@
 import { citeName, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage, readList } from '../values.js';
+import {
+  hasLoneSurrogate,
+  isPlainObject,
+  loneSurrogateMessage,
+  readList,
+  spendValues,
+  tooLargeMessage,
+} from '../values.js';
 
 /**
  * What a rule asks of one dimension of the input (D-18):
@@ -105,13 +112,21 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     valid = false;
     add(at, message);
   };
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) {
+    fail(path, tooLargeMessage(path));
+    return undefined;
+  }
   const fields: Record<string, unknown> = {};
-  for (const key of Object.keys(value)) {
+  for (const key of keys) {
+    const member = value[key];
+    // A member whose value is `undefined` is absent, known or not.
+    if (member === undefined) continue;
     if (!SPEC_KEYS.includes(key)) {
       fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
       continue;
     }
-    fields[key] = value[key];
+    fields[key] = member;
   }
 
   const ref = fields.ref;
@@ -170,8 +185,8 @@ function readValues(
     return undefined;
   }
   const items = readList(value, path);
-  if (typeof items === 'string') {
-    fail(path, items);
+  if (!Array.isArray(items)) {
+    fail(items.path, items.message);
     return undefined;
   }
   if (required && items.length === 0) {

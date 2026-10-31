@@ -1,4 +1,4 @@
-import { toJsonValue } from '../canonical.js';
+import { toJsonDocument, toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { citeName, isOwnError, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
@@ -8,7 +8,10 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  ownCopy,
   readList,
+  spendValues,
+  tooLargeMessage,
   withValueBudget,
 } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
@@ -20,7 +23,12 @@ import {
   reservedDimensionNameMessage,
   unnamableNameMessage,
 } from './dimensions.js';
-import { exceptionModelIssues, normalizedOutput, readRuleExceptions } from './exceptions.js';
+import {
+  exceptionFreeForm,
+  exceptionModelIssues,
+  normalizedOutput,
+  readRuleExceptions,
+} from './exceptions.js';
 import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
 import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
@@ -71,7 +79,9 @@ type Issues = IssueList;
  * hole at index <i>: arrays must be dense`, and one call reads at most `MAX_JSON_VALUES` values
  * (`<path> is too large: more than 10000000 values`, a list's size counted before any element
  * is read). Anything else that cannot be read (a top-level property, the object itself)
- * gives the single issue `rule definition could not be read: <reason>` at `''`.
+ * gives the single issue `rule definition could not be read: <reason>` at `''`. A member whose
+ * value is `undefined` is absent in an object the format defines, known or not; inside a
+ * free-form value or as an array item, it gives `<path> is not JSON: undefined`.
  *
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
  * the path of the offending field (`params.rates[1]`, `dimensions.country`; `''` when the
@@ -103,6 +113,10 @@ function definitionIssues(value: unknown): {
   const errors = new IssueList();
   if (!isPlainObject(value)) {
     errors.add('', 'a rule definition must be a plain object');
+    return result(errors);
+  }
+  if (!spendValues(Object.keys(value).length)) {
+    errors.add('', tooLargeMessage('rule definition'));
     return result(errors);
   }
 
@@ -206,31 +220,48 @@ function checkJson(value: unknown, field: string, errors: Issues): void {
   toJsonOrIssue(value, field, errors);
 }
 
-/** The JSON copy of `value`, or `undefined` after recording why it is not JSON. */
-function toJsonOrIssue(value: unknown, field: string, errors: Issues): JsonValue | undefined {
+/**
+ * The JSON copy of `value` (`toJsonValue`, or `toJsonDocument` with `freeFormAt`), or
+ * `undefined` after recording why it is not JSON.
+ */
+function toJsonOrIssue(
+  value: unknown,
+  field: string,
+  errors: Issues,
+  freeFormAt?: (depth: number, key: string) => boolean,
+): JsonValue | undefined {
   try {
-    return toJsonValue(value, field);
+    return freeFormAt === undefined
+      ? toJsonValue(value, field)
+      : toJsonDocument(value, field, freeFormAt);
   } catch (error) {
     addError(error, field, errors);
     return undefined;
   }
 }
 
+/** No member of `forEach` holds a free-form value. */
+const NOT_FREE_FORM = (): boolean => false;
+
 function checkExceptions(value: unknown, ruleSet: string | undefined, errors: Issues): void {
-  const json = toJsonOrIssue(value, 'exceptions', errors);
+  const json = toJsonOrIssue(value, 'exceptions', errors, exceptionFreeForm);
   if (json === undefined) return;
-  errors.merge(readRuleExceptions(json, 'exceptions', ruleSet).issues);
+  // The copy's values were counted when they were read from the rule.
+  errors.merge(ownCopy(() => readRuleExceptions(json, 'exceptions', ruleSet)).issues);
 }
 
 /** The normal form of a `forEach`, or `undefined` after recording why it is invalid. */
 function checkForEach(value: unknown, errors: Issues): ForEach | undefined {
-  const json = toJsonOrIssue(value, 'forEach', errors);
+  const json = toJsonOrIssue(value, 'forEach', errors, NOT_FREE_FORM);
   if (json === undefined) return undefined;
   let valid = true;
-  const forEach = readForEach(json, (path, message) => {
-    valid = false;
-    errors.add(path, message);
-  });
+  // The copy's values were counted when they were read from the rule.
+  const forEach = ownCopy(() =>
+    readForEach(json, (path, message) => {
+      valid = false;
+      errors.add(path, message);
+    }),
+  );
   return valid ? forEach : undefined;
 }
 
@@ -256,8 +287,14 @@ function checkCondition(value: unknown, errors: Issues): void {
     errors.add('condition', 'condition must be an object { dsl, value }');
     return;
   }
-  for (const key of Object.keys(value)) {
-    if (key !== 'dsl' && key !== 'value') {
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) {
+    errors.add('condition', tooLargeMessage('condition'));
+    return;
+  }
+  for (const key of keys) {
+    // A member whose value is `undefined` is absent, known or not.
+    if (key !== 'dsl' && key !== 'value' && value[key] !== undefined) {
       errors.add(`condition.${key}`, `condition has an unknown key ${quoteText(key)}`);
     }
   }
@@ -271,7 +308,12 @@ function checkDimensions(value: unknown, errors: Issues): void {
     errors.add('dimensions', 'dimensions must be an object of dimension specs');
     return;
   }
-  for (const key of Object.keys(value)) {
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) {
+    errors.add('dimensions', tooLargeMessage('dimensions'));
+    return;
+  }
+  for (const key of keys) {
     const v = value[key];
     if (isUnnamable(key)) {
       errors.add('dimensions', unnamableNameMessage('dimensions', 'dimension', key));
@@ -289,8 +331,8 @@ function checkDimensions(value: unknown, errors: Issues): void {
 
 function checkTags(value: unknown, errors: Issues): void {
   const tags = Array.isArray(value) ? readList(value, 'tags') : undefined;
-  if (typeof tags === 'string') {
-    errors.add('tags', tags);
+  if (tags !== undefined && !Array.isArray(tags)) {
+    errors.add(tags.path, tags.message);
     return;
   }
   if (!tags || !tags.every((t) => typeof t === 'string')) {

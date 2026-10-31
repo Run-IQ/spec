@@ -1,5 +1,4 @@
-import { toJsonDocument, toJsonValue } from '../canonical.js';
-import type { JsonValue } from '../canonical.js';
+import { toJsonValue } from '../canonical.js';
 import {
   checkRounding,
   COMBINE_STRATEGIES,
@@ -20,12 +19,23 @@ import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { isPlainObject, readList, withValueBudget } from '../values.js';
+import {
+  isPlainObject,
+  readList,
+  spendValues,
+  tooLargeMessage,
+  withValueBudget,
+} from '../values.js';
 import { isProofFormat, PROOF_FORMATS } from './formats.js';
 import type { DecisionProof, UnsignedProof } from './types.js';
 
 type Add = (path: string, message: string) => void;
-type Check = (value: unknown, path: string, add: Add) => void;
+/**
+ * Checks `value` at `path`, reporting each problem through `add`, and returns its copy: the
+ * value itself for a scalar, a plain copy of what was read for a list or an object. The copy is
+ * the proof's snapshot only when nothing was reported.
+ */
+type Check = (value: unknown, path: string, add: Add) => unknown;
 
 /** A closed object: its fields in reporting order, and which of them may be absent. */
 interface Shape {
@@ -45,38 +55,46 @@ const SHA256_HEX = /^[0-9a-f]{64}$/;
 const SIGNATURE_BASE64URL = /^[A-Za-z0-9_-]{85}[AQgw]$/;
 const DATE_FORMS = 'YYYY-MM-DD, or a date-time with Z or an offset';
 
-const nonEmptyString: Check = (value, path, add) => {
+/** A check of a scalar: `test` reports its problem; the copy is the value itself. */
+function scalarCheck(test: (value: unknown, path: string, add: Add) => void): Check {
+  return (value, path, add) => {
+    test(value, path, add);
+    return value;
+  };
+}
+
+const nonEmptyString = scalarCheck((value, path, add) => {
   if (typeof value !== 'string' || value === '') {
     add(path, `${citeName(path)} must be a non-empty string`);
   }
-};
+});
 
-const anyString: Check = (value, path, add) => {
+const anyString = scalarCheck((value, path, add) => {
   if (typeof value !== 'string') add(path, `${citeName(path)} must be a string`);
-};
+});
 
-const version: Check = (value, path, add) => {
+const version = scalarCheck((value, path, add) => {
   if (!isRuleVersion(value)) add(path, `${citeName(path)} must be a positive integer`);
-};
+});
 
 /** A stratum index: a safe integer, 0 or more. Whether `strata` has it is checked later. */
-const stratum: Check = (value, path, add) => {
+const stratum = scalarCheck((value, path, add) => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
     add(path, `${citeName(path)} must be a non-negative integer`);
   }
-};
+});
 
-const sha256: Check = (value, path, add) => {
+const sha256 = scalarCheck((value, path, add) => {
   if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
     add(path, `${citeName(path)} must be a lowercase sha256 hex string`);
   }
-};
+});
 
 /**
  * An ISO date string, in the grammar of rule dates. A `Date` object is refused: proofs are JSON.
  */
 function isoDate(nullable: boolean): Check {
-  return (value, path, add) => {
+  return scalarCheck((value, path, add) => {
     if (nullable && value === null) return;
     if (typeof value === 'string') {
       try {
@@ -87,15 +105,15 @@ function isoDate(nullable: boolean): Check {
       }
     }
     add(path, `${citeName(path)} must be ${nullable ? 'null or ' : ''}an ISO date: ${DATE_FORMS}`);
-  };
+  });
 }
 
 /** A format listed in `PROOF_FORMATS`; an unknown one is reported by `formatGate`. */
-const proofFormat: Check = (value, path, add) => {
+const proofFormat = scalarCheck((value, path, add) => {
   if (!isProofFormat(value)) {
     add(path, `${citeName(path)} must be one of ${PROOF_FORMATS.join(', ')}`);
   }
-};
+});
 
 /**
  * A proof in a format this package does not know (a later `run-iq.proof/2`) is refused with that
@@ -108,30 +126,31 @@ function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue 
 }
 
 function constant(expected: string): Check {
-  return (value, path, add) => {
+  return scalarCheck((value, path, add) => {
     if (value !== expected) add(path, `${citeName(path)} must be "${expected}"`);
-  };
+  });
 }
 
 function oneOf(allowed: readonly string[]): Check {
-  return (value, path, add) => {
+  return scalarCheck((value, path, add) => {
     if (!allowed.some((item) => item === value)) {
       add(path, `${citeName(path)} must be one of ${allowed.join(', ')}`);
     }
-  };
+  });
 }
 
 /**
- * Any value with a canonical JSON form; a problem is reported at the path of the bad value.
- * A value that cannot be read (a getter, a Proxy trap, a call stack overflow) is reported at
- * `path` with `unreadableMessage`.
+ * A free-form value: JSON, at most `MAX_JSON_DEPTH` levels deep, without `undefined`; a
+ * problem is reported at the path of the bad value. A value that cannot be read (a getter, a
+ * Proxy trap) is reported at `path` with `unreadableMessage`.
  */
 const json: Check = (value, path, add) => {
   try {
-    toJsonValue(value, path);
+    return toJsonValue(value, path);
   } catch (error) {
     if (isOwnError(error)) add(specErrorPath(error) ?? path, describeError(error));
     else add(path, unreadableMessage(path, error));
+    return undefined;
   }
 };
 
@@ -139,12 +158,32 @@ function listOf(item: Check): Check {
   return (value, path, add) => {
     if (!Array.isArray(value)) {
       add(path, `${citeName(path)} must be an array`);
-      return;
+      return undefined;
     }
     const items = readList(value, path);
-    if (typeof items === 'string') add(path, items);
-    else items.forEach((v, i) => item(v, `${path}[${i}]`, add));
+    if (!Array.isArray(items)) {
+      add(items.path, items.message);
+      return undefined;
+    }
+    return items.map((v, i) => item(v, `${path}[${i}]`, add));
   };
+}
+
+/**
+ * The own members of the plain object `value`, each read once after all are counted
+ * (`spendValues`); `undefined` after reporting that there are too many to read.
+ */
+function readMembers(
+  value: Record<string, unknown>,
+  path: string,
+  add: Add,
+): Map<string, unknown> | undefined {
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) {
+    add(path, tooLargeMessage(path || 'proof'));
+    return undefined;
+  }
+  return new Map(keys.map((key) => [key, value[key]]));
 }
 
 /** An object of named entries: names must be non-empty, an `undefined` entry is absent. */
@@ -152,28 +191,42 @@ function mapOf(item: Check, summary: string): Check {
   return (value, path, add) => {
     if (!isPlainObject(value)) {
       add(path, `${citeName(path)} must be an object of ${summary}`);
-      return;
+      return undefined;
     }
-    for (const [name, entry] of Object.entries(value)) {
+    const members = readMembers(value, path, add);
+    if (members === undefined) return undefined;
+    const copy: Record<string, unknown> = {};
+    for (const [name, entry] of members) {
       if (entry === undefined) continue;
       if (name === '') add(path, `${citeName(path)} has an empty name`);
-      else item(entry, `${path}.${name}`, add);
+      // Plain assignment would turn a `__proto__` key into a prototype change.
+      else defineMember(copy, name, item(entry, `${path}.${name}`, add));
     }
+    return copy;
   };
+}
+
+function defineMember(target: Record<string, unknown>, key: string, value: unknown): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
 }
 
 function objectOf(shape: Shape): Check {
-  return (value, path, add) => {
-    checkObject(value, path, shape, add, new Set());
-  };
+  return (value, path, add) => checkObject(value, path, shape, add, new Set())?.copy;
 }
 
 /**
- * Checks a closed object. Unknown keys are reported first, whatever their value (`undefined`
- * included), then each field in order. A known field whose value is `undefined` counts as
- * absent, as in the canonical form; keys in `ignored` are skipped.
- * Each own property is read once, so an accessor cannot answer two checks differently. Returns
- * the members read, or `undefined` when `value` is not an object or the shape's gate stopped.
+ * Checks a closed object. A member whose value is `undefined` is absent, known or not (the
+ * TypeScript idiom of an optional field, as in the canonical form). Unknown keys are reported
+ * first, then each field in order; keys in `ignored` are skipped.
+ * Each own property is read once, after all are counted (`spendValues`), so an accessor cannot
+ * answer two checks differently. Returns the copies of the fields checked (known, not
+ * `undefined`; `ignored` keys are left out) and their checks' copies, or `undefined` when
+ * `value` is not an object, has too many members, or the shape's gate stopped.
  */
 function checkObject(
   value: unknown,
@@ -181,28 +234,36 @@ function checkObject(
   shape: Shape,
   add: Add,
   ignored: ReadonlySet<string>,
-): ReadonlyMap<string, unknown> | undefined {
+  reserve?: (members: ReadonlyMap<string, unknown>) => number,
+): { members: ReadonlyMap<string, unknown>; copy: Record<string, unknown> } | undefined {
   if (!isPlainObject(value)) {
     add(path, `${citeName(path)} must be an object ${shape.summary}`);
     return undefined;
   }
-  const members = new Map<string, unknown>(Object.entries(value));
+  const members = readMembers(value, path, add);
+  if (members === undefined) return undefined;
+  if (reserve !== undefined && !spendValues(reserve(members))) {
+    add(path, tooLargeMessage(path || 'proof'));
+    return undefined;
+  }
   const stop = shape.gate?.(members);
   if (stop) {
     add(stop.path, stop.message);
     return undefined;
   }
   const at = (key: string): string => (path ? `${path}.${key}` : key);
-  for (const key of members.keys()) {
-    if (ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
+  for (const [key, member] of members) {
+    // A member whose value is `undefined` is absent, known or not.
+    if (member === undefined || ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
     add(at(key), `${citeName(path || 'proof')} has an unknown key ${quoteText(key)}`);
   }
+  const copy: Record<string, unknown> = {};
   for (const [key, check] of Object.entries(shape.fields)) {
     const field = members.get(key);
-    if (field !== undefined) check(field, at(key), add);
+    if (field !== undefined) copy[key] = check(field, at(key), add);
     else if (!shape.optional?.includes(key)) add(at(key), `${citeName(at(key))} is required`);
   }
-  return members;
+  return { members, copy };
 }
 
 const RULE_REF: Shape = {
@@ -243,13 +304,15 @@ const OUTPUT: Shape = {
  * cannot be rounded, only that is reported; otherwise its shape is checked.
  */
 const output: Check = (value, path, add) => {
-  const members = checkObject(value, path, OUTPUT, add, new Set());
-  const rounding = members?.get('rounding');
-  if (rounding === undefined) return;
-  const type = members?.get('type');
+  const read = checkObject(value, path, OUTPUT, add, new Set());
+  if (read === undefined) return undefined;
+  const rounding = read.members.get('rounding');
+  if (rounding === undefined) return read.copy;
+  const type = read.members.get('type');
   if (OUTPUT_TYPES.some((t) => t === type) && !isRoundable(type)) {
     roundingNotApplicable(`${path}.rounding`, add);
-  } else checkRounding(rounding, `${path}.rounding`, add);
+  } else read.copy.rounding = checkRounding(rounding, `${path}.rounding`, add);
+  return read.copy;
 };
 
 const STEP: Shape = {
@@ -289,14 +352,14 @@ const SIGNATURE: Shape = {
   fields: {
     alg: constant('ed25519'),
     keyId: nonEmptyString,
-    value: (value, path, add) => {
+    value: scalarCheck((value, path, add) => {
       if (typeof value !== 'string' || !SIGNATURE_BASE64URL.test(value)) {
         add(
           path,
           `${citeName(path)} must be an ed25519 signature in unpadded base64url (86 characters)`,
         );
       }
-    },
+    }),
   },
 };
 
@@ -338,13 +401,16 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * `validateRuleDefinition`. `errors` holds the same messages, in the same order.
  *
  * It checks the shape only, never the digest or the signature (`verifyProof` does):
- * - the format is closed: every object refuses unknown keys, even with an `undefined` value;
- *   a known field whose value is `undefined` counts as absent, as in the canonical form;
+ * - the format is closed: every object refuses unknown keys; a member whose value is
+ *   `undefined` is absent, known or not (the TypeScript idiom of an optional field), as in the
+ *   canonical form, while an `undefined` inside a free-form value (an output value, a
+ *   contribution, `unrounded`) or as a list item is refused: `<path> is not JSON: undefined`;
  * - a value that cannot be read (a getter or a Proxy trap that throws) gives the single issue
  *   `proof could not be read: <reason>` at path `''`; an output value, contribution or
  *   `unrounded` value that cannot be read is reported at its path, and one nested more than
  *   `MAX_JSON_DEPTH` (1000) levels deep gives `<path> is nested deeper than 1000 levels`, at
- *   its first container past the limit;
+ *   its first container past the limit; each value is counted once, and past `MAX_JSON_VALUES`
+ *   values in all, `<path> is too large: more than 10000000 values`;
  * - `format` is one of `PROOF_FORMATS`; a string that is not gives the single issue
  *   `unknown format: <format>` at path `format` (the rest follows rules of another format);
  *   `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
@@ -372,7 +438,7 @@ export function validateProof(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
-  const issues = withValueBudget(() => collect(value, DECISION_PROOF, new Set()));
+  const { issues } = withValueBudget(() => collect(value, DECISION_PROOF, new Set()));
   return { errors: issues.map((issue) => issue.message), issues };
 }
 
@@ -382,64 +448,65 @@ export type ProofRead<T> = { proof: T; errors: [] } | { proof: undefined; errors
 /**
  * Internal: a validated, plain-JSON snapshot of a sealed proof, or the validation messages.
  *
- * `value` is validated, then copied to JSON reading each property exactly once, and the copy is
- * validated again. Callers check and use ONLY the snapshot: an accessor or a Proxy cannot show
- * one value to the digest check and another to the signature check.
+ * `value` is read once, as `validateProof` reads it: each property is read exactly once and
+ * counted once, and the snapshot is built from the very values checked. Callers check and use
+ * ONLY the snapshot: an accessor or a Proxy cannot show one value to the digest check and
+ * another to the signature check.
  */
-export function readDecisionProof(value: unknown): ProofRead<DecisionProof> {
-  const { snapshot, errors } = withValueBudget(() =>
-    readSnapshot(value, DECISION_PROOF, new Set()),
+export function readDecisionProof(value: unknown, forSigning = false): ProofRead<DecisionProof> {
+  const reserve = forSigning ? signatureReserve : undefined;
+  const { issues, snapshot } = withValueBudget(() =>
+    collect(value, DECISION_PROOF, new Set(), reserve),
   );
-  return conforms<DecisionProof>(snapshot, errors)
+  return conforms<DecisionProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
-    : { proof: undefined, errors };
+    : { proof: undefined, errors: issues.map((issue) => issue.message) };
 }
 
 /**
  * Internal: like `readDecisionProof`, for the content `sealProof` hashes: `digest` and
- * `signature` are ignored and left out of the snapshot, since sealing replaces them.
+ * `signature` are ignored and left out of the snapshot, since sealing replaces them. The
+ * `digest` that sealing adds is counted too, so the sealed proof stays within the budget.
  */
 export function readUnsignedProof(value: unknown): ProofRead<UnsignedProof> {
-  const { snapshot, errors } = withValueBudget(() =>
-    readSnapshot(value, UNSIGNED_PROOF, SEAL_KEYS),
+  const { issues, snapshot } = withValueBudget(() =>
+    collect(value, UNSIGNED_PROOF, SEAL_KEYS, digestReserve),
   );
-  return conforms<UnsignedProof>(snapshot, errors)
+  return conforms<UnsignedProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
-    : { proof: undefined, errors };
+    : { proof: undefined, errors: issues.map((issue) => issue.message) };
 }
 
-/** `errors` are those found in `snapshot` against the shape of `T`: none means it is a `T`. */
-function conforms<T>(snapshot: unknown, errors: readonly string[]): snapshot is T {
-  return errors.length === 0;
+/** The values sealing adds to a proof whose root members are `members`: its `digest`. */
+function digestReserve(members: ReadonlyMap<string, unknown>): number {
+  return members.has('digest') ? 0 : 1;
 }
 
-/** The JSON snapshot of `value` and the problems of `value` or of the snapshot. */
-function readSnapshot(
-  value: unknown,
-  shape: Shape,
-  ignored: ReadonlySet<string>,
-): { snapshot: unknown; errors: string[] } {
-  const messages = (issues: RuleValidationIssue[]): string[] => issues.map((i) => i.message);
-  const first = collect(value, shape, ignored);
-  if (first.length > 0) return { snapshot: undefined, errors: messages(first) };
-
-  let snapshot: JsonValue;
-  try {
-    snapshot = toJsonDocument(value, '');
-  } catch (error) {
-    // A SpecError names a value with no JSON form; anything else was thrown while reading.
-    const message = isOwnError(error) ? describeError(error) : unreadableMessage('proof', error);
-    return { snapshot: undefined, errors: [message] };
-  }
-  if (isPlainObject(snapshot)) for (const key of ignored) delete snapshot[key];
-  return { snapshot, errors: messages(collect(snapshot, shape, ignored)) };
+/**
+ * The values signing adds to a proof whose root members are `members`: `signature` and its
+ * three members, less those already counted (a valid `signature` has exactly three).
+ */
+function signatureReserve(members: ReadonlyMap<string, unknown>): number {
+  if (!members.has('signature')) return 4;
+  return members.get('signature') === undefined ? 3 : 0;
 }
 
+/** `issues` are those found while reading `snapshot` as a `T`: none means it is a `T`. */
+function conforms<T>(snapshot: unknown, issues: readonly RuleValidationIssue[]): snapshot is T {
+  return issues.length === 0;
+}
+
+/**
+ * The problems of `value` against `shape`, and its copy (the snapshot when there are none).
+ * `reserve` gives the values a seal will add to the copy, counted as soon as the root's members
+ * are: whatever `sealProof` or `signProof` returns, the validators accept within the budget.
+ */
 function collect(
   value: unknown,
   shape: Shape,
   ignored: ReadonlySet<string>,
-): RuleValidationIssue[] {
+  reserve?: (members: ReadonlyMap<string, unknown>) => number,
+): { issues: RuleValidationIssue[]; snapshot: unknown } {
   const issues = new IssueList();
   const add: Add = (path, message) => {
     issues.add(path, message);
@@ -447,24 +514,26 @@ function collect(
   try {
     if (!isPlainObject(value)) {
       add('', 'a decision proof must be a plain object');
-      return issues.toArray();
+      return { issues: issues.toArray(), snapshot: undefined };
     }
-    const members = checkObject(value, '', shape, add, ignored);
-    checkUniqueRules(members?.get('rules'), add);
-    return issues.toArray();
+    const read = checkObject(value, '', shape, add, ignored, reserve);
+    checkUniqueRules(read?.copy.rules, add);
+    return { issues: issues.toArray(), snapshot: read?.copy };
   } catch (error) {
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
-    return [{ path: '', message: unreadableMessage('proof', error) }];
+    return {
+      issues: [{ path: '', message: unreadableMessage('proof', error) }],
+      snapshot: undefined,
+    };
   }
 }
 
-/** Validator-only: two rule references with the same id and version. */
+/** Validator-only: two rule references with the same id and version, read on the copy. */
 function checkUniqueRules(rules: unknown, add: Add): void {
   // The list itself was checked (and any problem of it reported) by the shape of `rules`.
-  const items = Array.isArray(rules) ? readList(rules, 'rules') : [];
-  if (typeof items === 'string') return;
+  if (!Array.isArray(rules)) return;
   const seen = new Set<string>();
-  items.forEach((rule, i) => {
+  rules.forEach((rule: unknown, i) => {
     if (!isPlainObject(rule) || typeof rule.id !== 'string' || !isRuleVersion(rule.version)) {
       return;
     }

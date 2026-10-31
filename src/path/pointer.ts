@@ -74,7 +74,7 @@ function readSegments(segments: readonly string[]): unknown[] {
       throw newSpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
     }
     const read = readList(segments, 'JSON pointer segments');
-    if (typeof read === 'string') throw newSpecError('INVALID_PATH', read);
+    if (!Array.isArray(read)) throw newSpecError('INVALID_PATH', read.message);
     items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;

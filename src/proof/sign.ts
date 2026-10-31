@@ -34,7 +34,7 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  * - `INVALID_KEY` when `privateKeyHex` is not 64 hex characters or `keyId` is empty.
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
-  const { proof, errors } = readDecisionProof(p);
+  const { proof, errors } = readDecisionProof(p, true);
   if (!proof) throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${errors[0]}`);
   if (contentDigest(proof) !== proof.digest) {
     throw newSpecError(

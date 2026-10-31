@@ -1,3 +1,4 @@
+import type { JsonValue } from '../canonical.js';
 import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { IssueList } from '../issues.js';
@@ -9,8 +10,10 @@ import {
   holeMessage,
   loneSurrogateMessage,
   MAX_JSON_DEPTH,
-  MAX_JSON_VALUES,
+  spendValues,
   tooLargeMessage,
+  undefinedMessage,
+  withValueBudget,
 } from '../values.js';
 
 /**
@@ -24,7 +27,7 @@ export type Add = (path: string, message: string) => void;
 /** Stops a check once its `IssueList` is full (`MAX_ISSUES`, `src/issues.ts`). */
 class IssueLimitReached {}
 
-/** Stops a check as soon as the budget of `MAX_JSON_VALUES` reads is spent. */
+/** Stops a check as soon as the budget of `MAX_JSON_VALUES` values is spent. */
 class InputTooLarge {
   readonly message: string;
   constructor(readonly path: string) {
@@ -40,14 +43,21 @@ export interface Reader {
   readonly issues: IssueList;
   /** The problems of depth listed so far: they depend on the path, not on the value. */
   depthIssues: number;
+  /** The property values read so far: each is read once, even under a shared object. */
   reads: number;
-  readonly maxValues: number;
   readonly maxDepth: number;
   /**
-   * Each object walked: `open` while its members are read, then its height (`walkJson`). An
-   * object with a part left unread (cut too deep) is not kept: a shorter path walks it again.
+   * Each object walked: `open` while its members are read, then its height and the values
+   * below it (`walkJson`), counted on every path that leads to it, as in its JSON text: an
+   * object met again is not read again, but its values are counted again. An object with a
+   * part left unread (cut too deep) is not kept: a shorter path walks it again.
    */
-  readonly heights: Map<object, number | 'open'>;
+  readonly walked: Map<object, Walked | 'open'>;
+  /**
+   * When set, `walkJson` also copies each value, kept here per object: a value shared by many
+   * paths is copied once. A copy is complete only when no problem was found under it.
+   */
+  readonly copies?: Map<object, JsonValue>;
   /**
    * When set, `walkJson` also encodes each value (`containerEncoding`), kept here per object so
    * that a value shared by many paths is encoded once: `undefined` when the value has a problem
@@ -56,7 +66,19 @@ export interface Reader {
   readonly encodings?: Map<object, string | undefined>;
 }
 
-function createReader(encode: boolean): Reader {
+/** An object walked: its height, and the values below it. */
+export interface Walked {
+  readonly height: number;
+  readonly size: number;
+}
+
+/** What `walkJson` keeps besides checking: encodings (`encode`), copies (`copy`). */
+export interface ReaderOptions {
+  readonly encode?: boolean;
+  readonly copy?: boolean;
+}
+
+function createReader(options: ReaderOptions): Reader {
   const issues = new IssueList();
   const reader: Reader = {
     add: (path, message) => {
@@ -65,26 +87,41 @@ function createReader(encode: boolean): Reader {
     issues,
     depthIssues: 0,
     reads: 0,
-    maxValues: MAX_JSON_VALUES,
     maxDepth: MAX_JSON_DEPTH,
-    heights: new Map(),
+    walked: new Map(),
   };
-  return encode ? { ...reader, encodings: new Map() } : reader;
+  return {
+    ...reader,
+    ...(options.encode === true ? { encodings: new Map() } : {}),
+    ...(options.copy === true ? { copies: new Map() } : {}),
+  };
 }
 
 /**
  * Internal: runs one check with a fresh reader and returns the problems it listed, in the order
  * found, bounded by `IssueList` (at most 100, then one saying that further problems were not
- * listed), and the reads it made. Never throws: past the read budget the check stops with
- * `<path> is too large`; any other error (a Proxy trap outside a guarded read) is reported by
- * `unreadable` (its path and message). With `encode`, `walkJson` encodes values.
+ * listed), and the reads it made. Never throws: past the budget of `MAX_JSON_VALUES` values
+ * (`withValueBudget`) the check stops with `<path> is too large`; any other error (a Proxy trap
+ * outside a guarded read) is reported by `unreadable` (its path and message). With
+ * `options.encode`, `walkJson` encodes values; with `options.copy`, it copies them.
  */
 export function runCheck(
   check: (reader: Reader) => void,
   unreadable: (error: unknown) => RuleValidationIssue,
-  encode = false,
+  options: ReaderOptions = {},
 ): { issues: RuleValidationIssue[]; reads: number } {
-  const reader = createReader(encode);
+  const reader = createReader(options);
+  return withValueBudget(() => {
+    runChecked(check, reader, unreadable);
+    return { issues: reader.issues.toArray(), reads: reader.reads };
+  });
+}
+
+function runChecked(
+  check: (reader: Reader) => void,
+  reader: Reader,
+  unreadable: (error: unknown) => RuleValidationIssue,
+): void {
   try {
     check(reader);
   } catch (error) {
@@ -96,13 +133,12 @@ export function runCheck(
       reader.issues.add(issue.path, issue.message);
     }
   }
-  return { issues: reader.issues.toArray(), reads: reader.reads };
 }
 
 /** Counts `n` reads about to happen at `path`; throws `InputTooLarge` past the budget. */
 export function announce(reader: Reader, n: number, path: string): void {
+  if (!spendValues(n)) throw new InputTooLarge(path);
   reader.reads += n;
-  if (reader.reads > reader.maxValues) throw new InputTooLarge(path);
 }
 
 /** The pointer of the member `key` of the value at `pointer` (RFC 6901 escapes). */
@@ -172,7 +208,8 @@ export function readMember(
 /**
  * Reads the element `index` of the list at `listPath` once, as `readMember` does; a hole (no
  * element at `index`: a hole is not JSON) is reported at `listPath` instead
- * (`<path> has a hole at index <i>: arrays must be dense`).
+ * (`<path> has a hole at index <i>: arrays must be dense`), and an `undefined` element at its
+ * own path (`<path>/<i> is not JSON: undefined`); both give `failed`.
  */
 export function readElement(
   list: object,
@@ -190,10 +227,18 @@ export function readElement(
     add(path, unreadableMessage(path, error));
     return 'failed';
   }
-  return readMember(list, index, path, add);
+  const read = readMember(list, index, path, add);
+  if (read !== 'failed' && read.value === undefined) {
+    add(path, undefinedMessage(path));
+    return 'failed';
+  }
+  return read;
 }
 
-/** The fields of a closed object, each read once (`readFields`). */
+/**
+ * The fields of a closed object, each read once (`readFields`). A known field whose value is
+ * `undefined` is absent: it is in neither `values` nor `failed`.
+ */
 export interface Fields {
   readonly values: ReadonlyMap<string, unknown>;
   /** The known fields whose read threw: already reported. */
@@ -201,9 +246,10 @@ export interface Fields {
 }
 
 /**
- * Reads the known fields of the closed object `value` at `path`, each once; reports each
- * unknown key (`<path> has an unknown key "k"`, at the path of that key, or at `path` when the
- * key holds a lone surrogate). Problems go to `options.add` (`reader.add` by default);
+ * Reads the fields of the closed object `value` at `path`, each once after all are counted; a
+ * field whose value is `undefined` is absent, known or not; reports each other unknown key
+ * (`<path> has an unknown key "k"`, at the path of that key, or at `path` when the key holds a
+ * lone surrogate). Problems go to `options.add` (`reader.add` by default);
  * `options.join` writes the path of a field (`childPointer` by default). Returns `undefined`
  * after reporting that the keys could not be listed.
  */
@@ -219,18 +265,16 @@ export function readFields(
   const join = options.join ?? childPointer;
   const keys = ownKeys(value, path, add);
   if (keys === undefined) return undefined;
-  const present = keys.filter((key) => known.includes(key));
-  announce(reader, present.length, path);
+  announce(reader, keys.length, path);
   const values = new Map<string, unknown>();
   const failed = new Set<string>();
   for (const key of keys) {
+    const at = hasLoneSurrogate(key) ? path : join(path, key);
+    const read = readMember(value, key, at, add);
+    if (read !== 'failed' && read.value === undefined) continue;
     if (!known.includes(key)) {
-      const at = hasLoneSurrogate(key) ? path : join(path, key);
-      add(at, `${citeName(label)} has an unknown key ${quoteText(key)}`);
-      continue;
-    }
-    const read = readMember(value, key, join(path, key), add);
-    if (read === 'failed') failed.add(key);
+      if (read !== 'failed') add(at, `${citeName(label)} has an unknown key ${quoteText(key)}`);
+    } else if (read === 'failed') failed.add(key);
     else values.set(key, read.value);
   }
   return { values, failed };
@@ -274,13 +318,20 @@ interface Frame {
   readonly length: number;
   index: number;
   height: number;
-  /** True when a part was left unread (cut too deep, or a reserved root key). */
+  /** True when a part was left unread (cut too deep). */
   cut: boolean;
+  /** False for a root with reserved keys: another path reads those keys, so it is not kept. */
+  readonly kept: boolean;
   /** The problems of the value itself listed before it was opened (`contentIssues`). */
   readonly contentBefore: number;
-  /** The key being read, and the encodings of the members read (with `reader.encodings`). */
+  /** The values below it so far: its members, and the values below each (`Reader.walked`). */
+  size: number;
+  /**
+   * The key being read, and for each member read its key, its encoding (with
+   * `reader.encodings`) and its copy (with `reader.copies`).
+   */
   pending: string | number;
-  readonly parts: [string | number, string | undefined][];
+  readonly parts: [string | number, string | undefined, JsonValue | undefined][];
 }
 
 /** The problems listed so far that do not depend on the path (all but those of depth). */
@@ -288,10 +339,12 @@ function contentIssues(reader: Reader): number {
   return reader.issues.length - reader.depthIssues;
 }
 
-/** What `openValue` found: an object already walked, or one cut too deep. */
+/** What `openValue` found: an object already walked (its values counted again), or one cut. */
 interface Closed {
   readonly height: number;
   readonly cut: boolean;
+  /** The values below it. */
+  readonly size: number;
 }
 
 /**
@@ -307,43 +360,54 @@ interface Closed {
  * from there). A value too deep is reported once, at its first container past the limit
  * (`<path> is nested deeper than 1000 levels`), and that container's members are not read; an
  * object holding it is not kept, so a shorter path reads it again and every problem is found
- * whatever the order of keys. Every member read
- * is counted (`announce`) before it happens.
+ * whatever the order of keys. Every member read is counted (`announce`) before it happens, and
+ * an object met again is counted again (its values, `Reader.walked`), as its JSON text holds it.
  *
- * With `reader.encodings`, returns the encoding of `root` (`containerEncoding`) when no problem
- * was found under it, else `undefined`.
+ * With `reader.encodings`, returns the encoding of `root` (`containerEncoding`), and with
+ * `reader.copies` its plain copy, when no problem was found under it; else `undefined`.
  */
 export function walkJson(
   root: unknown,
   path: string,
   reader: Reader,
   reservedRoot = false,
-): string | undefined {
+): { encoding: string | undefined; copy: JsonValue | undefined } {
   const stack: Frame[] = [];
   const issuesBefore = reader.issues.length;
   let rootEncoding: string | undefined;
-  const settle = (height: number, encoding: string | undefined, cut: boolean): void => {
+  let rootCopy: JsonValue | undefined;
+  const keepParts = reader.encodings !== undefined || reader.copies !== undefined;
+  const settle = (
+    value: { height: number; size: number; cut: boolean },
+    encoding: string | undefined,
+    copy: JsonValue | undefined,
+  ): void => {
     const parent = stack[stack.length - 1];
     if (parent === undefined) {
       rootEncoding = encoding;
+      rootCopy = copy;
       return;
     }
-    parent.height = Math.max(parent.height, height + 1);
-    if (cut) parent.cut = true;
-    if (reader.encodings !== undefined) parent.parts.push([parent.pending, encoding]);
+    parent.height = Math.max(parent.height, value.height + 1);
+    parent.size += value.size;
+    if (value.cut) parent.cut = true;
+    if (keepParts) parent.parts.push([parent.pending, encoding, copy]);
   };
   const visit = (value: unknown, at: string, depth: number, isRoot: boolean): void => {
     const contentBefore = contentIssues(reader);
     const opened = openValue(value, at, depth, reader, isRoot && reservedRoot);
     if (opened === undefined) {
       const clean = contentIssues(reader) === contentBefore;
-      settle(0, clean ? scalarEncoding(value) : undefined, false);
+      const leaf = { height: 0, size: 0, cut: false };
+      settle(
+        leaf,
+        clean ? scalarEncoding(value) : undefined,
+        clean ? scalarCopy(value) : undefined,
+      );
     } else if (!('node' in opened)) {
-      const cached =
-        opened.cut || typeof value !== 'object' || value === null
-          ? undefined
-          : reader.encodings?.get(value);
-      settle(opened.height, cached, opened.cut);
+      const shared = opened.cut || typeof value !== 'object' || value === null ? undefined : value;
+      const encoding = shared === undefined ? undefined : reader.encodings?.get(shared);
+      settle(opened, encoding, shared === undefined ? undefined : reader.copies?.get(shared));
     } else stack.push(opened);
   };
   visit(root, path, 0, true);
@@ -355,12 +419,14 @@ export function walkJson(
       const clean = !frame.cut && contentIssues(reader) === frame.contentBefore;
       const encoding =
         reader.encodings !== undefined && clean ? containerEncoding(frame) : undefined;
-      if (frame.cut) reader.heights.delete(frame.node);
+      const copy = reader.copies !== undefined && clean ? containerCopy(frame) : undefined;
+      if (frame.cut || !frame.kept) reader.walked.delete(frame.node);
       else {
-        reader.heights.set(frame.node, frame.height);
+        reader.walked.set(frame.node, { height: frame.height, size: frame.size });
         reader.encodings?.set(frame.node, encoding);
+        if (copy !== undefined) reader.copies?.set(frame.node, copy);
       }
-      settle(frame.height, encoding, frame.cut);
+      settle(frame, encoding, copy);
       continue;
     }
     const i = frame.index;
@@ -373,11 +439,11 @@ export function walkJson(
       typeof key === 'number'
         ? readElement(frame.node, key, frame.path, reader.add)
         : readMember(frame.node, key, at, reader.add);
-    if (read === 'failed') settle(0, undefined, false);
+    if (read === 'failed') settle({ height: 0, size: 0, cut: false }, undefined, undefined);
     else visit(read.value, at, frame.depth + 1, false);
   }
-  if (reader.encodings === undefined || reader.issues.length !== issuesBefore) return undefined;
-  return rootEncoding;
+  if (reader.issues.length !== issuesBefore) return { encoding: undefined, copy: undefined };
+  return { encoding: rootEncoding, copy: rootCopy };
 }
 
 /**
@@ -397,6 +463,38 @@ function scalarEncoding(value: unknown): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** The copy of a JSON scalar: the value itself (`-0` written `0`, as `canonicalize` writes it). */
+function scalarCopy(value: unknown): JsonValue | undefined {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
+  if (typeof value === 'number') return Object.is(value, -0) ? 0 : value;
+  return undefined;
+}
+
+/**
+ * The copy of a list or an object from the copies of its members, `undefined` when a member has
+ * none (a problem was reported). A shared member is one copy, shared as in the caller's value.
+ */
+function containerCopy(frame: Frame): JsonValue | undefined {
+  if (frame.parts.length !== frame.length) return undefined;
+  const copies: JsonValue[] = [];
+  for (const [, , copy] of frame.parts) {
+    if (copy === undefined) return undefined;
+    copies.push(copy);
+  }
+  if (frame.keys === undefined) return copies;
+  const out: { [k: string]: JsonValue } = {};
+  frame.parts.forEach(([key], i) => {
+    // Plain assignment would turn a `__proto__` key into a prototype change.
+    Object.defineProperty(out, String(key), {
+      value: copies[i],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  });
+  return out;
 }
 
 /**
@@ -471,11 +569,15 @@ function openValue(
     add(path, unreadableMessage(path, error));
     return undefined;
   }
-  const seen = reader.heights.get(node);
+  const seen = reader.walked.get(node);
   if (seen === 'open') return notJson('a circular reference');
-  // A walked object that still fits here is not read again. One that does not fit is walked
-  // again from here, so the problem is named at its first container past the limit.
-  if (seen !== undefined && depth + seen <= reader.maxDepth) return { height: seen, cut: false };
+  // A walked object that still fits here is not read again, but its values are counted again:
+  // the JSON text holds them once per path. One that does not fit is walked again from here,
+  // so the problem is named at its first container past the limit.
+  if (seen !== undefined && depth + seen.height <= reader.maxDepth) {
+    if (!spendValues(seen.size)) throw new InputTooLarge(path);
+    return { height: seen.height, cut: false, size: seen.size };
+  }
   let keys: string[] | undefined;
   let length: number;
   try {
@@ -497,9 +599,9 @@ function openValue(
   announce(reader, count, path);
   if (count > 0 && depth >= reader.maxDepth) {
     reportTooDeep(path, reader);
-    return { height: 1, cut: true };
+    return { height: 1, cut: true, size: count };
   }
-  reader.heights.set(node, 'open');
+  reader.walked.set(node, 'open');
   return {
     node,
     path,
@@ -508,8 +610,9 @@ function openValue(
     length: count,
     index: 0,
     height: 0,
-    // A root with reserved keys is not kept: another path reads those keys.
-    cut: reservedRoot,
+    size: count,
+    cut: false,
+    kept: !reservedRoot,
     contentBefore,
     pending: 0,
     parts: [],

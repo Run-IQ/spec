@@ -1,4 +1,5 @@
 import { canonicalize } from '../canonical.js';
+import { ownCopy, withValueBudget } from '../values.js';
 import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from './definition.js';
 import { normalizeRuleDefinition } from './normalize.js';
@@ -25,7 +26,10 @@ const NON_CONTENT_FIELDS = [
  * normalization as the checksum, so it does not depend on how the data is written.
  */
 export function computeRuleFingerprint(input: RuleDefinitionInput): string {
-  const content: Record<string, unknown> = normalizeRuleDefinition(input);
-  for (const field of NON_CONTENT_FIELDS) delete content[field];
-  return sha256Hex(canonicalize(content));
+  return withValueBudget(() => {
+    const content: Record<string, unknown> = normalizeRuleDefinition(input);
+    for (const field of NON_CONTENT_FIELDS) delete content[field];
+    // The normalized copy's values were counted when they were read from `input`.
+    return sha256Hex(ownCopy(() => canonicalize(content)));
+  });
 }

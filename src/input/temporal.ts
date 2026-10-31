@@ -54,7 +54,7 @@ export function validateTemporalFact(value: unknown, path: string): RuleValidati
       readFact(value, path, reader);
     },
     (error) => ({ path, message: unreadableMessage(path, error) }),
-    true,
+    { encode: true },
   ).issues;
 }
 
@@ -122,7 +122,7 @@ function readPeriod(value: unknown, path: string, reader: Reader): Omit<Span, 'i
     add(untilPath, `${citeName(untilPath)} must be a civil date YYYY-MM-DD or null`);
   }
   const encoding = values.has('value')
-    ? walkJson(values.get('value'), childPointer(path, 'value'), reader)
+    ? walkJson(values.get('value'), childPointer(path, 'value'), reader).encoding
     : undefined;
   if (!isCivilDate(from) || !values.has('until') || !untilValid) return undefined;
   const end = isCivilDate(until) ? until : null;

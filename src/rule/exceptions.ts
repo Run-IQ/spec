@@ -226,7 +226,7 @@ function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
  */
 function stringList(value: unknown, path: string): string[] {
   const items = Array.isArray(value) ? readCallerList(value, path) : undefined;
-  if (typeof items === 'string') selectorError(items);
+  if (items !== undefined && !Array.isArray(items)) selectorError(items.message);
   if (items === undefined || !items.every((item): item is string => typeof item === 'string')) {
     selectorError(`${citeName(path)} must be an array of strings`);
   }
@@ -235,6 +235,15 @@ function stringList(value: unknown, path: string): string[] {
 
 function selectorError(message: string): never {
   throw newSpecError('INVALID_RULE', message);
+}
+
+/**
+ * Internal: the members of `exceptions` that hold a free-form value, for `toJsonDocument`: the
+ * `params` of a `substitute` and the `value` of a `shortCircuit` (members of an item, depth 1).
+ * Anywhere else, an `undefined` member is absent.
+ */
+export function exceptionFreeForm(depth: number, key: string): boolean {
+  return depth === 1 && (key === 'params' || key === 'value');
 }
 
 /** Every exception kind. Internal: not exported from the package. */

@@ -7,6 +7,7 @@ import {
   MAX_JSON_DEPTH,
   spendValues,
   tooLargeMessage,
+  undefinedMessage,
   withValueBudget,
 } from './values.js';
 
@@ -17,7 +18,8 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * sorted by UTF-16 code unit at every depth, no whitespace, numbers written as ECMAScript writes
  * them (`1e+30`, `0.002`, `333333333.3333333`), strings escaped as `JSON.stringify` escapes them.
  * - a `Date` (from any realm) becomes its ISO string;
- * - an `undefined` property is omitted, an `undefined` in an array becomes `null`;
+ * - an `undefined` property is omitted; an `undefined` array item is refused (`<path> is not
+ *   JSON: undefined`): JSON has no `undefined`, and writing it `null` would change the value;
  * - `-0` is written `0`.
  *
  * Throws `SpecError` (`NON_SERIALIZABLE`) for `NaN`, `±Infinity`, bigints, functions, symbols,
@@ -55,27 +57,151 @@ export function canonicalizeAt(value: unknown, path: string): string {
   if (typeof root !== 'string') {
     throw newSpecError('INVALID_PATH', `path must be a string, got a value of type ${typeof root}`);
   }
-  return withValueBudget(() => write(value, root, true, Infinity));
+  const options = { guarded: true, maxDepth: Infinity, freeForm: false };
+  return withValueBudget(() => write(value, root, options, new TextSink()));
 }
 
 /**
  * Internal: copies a free-form value the format carries (rule `params`, a proof output value...)
- * into plain JSON data, with the same rules as `canonicalize`, and at most `MAX_JSON_DEPTH`
- * levels deep: a deeper value throws `SpecError` (`NON_SERIALIZABLE`, `<path> is nested deeper
- * than 1000 levels`, at the path of its first container past the limit). What a getter or a
- * Proxy trap throws is passed on as it is: every caller reads under its own guard, which names
- * the field that could not be read.
+ * into plain JSON data, with the same rules as `canonicalize`, except that an `undefined` member
+ * is refused as an `undefined` array item is (`<path> is not JSON: undefined`): inside a
+ * free-form value it is not JSON. At most `MAX_JSON_DEPTH` levels deep: a deeper value throws
+ * `SpecError` (`NON_SERIALIZABLE`, `<path> is nested deeper than 1000 levels`, at the path of its
+ * first container past the limit). What a getter or a Proxy trap throws is passed on as it is:
+ * every caller reads under its own guard, which names the field that could not be read.
  */
 export function toJsonValue(value: unknown, path: string): JsonValue {
-  return JSON.parse(write(value, path, false, MAX_JSON_DEPTH)) as JsonValue;
+  const options = { guarded: false, maxDepth: MAX_JSON_DEPTH, freeForm: true };
+  return write(value, path, options, new ValueSink());
 }
 
 /**
- * Internal: `toJsonValue` for a whole document (a proof, a rule) whose free-form values are
- * checked one by one at their own path: no limit of depth here.
+ * Internal: `toJsonValue` for a part of the format read as JSON (a rule's `exceptions` or
+ * `forEach`): an `undefined` member of one of its objects is absent and left out of the copy,
+ * except under a member `freeFormAt` names (`freeFormAt(depth, key)`, `depth` 0 for the members
+ * of the root), which holds a free-form value, copied as `toJsonValue` copies one.
  */
-export function toJsonDocument(value: unknown, path: string): JsonValue {
-  return JSON.parse(write(value, path, false, Infinity)) as JsonValue;
+export function toJsonDocument(
+  value: unknown,
+  path: string,
+  freeFormAt: (depth: number, key: string) => boolean,
+): JsonValue {
+  const options = { guarded: false, maxDepth: MAX_JSON_DEPTH, freeForm: false, freeFormAt };
+  return write(value, path, options, new ValueSink());
+}
+
+type Leaf = null | boolean | number | string;
+
+/**
+ * How `write` assembles its output, one event at a time in document order: the canonical text
+ * (`TextSink`), or a plain JSON copy (`ValueSink`).
+ */
+interface Sink<T> {
+  leaf(value: Leaf): void;
+  /** Starts an array or an object, ended by `close`. */
+  open(array: boolean): void;
+  /** The key of the next member of the open object. */
+  key(name: string): void;
+  close(): void;
+  result(): T;
+}
+
+/**
+ * The canonical text. Each open container keeps the text of its members written so far, each
+ * appended with `+` (a rope: no copy), as is a container's text to its parent's when it closes,
+ * so the work stays linear in the length of the text at any depth.
+ */
+class TextSink implements Sink<string> {
+  private text = '';
+  /** For each open container: its members' text, its brackets, and the pending key. */
+  private readonly containers: { out: string; array: boolean; key: string | undefined }[] = [];
+
+  leaf(value: Leaf): void {
+    this.add(typeof value === 'number' ? String(value) : JSON.stringify(value));
+  }
+
+  open(array: boolean): void {
+    this.containers.push({ out: '', array, key: undefined });
+  }
+
+  key(name: string): void {
+    const top = this.containers[this.containers.length - 1];
+    if (top !== undefined) top.key = name;
+  }
+
+  close(): void {
+    const top = this.containers.pop();
+    if (top !== undefined) this.add(top.array ? `[${top.out}]` : `{${top.out}}`);
+  }
+
+  result(): string {
+    return this.text;
+  }
+
+  private add(text: string): void {
+    const top = this.containers[this.containers.length - 1];
+    if (top === undefined) {
+      this.text = text;
+      return;
+    }
+    const member = top.key === undefined ? text : `${JSON.stringify(top.key)}:${text}`;
+    top.out = top.out === '' ? member : `${top.out},${member}`;
+  }
+}
+
+/** A plain JSON copy, built in document order. */
+class ValueSink implements Sink<JsonValue> {
+  private root: JsonValue = null;
+  private readonly containers: (JsonValue[] | { [k: string]: JsonValue })[] = [];
+  private pending = '';
+
+  leaf(value: Leaf): void {
+    this.add(Object.is(value, -0) ? 0 : value);
+  }
+
+  open(array: boolean): void {
+    const container: JsonValue[] | { [k: string]: JsonValue } = array ? [] : {};
+    this.add(container);
+    this.containers.push(container);
+  }
+
+  key(name: string): void {
+    this.pending = name;
+  }
+
+  close(): void {
+    this.containers.pop();
+  }
+
+  result(): JsonValue {
+    return this.root;
+  }
+
+  private add(value: JsonValue): void {
+    const parent = this.containers[this.containers.length - 1];
+    if (parent === undefined) this.root = value;
+    else if (Array.isArray(parent)) parent.push(value);
+    else {
+      // Plain assignment would turn a `__proto__` key into a prototype change.
+      Object.defineProperty(parent, this.pending, {
+        value,
+        enumerable: true,
+        writable: true,
+        configurable: true,
+      });
+    }
+  }
+}
+
+interface WriteOptions {
+  /** What a read throws (other than this package's own errors) is reported at the path read. */
+  readonly guarded: boolean;
+  /** A non-empty container more than this many levels deep is refused. */
+  readonly maxDepth: number;
+  /** An `undefined` member of the root and below is refused, rather than left out. */
+  readonly freeForm: boolean;
+  /** The members under which a value is free-form (`toJsonDocument`). */
+  readonly freeFormAt?: (depth: number, key: string) => boolean;
 }
 
 /** An array or an object being written: its members are read one by one. */
@@ -85,51 +211,79 @@ interface Frame {
   /** The sorted keys of an object; `undefined` for an array. */
   readonly keys: readonly string[] | undefined;
   readonly length: number;
+  /** An `undefined` member is refused (inside a free-form value), not left out. */
+  readonly freeForm: boolean;
   index: number;
-  /** The members written so far, joined by commas. */
-  out: string;
-  /** The key of the member being written (objects only). */
-  pending: string;
 }
 
 /**
- * The canonical text of `root`, by a depth-first walk over an explicit stack: members in index
+ * The output of `root` (`sink`), by a depth-first walk over an explicit stack: members in index
  * or sorted-key order, as a recursive walk would visit them. With `guarded`, what a read throws
  * (other than this package's own errors) is reported at the path read. A non-empty array or
  * object more than `maxDepth` levels deep is refused at its path: the first container past the
- * limit (`rootPath` is level 1).
+ * limit (`rootPath` is level 1). An `undefined` array item is refused; an `undefined` member is
+ * refused inside a free-form value, and left out elsewhere.
  */
-function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: number): string {
-  const read = <T>(path: string, fn: () => T): T => {
+function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: Sink<T>): T {
+  const { guarded, maxDepth, freeFormAt } = options;
+  /** `fn()`; with `guarded`, what it throws is reported at `path` (built only then). */
+  const read = <R>(path: string | (() => string), fn: () => R): R => {
     if (!guarded) return fn();
     try {
       return fn();
     } catch (error) {
       if (isOwnError(error)) throw error;
-      return fail(path, `a value that could not be read: ${reasonOf(error)}`);
+      const at = typeof path === 'string' ? path : path();
+      return fail(at, `a value that could not be read: ${reasonOf(error)}`);
     }
   };
   const ancestors = new Set<object>();
   const stack: Frame[] = [];
-  let result: string | undefined;
-  const emit = (text: string): void => {
-    const parent = stack[stack.length - 1];
-    if (parent === undefined) {
-      result = text;
-      return;
-    }
-    const member = parent.keys === undefined ? text : `${JSON.stringify(parent.pending)}:${text}`;
-    parent.out += parent.out === '' ? member : `,${member}`;
+  /** The path of `member` of `parent` (the root without one), built only when needed. */
+  const pathOf = (parent: Frame | undefined, member: string | number): string => {
+    if (parent === undefined) return rootPath;
+    if (typeof member === 'number') return `${parent.path}[${member}]`;
+    return parent.path ? `${parent.path}.${member}` : member;
   };
-  /** Writes a scalar or a `Date` at once (`emit`), or opens a frame for a container. */
-  const open = (value: unknown, path: string): void => {
-    const text = scalar(value, path, read);
-    if (text !== undefined) {
-      emit(text);
+  /** Writes a scalar or a `Date` at once, or opens a frame for a container. */
+  const open = (
+    value: unknown,
+    parent: Frame | undefined,
+    member: string | number,
+    freeForm: boolean,
+  ): void => {
+    switch (typeof value) {
+      case 'string':
+        if (hasLoneSurrogate(value)) {
+          fail(pathOf(parent, member), 'a string with a lone UTF-16 surrogate');
+        }
+        sink.leaf(value);
+        return;
+      case 'boolean':
+        sink.leaf(value);
+        return;
+      case 'number':
+        if (!Number.isFinite(value)) fail(pathOf(parent, member), String(value));
+        sink.leaf(value);
+        return;
+      case 'object':
+        if (value === null) {
+          sink.leaf(null);
+          return;
+        }
+        break;
+      default:
+        // undefined, bigint, function, symbol
+        fail(pathOf(parent, member), `a value of type ${typeof value}`);
+    }
+    const node = value as object;
+    const path = pathOf(parent, member);
+    const time = read(path, () => dateTimeOf(node));
+    if (time !== undefined) {
+      if (Number.isNaN(time)) fail(path, 'an invalid Date');
+      sink.leaf(new Date(time).toISOString());
       return;
     }
-    // `scalar` returned no text: `value` is an array or an object.
-    const node = value as object;
     if (ancestors.has(node)) fail(path, 'a circular reference');
     let keys: string[] | undefined;
     let length: number;
@@ -160,73 +314,58 @@ function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: numb
       throw newSpecError('NON_SERIALIZABLE', tooLargeMessage(path || '(root)'), path);
     }
     ancestors.add(node);
-    stack.push({ node, path, keys, length, index: 0, out: '', pending: '' });
+    sink.open(keys === undefined);
+    stack.push({ node, path, keys, length, freeForm, index: 0 });
+  };
+  /** Element `i` of the array of `frame`, read once; a hole or an `undefined` is refused. */
+  const element = (frame: Frame, i: number): unknown => {
+    const list = frame.node as unknown[];
+    const at = (): string => pathOf(frame, i);
+    const present = guarded ? read(at, () => i in list) : i in list;
+    if (!present) {
+      throw newSpecError('NON_SERIALIZABLE', holeMessage(frame.path || '(root)', i), frame.path);
+    }
+    const item = guarded ? read(at, () => list[i]) : list[i];
+    if (item === undefined) throw newSpecError('NON_SERIALIZABLE', undefinedMessage(at()), at());
+    return item;
   };
 
-  open(root, rootPath);
+  open(root, undefined, '', options.freeForm);
   while (stack.length > 0) {
     const frame = stack[stack.length - 1];
     if (frame === undefined) break;
     if (frame.index >= frame.length) {
       stack.pop();
       ancestors.delete(frame.node);
-      emit(frame.keys === undefined ? `[${frame.out}]` : `{${frame.out}}`);
+      sink.close();
       continue;
     }
     const i = frame.index;
     frame.index += 1;
     const { node, keys } = frame;
     if (keys === undefined) {
-      const path = `${frame.path}[${i}]`;
-      if (!read(path, () => i in node)) {
-        throw newSpecError('NON_SERIALIZABLE', holeMessage(frame.path || '(root)', i), frame.path);
-      }
-      const item = read(path, () => (node as unknown[])[i]);
-      if (item === undefined) emit('null');
-      else open(item, path);
+      open(element(frame, i), frame, i, frame.freeForm);
       continue;
     }
     const key = keys[i] ?? '';
-    const path = frame.path ? `${frame.path}.${key}` : key;
-    const member = read(path, () => (node as Record<string, unknown>)[key]);
-    if (member === undefined) continue;
-    if (hasLoneSurrogate(key)) fail(frame.path, 'a key with a lone UTF-16 surrogate');
-    frame.pending = key;
-    open(member, path);
-  }
-  if (result === undefined) return fail(rootPath, 'a value of type undefined');
-  return result;
-}
-
-/**
- * The canonical text of a scalar or a `Date`; `undefined` for an array or an object (a
- * container the walk opens). Throws `NON_SERIALIZABLE` for anything JSON cannot hold.
- */
-function scalar(
-  value: unknown,
-  path: string,
-  read: <T>(path: string, fn: () => T) => T,
-): string | undefined {
-  switch (typeof value) {
-    case 'string':
-      if (hasLoneSurrogate(value)) fail(path, 'a string with a lone UTF-16 surrogate');
-      return JSON.stringify(value);
-    case 'boolean':
-      return value ? 'true' : 'false';
-    case 'number':
-      if (!Number.isFinite(value)) fail(path, String(value));
-      return JSON.stringify(value);
-    case 'object': {
-      if (value === null) return 'null';
-      const time = read(path, () => dateTimeOf(value));
-      if (time === undefined) return undefined;
-      if (Number.isNaN(time)) fail(path, 'an invalid Date');
-      return JSON.stringify(new Date(time).toISOString());
+    const freeForm = frame.freeForm || (freeFormAt?.(stack.length - 1, key) ?? false);
+    const member = guarded
+      ? read(
+          () => pathOf(frame, key),
+          () => (node as Record<string, unknown>)[key],
+        )
+      : (node as Record<string, unknown>)[key];
+    if (member === undefined) {
+      if (!freeForm) continue;
+      const path = pathOf(frame, key);
+      throw newSpecError('NON_SERIALIZABLE', undefinedMessage(path), path);
     }
-    default:
-      // undefined, bigint, function, symbol
-      return fail(path, `a value of type ${typeof value}`);
+    if (hasLoneSurrogate(key)) fail(frame.path, 'a key with a lone UTF-16 surrogate');
+    sink.key(key);
+    open(member, frame, key, freeForm);
   }
+  // `open` wrote the root, or threw (`undefined` at the root included).
+  return sink.result();
 }
 
 function constructorName(value: object): string {

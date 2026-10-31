@@ -45,8 +45,12 @@ describe('canonicalize', () => {
     expect(canonicalize({ a: { b: undefined } })).toBe('{"a":{}}');
   });
 
-  it('turns undefined in an array into null, and refuses a hole: it is not JSON', () => {
-    expect(canonicalize([1, undefined, 3])).toBe('[1,null,3]');
+  it('refuses undefined in an array and a hole: neither is JSON, neither is written null', () => {
+    expect(specError(() => canonicalize({ a: [1, undefined, 3] }))).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      path: 'a[1]',
+      message: 'a[1] is not JSON: undefined',
+    });
     // eslint-disable-next-line no-sparse-arrays -- the hole is the case under test
     expect(specError(() => canonicalize({ a: [1, , 3] }))).toMatchObject({
       code: 'NON_SERIALIZABLE',

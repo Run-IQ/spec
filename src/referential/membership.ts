@@ -176,7 +176,7 @@ function readInput(input: unknown): string[] {
       throw newSpecError('INVALID_INPUT', 'input must be a value or an array of values');
     }
     const read = readList(input, 'input');
-    if (typeof read === 'string') throw newSpecError('INVALID_INPUT', read);
+    if (!Array.isArray(read)) throw newSpecError('INVALID_INPUT', read.message);
     list = read;
   } catch (error) {
     if (isOwnError(error)) throw error;

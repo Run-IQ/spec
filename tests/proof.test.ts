@@ -13,6 +13,7 @@ import {
   sha256Hex,
   signProof,
   validateProof,
+  validateProofInput,
   verifyProof,
 } from '../src/index.js';
 import type {
@@ -179,18 +180,21 @@ describe('computeInputDigest', () => {
     );
   });
 
-  it('depends neither on key order nor on undefined members', () => {
-    // A JavaScript caller can pass `undefined` members, which the types do not allow.
+  it('depends neither on key order nor on undefined members of the format', () => {
+    // A JavaScript caller can pass `undefined` members, which the types do not allow: outside
+    // `data` and `meta.context` (free-form, where it is refused), such a member is absent.
     const reordered = {
       meta: {
         context: {},
         tags: [],
         assertions: {},
-        dimensions: {},
+        note: undefined,
+        dimensions: { gone: undefined },
         tenantId: 't1',
-        dates: { effective: '2025-06-01T00:00:00.000Z' },
+        dates: { effective: '2025-06-01T00:00:00.000Z', gone: undefined },
       },
-      data: { skipped: undefined, income: 1000 },
+      extra: undefined,
+      data: { income: 1000 },
     } as unknown as ProofInput;
     expect(computeInputDigest(reordered)).toBe(computeInputDigest(input));
   });
@@ -201,12 +205,32 @@ describe('computeInputDigest', () => {
     );
   });
 
-  it('refuses a value with no JSON form, naming its path', () => {
-    const error = specError(() =>
-      computeInputDigest({ ...input, data: { x: new Map() } } as unknown as ProofInput),
-    );
-    expect(error.code).toBe('NON_SERIALIZABLE');
-    expect(error.path).toBe('data.x');
+  it('refuses exactly what validateProofInput refuses, naming the first problem', () => {
+    const cases: unknown[] = [
+      { ...input, data: { x: new Map() } },
+      { ...input, data: { skipped: undefined } },
+      { ...input, data: { list: [1, undefined] } },
+      { ...input, data: { big: 2 ** 53 } },
+      { ...input, data: { $x: 1 } },
+      { ...input, data: { at: new Date(0) } },
+      { ...input, meta: { ...input.meta, tags: ['b', 'a'] } },
+      { ...input, meta: { ...input.meta, tenantId: undefined } },
+      { data: {} },
+    ];
+    for (const value of cases) {
+      const [first] = validateProofInput(value);
+      expect(first).toBeDefined();
+      const error = specError(() => computeInputDigest(value as ProofInput));
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toBe(`invalid input: ${first?.message ?? ''}`);
+      expect(error.path).toBe(first?.path);
+    }
+    // A JavaScript caller can pass an `undefined` member, which the types do not allow.
+    const skipped = { ...input, data: { skipped: undefined } } as unknown as ProofInput;
+    expect(specError(() => computeInputDigest(skipped))).toMatchObject({
+      path: '/data/skipped',
+      message: 'invalid input: /data/skipped is not JSON: undefined',
+    });
   });
 });
 
@@ -1026,8 +1050,8 @@ describe('verifyProof: hostile input', () => {
       },
     });
     expect(verifyProof(proof, { trustedKeys: TRUSTED }).status).toBe('authentic');
-    // Once by validation, once for the snapshot every later check uses.
-    expect(reads).toBe(2);
+    // Once: the snapshot every later check uses is built from the very values validated.
+    expect(reads).toBe(1);
   });
 
   const throwing = (thrown: () => unknown): DecisionProof => {
@@ -1111,19 +1135,23 @@ describe('verifyProof: hostile input', () => {
   });
 
   it('a hostile entry in the rules option', () => {
-    const rule = {};
+    const rule: Record<string, unknown> = { ...ruleA };
     Object.defineProperty(rule, 'id', {
       enumerable: true,
       get: () => {
         throw Object.create(null);
       },
     });
+    // Read as computeRuleChecksum reads a rule: both refuse it with the same reason.
+    expect(specError(() => computeRuleChecksum(rule as RuleDefinitionInput)).message).toBe(
+      'rule definition could not be read: unreadable value',
+    );
     expect(
       verifyProof(signed(), { trustedKeys: TRUSTED, rules: [rule as RuleDefinitionInput] }),
     ).toEqual({
       status: 'invalid',
       issues: [
-        'rule invalid: rules[0]: unreadable value',
+        'rule invalid: rules[0]: rule definition could not be read: unreadable value',
         'rule missing: r1@1',
         'rule missing: r2@2',
       ],
@@ -1181,24 +1209,13 @@ describe('validateProof', () => {
     ]);
   });
 
-  it('refuses an unknown key even with an undefined value, everywhere', () => {
-    expect(validateProof({ ...sealed(), extra: undefined }).issues).toEqual([
-      { path: 'extra', message: 'proof has an unknown key "extra"' },
-    ]);
+  it('takes a member whose value is undefined as absent, known or not, everywhere', () => {
+    expect(validateProof({ ...sealed(), extra: undefined }).issues).toEqual([]);
     const proof = sealed();
     proof.outputs.value!.rounding = { scale: 2, mode: 'up' };
     Object.assign(proof.outputs.value!.rounding, { precision: undefined });
-    expect(validateProof(proof).issues).toEqual([
-      {
-        path: 'outputs.value.rounding.precision',
-        message: 'outputs.value.rounding has an unknown key "precision"',
-      },
-    ]);
-    Object.assign(proof.applied[0]!, { note: undefined });
-    expect(validateProof(proof).issues.map((i) => i.path)).toEqual([
-      'outputs.value.rounding.precision',
-      'applied[0].note',
-    ]);
+    Object.assign(proof.applied[0]!, { note: undefined, sourceRef: undefined });
+    expect(validateProof(proof).issues).toEqual([]);
   });
 
   it.each([

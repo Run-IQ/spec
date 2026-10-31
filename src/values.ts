@@ -19,11 +19,20 @@ export const MAX_JSON_DEPTH = 1000;
  * a count, never by a clock, even for a sparse array of length 2^32 - 1 or a Proxy that claims
  * 10^12 elements. Every walk of a caller value shares it: the copy of a free-form value, the
  * canonical form, the readers of rules, proofs, referentials, pointers and inputs.
+ *
+ * A value is counted once: as its JSON text holds it (an object shared by two paths counts on
+ * each), when it is read from the caller. A copy this package made (a proof's snapshot, a
+ * normalized rule, an input's copy) is walked again without spending (`ownCopy`), so every
+ * function reading the same value accepts and refuses at the same count.
  */
 export const MAX_JSON_VALUES = 10_000_000;
 
 /** The values the current call may still read; `undefined` outside `withValueBudget`. */
 let budget: { remaining: number } | undefined;
+/** How many `ownCopy` calls are running: while one is, nothing is spent. */
+let ownCopies = 0;
+/** The values the last outermost `withValueBudget` call spent (`lastValuesSpent`). */
+let lastSpent = 0;
 
 /**
  * Internal: runs `read` with one budget of `MAX_JSON_VALUES` values, shared by every walk it
@@ -31,23 +40,50 @@ let budget: { remaining: number } | undefined;
  * Calls are synchronous, so the budget is the current call's alone.
  */
 export function withValueBudget<T>(read: () => T): T {
-  if (budget !== undefined) return read();
-  budget = { remaining: MAX_JSON_VALUES };
+  // Nested, it shares the budget; inside `ownCopy` nothing is spent, so no budget is needed.
+  if (budget !== undefined || ownCopies > 0) return read();
+  const current = { remaining: MAX_JSON_VALUES };
+  budget = current;
   try {
     return read();
   } finally {
     budget = undefined;
+    lastSpent = MAX_JSON_VALUES - current.remaining;
   }
+}
+
+/**
+ * Internal: runs `read` over a copy this package made (a snapshot, a normalized rule): its
+ * values were counted when they were read from the caller, so walking them again spends
+ * nothing. `read` must never reach a caller's value.
+ */
+export function ownCopy<T>(read: () => T): T {
+  ownCopies += 1;
+  try {
+    return read();
+  } finally {
+    ownCopies -= 1;
+  }
+}
+
+/**
+ * Internal, for tests: the values the last outermost `withValueBudget` call spent, so that a
+ * test proves each value of the caller is counted exactly once.
+ */
+export function lastValuesSpent(): number {
+  return lastSpent;
 }
 
 /**
  * Internal: spends `count` values of the current budget, before they are read; false (nothing
  * spent) when fewer remain, or when `count` is not a count. Outside `withValueBudget`, one read
- * of at most `MAX_JSON_VALUES` values is allowed.
+ * of at most `MAX_JSON_VALUES` values is allowed. Inside `ownCopy`, nothing is spent.
  */
 export function spendValues(count: number): boolean {
+  if (!Number.isSafeInteger(count) || count < 0) return false;
+  if (ownCopies > 0) return true;
   const left = budget === undefined ? MAX_JSON_VALUES : budget.remaining;
-  if (!Number.isSafeInteger(count) || count < 0 || count > left) return false;
+  if (count > left) return false;
   if (budget !== undefined) budget.remaining = left - count;
   return true;
 }
@@ -63,24 +99,44 @@ export function holeMessage(path: string, index: number): string {
 }
 
 /**
+ * Internal: the problem of an `undefined` where JSON needs a value: an array item, or a member
+ * of a free-form value (a member of an object the format defines is absent instead).
+ */
+export function undefinedMessage(path: string): string {
+  return `${citeName(path)} is not JSON: undefined`;
+}
+
+/** Internal: why `readList` stopped, and the path to report it at. */
+export interface ListProblem {
+  readonly path: string;
+  readonly message: string;
+}
+
+/**
  * Internal: the elements of the caller's array `list`, read once each, or the problem that
  * stops the read: a `length` that is not a count (only a Proxy claims one), a list too large for
- * the budget (checked before any element is read), or a hole. A getter or a Proxy trap that
- * throws is passed on: each caller reads under its own guard.
+ * the budget (checked before any element is read) or a hole, reported at `path`; an `undefined`
+ * element, reported at its own path (`<path>[i] is not JSON: undefined`). A getter or a Proxy
+ * trap that throws is passed on: each caller reads under its own guard.
  */
-export function readList(list: readonly unknown[], path: string): unknown[] | string {
+export function readList(list: readonly unknown[], path: string): unknown[] | ListProblem {
   const length: unknown = list.length;
   if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
-    return `${citeName(path)} has an invalid length`;
+    return { path, message: `${citeName(path)} has an invalid length` };
   }
-  if (!spendValues(length)) return tooLargeMessage(path);
+  if (!spendValues(length)) return { path, message: tooLargeMessage(path) };
   const items: unknown[] = [];
   for (let i = 0; i < length; i++) {
-    if (!(i in list)) return holeMessage(path, i);
-    items.push(list[i]);
+    if (!(i in list)) return { path, message: holeMessage(path, i) };
+    const item: unknown = list[i];
+    if (item === undefined) {
+      return { path: `${path}[${i}]`, message: undefinedMessage(`${path}[${i}]`) };
+    }
+    items.push(item);
   }
   return items;
 }
+
 /**
  * Value classification shared by `canonicalize` and the rule normalizer. Both checks work
  * across realms (vm contexts, iframes, worker globals), where `instanceof` fails.

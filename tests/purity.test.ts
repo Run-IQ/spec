@@ -21,7 +21,7 @@ function makeInput(): RuleDefinitionInput {
     id: 'r1',
     version: 1,
     model: 'PROGRESSIVE_BRACKET',
-    params: { brackets: [{ from: 0, rate: 0.1, until: undefined }], base: 'income' },
+    params: { brackets: [{ from: 0, rate: 0.1, until: null }], base: 'income' },
     condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'x' }, 1] } },
     priority: 1,
     effectiveFrom: new Date('2025-01-01T00:00:00Z'),

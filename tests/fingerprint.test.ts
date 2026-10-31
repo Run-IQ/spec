@@ -283,16 +283,12 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
       expect(cs(withUndefined)).toBe(cs(minimal));
     });
 
-    it('undefined inside params, condition.value, exceptions and extensions', () => {
+    it('undefined members of the objects the format defines (exceptions, selectors)', () => {
+      const [first] = rich.exceptions as Record<string, unknown>[];
       const withUndefined: RuleDefinitionInput = {
         ...rich,
-        params: { ...(rich.params as object), ghost: undefined },
-        condition: {
-          dsl: 'jsonlogic',
-          value: { ...(rich.condition!.value as object), ghost: undefined },
-        },
-        exceptions: [{ ...(rich.exceptions as object[])[0], ghost: undefined }],
-        extra: { ...(rich.extra as object), ghost: undefined },
+        condition: { ...rich.condition!, ghost: undefined } as RuleDefinitionInput['condition'],
+        exceptions: [{ ...first, ghost: undefined }],
       };
       expect(fp(withUndefined)).toBe(fp(rich));
       expect(cs(withUndefined)).toBe(cs(rich));

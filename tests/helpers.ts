@@ -223,3 +223,22 @@ export function tooDeepIssue(path: string): { path: string; message: string } {
     message: `${cutAt(path, 256)} is nested deeper than 1000 levels`,
   };
 }
+
+/**
+ * The values of `value` as its JSON text holds them: each member of an object (an `undefined`
+ * one included) and each element of an array, on every path (a shared object counts once per
+ * path); the root is not one. A `Date` is a single value. What each function of the package
+ * charges against `MAX_JSON_VALUES` when it reads `value` once.
+ */
+export function countValues(value: unknown): number {
+  let count = 0;
+  const stack: unknown[] = [value];
+  while (stack.length > 0) {
+    const node = stack.pop();
+    if (typeof node !== 'object' || node === null || node instanceof Date) continue;
+    const members: unknown[] = Array.isArray(node) ? node : Object.values(node);
+    count += members.length;
+    for (const member of members) stack.push(member);
+  }
+  return count;
+}

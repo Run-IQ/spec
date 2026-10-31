@@ -2,10 +2,11 @@ import { canonicalize } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
-import { isPlainObject } from '../values.js';
+import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
 import { normalizeRuleDefinition } from './normalize.js';
+import { canonicalRulePayload } from './payload.js';
 import type { StoredRuleRecord } from './stored.js';
 
 /**
@@ -18,7 +19,7 @@ import type { StoredRuleRecord } from './stored.js';
  * `verifyRuleChecksum`, or tampering before the edit goes unnoticed.
  */
 export function toStoredPayload(input: RuleDefinitionInput): { payload: string; checksum: string } {
-  const payload = canonicalize(normalizeRuleDefinition(input));
+  const payload = canonicalRulePayload(input);
   return { payload, checksum: sha256Hex(payload) };
 }
 
@@ -33,8 +34,11 @@ export function toStoredPayload(input: RuleDefinitionInput): { payload: string; 
  * `verifyRuleChecksum`, or tampering before the edit goes unnoticed.
  */
 export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
-  const definition = normalizeRuleDefinition(input);
-  return executableOf(definition, sha256Hex(canonicalize(definition)));
+  return withValueBudget(() => {
+    const definition = normalizeRuleDefinition(input);
+    // The normalized copy's values were counted when they were read from `input`.
+    return executableOf(definition, sha256Hex(ownCopy(() => canonicalize(definition))));
+  });
 }
 
 /**
@@ -51,6 +55,10 @@ export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
  * Because the payload must be canonical, the checksum proves the stored bytes themselves.
  */
 export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
+  return withValueBudget(() => fromRecord(record));
+}
+
+function fromRecord(record: StoredRuleRecord): ExecutableRule {
   const { id, version, checksum, payload } = readRecord(record);
   const name = `${nameOf(id)}@${nameOf(version)}`;
   const fail = (reason: string): never => {
@@ -84,7 +92,8 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
     // The error of `normalizeRuleDefinition` is its own: its message, already cited, as it is.
     return fail(`invalid definition: ${reasonOf(error)}`);
   }
-  if (canonicalize(definition) !== payload) fail('payload is not canonical');
+  // The normalized copy's values were counted when they were read from the parsed payload.
+  if (ownCopy(() => canonicalize(definition)) !== payload) fail('payload is not canonical');
   const computed = sha256Hex(payload as string);
   if (computed !== checksum) {
     fail(

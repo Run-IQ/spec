@@ -1,4 +1,4 @@
-import { toJsonValue } from '../canonical.js';
+import { toJsonDocument, toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
@@ -7,7 +7,10 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  ownCopy,
   readList,
+  spendValues,
+  tooLargeMessage,
   withValueBudget,
 } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
@@ -20,7 +23,7 @@ import {
 } from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
-import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { exceptionFreeForm, exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
 import {
@@ -65,8 +68,13 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  *   fields dropped, and `ruleSets` listing only the rule's own rule set dropped; an empty list
  *   is dropped, as absent;
  * - `checksum` is removed, and so is every top-level optional or extension field that is
- *   `null` or `undefined` (see `RuleDefinition`); nested `undefined` properties are dropped;
- * - nested values become plain JSON (`Date` to ISO string, `undefined` dropped);
+ *   `null` or `undefined` (see `RuleDefinition`); a member whose value is `undefined` in an
+ *   object the format defines (`condition`, a dimension spec, an exception, a selector,
+ *   `forEach`) is absent, known or not;
+ * - nested values become plain JSON (`Date` to ISO string); an `undefined` inside a free-form
+ *   value (`params`, `condition.value`, an extension, a `substitute`'s `params`, a
+ *   `shortCircuit`'s `value`) or as an array item anywhere is refused (`NON_SERIALIZABLE`,
+ *   `<path> is not JSON: undefined`, as `validateRuleDefinition` reports it);
  * - extension fields are kept at the top level.
  *
  * Never mutates `input`; the result shares no reference with it.
@@ -116,6 +124,7 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
 
 function normalize(input: RuleDefinitionInput): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
+  if (!spendValues(Object.keys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
   const { from, until } = readRuleWindow(input.effectiveFrom, input.effectiveUntil);
 
@@ -151,11 +160,9 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     else out.output = output;
   }
   if (input.exceptions != null) {
-    const read = readRuleExceptions(
-      readJson(input.exceptions, 'exceptions'),
-      'exceptions',
-      ruleSet,
-    );
+    const json = readJson(input.exceptions, 'exceptions', exceptionFreeForm);
+    // The copy's values were counted when they were read from the rule.
+    const read = ownCopy(() => readRuleExceptions(json, 'exceptions', ruleSet));
     throwFirst(read.issues.toArray());
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
@@ -186,12 +193,19 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
 }
 
 /**
- * `toJsonValue(value, field)`, where anything but a `SpecError` thrown while reading (a getter,
- * a Proxy trap, a call stack overflow) becomes `INVALID_RULE` naming `field`.
+ * `toJsonValue(value, field)` (or `toJsonDocument` with `freeFormAt`), where anything but a
+ * `SpecError` thrown while reading (a getter, a Proxy trap) becomes `INVALID_RULE` naming
+ * `field`.
  */
-function readJson(value: unknown, field: string): JsonValue {
+function readJson(
+  value: unknown,
+  field: string,
+  freeFormAt?: (depth: number, key: string) => boolean,
+): JsonValue {
   try {
-    return toJsonValue(value, field);
+    return freeFormAt === undefined
+      ? toJsonValue(value, field)
+      : toJsonDocument(value, field, freeFormAt);
   } catch (error) {
     if (isOwnError(error)) throw error;
     invalidRule(unreadableMessage(field, error));
@@ -215,9 +229,13 @@ function requireId(value: unknown): string {
 /** The normal form of `forEach` (read once, as JSON), or `INVALID_RULE` for its first problem. */
 function readForEachField(value: unknown): ForEach | undefined {
   const problems = new IssueList();
-  const forEach = readForEach(readJson(value, 'forEach'), (path, message) => {
-    problems.add(path, message);
-  });
+  const json = readJson(value, 'forEach', () => false);
+  // The copy's values were counted when they were read from the rule.
+  const forEach = ownCopy(() =>
+    readForEach(json, (path, message) => {
+      problems.add(path, message);
+    }),
+  );
   throwFirst(problems.toArray());
   return forEach;
 }
@@ -229,8 +247,11 @@ function requireParams(value: unknown): unknown {
 
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
-  for (const key of Object.keys(value)) {
-    if (key !== 'dsl' && key !== 'value') {
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) invalidRule(tooLargeMessage('condition'));
+  for (const key of keys) {
+    // A member whose value is `undefined` is absent, known or not.
+    if (key !== 'dsl' && key !== 'value' && value[key] !== undefined) {
       invalidRule(`condition has an unknown key ${quoteText(key)}`);
     }
   }
@@ -244,8 +265,10 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
 function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   if (value == null) return {};
   if (!isPlainObject(value)) invalidRule('dimensions must be an object of dimension specs');
+  const keys = Object.keys(value);
+  if (!spendValues(keys.length)) invalidRule(tooLargeMessage('dimensions'));
   const out: Record<string, DimensionSpec> = {};
-  for (const key of Object.keys(value).sort()) {
+  for (const key of keys.sort()) {
     const v = value[key];
     if (isUnnamable(key)) invalidRule(unnamableNameMessage('dimensions', 'dimension', key));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
@@ -265,7 +288,7 @@ function normalizeTags(value: unknown): string[] {
   if (value == null) return [];
   if (!Array.isArray(value)) invalidRule('tags must be an array of strings');
   const tags = readList(value, 'tags');
-  if (typeof tags === 'string') invalidRule(tags);
+  if (!Array.isArray(tags)) invalidRule(tags.message);
   for (const tag of tags) {
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }

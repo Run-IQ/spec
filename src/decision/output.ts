@@ -3,7 +3,7 @@ import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from
 import { isReservedName } from '../reserved.js';
 import { IssueList, pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { isPlainObject, readList } from '../values.js';
+import { isPlainObject, readList, spendValues, tooLargeMessage } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 
 /**
@@ -180,7 +180,8 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
     return issues.toArray();
   }
   for (const key of Object.keys(declaration)) {
-    if (!KEYS.has(key)) {
+    // A member whose value is `undefined` is absent, known or not.
+    if (!KEYS.has(key) && declaration[key] !== undefined) {
       add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
     }
   }
@@ -218,21 +219,28 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
 
 /**
  * Internal: checks a rounding `{ scale, mode, at? }` at `path`, for an output declaration and
- * for the outputs of a proof alike. An unknown key is refused whatever its value; a known key
- * whose value is `undefined` counts as absent.
+ * for the outputs of a proof alike. A key whose value is `undefined` is absent, known or not;
+ * any other unknown key is refused. Each member is read once, after being counted
+ * (`spendValues`). Returns the copy of the known members read (`undefined` when `rounding` is
+ * not an object, or has too many members to read).
  */
 export function checkRounding(
   rounding: unknown,
   path: string,
   add: (path: string, message: string) => void,
-): void {
+): Record<string, unknown> | undefined {
   if (!isPlainObject(rounding)) {
     add(path, `${citeName(path)} must be an object { scale, mode, at? }`);
-    return;
+    return undefined;
   }
-  const members = new Map<string, unknown>(Object.entries(rounding));
-  for (const key of members.keys()) {
-    if (!ROUNDING_KEYS.has(key)) {
+  const keys = Object.keys(rounding);
+  if (!spendValues(keys.length)) {
+    add(path, tooLargeMessage(path));
+    return undefined;
+  }
+  const members = new Map<string, unknown>(keys.map((key) => [key, rounding[key]]));
+  for (const [key, member] of members) {
+    if (member !== undefined && !ROUNDING_KEYS.has(key)) {
       add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
     }
   }
@@ -250,6 +258,9 @@ export function checkRounding(
   if (at !== undefined && !isOneOf(at, ROUNDING_TARGETS)) {
     add(`${path}.at`, `${citeName(path)}.at must be one of ${ROUNDING_TARGETS.join(', ')}`);
   }
+  const copy: Record<string, unknown> = { scale, mode };
+  if (at !== undefined) copy.at = at;
+  return copy;
 }
 
 /** Internal: reports a rounding on an output whose type cannot be rounded. */
@@ -285,8 +296,8 @@ function checkEnumValues(
     return;
   }
   const items = readList(values, path);
-  if (typeof items === 'string') {
-    add(path, items);
+  if (!Array.isArray(items)) {
+    add(items.path, items.message);
     return;
   }
   if (items.length === 0) {
@@ -351,7 +362,7 @@ function readDeclaration(declaration: unknown): { type: OutputType; values: read
       throw newSpecError('INVALID_RULE', 'the values of an enum output must be an array');
     }
     const items = readList(values, 'output declaration.values');
-    if (typeof items === 'string') throw newSpecError('INVALID_RULE', items);
+    if (!Array.isArray(items)) throw newSpecError('INVALID_RULE', items.message);
     return { type, values: items };
   } catch (error) {
     if (isOwnError(error)) throw error;

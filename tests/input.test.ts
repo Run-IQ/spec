@@ -444,10 +444,23 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         return 1;
       },
     });
-    // 2^60 paths through 61 distinct objects: walking every path would never end.
+    // 2^20 paths through 21 distinct objects: the JSON text holds 2^21 - 2 + 2^20 values, each
+    // counted, but each object is read once.
     let dag: unknown = leaf;
-    for (let i = 0; i < 60; i++) dag = { l: dag, r: dag };
+    for (let i = 0; i < 20; i++) dag = { l: dag, r: dag };
     expect(validateProofInput(proofInput({}, { dag: dag as never }))).toEqual([]);
+    expect(reads).toBe(1);
+
+    // 2^60 paths: the JSON text would hold more than MAX_JSON_VALUES values. The second path to
+    // a walked object counts its values again before going on, so the check stops at once.
+    reads = 0;
+    let huge: unknown = leaf;
+    for (let i = 0; i < 60; i++) huge = { l: huge, r: huge };
+    const [first, ...rest] = validateProofInput(proofInput({}, { dag: huge as never }));
+    expect(rest).toEqual([]);
+    expect(first?.message).toMatch(
+      /^\/data\/dag(\/[lr])+ is too large: more than 10000000 values$/,
+    );
     expect(reads).toBe(1);
 
     const shared = nested(10);

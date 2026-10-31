@@ -131,10 +131,10 @@ describe('normalizeRuleDefinition: shape', () => {
     ]);
   });
 
-  it('turns nested values into plain JSON (Date to ISO, undefined dropped)', () => {
+  it('turns nested values into plain JSON (Date to ISO)', () => {
     const def = normalizeRuleDefinition({
       ...base,
-      params: { at: new Date('2025-06-01T00:00:00Z'), gone: undefined, list: [undefined] },
+      params: { at: new Date('2025-06-01T00:00:00Z'), list: [null] },
     });
     expect(def.params).toEqual({ at: '2025-06-01T00:00:00.000Z', list: [null] });
   });

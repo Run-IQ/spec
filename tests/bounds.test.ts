@@ -284,8 +284,12 @@ describe('a hole is not JSON: refused everywhere, never written as null', () => 
     });
   });
 
-  it('an explicit undefined in an array is still written null by canonicalize', () => {
-    expect(canonicalize([1, undefined])).toBe('[1,null]');
+  it('an explicit undefined in an array is refused by canonicalize, never written null', () => {
+    expect(specError(() => canonicalize([1, undefined]))).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      path: '[1]',
+      message: '[1] is not JSON: undefined',
+    });
   });
 });
 

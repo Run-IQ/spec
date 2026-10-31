@@ -106,7 +106,8 @@ describe('validateTemporalFact', () => {
   it('compares a value shared by many paths without walking every path', () => {
     let a: unknown = 1;
     let b: unknown = 1;
-    for (let i = 0; i < 60; i++) {
+    // 2^20 paths each: the values are counted on every path, as in the JSON text.
+    for (let i = 0; i < 20; i++) {
       a = { l: a, r: a };
       b = { r: b, l: b };
     }

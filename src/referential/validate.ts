@@ -6,7 +6,14 @@ import type { RuleValidationIssue } from '../issues.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
-import { hasLoneSurrogate, holeMessage, isPlainObject, loneSurrogateMessage } from '../values.js';
+import {
+  hasLoneSurrogate,
+  holeMessage,
+  isPlainObject,
+  loneSurrogateMessage,
+  ownCopy,
+  undefinedMessage,
+} from '../values.js';
 import { readLimits, STEPS_PER_NODE } from './limits.js';
 import type { Limits, ReferentialLimits } from './limits.js';
 import { ALWAYS, sweepNesting } from './nesting.js';
@@ -119,7 +126,9 @@ export function computeReferentialDigest(
   referential: Referential,
   options: ReferentialLimits = {},
 ): string {
-  return sha256Hex(canonicalize(normalizeReferential(referential, options)));
+  const normal = normalizeReferential(referential, options);
+  // The normal form is this package's copy: its values were counted when they were read.
+  return sha256Hex(ownCopy(() => canonicalize(normal)));
 }
 
 /**
@@ -308,7 +317,8 @@ function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number)
   const out: T[] = [];
   let last: string | undefined;
   for (const entry of [...entries].sort(compare)) {
-    const key = canonicalize(entry);
+    // An entry of the normal form: this package's copy.
+    const key = ownCopy(() => canonicalize(entry));
     if (key !== last) out.push(entry);
     last = key;
   }
@@ -316,7 +326,8 @@ function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number)
 }
 
 /**
- * Reads the own keys of `value` once each, into a plain record. An unknown key is reported.
+ * Reads the own keys of `value` once each, into a plain record. A key whose value is
+ * `undefined` is absent, known or not; any other unknown key is reported.
  * A property that cannot be read is reported and gives `undefined`: the caller checks nothing
  * more of that record, so a getter that throws gives one issue, not a cascade.
  */
@@ -331,17 +342,18 @@ function readFields(
   let readable = true;
   for (const key of Object.keys(value)) {
     const path = `${prefix}${key}`;
-    if (!known.includes(key)) {
-      add(path, `${unknownMessage} ${quoteText(key)}`);
-      continue;
-    }
+    let member: unknown;
     try {
-      // Known keys only: `__proto__` is never one, so plain assignment stays data.
-      out[key] = value[key];
+      member = value[key];
     } catch (error) {
       add(path, unreadableMessage(path, error));
       readable = false;
+      continue;
     }
+    if (member === undefined) continue;
+    // Known keys only: `__proto__` is never one, so plain assignment stays data.
+    if (known.includes(key)) out[key] = member;
+    else add(path, `${unknownMessage} ${quoteText(key)}`);
   }
   return readable ? out : undefined;
 }
@@ -406,17 +418,19 @@ function readCodeLists(
   }
   for (const code of keys) {
     const path = `codes.${code}`;
-    const problem = nameProblem(code, 'code');
-    if (problem !== undefined) {
-      add('codes', problem);
-      continue;
-    }
     let periods: unknown;
     try {
       periods = value[code];
     } catch (error) {
       add(path, unreadableMessage(path, error));
       codes.set(code, undefined);
+      continue;
+    }
+    // An entry of the map whose value is `undefined` is absent.
+    if (periods === undefined) continue;
+    const problem = nameProblem(code, 'code');
+    if (problem !== undefined) {
+      add('codes', problem);
       continue;
     }
     // The length is read once: the size check and the read of the periods both use it.
@@ -454,13 +468,22 @@ function readGroups(value: unknown, keys: readonly string[], add: Add): RawGroup
   const groups: RawGroup[] = [];
   for (const name of keys) {
     const path = `groups.${name}`;
+    let group: unknown;
+    try {
+      group = value[name];
+    } catch (error) {
+      add(path, unreadableMessage(path, error));
+      continue;
+    }
+    // An entry of the map whose value is `undefined` is absent.
+    if (group === undefined) continue;
     const problem = nameProblem(name, 'group name');
     if (problem !== undefined) {
       add('groups', problem);
       continue;
     }
     try {
-      groups.push(readGroup(value[name], name, path, add));
+      groups.push(readGroup(group, name, path, add));
     } catch (error) {
       add(path, unreadableMessage(path, error));
     }
@@ -527,7 +550,12 @@ function checkPeriods(periods: PeriodList, path: string, add: Add): Period[] {
         add(path, holeMessage(path, i));
         continue;
       }
-      const period = readPeriod(list[i], at, add);
+      const item = list[i];
+      if (item === undefined) {
+        add(at, undefinedMessage(at));
+        continue;
+      }
+      const period = readPeriod(item, at, add);
       if (period !== undefined) read.push(period);
     } catch (error) {
       add(at, unreadableMessage(at, error));
@@ -624,8 +652,12 @@ function checkMembers(
     const at = `${path}[${i}]`;
     let member: ReferentialMember | undefined;
     try {
-      if (i in members) member = readMember(members[i], at, codes, groupNames, add);
-      else add(path, holeMessage(path, i));
+      if (!(i in members)) add(path, holeMessage(path, i));
+      else {
+        const item = members[i];
+        if (item === undefined) add(at, undefinedMessage(at));
+        else member = readMember(item, at, codes, groupNames, add);
+      }
     } catch (error) {
       add(at, unreadableMessage(at, error));
     }

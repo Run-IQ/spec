@@ -6,6 +6,7 @@ import type { JsonPointer } from '../path/pointer.js';
 import { isSubject } from '../path/subject.js';
 import { citedNameProblem } from '../rule/ruleSet.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
+import { ownCopy, withValueBudget } from '../values.js';
 import {
   checkText,
   childPointer,
@@ -115,6 +116,10 @@ function guarded<T>(subject: string, read: () => T): T {
  * first problem (`invalid assertion: /method must be one of …`), never a raw error.
  */
 export function computeAssertionDigest(assertion: FactAssertion): string {
+  return withValueBudget(() => assertionDigest(assertion));
+}
+
+function assertionDigest(assertion: FactAssertion): string {
   let snapshot: FactAssertion | undefined;
   const { issues } = runCheck(
     (reader) => {
@@ -126,7 +131,9 @@ export function computeAssertionDigest(assertion: FactAssertion): string {
   if (first !== undefined || snapshot === undefined) {
     throw newSpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
   }
-  return sha256Hex(canonicalize(snapshot));
+  const read = snapshot;
+  // The copy's values were counted when they were read from `assertion`.
+  return sha256Hex(ownCopy(() => canonicalize(read)));
 }
 
 /**
