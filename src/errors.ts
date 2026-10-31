@@ -92,12 +92,14 @@ export function specErrorPath(error: unknown): string | undefined {
 /**
  * Internal: why the value at `subject` could not be read, never throwing:
  * `<subject> is too deeply nested` when the call stack overflowed while reading it, otherwise
- * `<subject> could not be read: <reason>` (a getter or a Proxy trap threw `error`).
+ * `<subject> could not be read: <reason>` (a getter or a Proxy trap threw `error`). The reason
+ * is `describeError(error)` passed through `escapeText`: control characters, lone surrogates,
+ * quotes and backslashes escaped, at most 100 code units.
  */
 export function unreadableMessage(subject: string, error: unknown): string {
   return isStackOverflow(error)
     ? `${subject} is too deeply nested`
-    : `${subject} could not be read: ${describeError(error)}`;
+    : `${subject} could not be read: ${escapeText(describeError(error))}`;
 }
 
 /** True for the `RangeError` a call stack overflow throws; never throws. */
