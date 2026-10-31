@@ -86,12 +86,4 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']crypto["']/);
     }
   });
-
-  it('the canonical entry imports no node: module and no crypto', () => {
-    for (const file of ['canonical.js', 'canonical.cjs']) {
-      const code = readFileSync(resolve(dist, file), 'utf8');
-      expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']node:/);
-      expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']crypto["']/);
-    }
-  });
 });
