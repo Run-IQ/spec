@@ -1,5 +1,5 @@
 import { canonicalize } from '../canonical.js';
-import { citeName, newSpecError, reasonOf } from '../errors.js';
+import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject } from '../values.js';
@@ -51,12 +51,8 @@ export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
  * Because the payload must be canonical, the checksum proves the stored bytes themselves.
  */
 export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
-  const unknownRecord: unknown = record;
-  if (!isPlainObject(unknownRecord)) {
-    throw newSpecError('INVALID_RULE', 'Stored rule: the record must be an object');
-  }
-  const { id, version, checksum, payload } = unknownRecord;
-  const name = `${String(id)}@${String(version)}`;
+  const { id, version, checksum, payload } = readRecord(record);
+  const name = `${nameOf(id)}@${nameOf(version)}`;
   const fail = (reason: string): never => {
     throw newSpecError('INVALID_RULE', `Stored rule ${citeName(name)}: ${reason}`);
   };
@@ -77,7 +73,7 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   if (parsed.id !== id || parsed.version !== version) {
     fail(
       `id/version mismatch: the payload holds ` +
-        `${citeName(String(parsed.id))}@${citeName(String(parsed.version))}`,
+        `${citeName(nameOf(parsed.id))}@${citeName(nameOf(parsed.version))}`,
     );
   }
 
@@ -106,6 +102,32 @@ function executableOf(definition: RuleDefinition, checksum: string): ExecutableR
     definition.effectiveUntil === null ? null : boundOf(definition.effectiveUntil);
   rule.checksum = checksum;
   return rule as ExecutableRule;
+}
+
+/**
+ * The four fields of a stored record, each read once. A record that is not a plain object, or
+ * that cannot be read (a getter or a Proxy trap that throws), is refused as `INVALID_RULE`.
+ */
+function readRecord(record: unknown): Record<'id' | 'version' | 'checksum' | 'payload', unknown> {
+  try {
+    if (!isPlainObject(record)) {
+      throw newSpecError('INVALID_RULE', 'Stored rule: the record must be an object');
+    }
+    const { id, version, checksum, payload } = record;
+    return { id, version, checksum, payload };
+  } catch (error) {
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_RULE', unreadableMessage('stored rule record', error));
+  }
+}
+
+/** A record field as a rule name shows it: a primitive as `String` writes it, never caller code. */
+function nameOf(value: unknown): string {
+  return typeof value === 'object' && value !== null
+    ? 'an object'
+    : typeof value === 'function'
+      ? 'a function'
+      : String(value);
 }
 
 /** A civil date stays a string; a canonical instant becomes a `Date`. */

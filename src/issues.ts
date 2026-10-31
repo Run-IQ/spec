@@ -97,3 +97,11 @@ export function boundMessages(messages: Iterable<string>): string[] {
   }
   return list.messages();
 }
+
+/**
+ * Internal: the single issue of a validator called with a `path` that is not a string (an
+ * argument of the caller, not of the value checked); the validator returns it, never throws.
+ */
+export function pathArgumentIssue(path: unknown): RuleValidationIssue {
+  return { path: '', message: `path must be a string, got a value of type ${typeof path}` };
+}

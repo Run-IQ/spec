@@ -1080,12 +1080,12 @@ describe('verifyProof: hostile input', () => {
     });
   });
 
-  it('a very deeply nested output value: invalid, without throwing', () => {
+  it('a very deeply nested output value is read whole: only the tampering is reported', () => {
     const proof = sealed();
     const tampered = { ...proof, outputs: { value: { ...proof.outputs.value!, value: deep } } };
     const result = verifyProof(tampered);
     expect(result.status).toBe('invalid');
-    expect(result.issues).toEqual(['outputs.value.value is too deeply nested']);
+    expect(result.issues).toEqual(['digest mismatch', 'unsigned']);
   });
 
   it('a hostile entry in the rules option', () => {

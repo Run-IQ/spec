@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalize,
   computeRuleChecksum,
   normalizeRuleDefinition,
   SpecError,
@@ -639,18 +640,14 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition(extension).errors).toEqual(['meta could not be read: y']);
   });
 
-  it('says a too deeply nested field is too deeply nested', () => {
+  it('accepts a field nested at any depth: the copy keeps no call stack', () => {
     let params: Record<string, unknown> = {};
     for (let i = 0; i < 200_000; i++) params = { a: params };
     const rule = { ...base, params };
-    expect(validateRuleDefinition(rule)).toEqual({
-      valid: false,
-      errors: ['params is too deeply nested'],
-      issues: [{ path: 'params', message: 'params is too deeply nested' }],
-    });
-    const error = specError(() => normalizeRuleDefinition(rule));
-    expect(error.code).toBe('INVALID_RULE');
-    expect(error.message).toBe('params is too deeply nested');
+    expect(validateRuleDefinition(rule)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(canonicalize(normalizeRuleDefinition(rule).params)).toBe(
+      `${'{"a":'.repeat(200_000)}{}${'}'.repeat(200_000)}`,
+    );
   });
 
   it('reports a hostile Proxy', () => {

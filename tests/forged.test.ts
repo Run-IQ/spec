@@ -1,20 +1,34 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import {
   canonicalize,
+  canonicalizeAt,
   findOverlappingVersions,
+  fromStoredRecord,
   governingAssertion,
   normalizeRuleDefinition,
+  sha256Hex,
   SpecError,
+  toCanonicalDecimal,
+  validateOutputDeclaration,
   validateProofInput,
   validateRuleDefinition,
+  validateTemporalFact,
+  valueMatchesOutputType,
+  verifyRuleChecksum,
   windowContains,
 } from '../src/index.js';
 import type {
   CivilCalendar,
   FactAssertion,
+  OutputDeclaration,
   RuleDefinitionInput,
+  StoredRuleRecord,
   VersionedRuleWindow,
 } from '../src/index.js';
+import * as canonicalEntry from '../src/canonical-entry.js';
+import { isOwnError } from '../src/errors.js';
+import * as api from '../src/index.js';
 import { BASE_RULE, fixedCalendar, proofInput, specError } from './helpers.js';
 
 /** 1.2 million characters a message must never carry raw: newlines and quotes. */
@@ -48,6 +62,38 @@ function throwingProxy(thrown: unknown): Record<string, FactAssertion> {
     {},
     { get: fail, getOwnPropertyDescriptor: fail, ownKeys: fail, has: fail },
   );
+}
+
+/** Throws a forged `SpecError`. */
+function throwForged(): never {
+  throw forged();
+}
+
+/** A Proxy over `target` whose every trap throws a forged `SpecError`. */
+function allTrapsThrow(target: object): object {
+  const traps: ProxyHandler<object> = {
+    get: throwForged,
+    has: throwForged,
+    ownKeys: throwForged,
+    getOwnPropertyDescriptor: throwForged,
+    getPrototypeOf: throwForged,
+    apply: throwForged,
+    construct: throwForged,
+    set: throwForged,
+    defineProperty: throwForged,
+    deleteProperty: throwForged,
+    isExtensible: throwForged,
+    preventExtensions: throwForged,
+    setPrototypeOf: throwForged,
+  };
+  return new Proxy(target, traps);
+}
+
+/** A Proxy that has been revoked: every operation on it throws a `TypeError`. */
+function revokedProxy(): object {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
 }
 
 /** A version whose `effectiveFrom` getter throws `thrown`. */
@@ -124,16 +170,16 @@ describe('a SpecError a caller built is cited, never trusted', () => {
     const error = specError(() => canonicalize({ a: throwingAt('b', forged()) }));
     expect(error.code).toBe('NON_SERIALIZABLE');
     expect(error.message).toBe(
-      'Value at "(root)" cannot be serialized to canonical JSON: ' +
+      'Value at "a.b" cannot be serialized to canonical JSON: ' +
         `a value that could not be read: ${REASON}`,
     );
-    expect(error.path).toBe('');
+    expect(error.path).toBe('a.b');
   });
 
   it('canonicalize cites a plain Error and a thrown value the same way', () => {
     for (const thrown of [new Error(HUGE), HUGE]) {
       expect(specError(() => canonicalize(throwingAt('b', thrown))).message).toBe(
-        'Value at "(root)" cannot be serialized to canonical JSON: ' +
+        'Value at "b" cannot be serialized to canonical JSON: ' +
           `a value that could not be read: ${REASON}`,
       );
     }
@@ -195,5 +241,263 @@ describe('an error this package created passes as it is', () => {
     expect(
       specError(() => windowContains(rule, '2026-01-01T00:00:00.000Z', 'UTC', calendar)),
     ).toMatchObject({ code: 'INVALID_DATE', message: own().message });
+  });
+});
+
+describe('every read of caller input at the API boundary is guarded', () => {
+  it('fromStoredRecord: a record that throws a forged error, or cannot be read', () => {
+    const getter = {
+      id: 'r',
+      version: 1,
+      checksum: 'x',
+      get payload(): never {
+        throw forged();
+      },
+    };
+    for (const record of [getter, throwingProxy(forged())]) {
+      const error = specError(() => fromStoredRecord(record as unknown as StoredRuleRecord));
+      expect(error.code).toBe('INVALID_RULE');
+      expect(error.message).toBe(`stored rule record could not be read: ${REASON}`);
+      expect(error.path).toBeUndefined();
+    }
+    expect(
+      specError(() => fromStoredRecord(revokedProxy() as unknown as StoredRuleRecord)).message,
+    ).toBe(
+      "stored rule record could not be read: Cannot perform 'IsArray' on a proxy that has been " +
+        'revoked',
+    );
+  });
+
+  it('fromStoredRecord: an id or version that is an object runs no caller code', () => {
+    const id = {
+      toString(): never {
+        throw forged();
+      },
+    };
+    const record = { id, version: 1, checksum: 'x', payload: '{}' };
+    expect(specError(() => fromStoredRecord(record as unknown as StoredRuleRecord)).message).toBe(
+      'Stored rule an object@1: malformed record: id must be a string and version a number',
+    );
+  });
+
+  it('verifyRuleChecksum: a checksum that throws, a rule that is not an object', () => {
+    const rule = {
+      ...BASE_RULE,
+      get checksum(): never {
+        throw forged();
+      },
+    };
+    expect(specError(() => verifyRuleChecksum(rule))).toMatchObject({
+      code: 'INVALID_RULE',
+      message: `rule could not be read: ${REASON}`,
+    });
+    for (const value of [null, undefined, 1, 'x']) {
+      expect(
+        specError(() =>
+          verifyRuleChecksum(value as unknown as Parameters<typeof verifyRuleChecksum>[0]),
+        ),
+      ).toMatchObject({
+        code: 'INVALID_RULE',
+        message: 'a rule definition must be a plain object',
+      });
+    }
+  });
+
+  it('canonicalizeAt: a path that is not a string', () => {
+    for (const path of [null, undefined, 1, Symbol('s'), throwingProxy(forged())]) {
+      expect(specError(() => canonicalizeAt({}, path as unknown as string))).toMatchObject({
+        code: 'INVALID_PATH',
+        message: `path must be a string, got a value of type ${typeof path}`,
+      });
+    }
+  });
+
+  it('sha256Hex: a value that is not a string, a lone surrogate', () => {
+    expect(specError(() => sha256Hex(1 as unknown as string))).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      message: 'sha256Hex needs a string, got a value of type number',
+    });
+    expect(specError(() => sha256Hex(`a${String.fromCharCode(0xd800)}`))).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      message: 'sha256Hex: a string with a lone UTF-16 surrogate',
+    });
+    // A well-formed pair is hashed as UTF-8 (U+1F600 is F0 9F 98 80).
+    expect(sha256Hex('\u{1F600}')).toBe(
+      createHash('sha256')
+        .update(Buffer.from([0xf0, 0x9f, 0x98, 0x80]))
+        .digest('hex'),
+    );
+  });
+
+  it('toCanonicalDecimal: a revoked Proxy', () => {
+    expect(specError(() => toCanonicalDecimal(revokedProxy() as unknown as string))).toMatchObject({
+      code: 'INVALID_DECIMAL',
+      message: 'Not a decimal: an object (expected a string)',
+    });
+  });
+
+  it('validateOutputDeclaration and validateTemporalFact: a path that is not a string', () => {
+    const issue = { path: '', message: 'path must be a string, got a value of type object' };
+    const path = throwingProxy(forged()) as unknown as string;
+    expect(validateOutputDeclaration({ type: 'number', combine: 'sum' }, path)).toEqual([issue]);
+    expect(validateTemporalFact([], path)).toEqual([issue]);
+    expect(validateTemporalFact([], undefined as unknown as string)).toEqual([
+      { path: '', message: 'path must be a string, got a value of type undefined' },
+    ]);
+  });
+
+  it('valueMatchesOutputType: a declaration that cannot be read or is not one', () => {
+    const declaration = (value: unknown): OutputDeclaration => value as OutputDeclaration;
+    const getter = {
+      combine: 'first',
+      get type(): never {
+        throw forged();
+      },
+    };
+    expect(specError(() => valueMatchesOutputType(1, declaration(getter)))).toMatchObject({
+      code: 'INVALID_RULE',
+      message: `output declaration could not be read: ${REASON}`,
+    });
+    const values = new Proxy([], {
+      get(): never {
+        throw forged();
+      },
+    });
+    expect(
+      specError(() => valueMatchesOutputType('a', declaration({ type: 'enum', values }))).message,
+    ).toBe(`output declaration could not be read: ${REASON}`);
+    for (const value of [null, undefined, 'number']) {
+      expect(specError(() => valueMatchesOutputType(1, declaration(value))).message).toBe(
+        'an output declaration must be an object { type, … }',
+      );
+    }
+    expect(specError(() => valueMatchesOutputType(1, declaration({ type: 'x' }))).message).toBe(
+      'output type must be one of number, boolean, string, enum, list, object, decimal',
+    );
+    expect(
+      specError(() => valueMatchesOutputType('a', declaration({ type: 'enum', values: 'a' })))
+        .message,
+    ).toBe('the values of an enum output must be an array');
+    expect(valueMatchesOutputType('a', declaration({ type: 'enum', values: ['a'] }))).toBe(true);
+    expect(valueMatchesOutputType('a', declaration({ type: 'enum' }))).toBe(false);
+  });
+});
+
+describe('canonicalize names the member that could not be read', () => {
+  const thrower = (): never => {
+    throw new Error('trap');
+  };
+  const cases: [string, unknown, string][] = [
+    ['an object member', { a: throwingAt('b', new Error('trap')) }, 'r.a.b'],
+    ['an array item', { a: [1, new Proxy([0], { get: thrower })] }, 'r.a[1]'],
+    ['the keys of an object', { a: { b: new Proxy({}, { ownKeys: thrower }) } }, 'r.a.b'],
+    ['the prototype of an object', { a: new Proxy({}, { getPrototypeOf: thrower }) }, 'r.a'],
+    ['the root', new Proxy({}, { getPrototypeOf: thrower }), 'r'],
+  ];
+  it.each(cases)('%s', (_label, value, path) => {
+    const error = specError(() => canonicalizeAt(value, 'r'));
+    expect(error).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      path,
+      message:
+        `Value at "${path}" cannot be serialized to canonical JSON: ` +
+        'a value that could not be read: trap',
+    });
+  });
+});
+
+describe('canonicalize keeps no call stack: any depth is accepted', () => {
+  it.each([3_000, 100_000])('arrays and objects %i deep', (depth) => {
+    let array: unknown = 1;
+    let object: unknown = 1;
+    let mixed: unknown = 'x';
+    for (let i = 0; i < depth; i++) {
+      array = [array];
+      object = { a: object };
+      mixed = i % 2 === 0 ? [null, mixed] : { b: undefined, a: mixed };
+    }
+    expect(canonicalize(array)).toBe(`${'['.repeat(depth)}1${']'.repeat(depth)}`);
+    expect(canonicalize(object)).toBe(`${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`);
+    let reference = '"x"';
+    for (let i = 0; i < depth; i++) {
+      reference = i % 2 === 0 ? `[null,${reference}]` : `{"a":${reference}}`;
+    }
+    expect(canonicalize(mixed)).toBe(reference);
+  });
+
+  it('a value it refuses 100,000 deep is reported at its path, in a bounded message', () => {
+    let value: unknown = Number.NaN;
+    for (let i = 0; i < 100_000; i++) value = [value];
+    const error = specError(() => canonicalize(value));
+    expect(error.path).toBe('[0]'.repeat(100_000));
+    expect(error.message).toBe(
+      `Value at "${'[0]'.repeat(85)}[…" cannot be serialized to canonical JSON: NaN`,
+    );
+  });
+
+  it('a circular reference deep down is still refused', () => {
+    const root: { a: unknown } = { a: null };
+    let node: { a: unknown } = root;
+    for (let i = 0; i < 10_000; i++) {
+      const next = { a: null };
+      node.a = next;
+      node = next;
+    }
+    node.a = root;
+    expect(specError(() => canonicalize(root)).message).toMatch(/: a circular reference$/);
+  });
+});
+
+describe('every exported function: hostile arguments give an own SpecError or a result', () => {
+  const hostiles: [string, unknown][] = [
+    ['null', null],
+    ['undefined', undefined],
+    ['a number', 1],
+    ['a string', 'x'],
+    ['a symbol', Symbol('s')],
+    ['a bigint', 1n],
+    ['a function', () => 1],
+    ['a Proxy whose every trap throws', allTrapsThrow({})],
+    ['an array Proxy whose every trap throws', allTrapsThrow([])],
+    ['a Date Proxy whose every trap throws', allTrapsThrow(new Date(0))],
+    ['a revoked Proxy', revokedProxy()],
+    ['an object whose every read throws', new Proxy({}, { get: () => throwForged() })],
+    ['an object whose conversions throw', { toString: throwForged, valueOf: throwForged }],
+  ];
+  const valid: unknown[] = [BASE_RULE, '2020-01-01', 'UTC', fixedCalendar];
+  const functions = new Map<string, (...args: unknown[]) => unknown>();
+  for (const [name, value] of [...Object.entries(api), ...Object.entries(canonicalEntry)]) {
+    if (typeof value === 'function' && value !== SpecError) {
+      functions.set(name, value as (...args: unknown[]) => unknown);
+    }
+  }
+
+  it('covers every exported function', () => {
+    expect(functions.size).toBe(54);
+  });
+
+  it.each([...functions.keys()])('%s', (name) => {
+    const call = functions.get(name);
+    if (call === undefined) throw new Error(`no function ${name}`);
+    const refused: string[] = [];
+    for (const [label, hostile] of hostiles) {
+      for (let position = 0; position < 4; position++) {
+        for (const fill of ['undefined', 'valid'] as const) {
+          const args = [0, 1, 2, 3].map((i) =>
+            i === position ? hostile : fill === 'valid' ? valid[i] : undefined,
+          );
+          try {
+            call(...args);
+          } catch (error) {
+            const bounded =
+              isOwnError(error) &&
+              error.message.length <= 2048 &&
+              (error.path === undefined || error.path.length <= 2048);
+            if (!bounded) refused.push(`${label} at ${position}, others ${fill}`);
+          }
+        }
+      }
+    }
+    expect(refused).toEqual([]);
   });
 });

@@ -194,7 +194,7 @@ describe('findOverlappingVersions', () => {
     // Both answers are well represented.
     expect(overlaps).toBeGreaterThan(60);
     expect(overlaps).toBeLessThan(240);
-  });
+  }, 30_000); // about 1.3 s alone; up to 5 s while the whole suite runs in parallel
 
   it('decides windows at the edges of the years 0000 and 9999', () => {
     const rules = [

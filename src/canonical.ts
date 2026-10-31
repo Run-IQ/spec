@@ -1,11 +1,4 @@
-import {
-  citeName,
-  isOwnError,
-  isStackOverflow,
-  newSpecError,
-  quoteText,
-  reasonOf,
-} from './errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
@@ -22,7 +15,12 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * an invalid `Date`, a circular reference, `undefined` at the top level, a string or a key that
  * holds a lone UTF-16 surrogate (I-JSON, RFC 7493: such a text has no UTF-8 form), and any
  * object that is not a plain object, an array or a `Date` (Map, Set, class instances...).
- * `toJSON` is ignored. A key with a lone surrogate is reported at the path of its object.
+ * `toJSON` is ignored. A key with a lone surrogate is reported at the path of its object. A
+ * value that cannot be read (a getter or a Proxy trap that throws, a caller's `SpecError`
+ * included) is reported at its own path: `a value that could not be read: <reason>`, the reason
+ * cited (escaped, cut at 256 characters).
+ *
+ * The walk keeps its own stack, not the JavaScript call stack: any depth is accepted.
  *
  * Strings are data, as in JCS (RFC 8785): no Unicode normalization is applied, so `"é"`
  * written precomposed (U+00E9) and decomposed (U+0065 U+0301) give different output.
@@ -40,15 +38,11 @@ export function canonicalize(value: unknown): string {
  * `metadata.score`.
  */
 export function canonicalizeAt(value: unknown, path: string): string {
-  try {
-    return write(value, path, new Set());
-  } catch (error) {
-    // A getter or a Proxy trap threw, or the call stack overflowed: cited, never passed on raw
-    // (a caller's `SpecError` included: only this package's own errors pass as they are).
-    if (isOwnError(error)) throw error;
-    if (isStackOverflow(error)) fail(path, 'a value nested too deeply');
-    return fail(path, `a value that could not be read: ${reasonOf(error)}`);
+  const root: unknown = path;
+  if (typeof root !== 'string') {
+    throw newSpecError('INVALID_PATH', `path must be a string, got a value of type ${typeof root}`);
   }
+  return write(value, root, true);
 }
 
 /**
@@ -57,10 +51,117 @@ export function canonicalizeAt(value: unknown, path: string): string {
  * which names the field that could not be read.
  */
 export function toJsonValue(value: unknown, path: string): JsonValue {
-  return JSON.parse(write(value, path, new Set())) as JsonValue;
+  return JSON.parse(write(value, path, false)) as JsonValue;
 }
 
-function write(value: unknown, path: string, ancestors: Set<object>): string {
+/** An array or an object being written: its members are read one by one. */
+interface Frame {
+  readonly node: object;
+  readonly path: string;
+  /** The sorted keys of an object; `undefined` for an array. */
+  readonly keys: readonly string[] | undefined;
+  readonly length: number;
+  index: number;
+  /** The members written so far, joined by commas. */
+  out: string;
+  /** The key of the member being written (objects only). */
+  pending: string;
+}
+
+/**
+ * The canonical text of `root`, by a depth-first walk over an explicit stack: members in index
+ * or sorted-key order, as a recursive walk would visit them, at any depth. With `guarded`, what
+ * a read throws (other than this package's own errors) is reported at the path read.
+ */
+function write(root: unknown, rootPath: string, guarded: boolean): string {
+  const read = <T>(path: string, fn: () => T): T => {
+    if (!guarded) return fn();
+    try {
+      return fn();
+    } catch (error) {
+      if (isOwnError(error)) throw error;
+      return fail(path, `a value that could not be read: ${reasonOf(error)}`);
+    }
+  };
+  const ancestors = new Set<object>();
+  const stack: Frame[] = [];
+  let result: string | undefined;
+  const emit = (text: string): void => {
+    const parent = stack[stack.length - 1];
+    if (parent === undefined) {
+      result = text;
+      return;
+    }
+    const member = parent.keys === undefined ? text : `${JSON.stringify(parent.pending)}:${text}`;
+    parent.out += parent.out === '' ? member : `,${member}`;
+  };
+  /** Writes a scalar or a `Date` at once (`emit`), or opens a frame for a container. */
+  const open = (value: unknown, path: string): void => {
+    const text = scalar(value, path, read);
+    if (text !== undefined) {
+      emit(text);
+      return;
+    }
+    // `scalar` returned no text: `value` is an array or an object.
+    const node = value as object;
+    if (ancestors.has(node)) fail(path, 'a circular reference');
+    let keys: string[] | undefined;
+    let length: number;
+    if (read(path, () => Array.isArray(node))) {
+      length = read(path, () => (node as unknown[]).length);
+    } else {
+      if (!read(path, () => isPlainObject(node))) {
+        const name = read(path, () => constructorName(node));
+        fail(path, `an instance of ${citeName(name)}`);
+      }
+      keys = read(path, () => Object.keys(node).sort());
+      length = keys.length;
+    }
+    ancestors.add(node);
+    stack.push({ node, path, keys, length, index: 0, out: '', pending: '' });
+  };
+
+  open(root, rootPath);
+  while (stack.length > 0) {
+    const frame = stack[stack.length - 1];
+    if (frame === undefined) break;
+    if (frame.index >= frame.length) {
+      stack.pop();
+      ancestors.delete(frame.node);
+      emit(frame.keys === undefined ? `[${frame.out}]` : `{${frame.out}}`);
+      continue;
+    }
+    const i = frame.index;
+    frame.index += 1;
+    const { node, keys } = frame;
+    if (keys === undefined) {
+      const path = `${frame.path}[${i}]`;
+      const item = read(path, () => (node as unknown[])[i]);
+      if (item === undefined) emit('null');
+      else open(item, path);
+      continue;
+    }
+    const key = keys[i] ?? '';
+    const path = frame.path ? `${frame.path}.${key}` : key;
+    const member = read(path, () => (node as Record<string, unknown>)[key]);
+    if (member === undefined) continue;
+    if (hasLoneSurrogate(key)) fail(frame.path, 'a key with a lone UTF-16 surrogate');
+    frame.pending = key;
+    open(member, path);
+  }
+  if (result === undefined) return fail(rootPath, 'a value of type undefined');
+  return result;
+}
+
+/**
+ * The canonical text of a scalar or a `Date`; `undefined` for an array or an object (a
+ * container the walk opens). Throws `NON_SERIALIZABLE` for anything JSON cannot hold.
+ */
+function scalar(
+  value: unknown,
+  path: string,
+  read: <T>(path: string, fn: () => T) => T,
+): string | undefined {
   switch (typeof value) {
     case 'string':
       if (hasLoneSurrogate(value)) fail(path, 'a string with a lone UTF-16 surrogate');
@@ -70,48 +171,17 @@ function write(value: unknown, path: string, ancestors: Set<object>): string {
     case 'number':
       if (!Number.isFinite(value)) fail(path, String(value));
       return JSON.stringify(value);
-    case 'object':
+    case 'object': {
       if (value === null) return 'null';
-      return writeObject(value, path, ancestors);
+      const time = read(path, () => dateTimeOf(value));
+      if (time === undefined) return undefined;
+      if (Number.isNaN(time)) fail(path, 'an invalid Date');
+      return JSON.stringify(new Date(time).toISOString());
+    }
     default:
       // undefined, bigint, function, symbol
       return fail(path, `a value of type ${typeof value}`);
   }
-}
-
-function writeObject(value: object, path: string, ancestors: Set<object>): string {
-  const time = dateTimeOf(value);
-  if (time !== undefined) {
-    if (Number.isNaN(time)) fail(path, 'an invalid Date');
-    return JSON.stringify(new Date(time).toISOString());
-  }
-  if (ancestors.has(value)) fail(path, 'a circular reference');
-
-  ancestors.add(value);
-  let out: string;
-  if (Array.isArray(value)) {
-    const items: string[] = [];
-    for (let i = 0; i < value.length; i++) {
-      const item: unknown = value[i];
-      items.push(item === undefined ? 'null' : write(item, `${path}[${i}]`, ancestors));
-    }
-    out = `[${items.join(',')}]`;
-  } else {
-    if (!isPlainObject(value)) fail(path, `an instance of ${citeName(constructorName(value))}`);
-    const record = value as Record<string, unknown>;
-    const members: string[] = [];
-    for (const key of Object.keys(record).sort()) {
-      const member = record[key];
-      if (member === undefined) continue;
-      if (hasLoneSurrogate(key)) fail(path, 'a key with a lone UTF-16 surrogate');
-      members.push(
-        `${JSON.stringify(key)}:${write(member, path ? `${path}.${key}` : key, ancestors)}`,
-      );
-    }
-    out = `{${members.join(',')}}`;
-  }
-  ancestors.delete(value);
-  return out;
 }
 
 function constructorName(value: object): string {

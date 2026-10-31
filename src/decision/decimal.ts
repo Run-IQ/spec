@@ -49,7 +49,16 @@ export function toCanonicalDecimal(text: string): string {
 
 function describe(value: unknown): string {
   if (value === null) return 'null';
-  if (Array.isArray(value)) return 'an array';
+  if (isArray(value)) return 'an array';
   const type = typeof value;
   return type === 'undefined' ? 'undefined' : `${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type}`;
+}
+
+/** `Array.isArray`, false when it throws (a revoked Proxy). */
+function isArray(value: unknown): boolean {
+  try {
+    return Array.isArray(value);
+  } catch {
+    return false;
+  }
 }

@@ -1,7 +1,7 @@
 import type { JsonValue } from '../canonical.js';
-import { citeName, quoteText, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
-import { IssueList } from '../issues.js';
+import { IssueList, pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isPlainObject } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
@@ -160,6 +160,8 @@ export function validateOutputDeclaration(
   declaration: unknown,
   path = 'output',
 ): RuleValidationIssue[] {
+  const at: unknown = path;
+  if (typeof at !== 'string') return [pathArgumentIssue(at)];
   try {
     return declarationIssues(declaration, path);
   } catch (error) {
@@ -302,7 +304,8 @@ function checkEnumValues(
  * (`isCanonicalDecimal`: `"12.5"`, not `"12.50"`, `"-0"`, `"1e3"` nor the number `12.5`).
  */
 export function valueMatchesOutputType(value: JsonValue, declaration: OutputDeclaration): boolean {
-  switch (declaration.type) {
+  const { type, values } = readDeclaration(declaration);
+  switch (type) {
     case 'number':
       return typeof value === 'number' && Number.isFinite(value);
     case 'boolean':
@@ -310,13 +313,39 @@ export function valueMatchesOutputType(value: JsonValue, declaration: OutputDecl
     case 'string':
       return typeof value === 'string';
     case 'enum':
-      return typeof value === 'string' && (declaration.values ?? []).includes(value);
+      return typeof value === 'string' && values.includes(value);
     case 'list':
       return Array.isArray(value);
     case 'object':
       return typeof value === 'object' && value !== null && !Array.isArray(value);
     case 'decimal':
       return typeof value === 'string' && isCanonicalDecimal(value);
+  }
+}
+
+/**
+ * The `type` and the enum `values` of a declaration, read once. Throws `SpecError`
+ * (`INVALID_RULE`) for a declaration that is not an object, an unknown `type`, enum `values`
+ * that are not an array, or a declaration that cannot be read (a getter or a Proxy trap that
+ * throws): never a raw error.
+ */
+function readDeclaration(declaration: unknown): { type: OutputType; values: readonly unknown[] } {
+  if (typeof declaration !== 'object' || declaration === null) {
+    throw newSpecError('INVALID_RULE', 'an output declaration must be an object { type, … }');
+  }
+  try {
+    const { type, values } = declaration as { type?: unknown; values?: unknown };
+    if (!isOneOf(type, OUTPUT_TYPES)) {
+      throw newSpecError('INVALID_RULE', `output type must be one of ${OUTPUT_TYPES.join(', ')}`);
+    }
+    if (type !== 'enum' || values === undefined) return { type, values: [] };
+    if (!Array.isArray(values)) {
+      throw newSpecError('INVALID_RULE', 'the values of an enum output must be an array');
+    }
+    return { type, values: Array.from(values as readonly unknown[]) };
+  } catch (error) {
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_RULE', unreadableMessage('output declaration', error));
   }
 }
 

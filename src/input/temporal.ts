@@ -1,4 +1,5 @@
 import { citeName, unreadableMessage } from '../errors.js';
+import { pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
@@ -46,6 +47,8 @@ interface Span {
  * `validateProofInput` (at most 100 problems, then `further problems not listed (limit 100)`).
  */
 export function validateTemporalFact(value: unknown, path: string): RuleValidationIssue[] {
+  const at: unknown = path;
+  if (typeof at !== 'string') return [pathArgumentIssue(at)];
   return runCheck(
     (reader) => {
       readFact(value, path, reader);
