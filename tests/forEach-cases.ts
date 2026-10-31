@@ -321,6 +321,12 @@ export const REFUSED_FOR_EACH: [string, unknown, string, string][] = [
     'forEach.dimensions must not have an empty dimension name',
   ],
   [
+    'the dimension name "-"',
+    { path: '/lignes', key: 'id', dimensions: { '-': '/pays' } },
+    'forEach.dimensions',
+    'forEach.dimensions must not have a dimension name "-"',
+  ],
+  [
     'a dimension that is not a pointer',
     { path: '/lignes', key: 'id', dimensions: { pays: 'pays' } },
     'forEach.dimensions.pays',

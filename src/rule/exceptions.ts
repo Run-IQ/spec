@@ -5,8 +5,9 @@ import { isReservedName } from '../reserved.js';
 import { isPlainObject, typeName } from '../values.js';
 import {
   readDimensionSpec,
-  emptyDimensionNameMessage,
+  isUnnamable,
   reservedDimensionNameMessage,
+  unnamableNameMessage,
   sameDimensionSpec,
 } from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
@@ -544,8 +545,8 @@ function readDimensions(
   }
   const entries: [string, DimensionSpec][] = [];
   for (const key of Object.keys(value).sort()) {
-    if (key === '') {
-      fail(path, emptyDimensionNameMessage(path));
+    if (isUnnamable(key)) {
+      fail(path, unnamableNameMessage(path, 'dimension', key));
       continue;
     }
     if (isReservedName(key)) {

@@ -138,6 +138,8 @@ export const REFUSED_INPUTS: [string, Doc][] = [
   ['an empty tag', inputWith({ tags: ['', 'a'] })],
   ['an empty dimension name', inputWith({ dimensions: { '': 'FR' } })],
   ['an empty date name', inputWith({ dates: { '': '2026-01-01' } })],
+  ['the date name "-"', inputWith({ dates: { '-': '2026-01-01' } })],
+  ['the dimension name "-"', inputWith({ dimensions: { '-': 'FR' } })],
   ['a date name starting with $', inputWith({ dates: { $x: '2026-01-01' } })],
   ['an assertion on a reserved date name', assertionAt('/$dates/$x')],
   ['an assertion on an empty date name', assertionAt('/$dates/')],

@@ -7,9 +7,10 @@ import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import {
-  emptyDimensionNameMessage,
+  isUnnamable,
   readDimensionSpec,
   reservedDimensionNameMessage,
+  unnamableNameMessage,
 } from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
@@ -226,7 +227,7 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   const out: Record<string, DimensionSpec> = {};
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
-    if (key === '') invalidRule(emptyDimensionNameMessage('dimensions'));
+    if (isUnnamable(key)) invalidRule(unnamableNameMessage('dimensions', 'dimension', key));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
     if (v == null) continue; // null or undefined: the dimension is unset
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));

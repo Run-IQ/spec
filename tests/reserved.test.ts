@@ -74,6 +74,14 @@ describe('empty and reserved names in rules (ruling 9G round 2)', () => {
     }
   });
 
+  it('refuses "-" as a dimension name: no pointer can name it (review M2)', () => {
+    expectRuleRefused(
+      { ...BASE_RULE, dimensions: { '-': 'FR' } },
+      'dimensions',
+      'dimensions must not have a dimension name "-"',
+    );
+  });
+
   it('refuses an effectiveOn naming a date that starts with $', () => {
     expectRuleRefused(
       { ...BASE_RULE, effectiveOn: '/$dates/$x' },

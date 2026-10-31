@@ -2,8 +2,9 @@ import { unreadableMessage } from '../errors.js';
 import { reservedDateNameMessage } from '../reserved.js';
 import {
   dimensionValueProblem,
-  emptyDimensionNameMessage,
+  isUnnamable,
   reservedDimensionNameMessage,
+  unnamableNameMessage,
 } from '../rule/dimensions.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
@@ -14,13 +15,12 @@ import {
   checkText,
   childPointer,
   cite,
-  createReader,
   expectPlainObject,
-  InputTooLarge,
   ownKeys,
   readFields,
   readMember,
   requireFields,
+  runCheck,
   surrogateKeyMessage,
   walkJson,
 } from './read.js';
@@ -57,13 +57,18 @@ const PLAIN_OBJECT = 'a plain object';
  * of absolute value 2^53 or more (`number beyond 2^53 at /data/id`, D-5); a root key of `data`
  * starting with `$` is reserved (`reserved key /data/$x`, D-3). A dimension is a value or a
  * sorted list of at least two values. Tags, dimension names and date names are never empty;
- * dimension and date names never start with `$`. An assertion is keyed by a context pointer
- * (`assertionKeyProblem`), carries every required field, `source` with `method: 'decision'`
- * only, and `complete` only as `false` (a list is complete by default).
+ * dimension and date names are never `-` and never start with `$` (no pointer could name them).
+ * An assertion is keyed by a context pointer (`assertionKeyProblem`), carries every required
+ * field, `source` with `method: 'decision'` only, and `complete` only as `false` (a list is
+ * complete by default).
  *
- * Never throws. Each property is read once, even when several paths lead to one object. A
- * property that cannot be read (a getter or a Proxy trap that throws) gives `<pointer> could
- * not be read: <reason>`; nesting is walked without recursion, so no input overflows the stack.
+ * Never throws. Each property is read once, even when several paths lead to one object (an
+ * object holding a value cut too deep is read again from a shorter path). A property that
+ * cannot be read (a getter or a Proxy trap that throws) gives `<pointer> could not be read:
+ * <reason>`; nesting is walked without recursion, so no input overflows the stack. At most
+ * `MAX_INPUT_ISSUES` (100) problems are listed, in the order found, then one last issue
+ * `further problems not listed (limit 100)` (path `''`) and the check stops; a path longer
+ * than `MAX_ISSUE_PATH` (1024) code units is cut there and followed by `…`.
  */
 export function validateProofInput(value: unknown): RuleValidationIssue[] {
   return check(value).issues;
@@ -78,17 +83,12 @@ export function inputCheckReads(value: unknown): number {
 }
 
 function check(value: unknown): { issues: RuleValidationIssue[]; reads: number } {
-  const issues: RuleValidationIssue[] = [];
-  const reader = createReader((path, message) => {
-    issues.push({ path, message });
-  });
-  try {
-    readInput(value, reader);
-  } catch (error) {
-    if (error instanceof InputTooLarge) issues.push({ path: error.path, message: error.message });
-    else issues.push({ path: '', message: unreadableMessage('proof input', error) });
-  }
-  return { issues, reads: reader.reads };
+  return runCheck(
+    (reader) => {
+      readInput(value, reader);
+    },
+    (error) => ({ path: '', message: unreadableMessage('proof input', error) }),
+  );
 }
 
 function readInput(value: unknown, reader: Reader): void {
@@ -164,7 +164,7 @@ function eachMember(
 function readDates(value: unknown, reader: Reader): void {
   const path = '/meta/dates';
   eachMember(value, path, reader, (key, at, date) => {
-    if (key === '') reader.add(path, `${path} must not have an empty date name`);
+    if (isUnnamable(key)) reader.add(path, unnamableNameMessage(path, 'date', key));
     else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(cite(at)));
     else if (!isCivilDate(date) && !isInstant(date)) {
       reader.add(at, `${cite(at)} must be ${DATE_FORMS}`);
@@ -231,8 +231,8 @@ function readTags(value: unknown, reader: Reader): void {
 function readDimensions(value: unknown, reader: Reader): void {
   const path = '/meta/dimensions';
   eachMember(value, path, reader, (key, at, dimension) => {
-    if (key === '') {
-      reader.add(path, emptyDimensionNameMessage(path));
+    if (isUnnamable(key)) {
+      reader.add(path, unnamableNameMessage(path, 'dimension', key));
       return;
     }
     if (key.startsWith('$')) {

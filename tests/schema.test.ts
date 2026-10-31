@@ -156,6 +156,7 @@ const INVALID: [string, unknown][] = [
   ),
   ['a reserved dimension name (I1)', { ...base, dimensions: { $pays: 'FR' } }],
   ['an empty dimension name', { ...base, dimensions: { '': 'FR' } }],
+  ['the dimension name "-"', { ...base, dimensions: { '-': 'FR' } }],
   ['an empty tag', { ...base, tags: [''] }],
   ['effectiveOn on a date name starting with $', { ...base, effectiveOn: '/$dates/$x' }],
   ['a non-string tag', { ...base, tags: ['a', 1] }],

@@ -172,6 +172,11 @@ export function proofInput(
   };
 }
 
+/** `issues` sorted by path (UTF-16 code units), to compare problems whatever their order. */
+export function sortedByPath<T extends { path: string }>(issues: readonly T[]): T[] {
+  return [...issues].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));
+}
+
 /** A value whose deepest value is `levels` objects below it: `nested(1)` is `{ a: 1 }`. */
 export function nested(levels: number): unknown {
   let value: unknown = 1;

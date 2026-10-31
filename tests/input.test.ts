@@ -3,7 +3,7 @@ import { validateProofInput } from '../src/index.js';
 import { reservedDimensionNameMessage } from '../src/rule/dimensions.js';
 import { MAX_INPUT_DEPTH, MAX_INPUT_VALUES } from '../src/input/read.js';
 import { inputCheckReads } from '../src/input/validate.js';
-import { nested, proofInput } from './helpers.js';
+import { nested, proofInput, sortedByPath } from './helpers.js';
 
 const DATE_FORMS = 'a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS.sssZ';
 
@@ -119,6 +119,12 @@ describe('validateProofInput: named dates', () => {
     ]);
   });
 
+  it('refuses "-" as a date name: no pointer can name it (review M2)', () => {
+    expect(validateProofInput(proofInput({ dates: { '-': '2026-01-01' } }))).toEqual([
+      { path: '/meta/dates', message: '/meta/dates must not have a date name "-"' },
+    ]);
+  });
+
   it('refuses a date name with a lone surrogate, naming its object', () => {
     expect(validateProofInput(proofInput({ dates: { 'd\uD800': '2026-01-01' } }))).toEqual([
       {
@@ -223,6 +229,12 @@ describe('validateProofInput: dimensions', () => {
         path: '/meta/dimensions',
         message: '/meta/dimensions must not have an empty dimension name',
       },
+    ]);
+  });
+
+  it('refuses "-" as a dimension name (review M2)', () => {
+    expect(dimensionIssues({ '-': 'FR' })).toEqual([
+      { path: '/meta/dimensions', message: '/meta/dimensions must not have a dimension name "-"' },
     ]);
   });
 
@@ -403,7 +415,10 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     );
     const path = `/data${'/a'.repeat(MAX_INPUT_DEPTH)}`;
     expect(validateProofInput(proofInput({}, { a: nested(MAX_INPUT_DEPTH) as never }))).toEqual([
-      { path, message: `${path.slice(0, 100)}… nests values more than 1000 levels deep` },
+      {
+        path: `${path.slice(0, 1024)}…`,
+        message: `${path.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
     ]);
   });
 
@@ -412,7 +427,10 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     for (let i = 0; i < 10_000; i++) list = [list];
     const path = `/meta/context/l${'/0'.repeat(MAX_INPUT_DEPTH - 1)}`;
     expect(validateProofInput(proofInput({ context: { l: list as never } }))).toEqual([
-      { path, message: `${path.slice(0, 100)}… nests values more than 1000 levels deep` },
+      {
+        path: `${path.slice(0, 1024)}…`,
+        message: `${path.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
     ]);
   });
 
@@ -441,7 +459,116 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     expect(
       validateProofInput(proofInput({}, { first: shared as never, deep: deep as never })),
     ).toEqual([
-      { path, message: `${path.slice(0, 100)}… nests values more than 1000 levels deep` },
+      {
+        path: `${path.slice(0, 1024)}…`,
+        message: `${path.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
+    ]);
+  });
+
+  /** Asserts the issues of a check that hit the cap: 100 listed, then the final notice. */
+  const expectCapped = (issues: { path: string; message: string }[]): void => {
+    expect(issues).toHaveLength(101);
+    expect(issues[100]).toEqual({ path: '', message: 'further problems not listed (limit 100)' });
+    expect(issues.every((issue) => issue.path.length <= 1025)).toBe(true);
+    expect(issues.every((issue) => issue.message.length <= 300)).toBe(true);
+  };
+
+  it('stops at 100 problems: 2 000 000 lists one level too deep (review I1)', () => {
+    const value = JSON.parse(
+      `{"x":${'{"a":'.repeat(998)}[${Array(2_000_000).fill('[1]').join(',')}]${'}'.repeat(998)}}`,
+    ) as Record<string, never>;
+    const issues = validateProofInput(proofInput({}, value));
+    expectCapped(issues);
+    const list = `/data/x${'/a'.repeat(998)}`;
+    expect(issues[0]).toEqual({
+      path: `${`${list}/0`.slice(0, 1024)}…`,
+      message: `${list.slice(0, 100)}… nests values more than 1000 levels deep`,
+    });
+  });
+
+  it('stops at 100 problems: 200 000 numbers beyond 2^53 at depth 999 (review I1)', () => {
+    const value = JSON.parse(
+      `{"x":${'{"a":'.repeat(998)}[${Array(200_000)
+        .fill(2 ** 53)
+        .join(',')}]${'}'.repeat(998)}}`,
+    ) as Record<string, never>;
+    expectCapped(validateProofInput(proofInput({}, value)));
+  });
+
+  it('stops at 100 problems on a Proxy that makes a new object at each read (review I1)', () => {
+    let reads = 0;
+    const target = {};
+    const handler: ProxyHandler<object> = {
+      ownKeys: () => ['a', 'b', 'c'],
+      getOwnPropertyDescriptor: () => ({ value: 1, enumerable: true, configurable: true }),
+      getPrototypeOf: () => Object.prototype,
+      get: () => {
+        reads += 1;
+        return new Proxy(target, handler);
+      },
+    };
+    expectCapped(validateProofInput(proofInput({}, { t: new Proxy(target, handler) as never })));
+    expect(reads).toBeLessThan(2000);
+  });
+
+  it('reports every problem of a shared value, whichever path reaches it first (review M3)', () => {
+    const shared = { n: 2 ** 53, s: 'x\uD800' };
+    let chain: unknown = shared;
+    for (let i = 0; i < MAX_INPUT_DEPTH - 1; i++) chain = { a: chain };
+    const deep = `/data/a${'/a'.repeat(MAX_INPUT_DEPTH - 1)}`;
+    const expected = [
+      {
+        path: `${deep.slice(0, 1024)}…`,
+        message: `${deep.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
+      { path: '/data/b/n', message: 'number beyond 2^53 at /data/b/n' },
+      { path: '/data/b/s', message: '/data/b/s contains a lone UTF-16 surrogate' },
+    ];
+    const deepFirst = validateProofInput(proofInput({}, { a: chain as never, b: shared }));
+    const shallowFirst = validateProofInput(proofInput({}, { b: shared, a: chain as never }));
+    expect(sortedByPath(deepFirst)).toEqual(expected);
+    expect(sortedByPath(shallowFirst)).toEqual(expected);
+  });
+
+  it('walks again an object holding a cut value when a shorter path reaches it (review M3)', () => {
+    let middle: unknown = { n: 2 ** 53 };
+    for (let i = 0; i < 9; i++) middle = { a: middle };
+    let chain: unknown = middle;
+    for (let i = 0; i < 990; i++) chain = { a: chain };
+    const short = `/data/b${'/a'.repeat(9)}/n`;
+    const deep = `/data/a${'/a'.repeat(999)}`;
+    const expected = [
+      {
+        path: `${deep.slice(0, 1024)}…`,
+        message: `${deep.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
+      { path: short, message: `number beyond 2^53 at ${short}` },
+    ];
+    for (const data of [
+      { a: chain as never, b: middle as never },
+      { b: middle as never, a: chain as never },
+    ]) {
+      expect(sortedByPath(validateProofInput(proofInput({}, data)))).toEqual(expected);
+    }
+  });
+
+  it('checks the keys of data reserved at its root when meta.context shares the object', () => {
+    const shared = { $x: 2 ** 53 };
+    expect(validateProofInput(proofInput({ context: shared }, shared as never))).toEqual([
+      { path: '/data/$x', message: 'reserved key /data/$x' },
+      { path: '/meta/context/$x', message: 'number beyond 2^53 at /meta/context/$x' },
+    ]);
+  });
+
+  it('cuts a path longer than 1024 code units between two code points', () => {
+    const key = `${'x'.repeat(1017)}\u{1F600}`;
+    const path = `/data/${key}`;
+    expect(validateProofInput(proofInput({}, { [key]: 2 ** 53 }))).toEqual([
+      {
+        path: `/data/${'x'.repeat(1017)}…`,
+        message: `number beyond 2^53 at ${path.slice(0, 100)}…`,
+      },
     ]);
   });
 

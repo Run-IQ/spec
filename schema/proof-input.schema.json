@@ -35,13 +35,13 @@
           "minLength": 1
         },
         "dates": {
-          "description": "The named dates (a name is non-empty and never starts with $, which is reserved); effective is the reference date of the decision. Each is a civil date or a canonical instant, never an offset (the caller normalizes first).",
+          "description": "The named dates (a name is non-empty, is not - and never starts with $, which is reserved); effective is the reference date of the decision. Each is a civil date or a canonical instant, never an offset (the caller normalizes first).",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/date"
           },
           "propertyNames": {
-            "pattern": "^(?!\\$)",
+            "pattern": "^(?!\\$|-$)",
             "minLength": 1
           }
         },
@@ -55,10 +55,10 @@
           }
         },
         "dimensions": {
-          "description": "A value, or a list of at least two values sorted without duplicates (sorting checked by validateProofInput only); a single value is written as a string. Names are non-empty; names starting with $ are reserved.",
+          "description": "A value, or a list of at least two values sorted without duplicates (sorting checked by validateProofInput only); a single value is written as a string. Names are non-empty and not -; names starting with $ are reserved.",
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)",
+            "pattern": "^(?!\\$|-$)",
             "minLength": 1
           },
           "additionalProperties": {

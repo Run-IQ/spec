@@ -16,7 +16,7 @@ describe('validateTemporalFact', () => {
     expect(check(SALARY)).toEqual([]);
   });
 
-  it('accepts a gap between periods, an empty list and any JSON value', () => {
+  it('accepts a gap between periods and any JSON value', () => {
     expect(
       check([
         { from: '2026-01-01', until: '2026-01-10', value: { base: 3000, primes: [100] } },
@@ -24,7 +24,6 @@ describe('validateTemporalFact', () => {
         { from: '2026-03-01', until: null, value: true },
       ]),
     ).toEqual([]);
-    expect(check([])).toEqual([]);
   });
 
   it('refuses adjacent periods with the same value: one meaning, one written form', () => {
@@ -40,6 +39,53 @@ describe('validateTemporalFact', () => {
         { from: '2026-01-15', until: '2026-02-01', value: '3000' },
       ]),
     ).toEqual([{ path: '/salaire/1', message: MERGE }]);
+  });
+
+  it('refuses an empty history: one written form for "no value at any date"', () => {
+    expect(check([])).toEqual([
+      {
+        path: '/salaire',
+        message: '/salaire is empty: omit the fact: an empty history says nothing',
+      },
+    ]);
+  });
+
+  it('never merges values that have a problem (M4)', () => {
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: { '\ud800': 1 } },
+        { from: '2026-01-15', until: null, value: { '\ud801': 2 } },
+      ]),
+    ).toEqual([
+      {
+        path: '/salaire/0/value',
+        message: '/salaire/0/value has a key with a lone UTF-16 surrogate: "\\ud800"',
+      },
+      {
+        path: '/salaire/1/value',
+        message: '/salaire/1/value has a key with a lone UTF-16 surrogate: "\\ud801"',
+      },
+    ]);
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: 2 ** 53 },
+        { from: '2026-01-15', until: null, value: 2 ** 53 },
+      ]),
+    ).toEqual([
+      { path: '/salaire/0/value', message: 'number beyond 2^53 at /salaire/0/value' },
+      { path: '/salaire/1/value', message: 'number beyond 2^53 at /salaire/1/value' },
+    ]);
+  });
+
+  it('lists at most 100 problems, then says more were not listed', () => {
+    const periods = Array.from({ length: 500 }, () => ({ from: 'x', until: null, value: 1 }));
+    const issues = check(periods) as { path: string; message: string }[];
+    expect(issues).toHaveLength(101);
+    expect(issues[99]).toEqual({
+      path: '/salaire/99/from',
+      message: '/salaire/99/from must be a civil date YYYY-MM-DD',
+    });
+    expect(issues[100]).toEqual({ path: '', message: 'further problems not listed (limit 100)' });
   });
 
   it('accepts the same value after a gap, and adjacent periods with different values', () => {
@@ -217,7 +263,10 @@ describe('validateTemporalFact', () => {
     const deep = check([{ from: '2026-01-01', until: null, value: nested(10_000) }]);
     const path = `/salaire/0/value${'/a'.repeat(1000)}`;
     expect(deep).toEqual([
-      { path, message: `${path.slice(0, 100)}… nests values more than 1000 levels deep` },
+      {
+        path: `${path.slice(0, 1024)}…`,
+        message: `${path.slice(0, 100)}… nests values more than 1000 levels deep`,
+      },
     ]);
   });
 

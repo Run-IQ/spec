@@ -7,9 +7,10 @@ import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import {
-  emptyDimensionNameMessage,
+  isUnnamable,
   readDimensionSpec,
   reservedDimensionNameMessage,
+  unnamableNameMessage,
 } from './dimensions.js';
 import { exceptionModelIssues, normalizedOutput, readRuleExceptions } from './exceptions.js';
 import { readForEach } from './forEach.js';
@@ -269,8 +270,8 @@ function checkDimensions(value: unknown, errors: Issues): void {
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
-    if (key === '') {
-      errors.add('dimensions', emptyDimensionNameMessage('dimensions'));
+    if (isUnnamable(key)) {
+      errors.add('dimensions', unnamableNameMessage('dimensions', 'dimension', key));
       continue;
     }
     if (isReservedName(key)) {

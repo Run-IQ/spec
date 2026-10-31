@@ -1,21 +1,19 @@
 import { canonicalize } from '../canonical.js';
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import { parsePointer } from '../path/pointer.js';
+import { parsePointer, parseReadPointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { isSubject } from '../path/subject.js';
 import { citedNameProblem } from '../rule/ruleSet.js';
-import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
 import {
   checkText,
   childPointer,
   cite,
-  createReader,
   expectPlainObject,
-  InputTooLarge,
   readFields,
   requireFields,
+  runCheck,
 } from './read.js';
 import type { Add, Reader } from './read.js';
 import { ASSERTION_METHODS, ASSERTION_STATUSES } from './types.js';
@@ -49,7 +47,8 @@ export const DATE_FORMS = 'a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:M
  *
  * Only own keys count. `assertions` is expected valid (`validateProofInput`): a key that is not
  * a pointer never covers anything. Throws `SpecError` (`INVALID_PATH`) when `pointer` is not a
- * JSON pointer, and `SpecError` (`INVALID_INPUT`, `assertions could not be read: …`) when
+ * JSON pointer or holds a `-` segment (as an assertion key cannot: it names nothing), and
+ * `SpecError` (`INVALID_INPUT`, `assertions could not be read: …`) when
  * `assertions` cannot be read (a getter or a Proxy trap that throws), never a raw error. Reads
  * at most one assertion; costs one lookup per segment of `pointer`.
  */
@@ -57,7 +56,7 @@ export function governingAssertion(
   assertions: Readonly<Record<JsonPointer, FactAssertion>>,
   pointer: JsonPointer,
 ): { pointer: JsonPointer; assertion: FactAssertion } | undefined {
-  const segments = parsePointer(pointer);
+  const segments = parseReadPointer(pointer);
   const prefixes: string[] = [''];
   for (const segment of segments) {
     prefixes.push(childPointer(prefixes[prefixes.length - 1] ?? '', segment));
@@ -106,18 +105,13 @@ function guarded<T>(subject: string, read: () => T): T {
  * first problem (`invalid assertion: /method must be one of …`), never a raw error.
  */
 export function computeAssertionDigest(assertion: FactAssertion): string {
-  const issues: RuleValidationIssue[] = [];
-  const reader = createReader((path, message) => {
-    issues.push({ path, message });
-  });
   let snapshot: FactAssertion | undefined;
-  try {
-    snapshot = readAssertion(assertion, '', reader);
-  } catch (error) {
-    const message =
-      error instanceof InputTooLarge ? error.message : unreadableMessage('assertion', error);
-    issues.push({ path: '', message });
-  }
+  const { issues } = runCheck(
+    (reader) => {
+      snapshot = readAssertion(assertion, '', reader);
+    },
+    (error) => ({ path: '', message: unreadableMessage('assertion', error) }),
+  );
   const [first] = issues;
   if (first !== undefined || snapshot === undefined) {
     throw new SpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
@@ -173,7 +167,7 @@ export function readAssertion(
   const shape =
     'an assertion { by, method, at, status, basis?, evidenceDigest?, confidence?, complete?, ' +
     'source? }';
-  if (!expectPlainObject(value, path, shape, add)) return undefined;
+  if (!expectPlainObject(value, path, shape, add, label)) return undefined;
   const fields = readFields(value, path, label, ASSERTION_KEYS, reader, { add });
   if (fields === undefined || fields.failed.size > 0) valid = false;
   if (fields === undefined) return undefined;

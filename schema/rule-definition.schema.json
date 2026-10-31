@@ -133,7 +133,7 @@
         {
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)",
+            "pattern": "^(?!\\$|-$)",
             "minLength": 1
           },
           "additionalProperties": {
@@ -490,7 +490,7 @@
         "dimensions": {
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)",
+            "pattern": "^(?!\\$|-$)",
             "minLength": 1
           },
           "additionalProperties": {
@@ -717,10 +717,10 @@
               }
             },
             "dimensions": {
-              "description": "Dimensions read per element: a name (not starting with $) to a pointer into the element. {} means absent.",
+              "description": "Dimensions read per element: a name (not starting with $, not -) to a pointer into the element. {} means absent.",
               "type": "object",
               "propertyNames": {
-                "pattern": "^[^$]"
+                "pattern": "^(?!-$)[^$]"
               },
               "additionalProperties": {
                 "$ref": "#/$defs/elementPointer"

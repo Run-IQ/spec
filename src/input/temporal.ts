@@ -6,12 +6,11 @@ import {
   announce,
   childPointer,
   cite,
-  createReader,
   expectPlainObject,
-  InputTooLarge,
   readFields,
   readMember,
   requireFields,
+  runCheck,
   walkJson,
 } from './read.js';
 import type { Reader } from './read.js';
@@ -40,23 +39,21 @@ interface Span {
  * that starts before an earlier one ends is refused (`overlap at /salaire/1`); a gap between
  * periods is allowed (no value then). A period that starts the day the previous one ends with
  * the same value (same canonical form) is refused (`merge adjacent periods with the same value
- * at /salaire/1`): one meaning, one written form. An empty list is a fact with no value at any
- * date.
+ * at /salaire/1`): one meaning, one written form. An empty list is refused (`/salaire is empty:
+ * omit the fact: an empty history says nothing`): a fact with no value at any date is written by
+ * leaving it out.
  *
- * Never throws; each property is read once; the work is bounded as in `validateProofInput`.
+ * Never throws; each property is read once; the work and the list of issues are bounded as in
+ * `validateProofInput`.
  */
 export function validateTemporalFact(value: unknown, path: string): RuleValidationIssue[] {
-  const issues: RuleValidationIssue[] = [];
-  const reader = createReader((at, message) => {
-    issues.push({ path: at, message });
-  }, true);
-  try {
-    readFact(value, path, reader);
-  } catch (error) {
-    if (error instanceof InputTooLarge) issues.push({ path: error.path, message: error.message });
-    else issues.push({ path, message: unreadableMessage(cite(path), error) });
-  }
-  return issues;
+  return runCheck(
+    (reader) => {
+      readFact(value, path, reader);
+    },
+    (error) => ({ path, message: unreadableMessage(cite(path), error) }),
+    true,
+  ).issues;
 }
 
 function readFact(value: unknown, path: string, reader: Reader): void {
@@ -80,6 +77,10 @@ function readFact(value: unknown, path: string, reader: Reader): void {
     length < 0
   ) {
     add(path, `${cite(path)} must be a list of periods { from, until, value }`);
+    return;
+  }
+  if (length === 0) {
+    add(path, `${cite(path)} is empty: omit the fact: an empty history says nothing`);
     return;
   }
   announce(reader, length, path);

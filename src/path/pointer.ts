@@ -118,13 +118,23 @@ const INPUT_VARIABLES: Readonly<Record<string, string>> = {
  * segment (`'-' is not an index`).
  */
 export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undefined {
-  const segments = parsePointer(pointer);
-  if (segments.includes('-')) invalidPointer(pointer, "'-' is not an index");
+  const segments = parseReadPointer(pointer);
   const [head, ...rest] = segments;
   if (head === undefined) return undefined;
   if (!head.startsWith('$')) return formatPointer(['data', ...segments]);
   const field = Object.hasOwn(INPUT_VARIABLES, head) ? INPUT_VARIABLES[head] : undefined;
   return field === undefined ? undefined : formatPointer(['meta', field, ...rest]);
+}
+
+/**
+ * Internal: the segments of `pointer` as a read takes them: `parsePointer`, and a `-` segment
+ * (RFC 6901's "past the end", which names nothing to read) refused with `SpecError`
+ * (`INVALID_PATH`, `'-' is not an index`).
+ */
+export function parseReadPointer(pointer: JsonPointer): string[] {
+  const segments = parsePointer(pointer);
+  if (segments.includes('-')) invalidPointer(pointer, "'-' is not an index");
+  return segments;
 }
 
 function invalidPointer(pointer: string, why: string): never {

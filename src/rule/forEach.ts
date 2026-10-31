@@ -4,7 +4,7 @@ import { comparePointers, parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import { typeName } from '../values.js';
-import { emptyDimensionNameMessage, reservedDimensionNameMessage } from './dimensions.js';
+import { isUnnamable, reservedDimensionNameMessage, unnamableNameMessage } from './dimensions.js';
 
 /** The types an order key compares its values as (`OrderKey`). */
 export type OrderKeyType = 'number' | 'decimal' | 'date' | 'dateTime' | 'string';
@@ -288,8 +288,8 @@ function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer
   const names = Object.keys(value).sort();
   for (const name of names) {
     const here = `${at}.${name}`;
-    if (name === '') {
-      fail(at, emptyDimensionNameMessage(at));
+    if (isUnnamable(name)) {
+      fail(at, unnamableNameMessage(at, 'dimension', name));
     } else if (isReservedName(name)) {
       fail(here, reservedDimensionNameMessage(here));
     } else {

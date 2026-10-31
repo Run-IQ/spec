@@ -372,6 +372,13 @@ describe('governingAssertion', () => {
     });
   });
 
+  it('throws INVALID_PATH for a "-" segment, as assertion keys refuse it (review M6)', () => {
+    expect(specError(() => governingAssertion(assertions, '/societe/-'))).toMatchObject({
+      code: 'INVALID_PATH',
+      message: 'invalid JSON pointer "/societe/-": \'-\' is not an index',
+    });
+  });
+
   it('throws INVALID_PATH for a pointer that is not one', () => {
     expect(specError(() => governingAssertion(assertions, 'societe'))).toMatchObject({
       code: 'INVALID_PATH',
@@ -479,6 +486,15 @@ describe('computeAssertionDigest', () => {
     expect(specError(() => computeAssertionDigest(invalid))).toMatchObject({
       code: 'INVALID_INPUT',
       message: `invalid assertion: /method must be one of ${METHODS.join(', ')}`,
+    });
+  });
+
+  it('names the assertion when it is not an object (review M5)', () => {
+    expect(specError(() => computeAssertionDigest('x' as never))).toMatchObject({
+      code: 'INVALID_INPUT',
+      message:
+        'invalid assertion: assertion must be an assertion { by, method, at, status, basis?, ' +
+        'evidenceDigest?, confidence?, complete?, source? }',
     });
   });
 

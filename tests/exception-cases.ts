@@ -10,6 +10,12 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'exceptions[0].targets.tags[1] must be a non-empty string',
   ],
   [
+    'a selector with the dimension name "-"',
+    [{ kind: 'inhibit', targets: { dimensions: { '-': 'FR' } } }],
+    'exceptions[0].targets.dimensions',
+    'exceptions[0].targets.dimensions must not have a dimension name "-"',
+  ],
+  [
     'a selector with an empty dimension name',
     [{ kind: 'inhibit', targets: { dimensions: { '': 'FR' } } }],
     'exceptions[0].targets.dimensions',

@@ -238,12 +238,22 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
- * Internal: the message refusing an empty dimension name in the object at `path` (rule
- * `dimensions`, selector `dimensions`, `forEach.dimensions`, input `meta.dimensions`): no
- * reference can name it (ruling 9G round 2).
+ * Internal: whether `name` is one no reference can name: `''` (`/$dimensions/` names the
+ * object) or `-` (a JSON pointer's past-the-end segment). Refused as a dimension name and
+ * as a date name (ruling 9G rounds 2 and 3).
  */
-export function emptyDimensionNameMessage(path: string): string {
-  return `${path} must not have an empty dimension name`;
+export function isUnnamable(name: string): boolean {
+  return name === '' || name === '-';
+}
+
+/**
+ * Internal: the message refusing the unnamable name `name` (see {@link isUnnamable}) of a
+ * `kind` (`dimension` or `date`) in the object at `path`.
+ */
+export function unnamableNameMessage(path: string, kind: string, name: string): string {
+  return name === ''
+    ? `${path} must not have an empty ${kind} name`
+    : `${path} must not have a ${kind} name "${name}"`;
 }
 
 /**

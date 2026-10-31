@@ -1,5 +1,6 @@
 import { escapeText, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
+import type { RuleValidationIssue } from '../rule/validate.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
 /**
@@ -23,10 +24,25 @@ export const MAX_INPUT_DEPTH = 1000;
  */
 export const MAX_INPUT_VALUES = 10_000_000;
 
+/**
+ * The most problems one check lists: past it, one last issue says that further problems were
+ * not listed, and the check stops. So a hostile input never makes a huge list of issues.
+ */
+export const MAX_INPUT_ISSUES = 100;
+
+/**
+ * The longest path an issue gives, in UTF-16 code units: a longer one is cut there (between
+ * two code points) and followed by `…`, so 1000 levels of long keys never make a huge path.
+ */
+export const MAX_ISSUE_PATH = 1024;
+
 export type Add = (path: string, message: string) => void;
 
+/** Stops a check once `MAX_INPUT_ISSUES` problems are listed (the last issue says so). */
+class IssueLimitReached {}
+
 /** Stops a check as soon as the budget of `MAX_INPUT_VALUES` reads is spent. */
-export class InputTooLarge {
+class InputTooLarge {
   readonly message: string;
   constructor(
     readonly path: string,
@@ -38,28 +54,90 @@ export class InputTooLarge {
 
 /** Internal: the state of one check: where issues go, and the reads counted so far. */
 export interface Reader {
+  /** Lists a problem; past `MAX_INPUT_ISSUES`, stops the check (`runCheck`). */
   readonly add: Add;
+  /** The problems listed so far: a value without new problem under it has an encoding. */
+  readonly issues: RuleValidationIssue[];
+  /** The problems of depth listed so far: they depend on the path, not on the value. */
+  depthIssues: number;
   reads: number;
   readonly maxValues: number;
   readonly maxDepth: number;
-  /** Each object walked: `open` while its members are read, then its height (`walkJson`). */
+  /**
+   * Each object walked: `open` while its members are read, then its height (`walkJson`). An
+   * object with a part left unread (cut too deep) is not kept: a shorter path walks it again.
+   */
   readonly heights: Map<object, number | 'open'>;
   /**
-   * When set, `walkJson` also gives each value its encoding (`valueEncoding`), kept here per
-   * object so that a value shared by many paths is encoded once.
+   * When set, `walkJson` also encodes each value (`containerEncoding`), kept here per object so
+   * that a value shared by many paths is encoded once: `undefined` when the value has a problem
+   * of its own (a problem of depth depends on the path, so it does not count here).
    */
   readonly encodings?: Map<object, string | undefined>;
 }
 
-export function createReader(add: Add, encode = false): Reader {
+/** `path` cut to `MAX_ISSUE_PATH` code units, never inside a surrogate pair, then `…`. */
+function issuePath(path: string): string {
+  if (path.length <= MAX_ISSUE_PATH) return path;
+  const last = path.charCodeAt(MAX_ISSUE_PATH - 1);
+  const splitsPair = last >= 0xd800 && last <= 0xdbff;
+  return `${path.slice(0, splitsPair ? MAX_ISSUE_PATH - 1 : MAX_ISSUE_PATH)}…`;
+}
+
+/**
+ * Lists the problem `message` at `path` in `issues`, unless `MAX_INPUT_ISSUES` are listed:
+ * then lists the last issue (further problems not listed) and returns false.
+ */
+function listIssue(issues: RuleValidationIssue[], path: string, message: string): boolean {
+  if (issues.length >= MAX_INPUT_ISSUES) {
+    issues.push({ path: '', message: `further problems not listed (limit ${MAX_INPUT_ISSUES})` });
+    return false;
+  }
+  issues.push({ path: issuePath(path), message });
+  return true;
+}
+
+function createReader(encode: boolean): Reader {
+  const issues: RuleValidationIssue[] = [];
   const reader: Reader = {
-    add,
+    add: (path, message) => {
+      if (!listIssue(issues, path, message)) throw new IssueLimitReached();
+    },
+    issues,
+    depthIssues: 0,
     reads: 0,
     maxValues: MAX_INPUT_VALUES,
     maxDepth: MAX_INPUT_DEPTH,
     heights: new Map(),
   };
   return encode ? { ...reader, encodings: new Map() } : reader;
+}
+
+/**
+ * Internal: runs one check with a fresh reader and returns the problems it listed, in the order
+ * found, at most `MAX_INPUT_ISSUES` and a last one saying that further problems were not listed,
+ * and the reads it made. Never throws: past the read budget the check stops with
+ * `input too large`; any other error (a Proxy trap outside a guarded read) is reported by
+ * `unreadable` (its path and message). With `encode`, `walkJson` encodes values.
+ */
+export function runCheck(
+  check: (reader: Reader) => void,
+  unreadable: (error: unknown) => RuleValidationIssue,
+  encode = false,
+): { issues: RuleValidationIssue[]; reads: number } {
+  const reader = createReader(encode);
+  try {
+    check(reader);
+  } catch (error) {
+    if (!(error instanceof IssueLimitReached)) {
+      const issue =
+        error instanceof InputTooLarge
+          ? { path: error.path, message: error.message }
+          : unreadable(error);
+      listIssue(reader.issues, issue.path, issue.message);
+    }
+  }
+  return { issues: reader.issues, reads: reader.reads };
 }
 
 /** Counts `n` reads about to happen at `path`; throws `InputTooLarge` past the budget. */
@@ -84,22 +162,24 @@ export function surrogateKeyMessage(path: string, key: string): string {
 }
 
 /**
- * True when `value` is a plain object; otherwise reports `<path> must be <shape>`, or why it
- * could not be inspected (a revoked Proxy, a trap that throws), and returns false.
+ * True when `value` is a plain object; otherwise reports at `path` `<label> must be <shape>`, or
+ * why it could not be inspected (a revoked Proxy, a trap that throws), and returns false. The
+ * message names `label`, `path` by default.
  */
 export function expectPlainObject(
   value: unknown,
   path: string,
   shape: string,
   add: Add,
+  label = path,
 ): value is Record<string, unknown> {
   try {
     if (isPlainObject(value)) return true;
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(cite(label), error));
     return false;
   }
-  add(path, `${cite(path)} must be ${shape}`);
+  add(path, `${cite(label)} must be ${shape}`);
   return false;
 }
 
@@ -216,9 +296,24 @@ interface Frame {
   readonly length: number;
   index: number;
   height: number;
+  /** True when a part was left unread (cut too deep, or a reserved root key). */
+  cut: boolean;
+  /** The problems of the value itself listed before it was opened (`contentIssues`). */
+  readonly contentBefore: number;
   /** The key being read, and the encodings of the members read (with `reader.encodings`). */
   pending: string | number;
   readonly parts: [string | number, string | undefined][];
+}
+
+/** The problems listed so far that do not depend on the path (all but those of depth). */
+function contentIssues(reader: Reader): number {
+  return reader.issues.length - reader.depthIssues;
+}
+
+/** What `openValue` found: an object already walked, or one cut too deep. */
+interface Closed {
+  readonly height: number;
+  readonly cut: boolean;
 }
 
 /**
@@ -230,10 +325,13 @@ interface Frame {
  *
  * Iterative (an explicit stack), so no nesting overflows the call stack. Each object is read
  * once, even when several paths lead to it: its height is kept, and a later path only checks
- * that the height still fits under `MAX_INPUT_DEPTH` there. Every member read is counted
- * (`announce`) before it happens.
+ * that the height still fits under `MAX_INPUT_DEPTH` there. A value too deep is reported once
+ * at its path and its members are not read; an object holding it is not kept, so a shorter
+ * path reads it again and every problem is found whatever the order of keys. Every member read
+ * is counted (`announce`) before it happens.
  *
- * With `reader.encodings`, returns the encoding of `root` (`valueEncoding`), else `undefined`.
+ * With `reader.encodings`, returns the encoding of `root` (`containerEncoding`) when no problem
+ * was found under it, else `undefined`.
  */
 export function walkJson(
   root: unknown,
@@ -242,25 +340,31 @@ export function walkJson(
   reservedRoot = false,
 ): string | undefined {
   const stack: Frame[] = [];
+  const issuesBefore = reader.issues.length;
   let rootEncoding: string | undefined;
-  const settle = (height: number, encoding: string | undefined): void => {
+  const settle = (height: number, encoding: string | undefined, cut: boolean): void => {
     const parent = stack[stack.length - 1];
     if (parent === undefined) {
       rootEncoding = encoding;
       return;
     }
     parent.height = Math.max(parent.height, height + 1);
+    if (cut) parent.cut = true;
     if (reader.encodings !== undefined) parent.parts.push([parent.pending, encoding]);
   };
   const visit = (value: unknown, at: string, depth: number, isRoot: boolean): void => {
-    const frame = openValue(value, at, depth, reader, isRoot && reservedRoot);
-    if (frame === undefined) settle(0, scalarEncoding(value));
-    else if (typeof frame === 'number') {
-      settle(
-        frame,
-        typeof value === 'object' && value !== null ? reader.encodings?.get(value) : undefined,
-      );
-    } else stack.push(frame);
+    const contentBefore = contentIssues(reader);
+    const opened = openValue(value, at, depth, reader, isRoot && reservedRoot);
+    if (opened === undefined) {
+      const clean = contentIssues(reader) === contentBefore;
+      settle(0, clean ? scalarEncoding(value) : undefined, false);
+    } else if (!('node' in opened)) {
+      const cached =
+        opened.cut || typeof value !== 'object' || value === null
+          ? undefined
+          : reader.encodings?.get(value);
+      settle(opened.height, cached, opened.cut);
+    } else stack.push(opened);
   };
   visit(root, path, 0, true);
   while (stack.length > 0) {
@@ -268,10 +372,15 @@ export function walkJson(
     if (frame === undefined) break;
     if (frame.index >= frame.length) {
       stack.pop();
-      reader.heights.set(frame.node, frame.height);
-      const encoding = reader.encodings === undefined ? undefined : containerEncoding(frame);
-      reader.encodings?.set(frame.node, encoding);
-      settle(frame.height, encoding);
+      const clean = !frame.cut && contentIssues(reader) === frame.contentBefore;
+      const encoding =
+        reader.encodings !== undefined && clean ? containerEncoding(frame) : undefined;
+      if (frame.cut) reader.heights.delete(frame.node);
+      else {
+        reader.heights.set(frame.node, frame.height);
+        reader.encodings?.set(frame.node, encoding);
+      }
+      settle(frame.height, encoding, frame.cut);
       continue;
     }
     const i = frame.index;
@@ -281,10 +390,11 @@ export function walkJson(
     frame.pending = key;
     const at = typeof key === 'number' ? `${frame.path}/${key}` : childPointer(frame.path, key);
     const read = readMember(frame.node, key, at, reader.add);
-    if (read === 'failed') settle(0, undefined);
+    if (read === 'failed') settle(0, undefined, false);
     else visit(read.value, at, frame.depth + 1, false);
   }
-  return reader.encodings === undefined ? undefined : rootEncoding;
+  if (reader.encodings === undefined || reader.issues.length !== issuesBefore) return undefined;
+  return rootEncoding;
 }
 
 /**
@@ -326,7 +436,8 @@ function containerEncoding(frame: Frame): string | undefined {
 
 /**
  * Checks one value: a scalar is checked at once (`undefined` returned); an object already walked
- * gives its height; any other object or list gives the frame that reads its members.
+ * gives its height, and one too deep is reported and cut (`Closed`); any other object or list
+ * gives the frame that reads its members.
  */
 function openValue(
   value: unknown,
@@ -334,8 +445,9 @@ function openValue(
   depth: number,
   reader: Reader,
   reservedRoot: boolean,
-): Frame | number | undefined {
+): Frame | Closed | undefined {
   const { add } = reader;
+  const contentBefore = contentIssues(reader);
   const notJson = (what: string): undefined => {
     add(path, `${cite(path)} is not JSON: ${what}`);
     return undefined;
@@ -379,8 +491,8 @@ function openValue(
   const seen = reader.heights.get(node);
   if (seen === 'open') return notJson('a circular reference');
   if (seen !== undefined) {
-    if (depth + seen > reader.maxDepth) add(path, tooDeepMessage(path, reader.maxDepth));
-    return seen;
+    if (depth + seen > reader.maxDepth) reportTooDeep(path, reader);
+    return { height: seen, cut: false };
   }
   let keys: string[] | undefined;
   let length: number;
@@ -402,12 +514,24 @@ function openValue(
   const count = keys === undefined ? length : keys.length;
   announce(reader, count, path);
   if (count > 0 && depth >= reader.maxDepth) {
-    add(path, tooDeepMessage(path, reader.maxDepth));
-    reader.heights.set(node, 1);
-    return 1;
+    reportTooDeep(path, reader);
+    return { height: 1, cut: true };
   }
   reader.heights.set(node, 'open');
-  return { node, path, depth, keys, length: count, index: 0, height: 0, pending: 0, parts: [] };
+  return {
+    node,
+    path,
+    depth,
+    keys,
+    length: count,
+    index: 0,
+    height: 0,
+    // A root with reserved keys is not kept: another path reads those keys.
+    cut: reservedRoot,
+    contentBefore,
+    pending: 0,
+    parts: [],
+  };
 }
 
 /** The keys to read: a key with a lone surrogate, or a reserved root key, is reported instead. */
@@ -428,6 +552,8 @@ function checkKeys(
   return kept;
 }
 
-function tooDeepMessage(path: string, maxDepth: number): string {
-  return `${cite(path)} nests values more than ${maxDepth} levels deep`;
+/** Reports that the value at `path` sits too deep (a problem of the path, not of the value). */
+function reportTooDeep(path: string, reader: Reader): void {
+  reader.depthIssues += 1;
+  reader.add(path, `${cite(path)} nests values more than ${reader.maxDepth} levels deep`);
 }
