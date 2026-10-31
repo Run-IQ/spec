@@ -28,7 +28,7 @@ function makeInput(): RuleDefinitionInput {
     effectiveUntil: '2026-01-01T00:00:00+01:00',
     dimensions: { country: 'TG', category: 'VAT' },
     tags: ['z', 'a', 'z'],
-    exceptions: ['r0'],
+    exceptions: [{ kind: 'inhibit', targets: { ids: ['r0', 'a', 'r0'] } }],
     checksum: 'stale',
     output: undefined,
     jurisdiction: 'NATIONAL',
@@ -56,6 +56,7 @@ describe('purity (A4)', () => {
     expect(input).toStrictEqual(before);
     expect(Object.keys(input)).toEqual(Object.keys(before));
     expect(input.tags).toEqual(['z', 'a', 'z']);
+    expect(input.exceptions).toEqual([{ kind: 'inhibit', targets: { ids: ['r0', 'a', 'r0'] } }]);
   });
 
   it('the normalized definition shares no reference with the input', () => {
@@ -67,6 +68,9 @@ describe('purity (A4)', () => {
     def.dimensions.country = 'changed';
     (def.condition!.value as Record<string, unknown>).x = 1;
     (def.extra as { a: number[] }).a.push(9);
+    const [exception] = def.exceptions ?? [];
+    if (exception?.kind === 'inhibit') exception.targets.ids?.push('changed');
+    expect(exception?.kind).toBe('inhibit');
     expect(input).toStrictEqual(before);
   });
 

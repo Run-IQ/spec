@@ -3,6 +3,7 @@ import {
   computeRuleChecksum,
   computeRuleFingerprint,
   fromStoredRecord,
+  matchesSelector,
   normalizeRuleDefinition,
   toExecutableRule,
   toStoredPayload,
@@ -14,6 +15,8 @@ import type {
   RuleDefinition,
   RuleDefinitionBase,
   RuleDefinitionInput,
+  RuleException,
+  RuleSelector,
   StoredRuleRecord,
 } from '../src/index.js';
 
@@ -38,6 +41,22 @@ describe('RuleDefinition types (A5)', () => {
     expectTypeOf(def.tags).toEqualTypeOf<string[]>();
     expectTypeOf(def.dimensions).toEqualTypeOf<Record<string, string>>();
     expectTypeOf(def.condition).toEqualTypeOf<{ dsl: string; value: JsonValue } | undefined>();
+    expectTypeOf(def.exceptions).toEqualTypeOf<RuleException[] | undefined>();
+  });
+
+  it('narrows an exception by its kind', () => {
+    const exception = def.exceptions?.[0];
+    if (exception?.kind === 'substitute') {
+      expectTypeOf(exception.params).toEqualTypeOf<{ [k: string]: JsonValue }>();
+      expectTypeOf(exception.targets).toEqualTypeOf<RuleSelector>();
+    }
+    if (exception?.kind === 'shortCircuit') {
+      expectTypeOf(exception.reason).toEqualTypeOf<string | undefined>();
+    }
+  });
+
+  it('accepts an executable rule where a selector match needs a rule', () => {
+    expectTypeOf<ExecutableRule>().toMatchTypeOf<Parameters<typeof matchesSelector>[0]>();
   });
 
   it('exposes extensions as unknown', () => {

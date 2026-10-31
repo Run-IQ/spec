@@ -33,7 +33,13 @@ const rich: RuleDefinitionInput = {
   dimensions: { country: 'TG', category: 'VAT', regime: 'normal' },
   tags: ['fiscal', 'vat'],
   dominanceGroup: 'VAT',
-  exceptions: { rules: ['vat-exempt'], scope: { kind: 'all', level: 1 } },
+  exceptions: [
+    {
+      kind: 'substitute',
+      targets: { tags: ['vat', 'fiscal'], dimensions: { country: 'TG', regime: 'normal' } },
+      params: { rate: 0.1, scope: { kind: 'all', level: 1 } },
+    },
+  ],
   sourceRef: 'CGI art. 12',
   jurisdiction: 'NATIONAL',
   extra: { owner: { team: 'tax', contact: { email: 'a@b.c', phone: null } }, flags: [1, 2] },
@@ -133,7 +139,16 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
 
     it('exceptions', () => {
       expect(
-        fp({ ...rich, exceptions: { scope: { level: 1, kind: 'all' }, rules: ['vat-exempt'] } }),
+        fp({
+          ...rich,
+          exceptions: [
+            {
+              params: { scope: { level: 1, kind: 'all' }, rate: 0.1 },
+              targets: { dimensions: { regime: 'normal', country: 'TG' }, tags: ['fiscal', 'vat'] },
+              kind: 'substitute',
+            },
+          ],
+        }),
       ).toBe(fp(rich));
     });
 
@@ -268,7 +283,7 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
           dsl: 'jsonlogic',
           value: { ...(rich.condition!.value as object), ghost: undefined },
         },
-        exceptions: { ...(rich.exceptions as object), ghost: undefined },
+        exceptions: [{ ...(rich.exceptions as object[])[0], ghost: undefined }],
         extra: { ...(rich.extra as object), ghost: undefined },
       };
       expect(fp(withUndefined)).toBe(fp(rich));
@@ -377,7 +392,30 @@ describe('computeRuleFingerprint: different content, different fingerprint', () 
     ['a tag added', { tags: ['fiscal', 'vat', 'new'] }],
     ['a tag removed', { tags: ['fiscal'] }],
     ['dominanceGroup', { dominanceGroup: 'OTHER' }],
-    ['exceptions', { exceptions: { rules: [], scope: { kind: 'all', level: 1 } } }],
+    [
+      'an exception parameter',
+      {
+        exceptions: [
+          {
+            kind: 'substitute',
+            targets: { tags: ['vat', 'fiscal'], dimensions: { country: 'TG', regime: 'normal' } },
+            params: { rate: 0.2, scope: { kind: 'all', level: 1 } },
+          },
+        ],
+      },
+    ],
+    [
+      'an exception target',
+      {
+        exceptions: [
+          {
+            kind: 'substitute',
+            targets: { tags: ['vat'], dimensions: { country: 'TG', regime: 'normal' } },
+            params: { rate: 0.1, scope: { kind: 'all', level: 1 } },
+          },
+        ],
+      },
+    ],
     ['sourceRef', { sourceRef: 'CGI art. 13' }],
   ])('%s changes', (_label, patch) => {
     expect(fp({ ...rich, ...patch } as RuleDefinitionInput)).not.toBe(ref);

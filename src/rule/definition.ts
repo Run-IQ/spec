@@ -1,4 +1,5 @@
 import type { JsonValue } from '../canonical.js';
+import type { RuleException } from './exceptions.js';
 
 export interface RuleCondition {
   dsl: string;
@@ -32,7 +33,11 @@ export interface RuleDefinitionBase {
   /** Sorted, without duplicates. */
   tags: string[];
   dominanceGroup?: string;
-  exceptions?: JsonValue;
+  /**
+   * In order, never empty: an empty list is normalized away, as absent. Selector lists are
+   * sorted, without duplicates. See `RuleException`.
+   */
+  exceptions?: RuleException[];
   sourceRef?: string;
 }
 
@@ -44,7 +49,8 @@ export interface RuleDefinitionBase {
  * `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`, `sourceRef`) and every
  * extension field, `null`, `undefined` and absence are the same input, so the checksum and
  * fingerprint do not depend on how a database writes empty columns. Normalization drops them,
- * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). A `null`
+ * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). An empty
+ * `exceptions` list is absent too. A `null`
  * value inside `dimensions` likewise means the dimension is unset and its key is dropped
  * (other non-string values throw). Below the top
  * level (inside `params`, `condition.value`, `exceptions` and extension values), and for the
@@ -75,6 +81,7 @@ export interface RuleDefinitionInputBase {
   readonly dimensions?: Readonly<Record<string, string | null | undefined>> | null | undefined;
   readonly tags?: readonly string[] | null | undefined;
   readonly dominanceGroup?: string | null | undefined;
+  /** A list of `RuleException`; `[]` means absent. Checked by normalization. */
   readonly exceptions?: unknown;
   readonly sourceRef?: string | null | undefined;
   /** Ignored: removed by normalization. */

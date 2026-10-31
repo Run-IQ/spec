@@ -1,8 +1,10 @@
 import { toJsonValue } from '../canonical.js';
+import type { JsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
@@ -24,8 +26,10 @@ class Issues {
  * Checks a rule definition without throwing and reports every problem found. Accepts exactly
  * what `normalizeRuleDefinition` accepts, and agrees with `schema/rule-definition.schema.json`
  * on JSON documents, plus one check JSON Schema cannot express: `effectiveUntil` must be after
- * `effectiveFrom`. Like normalize, it also accepts `Date` objects for the dates and refuses
- * non-JSON values (Map, Set, class instances, functions, `NaN`, `Infinity`...).
+ * `effectiveFrom`. It checks the closed `exceptions` format and the constraints of the
+ * reserved model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list). Like
+ * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
+ * Set, class instances, functions, `NaN`, `Infinity`...).
  *
  * `checksum` is ignored, as in normalize.
  *
@@ -69,7 +73,8 @@ export function validateRuleDefinition(value: unknown): {
   }
   if (value.dimensions != null) checkDimensions(value.dimensions, errors);
   if (value.tags != null) checkTags(value.tags, errors);
-  if (value.exceptions != null) checkJson(value.exceptions, 'exceptions', errors);
+  if (value.exceptions != null) checkExceptions(value.exceptions, errors);
+  for (const issue of exceptionModelIssues(value)) errors.add(issue.path, issue.message);
 
   for (const key of Object.keys(value)) {
     if (RESERVED.has(key) || value[key] == null) continue;
@@ -103,6 +108,17 @@ function checkJson(value: unknown, field: string, errors: Issues): void {
   } catch (error) {
     errors.add(pathOf(error, field), (error as Error).message);
   }
+}
+
+function checkExceptions(value: unknown, errors: Issues): void {
+  let json: JsonValue;
+  try {
+    json = toJsonValue(value, 'exceptions');
+  } catch (error) {
+    errors.add(pathOf(error, 'exceptions'), (error as Error).message);
+    return;
+  }
+  for (const issue of readRuleExceptions(json).issues) errors.add(issue.path, issue.message);
 }
 
 function checkDate(value: unknown, field: string, errors: Issues): Date | undefined {

@@ -4,6 +4,8 @@ import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
+import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import type { RuleValidationIssue } from './validate.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 
@@ -13,6 +15,8 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - dates become full UTC ISO strings (see `parseRuleDate` for the accepted forms);
  * - defaults are made explicit: `effectiveUntil: null`, `dimensions: {}`, `tags: []`;
  * - `tags` are sorted and deduplicated;
+ * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs` and `models` are
+ *   sorted and deduplicated, and its empty fields dropped; an empty list is dropped, as absent;
  * - `checksum` is removed, and so is every top-level optional or extension field that is
  *   `null` or `undefined` (see `RuleDefinition`); nested `undefined` properties are dropped;
  * - nested values become plain JSON (`Date` to ISO string, `undefined` dropped);
@@ -20,9 +24,11 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  *
  * Never mutates `input`; the result shares no reference with it.
  * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
- * positive integer), or when
+ * positive integer), for a malformed `exceptions` list, for a rule of model `EXCEPTION_MODEL`
+ * with an `output` or without exceptions, or when
  * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
- * `NON_SERIALIZABLE`.
+ * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
+ * `validateRuleDefinition` do.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
@@ -54,7 +60,12 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
     const value = input[field];
     if (value != null) out[field] = requireString(value, field);
   }
-  if (input.exceptions != null) out.exceptions = toJsonValue(input.exceptions, 'exceptions');
+  if (input.exceptions != null) {
+    const read = readRuleExceptions(toJsonValue(input.exceptions, 'exceptions'));
+    throwFirst(read.issues);
+    if (read.exceptions.length > 0) out.exceptions = read.exceptions;
+  }
+  throwFirst(exceptionModelIssues(input));
 
   for (const key of Object.keys(input)) {
     if (RESERVED.has(key)) continue;
@@ -130,6 +141,12 @@ function defineField(target: Record<string, unknown>, key: string, value: unknow
     writable: true,
     configurable: true,
   });
+}
+
+/** Throws the first issue as `INVALID_RULE`; its message already names the path. */
+function throwFirst(issues: readonly RuleValidationIssue[]): void {
+  const [first] = issues;
+  if (first) invalidRule(first.message);
 }
 
 function invalidRule(message: string): never {

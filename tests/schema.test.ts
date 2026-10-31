@@ -3,6 +3,7 @@ import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition, validateRuleDefinition } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { REFUSED_EXCEPTIONS } from './exception-cases.js';
 
 const schema = JSON.parse(
   readFileSync(new URL('../schema/rule-definition.schema.json', import.meta.url), 'utf8'),
@@ -46,7 +47,7 @@ const VALID: [string, unknown][] = [
       dimensions: { country: 'TG' },
       tags: ['vat'],
       dominanceGroup: 'VAT',
-      exceptions: ['r0'],
+      exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
       sourceRef: 'CGI art. 1',
       jurisdiction: 'NATIONAL',
       meta: { nested: [1, 'a', null] },
@@ -153,6 +154,64 @@ describe('validateRuleDefinition, JSON schema and normalize agree', () => {
 
   it('the schema documents the validator-only window check', () => {
     expect(JSON.stringify(schema)).toMatch(/effectiveUntil.*after.*effectiveFrom/);
+  });
+});
+
+describe('exceptions: validator, JSON schema and normalize agree', () => {
+  const carrier = {
+    ...base,
+    model: '@run-iq/exception',
+    params: {},
+    exceptions: [{ kind: 'inhibit', targets: { tags: ['vat'] } }],
+  };
+
+  const accepted: [string, unknown][] = [
+    ['an empty list (absent)', { ...base, exceptions: [] }],
+    [
+      'every kind',
+      {
+        ...base,
+        exceptions: [
+          { kind: 'inhibit', targets: { ids: ['a', 'a'], tags: [''] } },
+          {
+            kind: 'substitute',
+            targets: { dimensions: { country: 'TG' }, outputs: ['vat'], models: ['M'] },
+            params: { rate: 0.1, nested: { x: null } },
+          },
+          { kind: 'shortCircuit', output: 'eligible', value: null, reason: 'exempt' },
+        ],
+      },
+    ],
+    [
+      'an empty field next to a non-empty one',
+      { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: [], dimensions: { c: '' } } }] },
+    ],
+    ['a rule of the exception model', carrier],
+    ['a rule of the exception model with a null output', { ...carrier, output: null }],
+    ['an output on another model', { ...base, output: 'tax', exceptions: carrier.exceptions }],
+  ];
+
+  const refused: [string, unknown][] = [
+    ...REFUSED_EXCEPTIONS.map(([label, exceptions]): [string, unknown] => [
+      label,
+      { ...base, exceptions },
+    ]),
+    ['the exception model without exceptions', { ...carrier, exceptions: undefined }],
+    ['the exception model with null exceptions', { ...carrier, exceptions: null }],
+    ['the exception model with an empty list', { ...carrier, exceptions: [] }],
+    ['the exception model with an output', { ...carrier, output: 'tax' }],
+  ];
+
+  it.each(accepted)('accepts %s', (_name, value) => {
+    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(schemaAccepts(value)).toBe(true);
+    expect(normalizeAccepts(value)).toBe(true);
+  });
+
+  it.each(refused)('rejects %s', (_name, value) => {
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(schemaAccepts(value)).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
   });
 });
 

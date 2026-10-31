@@ -25,7 +25,7 @@ const full: RuleDefinitionInput = {
   dimensions: { country: 'TG' },
   tags: ['vat'],
   dominanceGroup: 'VAT',
-  exceptions: ['r0'],
+  exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
   sourceRef: 'CGI art. 1',
   jurisdiction: 'NATIONAL',
 };
@@ -182,7 +182,8 @@ describe('nested null stays data', () => {
   });
 
   it('inside exceptions', () => {
-    const def = normalizeRuleDefinition({ ...minimal, exceptions: [null] });
-    expect(def.exceptions).toEqual([null]);
+    const exceptions = [{ kind: 'shortCircuit', output: 'note', value: null }];
+    const def = normalizeRuleDefinition({ ...minimal, exceptions });
+    expect(def.exceptions).toEqual(exceptions);
   });
 });

@@ -19,6 +19,8 @@ export type {
   RuleDefinitionInput,
   RuleDefinitionInputBase,
 } from './rule/definition.js';
+export { EXCEPTION_MODEL, matchesSelector } from './rule/exceptions.js';
+export type { RuleException, RuleSelector } from './rule/exceptions.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
 export { canonicalRulePayload } from './rule/payload.js';
 export { isEffectiveAt } from './rule/effective.js';
@@ -26,3 +28,10 @@ export type { ExecutableRule, ExecutableRuleBase } from './rule/executable.js';
 export type { StoredRuleRecord } from './rule/stored.js';
 export { validateRuleDefinition } from './rule/validate.js';
 export type { RuleValidationIssue } from './rule/validate.js';
+export {
+  DEFAULT_OUTPUT,
+  DEFAULT_OUTPUT_DECLARATION,
+  validateOutputDeclaration,
+  valueMatchesOutputType,
+} from './decision/output.js';
+export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
