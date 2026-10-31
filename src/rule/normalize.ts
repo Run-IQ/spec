@@ -1,5 +1,6 @@
 import { toJsonValue } from '../canonical.js';
-import { describeError, SpecError } from '../errors.js';
+import type { JsonValue } from '../canonical.js';
+import { SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
@@ -30,8 +31,11 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), or when
  * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
- * `validateRuleDefinition` do. A value that cannot be read (a getter or a Proxy trap that
- * throws) gives `INVALID_RULE` with `rule definition could not be read: <reason>`.
+ * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
+ * (`params`, `condition.value`, `exceptions`, an extension: a getter or a Proxy trap that
+ * throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, or `<field> is too
+ * deeply nested` when it overflows the call stack, as in `validateRuleDefinition`; anything
+ * else that cannot be read gives `rule definition could not be read: <reason>`.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   try {
@@ -39,7 +43,7 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
   } catch (error) {
     if (error instanceof SpecError) throw error;
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
-    invalidRule(`rule definition could not be read: ${describeError(error)}`);
+    invalidRule(unreadableMessage('rule definition', error));
   }
 }
 
@@ -77,7 +81,7 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     invalidRule(reservedOutputNameMessage('output'));
   }
   if (input.exceptions != null) {
-    const read = readRuleExceptions(toJsonValue(input.exceptions, 'exceptions'));
+    const read = readRuleExceptions(readJson(input.exceptions, 'exceptions'));
     throwFirst(read.issues);
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
@@ -86,15 +90,28 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
   for (const key of Object.keys(input)) {
     if (RESERVED.has(key)) continue;
     const value = input[key];
-    if (value != null) defineField(out, key, toJsonValue(value, key));
+    if (value != null) defineField(out, key, readJson(value, key));
   }
 
   return out as RuleDefinition;
 }
 
+/**
+ * `toJsonValue(value, field)`, where anything but a `SpecError` thrown while reading (a getter,
+ * a Proxy trap, a call stack overflow) becomes `INVALID_RULE` naming `field`.
+ */
+function readJson(value: unknown, field: string): JsonValue {
+  try {
+    return toJsonValue(value, field);
+  } catch (error) {
+    if (error instanceof SpecError) throw error;
+    invalidRule(unreadableMessage(field, error));
+  }
+}
+
 function requireParams(value: unknown): unknown {
   if (value === undefined) invalidRule('params is required');
-  return toJsonValue(value, 'params');
+  return readJson(value, 'params');
 }
 
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
@@ -105,7 +122,7 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (value.value === undefined) invalidRule('condition.value is required');
   return {
     dsl: requireString(value.dsl, 'condition.dsl'),
-    value: toJsonValue(value.value, 'condition.value'),
+    value: readJson(value.value, 'condition.value'),
   };
 }
 

@@ -1,5 +1,5 @@
 import type { JsonValue } from '../canonical.js';
-import { describeError } from '../errors.js';
+import { unreadableMessage } from '../errors.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isPlainObject } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
@@ -147,7 +147,8 @@ const MAX_SCALE = 20;
  * - no other key is allowed.
  *
  * A value that cannot be read (a getter or a Proxy trap that throws, at any depth) gives the
- * single issue `<path> could not be read: <reason>` at `path`.
+ * single issue `<path> could not be read: <reason>` at `path` (`<path> is too deeply nested`
+ * when reading it overflows the call stack).
  */
 export function validateOutputDeclaration(
   declaration: unknown,
@@ -156,7 +157,7 @@ export function validateOutputDeclaration(
   try {
     return declarationIssues(declaration, path);
   } catch (error) {
-    return [{ path, message: `${path} could not be read: ${describeError(error)}` }];
+    return [{ path, message: unreadableMessage(path, error) }];
   }
 }
 

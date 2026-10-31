@@ -1,5 +1,5 @@
 import { toJsonValue } from '../canonical.js';
-import { describeError } from '../errors.js';
+import { describeError, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
 import { canonicalRulePayload } from '../rule/payload.js';
@@ -65,7 +65,7 @@ export function verifyProof(
     return verify(p, o);
   } catch (error) {
     // A hostile value (a Proxy, a throwing getter) can still throw while being read.
-    return { status: 'invalid', issues: [`proof could not be read: ${describeError(error)}`] };
+    return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
   }
 }
 

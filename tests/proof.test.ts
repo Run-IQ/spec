@@ -1028,8 +1028,7 @@ describe('verifyProof: hostile input', () => {
     const tampered = { ...proof, outputs: { value: { ...proof.outputs.value!, value: deep } } };
     const result = verifyProof(tampered);
     expect(result.status).toBe('invalid');
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0]).toMatch(/call stack/);
+    expect(result.issues).toEqual(['outputs.value.value is too deeply nested']);
   });
 
   it('a hostile entry in the rules option', () => {

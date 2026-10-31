@@ -17,7 +17,7 @@ Dependants that use `^1.0.0-next.0` accept the new version. Node.js 20.19 or lat
 - `validateOutputDeclaration(d)` returns every problem with its path and never throws. `valueMatchesOutputType(value, d)` checks a value against a declaration.
 - `DEFAULT_OUTPUT` is `value`, the output of a rule that names none. `DEFAULT_OUTPUT_DECLARATION` is `{ type: 'number', combine: 'sum' }`, frozen.
 - There is no JSON schema for declarations: they live in calculation models, not in rules.
-- **Unreadable input never escapes as a raw error.** A getter or Proxy trap that throws gives an issue instead: `validateOutputDeclaration` reports `<path> could not be read: <reason>`; `validateRuleDefinition` reports `<field> could not be read: <reason>` for a field whose value cannot be converted, and `rule definition could not be read: <reason>` otherwise; `normalizeRuleDefinition` (and every function built on it) throws `INVALID_RULE` with `rule definition could not be read: <reason>`.
+- **Unreadable input never escapes as a raw error.** A getter or Proxy trap that throws gives an issue instead: `validateOutputDeclaration` reports `<path> could not be read: <reason>`; `validateRuleDefinition` reports `<field> could not be read: <reason>` for a field whose value cannot be converted (`params`, `condition.value`, `exceptions`, an extension), and `rule definition could not be read: <reason>` otherwise; `normalizeRuleDefinition` (and every function built on it) throws `INVALID_RULE` with the same message. A value nested so deeply that reading it overflows the call stack gives `<field> is too deeply nested` instead, in rules and in proofs.
 
 ## Decimals, rounding and strata
 

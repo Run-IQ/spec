@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { describeError, SpecError } from '../errors.js';
+import { SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
@@ -36,9 +36,11 @@ class Issues {
  *
  * `checksum` is ignored, as in normalize.
  *
- * It never throws. A field that cannot be read (a getter or a Proxy trap that throws while its
- * value is converted to JSON) gives `<field> could not be read: <reason>`; anything else that
- * cannot be read gives the single issue `rule definition could not be read: <reason>` at `''`.
+ * It never throws. A field that cannot be read while its value is converted to JSON (`params`,
+ * `condition.value`, `exceptions`, an extension: a getter or a Proxy trap that throws) gives
+ * `<field> could not be read: <reason>`, or `<field> is too deeply nested` when it overflows
+ * the call stack. Anything else that cannot be read (a top-level property, the object itself)
+ * gives the single issue `rule definition could not be read: <reason>` at `''`.
  *
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
  * the path of the offending field (`params.rates[1]`, `dimensions.country`; `''` when the
@@ -53,7 +55,7 @@ export function validateRuleDefinition(value: unknown): {
     return definitionIssues(value);
   } catch (error) {
     const unreadable = new Issues();
-    unreadable.add('', `rule definition could not be read: ${describeError(error)}`);
+    unreadable.add('', unreadableMessage('rule definition', error));
     return result(unreadable);
   }
 }
@@ -194,12 +196,12 @@ function checkTags(value: unknown, errors: Issues): void {
 
 /**
  * Records a thrown error as an issue on `field`: a `SpecError` with its own message and path;
- * anything else was thrown while reading the value (a getter, a Proxy trap) and gives
- * `<field> could not be read: <reason>`.
+ * anything else was thrown while reading the value (a getter, a Proxy trap, a call stack
+ * overflow) and gives `unreadableMessage(field, error)`.
  */
 function addError(error: unknown, field: string, errors: Issues): void {
   if (error instanceof SpecError) errors.add(pathOf(error, field), error.message);
-  else errors.add(field, `${field} could not be read: ${describeError(error)}`);
+  else errors.add(field, unreadableMessage(field, error));
 }
 
 /** Path of a `SpecError` about one value, else the checked field. */

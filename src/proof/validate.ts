@@ -7,7 +7,7 @@ import {
   OUTPUT_TYPES,
   roundingNotApplicable,
 } from '../decision/output.js';
-import { describeError, SpecError, specErrorPath } from '../errors.js';
+import { describeError, SpecError, specErrorPath, unreadableMessage } from '../errors.js';
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
@@ -87,12 +87,17 @@ function oneOf(allowed: readonly string[]): Check {
   };
 }
 
-/** Any value with a canonical JSON form; a problem is reported at the path of the bad value. */
+/**
+ * Any value with a canonical JSON form; a problem is reported at the path of the bad value.
+ * A value that cannot be read (a getter, a Proxy trap, a call stack overflow) is reported at
+ * `path` with `unreadableMessage`.
+ */
 const json: Check = (value, path, add) => {
   try {
     toJsonValue(value, path);
   } catch (error) {
-    add(specErrorPath(error) ?? path, describeError(error));
+    if (error instanceof SpecError) add(specErrorPath(error) ?? path, describeError(error));
+    else add(path, unreadableMessage(path, error));
   }
 };
 
@@ -286,7 +291,9 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * - the format is closed: every object refuses unknown keys, even with an `undefined` value;
  *   a known field whose value is `undefined` counts as absent, as in the canonical form;
  * - a value that cannot be read (a getter or a Proxy trap that throws) gives the single issue
- *   `proof could not be read: <reason>` at path `''`;
+ *   `proof could not be read: <reason>` at path `''`; an output value, contribution or
+ *   `unrounded` value that cannot be read is reported at its path, and one that overflows the
+ *   call stack gives `<path> is too deeply nested`;
  * - `format` is `PROOF_FORMAT`; `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
  *   in the grammar of rule dates; `inputDigest`, `digest`, rule checksums and `ruleSet.digest`
  *   are lowercase sha256 hex; `signature.value` is 64 bytes in unpadded base64url;
@@ -360,8 +367,8 @@ function readSnapshot(
     snapshot = toJsonValue(value, '');
   } catch (error) {
     // A SpecError names a value with no JSON form; anything else was thrown while reading.
-    const reason = describeError(error);
-    const message = error instanceof SpecError ? reason : `proof could not be read: ${reason}`;
+    const message =
+      error instanceof SpecError ? describeError(error) : unreadableMessage('proof', error);
     return { snapshot: undefined, errors: [message] };
   }
   if (isPlainObject(snapshot)) for (const key of ignored) delete snapshot[key];
@@ -387,7 +394,7 @@ function collect(
     return issues;
   } catch (error) {
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
-    return [{ path: '', message: `proof could not be read: ${describeError(error)}` }];
+    return [{ path: '', message: unreadableMessage('proof', error) }];
   }
 }
 

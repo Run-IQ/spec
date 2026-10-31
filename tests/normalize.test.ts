@@ -358,7 +358,7 @@ describe('unreadable rule definitions', () => {
     });
     const error = specErrorOf(() => normalizeRuleDefinition(rule as RuleDefinitionInput));
     expect(error.code).toBe('INVALID_RULE');
-    expect(error.message).toBe('rule definition could not be read: Symbol(kind)');
+    expect(error.message).toBe('exceptions could not be read: Symbol(kind)');
   });
 
   it('reports a throwing getter inside params at its field', () => {
@@ -368,7 +368,49 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition(rule).issues).toEqual([
       { path: 'params', message: 'params could not be read: nope' },
     ]);
-    expect(specErrorOf(() => normalizeRuleDefinition(rule)).code).toBe('INVALID_RULE');
+    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe('params could not be read: nope');
+  });
+
+  it('names a nested unreadable field of params, condition and an extension', () => {
+    const rates = {};
+    throwing(rates, 'reduced', new Error('nope'));
+    const nested = { ...base, params: { rates: [rates] } };
+    expect(validateRuleDefinition(nested).errors).toEqual(['params could not be read: nope']);
+    expect(specErrorOf(() => normalizeRuleDefinition(nested)).message).toBe(
+      'params could not be read: nope',
+    );
+    const value = {};
+    throwing(value, 'var', new Error('x'));
+    const condition = { ...base, condition: { dsl: 'jsonlogic', value } };
+    expect(specErrorOf(() => normalizeRuleDefinition(condition)).message).toBe(
+      'condition.value could not be read: x',
+    );
+    expect(validateRuleDefinition(condition).errors).toEqual([
+      'condition.value could not be read: x',
+    ]);
+    const meta = {};
+    throwing(meta, 'owner', new Error('y'));
+    const extension = { ...base, meta };
+    expect(specErrorOf(() => normalizeRuleDefinition(extension)).message).toBe(
+      'meta could not be read: y',
+    );
+    expect(validateRuleDefinition(extension).errors).toEqual(['meta could not be read: y']);
+  });
+
+  it('says a too deeply nested field is too deeply nested', () => {
+    let params: Record<string, unknown> = {};
+    for (let i = 0; i < 200_000; i++) params = { a: params };
+    const rule = { ...base, params };
+    expect(validateRuleDefinition(rule)).toEqual({
+      valid: false,
+      errors: ['params is too deeply nested'],
+      issues: [{ path: 'params', message: 'params is too deeply nested' }],
+    });
+    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe('params is too deeply nested');
   });
 
   it('reports a hostile Proxy', () => {

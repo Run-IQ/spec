@@ -83,3 +83,23 @@ export function specErrorPath(error: unknown): string | undefined {
     return undefined;
   }
 }
+
+/**
+ * Internal: why the value at `subject` could not be read, never throwing:
+ * `<subject> is too deeply nested` when the call stack overflowed while reading it, otherwise
+ * `<subject> could not be read: <reason>` (a getter or a Proxy trap threw `error`).
+ */
+export function unreadableMessage(subject: string, error: unknown): string {
+  return isStackOverflow(error)
+    ? `${subject} is too deeply nested`
+    : `${subject} could not be read: ${describeError(error)}`;
+}
+
+/** True for the `RangeError` a call stack overflow throws; never throws. */
+function isStackOverflow(error: unknown): boolean {
+  try {
+    return error instanceof RangeError && /call stack/i.test(error.message);
+  } catch {
+    return false;
+  }
+}
