@@ -1,6 +1,6 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { SpecError } from '../errors.js';
+import { newSpecError } from '../errors.js';
 import { contentDigest, inconsistencies } from './digest.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
@@ -35,23 +35,23 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
   const { proof, errors } = readDecisionProof(p);
-  if (!proof) throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${errors[0]}`);
+  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${errors[0]}`);
   if (contentDigest(proof) !== proof.digest) {
-    throw new SpecError(
+    throw newSpecError(
       'INVALID_PROOF',
       'Cannot sign the proof: its digest does not match its content; seal it again',
     );
   }
   const [inconsistency] = inconsistencies(proof);
   if (inconsistency) {
-    throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
+    throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
   }
   if (typeof keyId !== 'string' || keyId === '') {
-    throw new SpecError('INVALID_KEY', 'keyId must be a non-empty string');
+    throw newSpecError('INVALID_KEY', 'keyId must be a non-empty string');
   }
   const secretKey = keyBytes(privateKeyHex);
   if (!secretKey) {
-    throw new SpecError(
+    throw newSpecError(
       'INVALID_KEY',
       'privateKey must be 64 hex characters (an ed25519 secret key)',
     );

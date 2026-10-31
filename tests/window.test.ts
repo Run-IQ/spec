@@ -308,7 +308,7 @@ describe('windowContains: refusals', () => {
     );
   });
 
-  it('turns a calendar that throws into INVALID_DATE, keeping the message of its SpecError', () => {
+  it('turns a calendar that throws into INVALID_DATE, citing a SpecError it built', () => {
     const throwing: CivilCalendar = {
       toCivilDate: () => {
         throw new Error('no data for "Europe/Paris"');
@@ -332,7 +332,10 @@ describe('windowContains: refusals', () => {
           startOfDay: throwing.startOfDay,
         }),
       ),
-    ).toMatchObject({ code: 'INVALID_DATE', message: 'own error' });
+    ).toMatchObject({
+      code: 'INVALID_DATE',
+      message: 'calendar.startOfDay failed for 2026-01-01 in UTC: own error',
+    });
   });
 
   it('refuses a calendar without its functions, or unreadable', () => {

@@ -195,6 +195,25 @@ describe('fromStoredRecord: errors name the rule and the reason (A7)', () => {
     expect(dateError.message).toMatch(/invalid definition.*effectiveFrom/);
   });
 
+  it("cites the definition's own message once, never escaping it again", () => {
+    const payload = JSON.stringify({
+      ...JSON.parse(storedRecordOf(base).payload),
+      dimensions: { 'a"b': 1 },
+    });
+    expect(
+      thrown(() => fromStoredRecord({ id: 'vat-std', version: 2, checksum: 'x', payload })).message,
+    ).toBe(
+      'Stored rule vat-std@2: invalid definition: dimensions.a\\"b must be a value or an ' +
+        'object { ref?, anyOf, except?, match? }',
+    );
+    const priority = JSON.stringify({ ...JSON.parse(storedRecordOf(base).payload), priority: 'x' });
+    expect(
+      thrown(() =>
+        fromStoredRecord({ id: 'vat-std', version: 2, checksum: 'x', payload: priority }),
+      ).message,
+    ).toBe('Stored rule vat-std@2: invalid definition: priority must be a finite number');
+  });
+
   it('a malformed record', () => {
     for (const record of [
       null,

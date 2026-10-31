@@ -2,7 +2,7 @@ import { canonicalize } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { isCanonicalDecimal } from '../decision/decimal.js';
 import { isReservedOutputName } from '../decision/output.js';
-import { citeName, SpecError } from '../errors.js';
+import { citeName, newSpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
 import { readUnsignedProof } from './validate.js';
@@ -32,10 +32,10 @@ export function computeInputDigest(input: ProofInput): string {
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
   const { proof, errors } = readUnsignedProof(p);
-  if (!proof) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
+  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
   const [inconsistency] = inconsistencies(proof);
   if (inconsistency) {
-    throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
+    throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
   return { ...proof, digest: contentDigest(proof) };
 }

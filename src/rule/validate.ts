@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
@@ -296,11 +296,11 @@ function checkTags(value: unknown, errors: Issues): void {
  * overflow) and gives `unreadableMessage(field, error)`.
  */
 function addError(error: unknown, field: string, errors: Issues): void {
-  if (error instanceof SpecError) errors.add(pathOf(error, field), error.message);
+  if (isOwnError(error)) errors.add(pathOf(error, field), error.message);
   else errors.add(field, unreadableMessage(field, error));
 }
 
 /** Path of a `SpecError` about one value, else the checked field. */
 function pathOf(error: unknown, field: string): string {
-  return error instanceof SpecError && error.path ? error.path : field;
+  return isOwnError(error) && error.path ? error.path : field;
 }

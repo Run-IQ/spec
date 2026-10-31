@@ -1,4 +1,4 @@
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { canonicalize } from '../canonical.js';
 import { sha256Hex } from '../hash.js';
 import { IssueList } from '../issues.js';
@@ -103,7 +103,7 @@ export function normalizeReferential(
   const { issues, normal } = check(referential, readLimits(options));
   const [first] = issues;
   if (first !== undefined || normal === undefined) {
-    throw new SpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
+    throw newSpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
   }
   return normal;
 }

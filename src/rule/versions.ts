@@ -1,4 +1,4 @@
-import { citeName, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, unreadableMessage } from '../errors.js';
 import {
   civilDateIn,
   isCivilDate,
@@ -292,22 +292,22 @@ export function readVersionGroups(
   let items: unknown[];
   try {
     if (!Array.isArray(rules)) {
-      throw new SpecError('INVALID_RULE', 'rules must be an array of rules');
+      throw newSpecError('INVALID_RULE', 'rules must be an array of rules');
     }
     const list: readonly unknown[] = rules;
     const length = list.length;
     items = [];
     for (let i = 0; i < length; i++) items.push(list[i]);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_RULE', unreadableMessage('rules', error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_RULE', unreadableMessage('rules', error));
   }
 
   for (const [index, item] of items.entries()) {
     const rule = readRule(item, index, zone);
     const key = JSON.stringify([rule.ruleSet, rule.id, rule.version.version]);
     if (seen.has(key)) {
-      throw new SpecError('INVALID_RULE', `duplicate rule ${rule.name}`);
+      throw newSpecError('INVALID_RULE', `duplicate rule ${rule.name}`);
     }
     seen.add(key);
     let ids = groups.get(rule.ruleSet);
@@ -325,7 +325,7 @@ function readRule(
   zone: string,
 ): { ruleSet: string; id: string; name: string; version: Version } {
   if (typeof item !== 'object' || item === null) {
-    throw new SpecError('INVALID_RULE', `rules[${index}] must be a rule object`);
+    throw newSpecError('INVALID_RULE', `rules[${index}] must be a rule object`);
   }
   let fields: Record<
     'id' | 'version' | 'ruleSet' | 'effectiveOn' | 'from' | 'until' | 'timeZone',
@@ -342,7 +342,7 @@ function readRule(
       timeZone: 'timeZone' in item ? item.timeZone : undefined,
     };
   } catch (error) {
-    throw new SpecError('INVALID_RULE', unreadableMessage(`rules[${index}]`, error));
+    throw newSpecError('INVALID_RULE', unreadableMessage(`rules[${index}]`, error));
   }
   const { id, version, ruleSet, effectiveOn } = fields;
   const name = `${typeof id === 'string' ? citeName(id) : typeName(id)}@${
@@ -351,21 +351,21 @@ function readRule(
   const prefix = `rule ${name}: `;
   const requireText = (value: unknown, field: string): string => {
     if (typeof value !== 'string' || value === '') {
-      throw new SpecError('INVALID_RULE', `${prefix}${field} must be a non-empty string`);
+      throw newSpecError('INVALID_RULE', `${prefix}${field} must be a non-empty string`);
     }
     if (hasLoneSurrogate(value)) {
-      throw new SpecError('INVALID_RULE', prefix + loneSurrogateMessage(field));
+      throw newSpecError('INVALID_RULE', prefix + loneSurrogateMessage(field));
     }
     return value;
   };
 
   const ruleId = requireText(id, 'id');
   if (!isRuleVersion(version)) {
-    throw new SpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
+    throw newSpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
   }
   const set = ruleSet == null ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
   if (!isRuleSetId(set)) {
-    throw new SpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet', set));
+    throw newSpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet', set));
   }
   const window = resolveWindow(fields, zone, prefix);
   const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);

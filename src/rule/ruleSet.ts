@@ -1,5 +1,5 @@
 import { reservedOutputNameMessage } from '../decision/output.js';
-import { citeName, quoteText, SpecError } from '../errors.js';
+import { citeName, newSpecError, quoteText } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { typeName } from '../values.js';
 
@@ -82,7 +82,7 @@ export function qualifyName(ruleSet: string, name: string): string {
 }
 
 function nameError(message: string): never {
-  throw new SpecError('INVALID_RULE', `qualifyName: ${message}`);
+  throw newSpecError('INVALID_RULE', `qualifyName: ${message}`);
 }
 
 function describeType(value: unknown): string {

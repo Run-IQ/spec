@@ -1,4 +1,4 @@
-import { citeName, quoteText, SpecError } from '../errors.js';
+import { citeName, newSpecError, quoteText } from '../errors.js';
 import { daysInMonth } from '../rule/date.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 import { parsePointer } from './pointer.js';
@@ -67,7 +67,7 @@ export function subjectContains(scope: Subject, subject: Subject): boolean {
 function subjectSegments(subject: Subject): string[] {
   if (!isSubject(subject)) {
     const text = typeof subject === 'string' ? quoteText(subject) : typeName(subject);
-    throw new SpecError('INVALID_PATH', `invalid subject ${text}: not a subject`);
+    throw newSpecError('INVALID_PATH', `invalid subject ${text}: not a subject`);
   }
   return parsePointer(subject);
 }
@@ -98,13 +98,13 @@ function isRealDate(text: string): boolean {
 function keyText(value: unknown, what: string): string {
   if (typeof value === 'string') {
     if (hasLoneSurrogate(value)) {
-      throw new SpecError('INVALID_PATH', loneSurrogateMessage(what));
+      throw newSpecError('INVALID_PATH', loneSurrogateMessage(what));
     }
     return value;
   }
   if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
   const got = typeof value === 'number' ? String(value) : typeName(value);
-  throw new SpecError(
+  throw newSpecError(
     'INVALID_PATH',
     `${citeName(what)} must be a string or a safe integer, got ${got}`,
   );

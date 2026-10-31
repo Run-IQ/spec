@@ -1,4 +1,11 @@
-import { citeName, quoteText, SpecError } from './errors.js';
+import {
+  citeName,
+  isOwnError,
+  isStackOverflow,
+  newSpecError,
+  quoteText,
+  reasonOf,
+} from './errors.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
@@ -33,12 +40,24 @@ export function canonicalize(value: unknown): string {
  * `metadata.score`.
  */
 export function canonicalizeAt(value: unknown, path: string): string {
-  return write(value, path, new Set());
+  try {
+    return write(value, path, new Set());
+  } catch (error) {
+    // A getter or a Proxy trap threw, or the call stack overflowed: cited, never passed on raw
+    // (a caller's `SpecError` included: only this package's own errors pass as they are).
+    if (isOwnError(error)) throw error;
+    if (isStackOverflow(error)) fail(path, 'a value nested too deeply');
+    return fail(path, `a value that could not be read: ${reasonOf(error)}`);
+  }
 }
 
-/** Copies a value into plain JSON data, with the same rules as `canonicalize`. */
+/**
+ * Internal: copies a value into plain JSON data, with the same rules as `canonicalize`. What a
+ * getter or a Proxy trap throws is passed on as it is: every caller reads under its own guard,
+ * which names the field that could not be read.
+ */
 export function toJsonValue(value: unknown, path: string): JsonValue {
-  return JSON.parse(canonicalizeAt(value, path)) as JsonValue;
+  return JSON.parse(write(value, path, new Set())) as JsonValue;
 }
 
 function write(value: unknown, path: string, ancestors: Set<object>): string {
@@ -101,7 +120,7 @@ function constructorName(value: object): string {
 }
 
 function fail(path: string, what: string): never {
-  throw new SpecError(
+  throw newSpecError(
     'NON_SERIALIZABLE',
     `Value at ${quoteText(path || '(root)')} cannot be serialized to canonical JSON: ${what}`,
     path,

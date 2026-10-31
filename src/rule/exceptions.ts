@@ -1,6 +1,6 @@
 import type { JsonValue } from '../canonical.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { isPlainObject, typeName } from '../values.js';
 import {
@@ -142,8 +142,8 @@ function readOnce<T>(subject: string, read: () => T): T {
   try {
     return read();
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_RULE', unreadableMessage(subject, error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_RULE', unreadableMessage(subject, error));
   }
 }
 
@@ -223,7 +223,7 @@ function isStringArray(value: unknown): value is string[] {
 }
 
 function selectorError(message: string): never {
-  throw new SpecError('INVALID_RULE', message);
+  throw newSpecError('INVALID_RULE', message);
 }
 
 /** Every exception kind. Internal: not exported from the package. */

@@ -1,5 +1,5 @@
 import { canonicalize } from '../canonical.js';
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { parsePointer, parseReadPointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
@@ -92,8 +92,8 @@ function guarded<T>(subject: string, read: () => T): T {
   try {
     return read();
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_INPUT', unreadableMessage(subject, error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_INPUT', unreadableMessage(subject, error));
   }
 }
 
@@ -113,7 +113,7 @@ export function computeAssertionDigest(assertion: FactAssertion): string {
   );
   const [first] = issues;
   if (first !== undefined || snapshot === undefined) {
-    throw new SpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
+    throw newSpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
   }
   return sha256Hex(canonicalize(snapshot));
 }

@@ -8,10 +8,10 @@ import {
   roundingNotApplicable,
 } from '../decision/output.js';
 import {
-  describeError,
   citeName,
+  describeError,
+  isOwnError,
   quoteText,
-  SpecError,
   specErrorPath,
   unreadableMessage,
 } from '../errors.js';
@@ -82,7 +82,7 @@ function isoDate(nullable: boolean): Check {
         parseRuleDate(value, path);
         return;
       } catch (error) {
-        if (!(error instanceof SpecError)) throw error;
+        if (!isOwnError(error)) throw error;
       }
     }
     add(path, `${citeName(path)} must be ${nullable ? 'null or ' : ''}an ISO date: ${DATE_FORMS}`);
@@ -128,7 +128,7 @@ const json: Check = (value, path, add) => {
   try {
     toJsonValue(value, path);
   } catch (error) {
-    if (error instanceof SpecError) add(specErrorPath(error) ?? path, describeError(error));
+    if (isOwnError(error)) add(specErrorPath(error) ?? path, describeError(error));
     else add(path, unreadableMessage(path, error));
   }
 };
@@ -419,8 +419,7 @@ function readSnapshot(
     snapshot = toJsonValue(value, '');
   } catch (error) {
     // A SpecError names a value with no JSON form; anything else was thrown while reading.
-    const message =
-      error instanceof SpecError ? describeError(error) : unreadableMessage('proof', error);
+    const message = isOwnError(error) ? describeError(error) : unreadableMessage('proof', error);
     return { snapshot: undefined, errors: [message] };
   }
   if (isPlainObject(snapshot)) for (const key of ignored) delete snapshot[key];

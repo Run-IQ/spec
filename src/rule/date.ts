@@ -1,4 +1,4 @@
-import { citeName, quoteText, SpecError } from '../errors.js';
+import { citeName, newSpecError, quoteText } from '../errors.js';
 import { daysInMonth } from '../time/civil.js';
 import { dateTimeOf } from '../values.js';
 
@@ -79,7 +79,7 @@ function build(
 }
 
 function invalid(field: string, what: string): never {
-  throw new SpecError(
+  throw newSpecError(
     'INVALID_DATE',
     `${citeName(field)} must be a Date, YYYY-MM-DD, or an ISO date-time with Z or an offset; ` +
       `got ${what}`,

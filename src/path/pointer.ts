@@ -1,4 +1,4 @@
-import { SpecError, quoteText, unreadableMessage } from '../errors.js';
+import { isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 
 /**
@@ -24,10 +24,7 @@ export type JsonPointer = string;
  */
 export function parsePointer(pointer: string): string[] {
   if (typeof pointer !== 'string') {
-    throw new SpecError(
-      'INVALID_PATH',
-      `a JSON pointer must be a string, got ${typeName(pointer)}`,
-    );
+    throw newSpecError('INVALID_PATH', `a JSON pointer must be a string, got ${typeName(pointer)}`);
   }
   if (pointer === '') return [];
   if (!pointer.startsWith('/')) invalidPointer(pointer, 'must be empty or start with "/"');
@@ -50,13 +47,13 @@ export function formatPointer(segments: readonly string[]): JsonPointer {
   let out = '';
   items.forEach((segment, i) => {
     if (typeof segment !== 'string') {
-      throw new SpecError(
+      throw newSpecError(
         'INVALID_PATH',
         `segment ${i} of a JSON pointer must be a string, got ${typeName(segment)}`,
       );
     }
     if (hasLoneSurrogate(segment)) {
-      throw new SpecError('INVALID_PATH', loneSurrogateMessage(`segment ${i} of a JSON pointer`));
+      throw newSpecError('INVALID_PATH', loneSurrogateMessage(`segment ${i} of a JSON pointer`));
     }
     out += `/${segment.replace(/~/g, '~0').replace(/\//g, '~1')}`;
   });
@@ -73,15 +70,15 @@ function readSegments(segments: readonly string[]): unknown[] {
   let items: unknown[];
   try {
     if (!Array.isArray(segments)) {
-      throw new SpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
+      throw newSpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
     }
     const list: readonly unknown[] = segments;
     const length = list.length;
     items = [];
     for (let i = 0; i < length; i++) items.push(list[i]);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_PATH', unreadableMessage('JSON pointer segments', error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_PATH', unreadableMessage('JSON pointer segments', error));
   }
   return items;
 }
@@ -138,5 +135,5 @@ export function parseReadPointer(pointer: JsonPointer): string[] {
 }
 
 function invalidPointer(pointer: string, why: string): never {
-  throw new SpecError('INVALID_PATH', `invalid JSON pointer ${quoteText(pointer)}: ${why}`);
+  throw newSpecError('INVALID_PATH', `invalid JSON pointer ${quoteText(pointer)}: ${why}`);
 }

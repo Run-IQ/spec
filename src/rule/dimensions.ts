@@ -1,4 +1,4 @@
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
@@ -215,7 +215,7 @@ export function normalizeDimensionSpec(spec: unknown, path = 'dimension'): Dimen
   const normal = readDimensionSpec(spec, path, (at, message) => problems.add(at, message));
   const [first] = problems.messages();
   if (first !== undefined || normal === undefined) {
-    throw new SpecError('INVALID_RULE', first ?? `${citeName(path)} must be ${SPEC_SHAPE}`);
+    throw newSpecError('INVALID_RULE', first ?? `${citeName(path)} must be ${SPEC_SHAPE}`);
   }
   return normal;
 }

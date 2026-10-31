@@ -1,4 +1,4 @@
-import { reasonOf, SpecError, unreadableMessage } from '../errors.js';
+import { isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import {
@@ -61,7 +61,7 @@ export function windowContains(
   try {
     fields = { from: rule.effectiveFrom, until: rule.effectiveUntil, timeZone: rule.timeZone };
   } catch (error) {
-    throw new SpecError('INVALID_RULE', unreadableMessage('rule', error));
+    throw newSpecError('INVALID_RULE', unreadableMessage('rule', error));
   }
   const window = resolveWindow(fields, zone, '');
   const ref = readReferenceDate(at, 'at');
@@ -119,8 +119,8 @@ function prefixed<T>(prefix: string, read: () => T): T {
   try {
     return read();
   } catch (error) {
-    if (prefix === '' || !(error instanceof SpecError)) throw error;
-    throw new SpecError(error.code, prefix + error.message);
+    if (prefix === '' || !isOwnError(error)) throw error;
+    throw newSpecError(error.code, prefix + error.message);
   }
 }
 
@@ -136,7 +136,7 @@ export function readRuleWindow(
   const start = readReferenceDate(from, 'effectiveFrom');
   const end = until == null ? null : readReferenceDate(until, 'effectiveUntil');
   const problem = windowShapeProblem(start, end);
-  if (problem !== undefined) throw new SpecError('INVALID_RULE', problem);
+  if (problem !== undefined) throw newSpecError('INVALID_RULE', problem);
   return { from: start, until: end };
 }
 
@@ -172,7 +172,7 @@ const EFFECTIVE_ON_START = 'effectiveOn must start with /$dates/, /$item/ or /$s
 export function readEffectiveOn(value: unknown, prefix = ''): string {
   const problem = effectiveOnIssue(value);
   if (problem === undefined && typeof value === 'string') return value;
-  throw new SpecError('INVALID_RULE', prefix + (problem ?? ''));
+  throw newSpecError('INVALID_RULE', prefix + (problem ?? ''));
 }
 
 /** Internal: `effectiveOnProblem` for any value; a non-string is not a pointer. */

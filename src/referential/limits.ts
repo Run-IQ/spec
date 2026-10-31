@@ -1,4 +1,4 @@
-import { citeName, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, newSpecError, unreadableMessage } from '../errors.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -52,7 +52,7 @@ export function readLimits(options: unknown): Limits {
     };
   }
   if (options === null || typeof options !== 'object') {
-    throw new SpecError('INVALID_REFERENTIAL', 'options must be an object');
+    throw newSpecError('INVALID_REFERENTIAL', 'options must be an object');
   }
   let maxNodes: unknown;
   let maxDepth: unknown;
@@ -62,12 +62,12 @@ export function readLimits(options: unknown): Limits {
     maxDepth = Reflect.get(options, 'maxDepth');
     maxSteps = Reflect.get(options, 'maxSteps');
   } catch (error) {
-    throw new SpecError('INVALID_REFERENTIAL', unreadableMessage('options', error));
+    throw newSpecError('INVALID_REFERENTIAL', unreadableMessage('options', error));
   }
   const nodes = positive(maxNodes, DEFAULT_MAX_REFERENTIAL_NODES, 'maxNodes');
   const depth = positive(maxDepth, DEFAULT_MAX_GROUP_DEPTH, 'maxDepth');
   if (depth > MAX_GROUP_DEPTH_CEILING) {
-    throw new SpecError(
+    throw newSpecError(
       'INVALID_REFERENTIAL',
       `maxDepth must be at most ${MAX_GROUP_DEPTH_CEILING}`,
     );
@@ -79,7 +79,7 @@ export function readLimits(options: unknown): Limits {
 function positive(value: unknown, fallback: number, name: string): number {
   if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new SpecError('INVALID_REFERENTIAL', `${citeName(name)} must be a positive integer`);
+    throw newSpecError('INVALID_REFERENTIAL', `${citeName(name)} must be a positive integer`);
   }
   return value;
 }

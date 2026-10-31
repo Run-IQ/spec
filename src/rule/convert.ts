@@ -1,5 +1,5 @@
 import { canonicalize } from '../canonical.js';
-import { citeName, SpecError } from '../errors.js';
+import { citeName, newSpecError, reasonOf } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject } from '../values.js';
@@ -53,12 +53,12 @@ export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
 export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   const unknownRecord: unknown = record;
   if (!isPlainObject(unknownRecord)) {
-    throw new SpecError('INVALID_RULE', 'Stored rule: the record must be an object');
+    throw newSpecError('INVALID_RULE', 'Stored rule: the record must be an object');
   }
   const { id, version, checksum, payload } = unknownRecord;
   const name = `${String(id)}@${String(version)}`;
   const fail = (reason: string): never => {
-    throw new SpecError('INVALID_RULE', `Stored rule ${citeName(name)}: ${reason}`);
+    throw newSpecError('INVALID_RULE', `Stored rule ${citeName(name)}: ${reason}`);
   };
   if (typeof id !== 'string' || typeof version !== 'number') {
     fail('malformed record: id must be a string and version a number');
@@ -71,7 +71,7 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   try {
     parsed = JSON.parse(payload as string);
   } catch (error) {
-    fail(`payload is not valid JSON (${citeName(messageOf(error))})`);
+    fail(`payload is not valid JSON (${reasonOf(error)})`);
   }
   if (!isPlainObject(parsed)) return fail('invalid definition: the payload must be a JSON object');
   if (parsed.id !== id || parsed.version !== version) {
@@ -85,7 +85,8 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   try {
     definition = normalizeRuleDefinition(parsed as RuleDefinitionInput);
   } catch (error) {
-    return fail(`invalid definition: ${citeName(messageOf(error))}`);
+    // The error of `normalizeRuleDefinition` is its own: its message, already cited, as it is.
+    return fail(`invalid definition: ${reasonOf(error)}`);
   }
   if (canonicalize(definition) !== payload) fail('payload is not canonical');
   const computed = sha256Hex(payload as string);
@@ -110,8 +111,4 @@ function executableOf(definition: RuleDefinition, checksum: string): ExecutableR
 /** A civil date stays a string; a canonical instant becomes a `Date`. */
 function boundOf(bound: string): string | Date {
   return isCivilDate(bound) ? bound : new Date(bound);
-}
-
-function messageOf(error: unknown): string {
-  return error instanceof Error ? error.message : String(error);
 }

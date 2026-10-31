@@ -1,4 +1,4 @@
-import { citeName, quoteText, reasonOf, SpecError } from '../errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from '../errors.js';
 import { dateTimeOf, typeName } from '../values.js';
 
 /**
@@ -160,7 +160,7 @@ function offsetMinutes(offset: string): number | undefined {
 }
 
 function invalidDate(field: string, got: string): never {
-  throw new SpecError(
+  throw newSpecError(
     'INVALID_DATE',
     `${citeName(field)} must be a Date, a civil date YYYY-MM-DD or an instant ` +
       'YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; ' +
@@ -203,7 +203,7 @@ export function requireTimeZone(
   prefix = '',
 ): string {
   if (typeof zone !== 'string' || !isTimeZone(zone)) {
-    throw new SpecError(code, prefix + timeZoneMessage(zone));
+    throw newSpecError(code, prefix + timeZoneMessage(zone));
   }
   return normalizeTimeZone(zone);
 }
@@ -241,8 +241,9 @@ function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
 /**
  * Internal: `calendar.toCivilDate(at, zone)`, checked: a civil date, or `BEFORE_ALL` /
  * `AFTER_ALL` for an expanded date outside the years 0000 to 9999. Whatever goes wrong becomes
- * `SpecError` (`INVALID_DATE`): a missing method, a throw (a `SpecError` keeps its message), a
- * result that is neither.
+ * `SpecError` (`INVALID_DATE`): a missing method, a throw (an error of this package keeps its
+ * message; any other, a `SpecError` the calendar built included, is cited), a result that is
+ * neither.
  */
 export function civilDateIn(
   calendar: CivilCalendar,
@@ -253,7 +254,7 @@ export function civilDateIn(
   if (isCivilDate(day)) return day;
   const beyond = beyondOf(day, EXPANDED_DATE);
   if (beyond !== undefined) return beyond;
-  throw new SpecError(
+  throw newSpecError(
     'INVALID_DATE',
     `calendar.toCivilDate returned ${describeResult(day)} for ${citeName(at)} in ` +
       `${citeName(zone)}: ` +
@@ -271,7 +272,7 @@ export function startOfDayIn(
   if (isInstant(start)) return start;
   const beyond = beyondOf(start, EXPANDED_INSTANT);
   if (beyond !== undefined) return beyond;
-  throw new SpecError(
+  throw newSpecError(
     'INVALID_DATE',
     `calendar.startOfDay returned ${describeResult(start)} for ${citeName(day)} in ` +
       `${citeName(zone)}: ` +
@@ -294,13 +295,14 @@ function callCalendar(
   try {
     const call: unknown = calendar[method];
     if (typeof call !== 'function') {
-      throw new SpecError('INVALID_DATE', `calendar.${method} must be a function`);
+      throw newSpecError('INVALID_DATE', `calendar.${method} must be a function`);
     }
     return (call as (v: string, z: string) => unknown).call(calendar, value, zone);
   } catch (error) {
-    // A calendar's own SpecError keeps its message, under the calendar's code.
-    if (error instanceof SpecError) throw new SpecError('INVALID_DATE', error.message);
-    throw new SpecError(
+    // An error of this package keeps its message, under the calendar's code; a SpecError the
+    // calendar built is cited like any other throw.
+    if (isOwnError(error)) throw newSpecError('INVALID_DATE', error.message);
+    throw newSpecError(
       'INVALID_DATE',
       `calendar.${method} failed for ${citeName(value)} in ${citeName(zone)}: ${reasonOf(error)}`,
     );
@@ -320,7 +322,7 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
   const offsetOf = (zone: string): number => {
     const offset = zone === 'UTC' ? 0 : offsetMinutes(zone);
     if (offset === undefined) {
-      throw new SpecError(
+      throw newSpecError(
         'INVALID_DATE',
         `${citeName(user)} knows UTC and ±HH:MM offsets only: use windowContains with a calendar ` +
           `for ${quoteText(zone)}`,

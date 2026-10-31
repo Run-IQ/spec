@@ -24,6 +24,10 @@ const BRAND = Symbol.for('@run-iq/spec/SpecError');
  * `error instanceof SpecError` holds for a `SpecError` built by ANY copy of the class (another
  * entry point or another installed copy of the package): instances carry a non-enumerable
  * brand, which `instanceof` checks. A subclass keeps the ordinary prototype check.
+ *
+ * A `SpecError` a caller builds and throws from a getter, a Proxy trap or a calendar is not
+ * passed on as it is: like any other thrown value, it is described and cited in the message of
+ * the error this package throws.
  */
 export class SpecError extends Error {
   readonly code: SpecErrorCode;
@@ -54,6 +58,29 @@ export class SpecError extends Error {
 }
 
 /**
+ * The errors this copy of the package created (`newSpecError`). Only these are trusted as they
+ * are: a `SpecError` is public, so a caller's getter or Proxy trap can throw one with any code
+ * and any text; such an error, like any other thrown value, is described and cited
+ * (`reasonOf`), never passed on raw.
+ */
+const OWN_ERRORS = new WeakSet<object>();
+
+/** Internal: a `SpecError` created by this package, remembered as its own (`isOwnError`). */
+export function newSpecError(code: SpecErrorCode, message: string, path?: string): SpecError {
+  const error = new SpecError(code, message, path);
+  OWN_ERRORS.add(error);
+  return error;
+}
+
+/**
+ * Internal: true for an error this package created (`newSpecError`); false for any other
+ * value, a `SpecError` built by a caller included. Never throws (no trap of a Proxy runs).
+ */
+export function isOwnError(error: unknown): error is SpecError {
+  return typeof error === 'object' && error !== null && OWN_ERRORS.has(error);
+}
+
+/**
  * Internal: a readable description of any thrown value, without ever throwing. A hostile value
  * (a Proxy, a null-prototype object, an Error whose `message` getter throws) gives
  * `'unreadable value'`.
@@ -80,22 +107,25 @@ export function describeError(error: unknown): string {
   }
 }
 
-/** Internal: the `path` of a `SpecError`, or `undefined` for anything else; never throws. */
+/**
+ * Internal: the `path` of an error this package created, or `undefined` for anything else (a
+ * caller's `SpecError` included); never throws.
+ */
 export function specErrorPath(error: unknown): string | undefined {
   try {
-    return error instanceof SpecError && error.path ? error.path : undefined;
+    return isOwnError(error) && error.path ? error.path : undefined;
   } catch {
     return undefined;
   }
 }
 
 /**
- * Internal: `error` as a message cites it: the message of a `SpecError` as it is (built by this
- * package, its caller text already cited by `citeName`), any other thrown value described
- * (`describeError`) and cited by `citeName`.
+ * Internal: `error` as a message cites it: the message of an error this package created
+ * (`isOwnError`) as it is, its caller text already cited by `citeName`; any other thrown value
+ * (a caller's `SpecError` included) described (`describeError`) and cited by `citeName`.
  */
 export function reasonOf(error: unknown): string {
-  return error instanceof SpecError ? error.message : citeName(describeError(error));
+  return isOwnError(error) ? error.message : citeName(describeError(error));
 }
 
 /**
@@ -110,8 +140,8 @@ export function unreadableMessage(subject: string, error: unknown): string {
     : `${citeName(subject)} could not be read: ${reasonOf(error)}`;
 }
 
-/** True for the `RangeError` a call stack overflow throws; never throws. */
-function isStackOverflow(error: unknown): boolean {
+/** Internal: true for the `RangeError` a call stack overflow throws; never throws. */
+export function isStackOverflow(error: unknown): boolean {
   try {
     return error instanceof RangeError && /call stack/i.test(error.message);
   } catch {

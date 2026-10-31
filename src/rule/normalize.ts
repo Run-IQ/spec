@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
 import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
@@ -94,11 +94,11 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
     return normalize(input);
   } catch (error) {
     // Cut as `validateRuleDefinition` cuts its issues, so both give the same first message.
-    if (error instanceof SpecError) {
+    if (isOwnError(error)) {
       const message = boundIssueText(error.message);
       const path = error.path === undefined ? undefined : boundIssueText(error.path);
       if (message === error.message && path === error.path) throw error;
-      throw new SpecError(error.code, message, path);
+      throw newSpecError(error.code, message, path);
     }
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
     invalidRule(unreadableMessage('rule definition', error));
@@ -184,7 +184,7 @@ function readJson(value: unknown, field: string): JsonValue {
   try {
     return toJsonValue(value, field);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
+    if (isOwnError(error)) throw error;
     invalidRule(unreadableMessage(field, error));
   }
 }
@@ -303,5 +303,5 @@ function throwFirst(issues: readonly RuleValidationIssue[]): void {
 }
 
 function invalidRule(message: string): never {
-  throw new SpecError('INVALID_RULE', message);
+  throw newSpecError('INVALID_RULE', message);
 }

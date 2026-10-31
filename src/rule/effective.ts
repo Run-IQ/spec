@@ -1,4 +1,4 @@
-import { SpecError } from '../errors.js';
+import { newSpecError } from '../errors.js';
 import { fixedOffsetCalendar, readReferenceDate } from '../time/civil.js';
 import { dateTimeOf } from '../values.js';
 import { windowContains } from './window.js';
@@ -24,7 +24,7 @@ export function isEffectiveAt(rule: RuleWindow, at: Date): boolean {
     time = undefined;
   }
   if (time === undefined || Number.isNaN(time)) {
-    throw new SpecError('INVALID_DATE', 'at must be a valid Date');
+    throw newSpecError('INVALID_DATE', 'at must be a valid Date');
   }
   // An instant is never 'unknown': only a civil date can fall inside a day cut by a bound.
   return windowContains(rule, readReferenceDate(at, 'at'), 'UTC', OFFSETS_ONLY) === true;

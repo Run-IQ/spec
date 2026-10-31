@@ -1,4 +1,4 @@
-import { SpecError } from '../errors.js';
+import { newSpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from './definition.js';
 import { canonicalRulePayload } from './payload.js';
@@ -22,7 +22,7 @@ export function computeRuleChecksum(input: RuleDefinitionInput): string {
 export function verifyRuleChecksum(rule: RuleDefinitionInput & { checksum: string }): boolean {
   const expected: unknown = (rule as { checksum?: unknown }).checksum;
   if (typeof expected !== 'string') {
-    throw new SpecError('INVALID_RULE', 'checksum must be a string to be verified');
+    throw newSpecError('INVALID_RULE', 'checksum must be a string to be verified');
   }
   return computeRuleChecksum(rule) === expected;
 }

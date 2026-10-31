@@ -1,4 +1,4 @@
-import { citeName, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, unreadableMessage } from '../errors.js';
 import {
   dimensionValueProblem,
   normalizeDimensionSpec,
@@ -75,10 +75,10 @@ export function resolveMembership(
   return guarded(() => {
     requireDate(at);
     const problem = dimensionValueProblem(value, 'value');
-    if (problem !== undefined) throw new SpecError('INVALID_INPUT', problem);
+    if (problem !== undefined) throw newSpecError('INVALID_INPUT', problem);
     const groups = referential.groups;
     if (typeof group !== 'string' || !Object.hasOwn(groups, group)) {
-      throw new SpecError(
+      throw newSpecError(
         'INVALID_REFERENTIAL',
         `group ${citeName(String(group))} not in referential ${citeName(referential.id)}`,
       );
@@ -130,7 +130,7 @@ export function matchDimension(
     } else {
       const referential = referentials.get(ref);
       if (referential === undefined) {
-        throw new SpecError('INVALID_REFERENTIAL', `unknown referential ${citeName(ref)}`);
+        throw newSpecError('INVALID_REFERENTIAL', `unknown referential ${citeName(ref)}`);
       }
       const targets = [...anyOf, ...except].map((t) => readTarget(referential, t));
       const resolver = new Resolver(referential, at, maxDepth);
@@ -155,14 +155,14 @@ function guarded<T>(call: () => T): T {
   try {
     return call();
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_REFERENTIAL', unreadableMessage('referential', error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_REFERENTIAL', unreadableMessage('referential', error));
   }
 }
 
 function requireDate(at: unknown): void {
   if (!isCivilDate(at)) {
-    throw new SpecError('INVALID_DATE', `the date must be a civil date YYYY-MM-DD`);
+    throw newSpecError('INVALID_DATE', `the date must be a civil date YYYY-MM-DD`);
   }
 }
 
@@ -172,12 +172,12 @@ function readInput(input: unknown): string[] {
   let list: unknown[];
   try {
     if (!Array.isArray(input)) {
-      throw new SpecError('INVALID_INPUT', 'input must be a value or an array of values');
+      throw newSpecError('INVALID_INPUT', 'input must be a value or an array of values');
     }
     list = Array.from(input);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
-    throw new SpecError('INVALID_INPUT', unreadableMessage('input', error));
+    if (isOwnError(error)) throw error;
+    throw newSpecError('INVALID_INPUT', unreadableMessage('input', error));
   }
   return checkInput(list, input);
 }
@@ -185,14 +185,14 @@ function readInput(input: unknown): string[] {
 /** The values of `list` checked, sorted without duplicates; never empty. */
 function checkInput(list: readonly unknown[], input: unknown): string[] {
   if (list.length === 0) {
-    throw new SpecError('INVALID_INPUT', 'a dimension input must hold at least one value');
+    throw newSpecError('INVALID_INPUT', 'a dimension input must hold at least one value');
   }
   list.forEach((value, i) => {
     const problem = dimensionValueProblem(
       value,
       typeof input === 'string' ? 'input' : `input[${i}]`,
     );
-    if (problem !== undefined) throw new SpecError('INVALID_INPUT', problem);
+    if (problem !== undefined) throw newSpecError('INVALID_INPUT', problem);
   });
   return [...new Set(list.map(String))].sort();
 }
@@ -217,7 +217,7 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
       return { kind: 'unknown', why: `code system ${citeName(system)} is not ${citeName(own)}` };
   }
   if (Object.hasOwn(referential.groups, code)) {
-    throw new SpecError(
+    throw newSpecError(
       'INVALID_INPUT',
       `input value ${citeName(value)} is a group of ${citeName(referential.id)}`,
     );
@@ -245,7 +245,7 @@ function readTarget(referential: Referential, target: string): Target {
   if (Object.hasOwn(referential.groups, target)) return { kind: 'group', name: target };
   const codes = referential.codes;
   if (codes !== undefined && !Object.hasOwn(codes, target)) {
-    throw new SpecError(
+    throw newSpecError(
       'INVALID_REFERENTIAL',
       `${citeName(target)} is neither a group nor a code of referential ` +
         `${citeName(referential.id)}`,
@@ -365,7 +365,7 @@ class Resolver {
     const known = memo.get(group);
     if (known !== undefined) return known;
     if (stack.length >= this.maxDepth) {
-      throw new SpecError('INVALID_REFERENTIAL', `group nesting deeper than ${this.maxDepth}`);
+      throw newSpecError('INVALID_REFERENTIAL', `group nesting deeper than ${this.maxDepth}`);
     }
     const groups = this.referential.groups;
     const entry = groups[group];
