@@ -18,7 +18,8 @@ import {
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
-import type { RuleValidationIssue } from '../rule/validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import { isPlainObject } from '../values.js';
 import { isProofFormat, PROOF_FORMATS } from './formats.js';
 import type { DecisionProof, UnsignedProof } from './types.js';
@@ -352,6 +353,10 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  *
  * It agrees with `schema/decision-proof.schema.json` on JSON documents, plus one check JSON
  * Schema cannot express: no two entries of `rules` have the same id and version.
+ *
+ * Lists at most 100 problems, in the order found, then one last issue `further problems not
+ * listed (limit 100)`; a path or message longer than 1024 code units is cut there, then `…`
+ * (`IssueList`, shared by every validator of the package).
  */
 export function validateProof(value: unknown): {
   errors: string[];
@@ -422,18 +427,18 @@ function collect(
   shape: Shape,
   ignored: ReadonlySet<string>,
 ): RuleValidationIssue[] {
-  const issues: RuleValidationIssue[] = [];
+  const issues = new IssueList();
   const add: Add = (path, message) => {
-    issues.push({ path, message });
+    issues.add(path, message);
   };
   try {
     if (!isPlainObject(value)) {
       add('', 'a decision proof must be a plain object');
-      return issues;
+      return issues.toArray();
     }
     const members = checkObject(value, '', shape, add, ignored);
     checkUniqueRules(members?.get('rules'), add);
-    return issues;
+    return issues.toArray();
   } catch (error) {
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
     return [{ path: '', message: unreadableMessage('proof', error) }];

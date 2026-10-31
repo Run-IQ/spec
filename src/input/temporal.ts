@@ -44,7 +44,7 @@ interface Span {
  * leaving it out.
  *
  * Never throws; each property is read once; the work and the list of issues are bounded as in
- * `validateProofInput`.
+ * `validateProofInput` (at most 100 problems, then `further problems not listed (limit 100)`).
  */
 export function validateTemporalFact(value: unknown, path: string): RuleValidationIssue[] {
   return runCheck(

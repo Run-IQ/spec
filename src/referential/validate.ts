@@ -1,7 +1,8 @@
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { canonicalize } from '../canonical.js';
 import { sha256Hex } from '../hash.js';
-import type { RuleValidationIssue } from '../rule/validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
@@ -68,6 +69,10 @@ type Add = (path: string, message: string) => void;
  * `referential could not be read: <reason>`. Throws `SpecError` (`INVALID_REFERENTIAL`) only
  * for invalid options: not an object, unreadable, a limit that is not a positive integer, or
  * `maxDepth` above 1 024.
+ *
+ * Lists at most 100 problems, in the order found, then one last issue `further problems not
+ * listed (limit 100)`; a path or message longer than 1024 code units is cut there, then `…`
+ * (`IssueList`, shared by every validator of the package).
  */
 export function validateReferential(
   value: unknown,
@@ -131,9 +136,9 @@ function check(
 ): { issues: RuleValidationIssue[]; normal: Referential | undefined; steps: number } {
   // The budget is set once the nodes are counted (`readReferential`).
   const work: Work = { steps: 0, limit: 0 };
-  const issues: RuleValidationIssue[] = [];
+  const issues = new IssueList();
   const add: Add = (path, message) => {
-    issues.push({ path, message });
+    issues.add(path, message);
   };
   let normal: Referential | undefined;
   try {
@@ -145,7 +150,11 @@ function check(
       steps: work.steps,
     };
   }
-  return { issues, normal: issues.length === 0 ? normal : undefined, steps: work.steps };
+  return {
+    issues: issues.toArray(),
+    normal: issues.length === 0 ? normal : undefined,
+    steps: work.steps,
+  };
 }
 
 /** A group as read once: its raw members, read after the size check. */

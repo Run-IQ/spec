@@ -66,9 +66,9 @@ const PLAIN_OBJECT = 'a plain object';
  * object holding a value cut too deep is read again from a shorter path). A property that
  * cannot be read (a getter or a Proxy trap that throws) gives `<pointer> could not be read:
  * <reason>`; nesting is walked without recursion, so no input overflows the stack. At most
- * `MAX_INPUT_ISSUES` (100) problems are listed, in the order found, then one last issue
- * `further problems not listed (limit 100)` (path `''`) and the check stops; a path longer
- * than `MAX_ISSUE_PATH` (1024) code units is cut there and followed by `…`.
+ * `MAX_ISSUES` (100) problems are listed, in the order found, then one last issue
+ * `further problems not listed (limit 100)` (path `''`) and the check stops; a path or a
+ * message longer than `MAX_ISSUE_TEXT` (1024) code units is cut there and followed by `…`.
  */
 export function validateProofInput(value: unknown): RuleValidationIssue[] {
   return check(value).issues;

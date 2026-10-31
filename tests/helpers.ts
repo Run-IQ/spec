@@ -172,6 +172,24 @@ export function proofInput(
   };
 }
 
+/**
+ * Asserts a list of issues that reached the shared bound: 100 problems, then the last issue
+ * `further problems not listed (limit 100)`; every path at most 1024 code units plus `…`, every
+ * message at most `maxMessage` code units (so the total size is bounded too).
+ */
+export function expectBoundedIssues(
+  issues: readonly { path: string; message: string }[],
+  maxMessage = 1025,
+): void {
+  expect(issues).toHaveLength(101);
+  expect(issues[100]).toEqual({ path: '', message: 'further problems not listed (limit 100)' });
+  expect(issues.every((issue) => issue.path.length <= 1025)).toBe(true);
+  expect(issues.every((issue) => issue.message.length <= maxMessage)).toBe(true);
+  expect(issues.reduce((total, issue) => total + issue.message.length, 0)).toBeLessThanOrEqual(
+    101 * maxMessage,
+  );
+}
+
 /** `issues` sorted by path (UTF-16 code units), to compare problems whatever their order. */
 export function sortedByPath<T extends { path: string }>(issues: readonly T[]): T[] {
   return [...issues].sort((a, b) => (a.path < b.path ? -1 : a.path > b.path ? 1 : 0));

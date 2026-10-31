@@ -1,7 +1,8 @@
 import type { JsonValue } from '../canonical.js';
 import { unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
-import type { RuleValidationIssue } from '../rule/validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import { isPlainObject } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 
@@ -150,6 +151,10 @@ const MAX_SCALE = 20;
  * A value that cannot be read (a getter or a Proxy trap that throws, at any depth) gives the
  * single issue `<path> could not be read: <reason>` at `path` (`<path> is too deeply nested`
  * when reading it overflows the call stack).
+ *
+ * Lists at most 100 problems, in the order found, then one last issue `further problems not
+ * listed (limit 100)`; a path or message longer than 1024 code units is cut there, then `…`
+ * (`IssueList`, shared by every validator of the package).
  */
 export function validateOutputDeclaration(
   declaration: unknown,
@@ -163,14 +168,14 @@ export function validateOutputDeclaration(
 }
 
 function declarationIssues(declaration: unknown, path: string): RuleValidationIssue[] {
-  const issues: RuleValidationIssue[] = [];
+  const issues = new IssueList();
   const add = (at: string, message: string): void => {
-    issues.push({ path: at, message });
+    issues.add(at, message);
   };
 
   if (!isPlainObject(declaration)) {
     add(path, `${path} must be an object { type, combine, values?, rounding? }`);
-    return issues;
+    return issues.toArray();
   }
   for (const key of Object.keys(declaration)) {
     if (!KEYS.has(key)) add(`${path}.${key}`, `${path} has an unknown key "${key}"`);
@@ -199,7 +204,7 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
     if (knownType && !ROUNDABLE.includes(type)) roundingNotApplicable(`${path}.rounding`, add);
     else checkRounding(rounding, `${path}.rounding`, add);
   }
-  return issues;
+  return issues.toArray();
 }
 
 /**

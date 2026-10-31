@@ -22,7 +22,8 @@ import {
   ruleSetOf,
   shortestFrom,
 } from './ruleSet.js';
-import type { RuleValidationIssue } from './validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 
 /**
  * Which rules an exception targets. Fields combine by AND; the values of one field by OR
@@ -259,10 +260,10 @@ export function readRuleExceptions(
   value: JsonValue,
   path: string,
   ruleSet: string | undefined,
-): { exceptions: RuleException[]; issues: RuleValidationIssue[] } {
-  const issues: RuleValidationIssue[] = [];
+): { exceptions: RuleException[]; issues: IssueList } {
+  const issues = new IssueList();
   const add = (at: string, message: string): void => {
-    issues.push({ path: at, message });
+    issues.add(at, message);
   };
   if (value === null) return { exceptions: [], issues };
   if (!Array.isArray(value)) {

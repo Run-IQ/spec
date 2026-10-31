@@ -1,6 +1,7 @@
 import { toJsonValue } from '../canonical.js';
 import { describeError, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
+import { boundMessages } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
 import { canonicalRulePayload } from '../rule/payload.js';
 import { isPlainObject } from '../values.js';
@@ -51,6 +52,9 @@ interface Finding {
  * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
  * `invalid` too, rather than being ignored.
  *
+ * `issues` lists at most 100 messages, then `further problems not listed (limit 100)`
+ * (`IssueList`, shared by every validator of the package).
+ *
  * `authentic` needs a matching digest, a valid signature by a trusted key, and no difference
  * in `rules`. A proof that is only `consistent` must not be used for audit.
  *
@@ -72,7 +76,7 @@ export function verifyProof(
 
 function verify(p: unknown, options: unknown): ProofVerification {
   const { proof, errors } = readDecisionProof(p);
-  if (!proof) return { status: 'invalid', issues: errors };
+  if (!proof) return { status: 'invalid', issues: boundMessages(errors) };
 
   const findings: Finding[] = [];
   if (contentDigest(proof) !== proof.digest) {
@@ -87,7 +91,7 @@ function verify(p: unknown, options: unknown): ProofVerification {
   findings.push(...signatureFindings(proof, trustedKeys));
   if (rules !== undefined) findings.push(...ruleFindings(proof, rules));
 
-  const issues = findings.map((finding) => finding.message);
+  const issues = boundMessages(findings.map((finding) => finding.message));
   if (findings.some((finding) => finding.invalid)) return { status: 'invalid', issues };
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues };
 }

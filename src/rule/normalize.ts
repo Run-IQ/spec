@@ -25,7 +25,8 @@ import {
   shortestFrom,
 } from './ruleSet.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
-import type { RuleValidationIssue } from './validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import {
   DEFAULT_EFFECTIVE_ON,
   effectiveOnContextProblem,
@@ -138,7 +139,7 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
       'exceptions',
       ruleSet,
     );
-    throwFirst(read.issues);
+    throwFirst(read.issues.toArray());
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
   throwFirst(
@@ -196,11 +197,11 @@ function requireId(value: unknown): string {
 
 /** The normal form of `forEach` (read once, as JSON), or `INVALID_RULE` for its first problem. */
 function readForEachField(value: unknown): ForEach | undefined {
-  const problems: RuleValidationIssue[] = [];
+  const problems = new IssueList();
   const forEach = readForEach(readJson(value, 'forEach'), (path, message) => {
-    problems.push({ path, message });
+    problems.add(path, message);
   });
-  throwFirst(problems);
+  throwFirst(problems.toArray());
   return forEach;
 }
 
@@ -231,11 +232,11 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
     if (v == null) continue; // null or undefined: the dimension is unset
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
-    const problems: RuleValidationIssue[] = [];
+    const problems = new IssueList();
     const spec = readDimensionSpec(v, `dimensions.${key}`, (path, message) => {
-      problems.push({ path, message });
+      problems.add(path, message);
     });
-    throwFirst(problems);
+    throwFirst(problems.toArray());
     if (spec !== undefined) defineField(out, key, spec);
   }
   return out;

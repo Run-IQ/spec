@@ -1,4 +1,5 @@
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { IssueList } from '../issues.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
 /**
@@ -207,9 +208,9 @@ function normalForm(
  * the first problem of an invalid spec.
  */
 export function normalizeDimensionSpec(spec: unknown, path = 'dimension'): DimensionSpec {
-  const problems: string[] = [];
-  const normal = readDimensionSpec(spec, path, (_at, message) => problems.push(message));
-  const [first] = problems;
+  const problems = new IssueList();
+  const normal = readDimensionSpec(spec, path, (at, message) => problems.add(at, message));
+  const [first] = problems.messages();
   if (first !== undefined || normal === undefined) {
     throw new SpecError('INVALID_RULE', first ?? `${path} must be ${SPEC_SHAPE}`);
   }

@@ -1,6 +1,8 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
@@ -21,18 +23,10 @@ import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
 
-/** One problem found by `validateRuleDefinition`: the field path (`''` for the whole value). */
-export interface RuleValidationIssue {
-  path: string;
-  message: string;
-}
+export type { RuleValidationIssue } from '../issues.js';
 
-class Issues {
-  readonly list: RuleValidationIssue[] = [];
-  add(path: string, message: string): void {
-    this.list.push({ path, message });
-  }
-}
+/** The problems of one check, bounded (`IssueList`). */
+type Issues = IssueList;
 
 /**
  * Checks a rule definition without throwing and reports every problem found. Accepts exactly
@@ -71,6 +65,10 @@ class Issues {
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
  * the path of the offending field (`params.rates[1]`, `dimensions.country`; `''` when the
  * value itself is not an object).
+ *
+ * Lists at most 100 problems, in the order found, then one last issue `further problems not
+ * listed (limit 100)`; a path or message longer than 1024 code units is cut there, then `…`
+ * (`IssueList`, shared by every validator of the package).
  */
 export function validateRuleDefinition(value: unknown): {
   valid: boolean;
@@ -80,7 +78,7 @@ export function validateRuleDefinition(value: unknown): {
   try {
     return definitionIssues(value);
   } catch (error) {
-    const unreadable = new Issues();
+    const unreadable = new IssueList();
     unreadable.add('', unreadableMessage('rule definition', error));
     return result(unreadable);
   }
@@ -91,7 +89,7 @@ function definitionIssues(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
-  const errors = new Issues();
+  const errors = new IssueList();
   if (!isPlainObject(value)) {
     errors.add('', 'a rule definition must be a plain object');
     return result(errors);
@@ -174,11 +172,7 @@ function result(issues: Issues): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
-  return {
-    valid: issues.list.length === 0,
-    errors: issues.list.map((i) => i.message),
-    issues: issues.list,
-  };
+  return { valid: issues.length === 0, errors: issues.messages(), issues: issues.toArray() };
 }
 
 function checkNonEmptyString(value: unknown, field: string, errors: Issues): void {
@@ -214,9 +208,7 @@ function toJsonOrIssue(value: unknown, field: string, errors: Issues): JsonValue
 function checkExceptions(value: unknown, ruleSet: string | undefined, errors: Issues): void {
   const json = toJsonOrIssue(value, 'exceptions', errors);
   if (json === undefined) return;
-  for (const issue of readRuleExceptions(json, 'exceptions', ruleSet).issues) {
-    errors.add(issue.path, issue.message);
-  }
+  errors.merge(readRuleExceptions(json, 'exceptions', ruleSet).issues);
 }
 
 /** The normal form of a `forEach`, or `undefined` after recording why it is invalid. */

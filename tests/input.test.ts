@@ -3,7 +3,7 @@ import { validateProofInput } from '../src/index.js';
 import { reservedDimensionNameMessage } from '../src/rule/dimensions.js';
 import { MAX_INPUT_DEPTH, MAX_INPUT_VALUES } from '../src/input/read.js';
 import { inputCheckReads } from '../src/input/validate.js';
-import { nested, proofInput, sortedByPath } from './helpers.js';
+import { expectBoundedIssues, nested, proofInput, sortedByPath } from './helpers.js';
 
 const DATE_FORMS = 'a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS.sssZ';
 
@@ -466,20 +466,12 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     ]);
   });
 
-  /** Asserts the issues of a check that hit the cap: 100 listed, then the final notice. */
-  const expectCapped = (issues: { path: string; message: string }[]): void => {
-    expect(issues).toHaveLength(101);
-    expect(issues[100]).toEqual({ path: '', message: 'further problems not listed (limit 100)' });
-    expect(issues.every((issue) => issue.path.length <= 1025)).toBe(true);
-    expect(issues.every((issue) => issue.message.length <= 300)).toBe(true);
-  };
-
   it('stops at 100 problems: 2 000 000 lists one level too deep (review I1)', () => {
     const value = JSON.parse(
       `{"x":${'{"a":'.repeat(998)}[${Array(2_000_000).fill('[1]').join(',')}]${'}'.repeat(998)}}`,
     ) as Record<string, never>;
     const issues = validateProofInput(proofInput({}, value));
-    expectCapped(issues);
+    expectBoundedIssues(issues, 300);
     const list = `/data/x${'/a'.repeat(998)}`;
     expect(issues[0]).toEqual({
       path: `${`${list}/0`.slice(0, 1024)}…`,
@@ -493,7 +485,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         .fill(2 ** 53)
         .join(',')}]${'}'.repeat(998)}}`,
     ) as Record<string, never>;
-    expectCapped(validateProofInput(proofInput({}, value)));
+    expectBoundedIssues(validateProofInput(proofInput({}, value)), 300);
   });
 
   it('stops at 100 problems on a Proxy that makes a new object at each read (review I1)', () => {
@@ -508,7 +500,10 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         return new Proxy(target, handler);
       },
     };
-    expectCapped(validateProofInput(proofInput({}, { t: new Proxy(target, handler) as never })));
+    expectBoundedIssues(
+      validateProofInput(proofInput({}, { t: new Proxy(target, handler) as never })),
+      300,
+    );
     expect(reads).toBeLessThan(2000);
   });
 

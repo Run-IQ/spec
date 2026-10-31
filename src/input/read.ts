@@ -1,6 +1,7 @@
 import { escapeText, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import type { RuleValidationIssue } from '../rule/validate.js';
+import { IssueList } from '../issues.js';
+import type { RuleValidationIssue } from '../issues.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
 /**
@@ -24,21 +25,9 @@ export const MAX_INPUT_DEPTH = 1000;
  */
 export const MAX_INPUT_VALUES = 10_000_000;
 
-/**
- * The most problems one check lists: past it, one last issue says that further problems were
- * not listed, and the check stops. So a hostile input never makes a huge list of issues.
- */
-export const MAX_INPUT_ISSUES = 100;
-
-/**
- * The longest path an issue gives, in UTF-16 code units: a longer one is cut there (between
- * two code points) and followed by `…`, so 1000 levels of long keys never make a huge path.
- */
-export const MAX_ISSUE_PATH = 1024;
-
 export type Add = (path: string, message: string) => void;
 
-/** Stops a check once `MAX_INPUT_ISSUES` problems are listed (the last issue says so). */
+/** Stops a check once its `IssueList` is full (`MAX_ISSUES`, `src/issues.ts`). */
 class IssueLimitReached {}
 
 /** Stops a check as soon as the budget of `MAX_INPUT_VALUES` reads is spent. */
@@ -54,10 +43,10 @@ class InputTooLarge {
 
 /** Internal: the state of one check: where issues go, and the reads counted so far. */
 export interface Reader {
-  /** Lists a problem; past `MAX_INPUT_ISSUES`, stops the check (`runCheck`). */
+  /** Lists a problem; once the list is full, stops the check (`runCheck`). */
   readonly add: Add;
   /** The problems listed so far: a value without new problem under it has an encoding. */
-  readonly issues: RuleValidationIssue[];
+  readonly issues: IssueList;
   /** The problems of depth listed so far: they depend on the path, not on the value. */
   depthIssues: number;
   reads: number;
@@ -76,32 +65,11 @@ export interface Reader {
   readonly encodings?: Map<object, string | undefined>;
 }
 
-/** `path` cut to `MAX_ISSUE_PATH` code units, never inside a surrogate pair, then `…`. */
-function issuePath(path: string): string {
-  if (path.length <= MAX_ISSUE_PATH) return path;
-  const last = path.charCodeAt(MAX_ISSUE_PATH - 1);
-  const splitsPair = last >= 0xd800 && last <= 0xdbff;
-  return `${path.slice(0, splitsPair ? MAX_ISSUE_PATH - 1 : MAX_ISSUE_PATH)}…`;
-}
-
-/**
- * Lists the problem `message` at `path` in `issues`, unless `MAX_INPUT_ISSUES` are listed:
- * then lists the last issue (further problems not listed) and returns false.
- */
-function listIssue(issues: RuleValidationIssue[], path: string, message: string): boolean {
-  if (issues.length >= MAX_INPUT_ISSUES) {
-    issues.push({ path: '', message: `further problems not listed (limit ${MAX_INPUT_ISSUES})` });
-    return false;
-  }
-  issues.push({ path: issuePath(path), message });
-  return true;
-}
-
 function createReader(encode: boolean): Reader {
-  const issues: RuleValidationIssue[] = [];
+  const issues = new IssueList();
   const reader: Reader = {
     add: (path, message) => {
-      if (!listIssue(issues, path, message)) throw new IssueLimitReached();
+      if (!issues.add(path, message)) throw new IssueLimitReached();
     },
     issues,
     depthIssues: 0,
@@ -115,8 +83,8 @@ function createReader(encode: boolean): Reader {
 
 /**
  * Internal: runs one check with a fresh reader and returns the problems it listed, in the order
- * found, at most `MAX_INPUT_ISSUES` and a last one saying that further problems were not listed,
- * and the reads it made. Never throws: past the read budget the check stops with
+ * found, bounded by `IssueList` (at most 100, then one saying that further problems were not
+ * listed), and the reads it made. Never throws: past the read budget the check stops with
  * `input too large`; any other error (a Proxy trap outside a guarded read) is reported by
  * `unreadable` (its path and message). With `encode`, `walkJson` encodes values.
  */
@@ -134,10 +102,10 @@ export function runCheck(
         error instanceof InputTooLarge
           ? { path: error.path, message: error.message }
           : unreadable(error);
-      listIssue(reader.issues, issue.path, issue.message);
+      reader.issues.add(issue.path, issue.message);
     }
   }
-  return { issues: reader.issues, reads: reader.reads };
+  return { issues: reader.issues.toArray(), reads: reader.reads };
 }
 
 /** Counts `n` reads about to happen at `path`; throws `InputTooLarge` past the budget. */
