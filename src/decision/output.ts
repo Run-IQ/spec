@@ -1,5 +1,5 @@
 import type { JsonValue } from '../canonical.js';
-import { unreadableMessage } from '../errors.js';
+import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
@@ -75,7 +75,7 @@ export function isReservedOutputName(name: string): boolean {
 
 /** Internal: the message refusing the reserved output name at `path`. */
 export function reservedOutputNameMessage(path: string): string {
-  return `${path} must not start with "$": output names starting with "$" are reserved`;
+  return `${citeName(path)} must not start with "$": output names starting with "$" are reserved`;
 }
 
 /** The declaration of an output nobody declares: a number, summed. Frozen. */
@@ -174,22 +174,27 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
   };
 
   if (!isPlainObject(declaration)) {
-    add(path, `${path} must be an object { type, combine, values?, rounding? }`);
+    add(path, `${citeName(path)} must be an object { type, combine, values?, rounding? }`);
     return issues.toArray();
   }
   for (const key of Object.keys(declaration)) {
-    if (!KEYS.has(key)) add(`${path}.${key}`, `${path} has an unknown key "${key}"`);
+    if (!KEYS.has(key))
+      add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
   }
 
   const { type, combine, values, rounding } = declaration;
   const knownType = isOneOf(type, OUTPUT_TYPES);
-  if (!knownType) add(`${path}.type`, `${path}.type must be one of ${OUTPUT_TYPES.join(', ')}`);
+  if (!knownType)
+    add(`${path}.type`, `${citeName(path)}.type must be one of ${OUTPUT_TYPES.join(', ')}`);
   if (!isOneOf(combine, COMBINE_STRATEGIES)) {
-    add(`${path}.combine`, `${path}.combine must be one of ${COMBINE_STRATEGIES.join(', ')}`);
+    add(
+      `${path}.combine`,
+      `${citeName(path)}.combine must be one of ${COMBINE_STRATEGIES.join(', ')}`,
+    );
   } else if (knownType && !COMBINABLE[combine].includes(type)) {
     add(
       `${path}.combine`,
-      `${path}.combine "${combine}" cannot combine a ${type} output: ` +
+      `${citeName(path)}.combine ${quoteText(combine)} cannot combine a ${type} output: ` +
         `it applies to ${COMBINABLE[combine].join(', ')}`,
     );
   }
@@ -197,7 +202,7 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
   if (type === 'enum') {
     checkEnumValues(values, `${path}.values`, add);
   } else if (knownType && values !== undefined) {
-    add(`${path}.values`, `${path}.values applies only to an enum output`);
+    add(`${path}.values`, `${citeName(path)}.values applies only to an enum output`);
   }
 
   if (rounding !== undefined) {
@@ -218,28 +223,28 @@ export function checkRounding(
   add: (path: string, message: string) => void,
 ): void {
   if (!isPlainObject(rounding)) {
-    add(path, `${path} must be an object { scale, mode, at? }`);
+    add(path, `${citeName(path)} must be an object { scale, mode, at? }`);
     return;
   }
   const members = new Map<string, unknown>(Object.entries(rounding));
   for (const key of members.keys()) {
     if (!ROUNDING_KEYS.has(key)) {
-      add(`${path}.${key}`, `${path} has an unknown key "${key}"`);
+      add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
     }
   }
   const scale = members.get('scale');
   const mode = members.get('mode');
   const at = members.get('at');
-  if (scale === undefined) add(`${path}.scale`, `${path}.scale is required`);
+  if (scale === undefined) add(`${path}.scale`, `${citeName(path)}.scale is required`);
   else if (!isScale(scale)) {
-    add(`${path}.scale`, `${path}.scale must be an integer from 0 to ${MAX_SCALE}`);
+    add(`${path}.scale`, `${citeName(path)}.scale must be an integer from 0 to ${MAX_SCALE}`);
   }
-  if (mode === undefined) add(`${path}.mode`, `${path}.mode is required`);
+  if (mode === undefined) add(`${path}.mode`, `${citeName(path)}.mode is required`);
   else if (!isOneOf(mode, ROUNDING_MODES)) {
-    add(`${path}.mode`, `${path}.mode must be one of ${ROUNDING_MODES.join(', ')}`);
+    add(`${path}.mode`, `${citeName(path)}.mode must be one of ${ROUNDING_MODES.join(', ')}`);
   }
   if (at !== undefined && !isOneOf(at, ROUNDING_TARGETS)) {
-    add(`${path}.at`, `${path}.at must be one of ${ROUNDING_TARGETS.join(', ')}`);
+    add(`${path}.at`, `${citeName(path)}.at must be one of ${ROUNDING_TARGETS.join(', ')}`);
   }
 }
 
@@ -248,7 +253,7 @@ export function roundingNotApplicable(
   path: string,
   add: (path: string, message: string) => void,
 ): void {
-  add(path, `${path} applies only to a number or decimal output`);
+  add(path, `${citeName(path)} applies only to a number or decimal output`);
 }
 
 /** Internal: true for an output type a rounding applies to. */
@@ -268,23 +273,24 @@ function checkEnumValues(
   add: (path: string, message: string) => void,
 ): void {
   if (values === undefined) {
-    add(path, `${path} is required for an enum output: list its allowed strings`);
+    add(path, `${citeName(path)} is required for an enum output: list its allowed strings`);
     return;
   }
   if (!Array.isArray(values)) {
-    add(path, `${path} must be an array of non-empty strings`);
+    add(path, `${citeName(path)} must be an array of non-empty strings`);
     return;
   }
   const items: unknown[] = Array.from(values);
   if (items.length === 0) {
-    add(path, `${path} must not be empty: an enum output needs at least one value`);
+    add(path, `${citeName(path)} must not be empty: an enum output needs at least one value`);
     return;
   }
   const seen = new Set<string>();
   items.forEach((item, i) => {
     if (typeof item !== 'string' || item === '') {
-      add(`${path}[${i}]`, `${path}[${i}] must be a non-empty string`);
-    } else if (seen.has(item)) add(`${path}[${i}]`, `${path}[${i}] repeats "${item}"`);
+      add(`${path}[${i}]`, `${citeName(path)}[${i}] must be a non-empty string`);
+    } else if (seen.has(item))
+      add(`${path}[${i}]`, `${citeName(path)}[${i}] repeats ${quoteText(item)}`);
     else seen.add(item);
   });
 }

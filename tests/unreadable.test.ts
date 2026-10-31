@@ -39,7 +39,7 @@ const REASONS: [string, unknown, string][] = [
   ['control characters', new Error('bad\nline\ttab'), 'bad\\nline\\ttab'],
   ['a lone surrogate', new Error(`x${LONE}`), 'x\\ud800'],
   ['quotes and backslashes', new Error('a "b" \\ c'), 'a \\"b\\" \\\\ c'],
-  ['a 1 MB message', new Error('m'.repeat(1_000_000)), `${'m'.repeat(100)}…`],
+  ['a 1 MB message', new Error('m'.repeat(1_000_000)), `${'m'.repeat(256)}…`],
   ['a throwing message getter', errorWithThrowingMessage(), 'unreadable value'],
   ['a thrown string', 'plain\nstring', 'plain\\nstring'],
   ['a thrown number', 42, '42'],

@@ -1,4 +1,4 @@
-import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { canonicalize } from '../canonical.js';
 import { sha256Hex } from '../hash.js';
 import { IssueList } from '../issues.js';
@@ -232,7 +232,7 @@ function readReferential(
   if (groups === undefined) return undefined;
   const groupNames = new Set(groups.map((g) => g.name));
   for (const name of groupNames) {
-    if (codeNames.has(name)) add(`groups.${name}`, `${name} is both a code and a group`);
+    if (codeNames.has(name)) add(`groups.${name}`, `${citeName(name)} is both a code and a group`);
   }
 
   const edges: Edge[] = [];
@@ -359,7 +359,7 @@ function checkSourceRef(fields: Record<string, unknown>, prefix: string, add: Ad
 /** True for a non-empty string without lone surrogate; reports any other value at `path`. */
 function checkText(value: unknown, path: string, add: Add): boolean {
   if (typeof value !== 'string' || value === '') {
-    add(path, `${path} must be a non-empty string`);
+    add(path, `${citeName(path)} must be a non-empty string`);
     return false;
   }
   if (hasLoneSurrogate(value)) {
@@ -420,10 +420,10 @@ function readCodeLists(
       continue;
     }
     if (!Array.isArray(periods)) {
-      add(path, `${path} must be an array of periods`);
+      add(path, `${citeName(path)} must be an array of periods`);
       codes.set(code, undefined);
     } else if (periods.length === 0) {
-      add(path, `${path} must list at least one period`);
+      add(path, `${citeName(path)} must list at least one period`);
       codes.set(code, undefined);
     } else {
       codes.set(code, periods);
@@ -458,19 +458,25 @@ function readGroups(value: unknown, keys: readonly string[], add: Add): RawGroup
 function readGroup(value: unknown, name: string, path: string, add: Add): RawGroup {
   const refused = { name, exhaustive: false, sourceRef: undefined, members: undefined, length: 0 };
   if (!isPlainObject(value)) {
-    add(path, `${path} must be an object { exhaustive, members }`);
+    add(path, `${citeName(path)} must be an object { exhaustive, members }`);
     return refused;
   }
-  const fields = readFields(value, `${path}.`, GROUP_KEYS, `${path} has an unknown key`, add);
+  const fields = readFields(
+    value,
+    `${path}.`,
+    GROUP_KEYS,
+    `${citeName(path)} has an unknown key`,
+    add,
+  );
   if (fields === undefined) return refused;
   checkSourceRef(fields, `${path}.`, add);
   const exhaustive = fields.exhaustive;
   if (typeof exhaustive !== 'boolean') {
-    add(`${path}.exhaustive`, `${path}.exhaustive must be a boolean`);
+    add(`${path}.exhaustive`, `${citeName(path)}.exhaustive must be a boolean`);
   }
   const members = fields.members;
   if (!Array.isArray(members)) {
-    add(`${path}.members`, `${path}.members must be an array of members`);
+    add(`${path}.members`, `${citeName(path)}.members must be an array of members`);
     return refused;
   }
   const list: readonly unknown[] = members;
@@ -508,27 +514,33 @@ function checkPeriods(periods: readonly unknown[], path: string, add: Add): Peri
   }
   const normal = sortedUnique(read, compareSpans);
   const overlap = firstOverlap(normal.map((p) => ({ from: p.from, until: p.until ?? null })));
-  if (overlap !== undefined) add(path, `${path} has overlapping periods from ${overlap}`);
+  if (overlap !== undefined) add(path, `${citeName(path)} has overlapping periods from ${overlap}`);
   return mergeAdjacent(normal);
 }
 
 function readPeriod(value: unknown, path: string, add: Add): Period | undefined {
   if (!isPlainObject(value)) {
-    add(path, `${path} must be a period { from, until }`);
+    add(path, `${citeName(path)} must be a period { from, until }`);
     return undefined;
   }
-  const fields = readFields(value, `${path}.`, PERIOD_KEYS, `${path} has an unknown key`, add);
+  const fields = readFields(
+    value,
+    `${path}.`,
+    PERIOD_KEYS,
+    `${citeName(path)} has an unknown key`,
+    add,
+  );
   if (fields === undefined) return undefined;
   checkSourceRef(fields, `${path}.`, add);
   const from = fields.from;
   const until = fields.until;
   let valid = true;
   if (!isCivilDate(from)) {
-    add(`${path}.from`, `${path}.from must be a civil date YYYY-MM-DD`);
+    add(`${path}.from`, `${citeName(path)}.from must be a civil date YYYY-MM-DD`);
     valid = false;
   }
   if (until != null && !isCivilDate(until)) {
-    add(`${path}.until`, `${path}.until must be a civil date YYYY-MM-DD or null`);
+    add(`${path}.until`, `${citeName(path)}.until must be a civil date YYYY-MM-DD or null`);
     valid = false;
   }
   if (!valid || !isCivilDate(from)) return undefined;
@@ -548,7 +560,7 @@ function checkSpan(
   add: Add,
 ): Span | undefined {
   if (until !== null && until <= from) {
-    add(`${path}.until`, `${path}.until must be after from ${from}: the period is empty`);
+    add(`${path}.until`, `${citeName(path)}.until must be after from ${from}: the period is empty`);
     return undefined;
   }
   return { from, until };
@@ -613,7 +625,7 @@ function checkMembers(
     const overlap = spans.length > 1 ? firstOverlap(spans) : undefined;
     if (overlap !== undefined) {
       const when = overlap === ALWAYS ? 'from the beginning' : `from ${overlap}`;
-      add(path, `${path} lists ${value} twice ${when}`);
+      add(path, `${citeName(path)} lists ${citeName(value)} twice ${when}`);
     }
   }
   return valid ? mergeAdjacent(normal) : undefined;
@@ -655,10 +667,16 @@ function readMember(
   add: Add,
 ): ReferentialMember | undefined {
   if (!isPlainObject(value)) {
-    add(path, `${path} must be a member { value, from?, until? }`);
+    add(path, `${citeName(path)} must be a member { value, from?, until? }`);
     return undefined;
   }
-  const fields = readFields(value, `${path}.`, MEMBER_KEYS, `${path} has an unknown key`, add);
+  const fields = readFields(
+    value,
+    `${path}.`,
+    MEMBER_KEYS,
+    `${citeName(path)} has an unknown key`,
+    add,
+  );
   if (fields === undefined) return undefined;
   checkSourceRef(fields, `${path}.`, add);
   let valid = true;
@@ -669,7 +687,7 @@ function readMember(
     add(valuePath, problem);
     valid = false;
   } else if (typeof member === 'string' && member.includes(':')) {
-    add(valuePath, `${valuePath} must not hold ":"`);
+    add(valuePath, `${citeName(valuePath)} must not hold ":"`);
     valid = false;
   } else if (
     typeof member === 'string' &&
@@ -677,17 +695,20 @@ function readMember(
     !codes.has(member) &&
     !groupNames.has(member)
   ) {
-    add(valuePath, `${valuePath} ${member} is neither a group nor a code of codes`);
+    add(
+      valuePath,
+      `${citeName(valuePath)} ${citeName(member)} is neither a group nor a code of codes`,
+    );
     valid = false;
   }
   const from = fields.from;
   const until = fields.until;
   if (from !== undefined && !isCivilDate(from)) {
-    add(`${path}.from`, `${path}.from must be a civil date YYYY-MM-DD`);
+    add(`${path}.from`, `${citeName(path)}.from must be a civil date YYYY-MM-DD`);
     valid = false;
   }
   if (until !== undefined && until !== null && !isCivilDate(until)) {
-    add(`${path}.until`, `${path}.until must be a civil date YYYY-MM-DD or null`);
+    add(`${path}.until`, `${citeName(path)}.until must be a civil date YYYY-MM-DD or null`);
     valid = false;
   }
   if (!valid || typeof member !== 'string') return undefined;

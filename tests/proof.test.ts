@@ -128,11 +128,11 @@ describe('PROOF_FORMATS', () => {
     );
   });
 
-  it('cites at most 100 characters of an unknown format', () => {
+  it('cites at most 256 characters of an unknown format', () => {
     const format = `x${'y'.repeat(1_000_000)}`;
     expect(verifyProof({ ...signed(), format })).toEqual({
       status: 'invalid',
-      issues: [`unknown format: x${'y'.repeat(99)}…`],
+      issues: [`unknown format: x${'y'.repeat(255)}…`],
     });
   });
 

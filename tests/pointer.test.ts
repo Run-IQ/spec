@@ -34,17 +34,17 @@ describe('parsePointer', () => {
     expect(error.message).toBe(message);
   });
 
-  it('cites at most 100 characters of a huge pointer', () => {
+  it('cites at most 256 characters of a huge pointer', () => {
     const error = specError(() => parsePointer(`x${'a'.repeat(1_000_000)}`));
     expect(error.message).toBe(
-      `invalid JSON pointer "x${'a'.repeat(99)}…": must be empty or start with "/"`,
+      `invalid JSON pointer "x${'a'.repeat(255)}…": must be empty or start with "/"`,
     );
   });
 
   it('cuts a cited text between code points, never inside a surrogate pair', () => {
-    const pointer = `x${'a'.repeat(98)}${String.fromCodePoint(0x1f600)}b`;
+    const pointer = `x${'a'.repeat(254)}${String.fromCodePoint(0x1f600)}b`;
     expect(specError(() => parsePointer(pointer)).message).toBe(
-      `invalid JSON pointer "x${'a'.repeat(98)}…": must be empty or start with "/"`,
+      `invalid JSON pointer "x${'a'.repeat(254)}…": must be empty or start with "/"`,
     );
   });
 

@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
@@ -177,7 +177,7 @@ function result(issues: Issues): {
 
 function checkNonEmptyString(value: unknown, field: string, errors: Issues): void {
   if (typeof value !== 'string' || value === '') {
-    errors.add(field, `${field} must be a non-empty string`);
+    errors.add(field, `${citeName(field)} must be a non-empty string`);
   } else if (hasLoneSurrogate(value)) errors.add(field, loneSurrogateMessage(field));
 }
 
@@ -247,7 +247,7 @@ function checkCondition(value: unknown, errors: Issues): void {
   }
   for (const key of Object.keys(value)) {
     if (key !== 'dsl' && key !== 'value') {
-      errors.add(`condition.${key}`, `condition has an unknown key "${key}"`);
+      errors.add(`condition.${key}`, `condition has an unknown key ${quoteText(key)}`);
     }
   }
   checkNonEmptyString(value.dsl, 'condition.dsl', errors);

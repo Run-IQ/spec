@@ -1,4 +1,4 @@
-import { SpecError, unreadableMessage } from '../errors.js';
+import { citeName, SpecError, unreadableMessage } from '../errors.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -79,7 +79,7 @@ export function readLimits(options: unknown): Limits {
 function positive(value: unknown, fallback: number, name: string): number {
   if (value === undefined) return fallback;
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
-    throw new SpecError('INVALID_REFERENTIAL', `${name} must be a positive integer`);
+    throw new SpecError('INVALID_REFERENTIAL', `${citeName(name)} must be a positive integer`);
   }
   return value;
 }

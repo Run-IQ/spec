@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
 import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
@@ -221,7 +221,8 @@ function requireParams(value: unknown): unknown {
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
   for (const key of Object.keys(value)) {
-    if (key !== 'dsl' && key !== 'value') invalidRule(`condition has an unknown key "${key}"`);
+    if (key !== 'dsl' && key !== 'value')
+      invalidRule(`condition has an unknown key ${quoteText(key)}`);
   }
   if (value.value === undefined) invalidRule('condition.value is required');
   return {
@@ -267,7 +268,8 @@ function normalizeTags(value: unknown): string[] {
 }
 
 function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value === '') invalidRule(`${field} must be a non-empty string`);
+  if (typeof value !== 'string' || value === '')
+    invalidRule(`${citeName(field)} must be a non-empty string`);
   if (hasLoneSurrogate(value)) invalidRule(loneSurrogateMessage(field));
   return value;
 }
@@ -279,7 +281,7 @@ function requireVersion(value: unknown): number {
 
 function requireNumber(value: unknown, field: string): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) {
-    invalidRule(`${field} must be a finite number`);
+    invalidRule(`${citeName(field)} must be a finite number`);
   }
   return value;
 }

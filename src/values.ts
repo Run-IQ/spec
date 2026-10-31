@@ -1,3 +1,4 @@
+import { citeName } from './errors.js';
 /**
  * Value classification shared by `canonicalize` and the rule normalizer. Both checks work
  * across realms (vm contexts, iframes, worker globals), where `instanceof` fails.
@@ -55,11 +56,11 @@ export function hasLoneSurrogate(text: string): boolean {
 }
 
 /**
- * Internal: the message refusing `subject` (a field path, or a description) for a lone
- * surrogate.
+ * Internal: the message refusing `subject` (a raw field path, or a description; cited by
+ * `citeName`) for a lone surrogate.
  */
 export function loneSurrogateMessage(subject: string): string {
-  return `${subject} contains a lone UTF-16 surrogate`;
+  return `${citeName(subject)} contains a lone UTF-16 surrogate`;
 }
 
 /**

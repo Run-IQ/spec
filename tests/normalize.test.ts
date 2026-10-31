@@ -428,7 +428,10 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     const bad = `${deep}/~`;
     const issues = validateRuleDefinition({ ...base, ...items, effectiveOn: bad }).issues;
     expect(issues).toHaveLength(1);
-    expect(issues[0]?.message.length).toBeLessThan(250);
+    expect(issues[0]?.message).toBe(
+      `effectiveOn must be a JSON pointer: invalid JSON pointer "${bad.slice(0, 256)}…": ` +
+        '"~" must be followed by 0 or 1',
+    );
   });
 
   it("drops effectiveOn '/$dates/effective', the default: absent and default are one rule", () => {

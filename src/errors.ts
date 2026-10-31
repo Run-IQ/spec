@@ -90,16 +90,24 @@ export function specErrorPath(error: unknown): string | undefined {
 }
 
 /**
+ * Internal: `error` as a message cites it: the message of a `SpecError` as it is (built by this
+ * package, its caller text already cited by `citeName`), any other thrown value described
+ * (`describeError`) and cited by `citeName`.
+ */
+export function reasonOf(error: unknown): string {
+  return error instanceof SpecError ? error.message : citeName(describeError(error));
+}
+
+/**
  * Internal: why the value at `subject` could not be read, never throwing:
  * `<subject> is too deeply nested` when the call stack overflowed while reading it, otherwise
- * `<subject> could not be read: <reason>` (a getter or a Proxy trap threw `error`). The reason
- * is `describeError(error)` passed through `escapeText`: control characters, lone surrogates,
- * quotes and backslashes escaped, at most 100 code units.
+ * `<subject> could not be read: <reason>` (a getter or a Proxy trap threw `error`). `subject`
+ * (raw, often a path holding caller keys) is cited by `citeName`, the reason by `reasonOf`.
  */
 export function unreadableMessage(subject: string, error: unknown): string {
   return isStackOverflow(error)
-    ? `${subject} is too deeply nested`
-    : `${subject} could not be read: ${escapeText(describeError(error))}`;
+    ? `${citeName(subject)} is too deeply nested`
+    : `${citeName(subject)} could not be read: ${reasonOf(error)}`;
 }
 
 /** True for the `RangeError` a call stack overflow throws; never throws. */
@@ -111,31 +119,33 @@ function isStackOverflow(error: unknown): boolean {
   }
 }
 
-/** Longest text a message cites before cutting it, in UTF-16 code units. */
-const EXCERPT_LENGTH = 100;
+/** Longest citation a message holds, in UTF-16 code units of its escaped form. */
+export const CITE_LENGTH = 256;
 
 /**
- * Internal: `text` as a message cites it: at most its first 100 UTF-16 code units, cut between
- * two code points (never inside a surrogate pair), followed by `…` when it is longer, so a huge
- * value never makes a huge message.
+ * Internal: the one way a message cites a caller-supplied key, path or value: its control
+ * characters, lone surrogates, quotes and backslashes escaped as in a JSON string (without the
+ * surrounding quotes), cut once the escaped text would pass `CITE_LENGTH` (256) code units,
+ * between two code points and never inside an escape, then `…`. So a huge key never makes a
+ * huge message, and the fixed text after the citation (the reason) is always kept. Reads at
+ * most 256 code points of `text`.
  */
-export function excerpt(text: string): string {
-  if (text.length <= EXCERPT_LENGTH) return text;
-  const last = text.charCodeAt(EXCERPT_LENGTH - 1);
-  const next = text.charCodeAt(EXCERPT_LENGTH);
-  const splitsPair = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
-  return `${text.slice(0, splitsPair ? EXCERPT_LENGTH - 1 : EXCERPT_LENGTH)}…`;
+export function citeName(text: string): string {
+  let out = '';
+  for (let i = 0; i < text.length;) {
+    const code = text.charCodeAt(i);
+    const next = text.charCodeAt(i + 1);
+    const pair = code >= 0xd800 && code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+    const char = text.slice(i, i + (pair ? 2 : 1));
+    const piece = JSON.stringify(char).slice(1, -1);
+    if (out.length + piece.length > CITE_LENGTH) return `${out}…`;
+    out += piece;
+    i += char.length;
+  }
+  return out;
 }
 
-/**
- * Internal: `text` cut like `excerpt`, with its control characters, lone surrogates, quotes and
- * backslashes escaped as in a JSON string, without the surrounding quotes.
- */
-export function escapeText(text: string): string {
-  return JSON.stringify(excerpt(text)).slice(1, -1);
-}
-
-/** Internal: `text` quoted for a message, as a JSON string, cut like `excerpt`. */
+/** Internal: `text` quoted for a message, as a JSON string cited by `citeName`. */
 export function quoteText(text: string): string {
-  return `"${escapeText(text)}"`;
+  return `"${citeName(text)}"`;
 }

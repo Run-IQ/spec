@@ -1,6 +1,6 @@
 import type { JsonValue } from '../canonical.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { isPlainObject, typeName } from '../values.js';
 import {
@@ -149,10 +149,12 @@ function readOnce<T>(subject: string, read: () => T): T {
 
 function requireRuleSet(value: unknown, what: string): asserts value is string {
   if (typeof value !== 'string') {
-    selectorError(`${what} must be a string, got ${typeName(value)}`);
+    selectorError(`${citeName(what)} must be a string, got ${typeName(value)}`);
   }
   if (!isRuleSetId(value)) {
-    selectorError(`${what} ${quoteText(value)} is not a rule set id (${RULE_SET_GRAMMAR})`);
+    selectorError(
+      `${citeName(what)} ${quoteText(value)} is not a rule set id (${RULE_SET_GRAMMAR})`,
+    );
   }
 }
 
@@ -195,7 +197,8 @@ function copySelector(selector: unknown): RuleSelector {
   for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
     const value = selector[field];
     if (value === undefined) continue;
-    if (!isStringArray(value)) selectorError(`selector.${field} must be an array of strings`);
+    if (!isStringArray(value))
+      selectorError(`selector.${citeName(field)} must be an array of strings`);
     copy[field] = [...value];
   }
   const dimensions = selector.dimensions;
@@ -267,7 +270,7 @@ export function readRuleExceptions(
   };
   if (value === null) return { exceptions: [], issues };
   if (!Array.isArray(value)) {
-    add(path, `${path} must be an array of exceptions`);
+    add(path, `${citeName(path)} must be an array of exceptions`);
     return { exceptions: [], issues };
   }
   const exceptions: RuleException[] = [];
@@ -353,7 +356,8 @@ function checkReach(
     if (!targeted.has(set)) {
       fail(
         `${path}.ids[${i}]`,
-        `${path}.ids[${i}] names a rule of ${quoteText(set)}, a rule set the selector does ` +
+        `${citeName(path)}.ids[${i}] names a rule of ${quoteText(set)}, a rule set the selector ` +
+          `does ` +
           'not target',
       );
     }
@@ -363,12 +367,13 @@ function checkReach(
     if (!targeted.has(set) && (set === LOCAL_RULE_SET || !packTargeted)) {
       fail(
         `${path}.outputs[${i}]`,
-        `${path}.outputs[${i}] names an output of ${quoteText(set)}: ` +
+        `${citeName(path)}.outputs[${i}] names an output of ${quoteText(set)}: ` +
           (set === LOCAL_RULE_SET
             ? 'only local rules feed it (a pack never imports local), and the selector does ' +
               'not target local'
-            : `only rules of ${set} or of a pack that imports it feed it, and the selector ` +
-              `targets neither ${set} nor any pack`),
+            : `only rules of ${citeName(set)} or of a pack that imports it feed it, and the ` +
+              `selector ` +
+              `targets neither ${citeName(set)} nor any pack`),
       );
     }
   });
@@ -381,12 +386,12 @@ function readException(
   add: Add,
 ): RuleException | undefined {
   if (!isJsonObject(item)) {
-    add(path, `${path} must be an object with a kind`);
+    add(path, `${citeName(path)} must be an object with a kind`);
     return undefined;
   }
   const kind = KINDS.find((k) => k === item.kind);
   if (kind === undefined) {
-    add(`${path}.kind`, `${path}.kind must be one of ${KINDS.join(', ')}`);
+    add(`${path}.kind`, `${citeName(path)}.kind must be one of ${KINDS.join(', ')}`);
     return undefined;
   }
   let valid = true;
@@ -396,7 +401,10 @@ function readException(
   };
   for (const key of Object.keys(item)) {
     if (!KEYS_BY_KIND[kind].includes(key)) {
-      fail(`${path}.${key}`, `${path} has an unknown key "${key}" for kind ${kind}`);
+      fail(
+        `${path}.${key}`,
+        `${citeName(path)} has an unknown key ${quoteText(key)} for kind ${kind}`,
+      );
     }
   }
 
@@ -411,7 +419,8 @@ function readException(
     }
     if (output !== undefined && ruleSet !== undefined) output = shortestFrom(ruleSet, output);
     const value = item.value;
-    if (value === undefined) fail(`${path}.value`, `${path}.value is required (null is a value)`);
+    if (value === undefined)
+      fail(`${path}.value`, `${citeName(path)}.value is required (null is a value)`);
     const reason =
       item.reason === undefined
         ? undefined
@@ -424,7 +433,7 @@ function readException(
     if (kind === 'inhibit') {
       if (targets) exception = { kind, targets };
     } else if (!isJsonObject(item.params)) {
-      fail(`${path}.params`, `${path}.params must be an object of parameters to merge`);
+      fail(`${path}.params`, `${citeName(path)}.params must be an object of parameters to merge`);
     } else if (targets) {
       exception = { kind, targets, params: item.params };
     }
@@ -439,7 +448,10 @@ function readSelector(
   add: Add,
 ): RuleSelector | undefined {
   if (value === undefined || !isJsonObject(value)) {
-    add(path, `${path} must be a selector { ${SELECTOR_KEYS.map((k) => `${k}?`).join(', ')} }`);
+    add(
+      path,
+      `${citeName(path)} must be a selector { ${SELECTOR_KEYS.map((k) => `${k}?`).join(', ')} }`,
+    );
     return undefined;
   }
   let valid = true;
@@ -448,7 +460,8 @@ function readSelector(
     add(at, message);
   };
   for (const key of Object.keys(value)) {
-    if (!SELECTOR_KEYS.includes(key)) fail(`${path}.${key}`, `${path} has an unknown key "${key}"`);
+    if (!SELECTOR_KEYS.includes(key))
+      fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
   }
 
   const ruleSets = readRuleSets(value.ruleSets, `${path}.ruleSets`, fail);
@@ -489,7 +502,7 @@ function readSelector(
   if (valid && !constrains(selector)) {
     fail(
       path,
-      `${path} must constrain at least one of ${CONSTRAINING_KEYS}: ` +
+      `${citeName(path)} must constrain at least one of ${CONSTRAINING_KEYS}: ` +
         'an empty selector would target every rule',
     );
   }
@@ -520,13 +533,16 @@ function readList(
   if (value === undefined) return undefined;
   const expected = nonEmpty ? 'a non-empty string' : 'a string';
   if (!Array.isArray(value)) {
-    fail(path, `${path} must be an array of ${nonEmpty ? 'non-empty strings' : 'strings'}`);
+    fail(
+      path,
+      `${citeName(path)} must be an array of ${nonEmpty ? 'non-empty strings' : 'strings'}`,
+    );
     return undefined;
   }
   const strings: string[] = [];
   value.forEach((item, i) => {
     if (typeof item !== 'string' || (nonEmpty && item === '')) {
-      fail(`${path}[${i}]`, `${path}[${i}] must be ${expected}`);
+      fail(`${path}[${i}]`, `${citeName(path)}[${i}] must be ${expected}`);
     } else {
       strings.push(item);
     }
@@ -541,7 +557,7 @@ function readDimensions(
 ): Record<string, DimensionSpec> | undefined {
   if (value === undefined) return undefined;
   if (!isJsonObject(value)) {
-    fail(path, `${path} must be an object of dimension specs`);
+    fail(path, `${citeName(path)} must be an object of dimension specs`);
     return undefined;
   }
   const entries: [string, DimensionSpec][] = [];
@@ -567,7 +583,7 @@ function readNonEmptyString(
   add: Add,
 ): string | undefined {
   if (typeof value === 'string' && value !== '') return value;
-  add(path, `${path} must be a non-empty string`);
+  add(path, `${citeName(path)} must be a non-empty string`);
   return undefined;
 }
 

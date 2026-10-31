@@ -1,4 +1,4 @@
-import { escapeText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, SpecError, unreadableMessage } from '../errors.js';
 import {
   civilDateIn,
   isCivilDate,
@@ -345,7 +345,7 @@ function readRule(
     throw new SpecError('INVALID_RULE', unreadableMessage(`rules[${index}]`, error));
   }
   const { id, version, ruleSet, effectiveOn } = fields;
-  const name = `${typeof id === 'string' ? escapeText(id) : typeName(id)}@${
+  const name = `${typeof id === 'string' ? citeName(id) : typeName(id)}@${
     typeof version === 'number' ? String(version) : typeName(version)
   }`;
   const prefix = `rule ${name}: `;

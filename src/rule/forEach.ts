@@ -1,5 +1,5 @@
 import type { JsonValue } from '../canonical.js';
-import { describeError, quoteText } from '../errors.js';
+import { citeName, quoteText, reasonOf } from '../errors.js';
 import { comparePointers, parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
@@ -170,14 +170,14 @@ function isNonEmpty(value: JsonValue | undefined): boolean {
 function readPath(value: JsonValue | undefined, fail: Add): number | undefined {
   const at = 'forEach.path';
   if (value === undefined) {
-    fail(at, `${at} is required: the JSON pointer to the collection`);
+    fail(at, `${citeName(at)} is required: the JSON pointer to the collection`);
     return undefined;
   }
   const segments = pointerSegments(value, at, fail);
   if (segments === undefined) return undefined;
   const problem = pathProblem(segments);
   if (problem !== undefined) {
-    fail(at, `${at} ${problem}`);
+    fail(at, `${citeName(at)} ${problem}`);
     return undefined;
   }
   return segments.filter((segment) => segment === '*').length + 1;
@@ -211,26 +211,26 @@ function readKey(
 ): string | string[] | undefined {
   const at = 'forEach.key';
   if (value === undefined) {
-    fail(at, `${at} is required: the member that identifies each element`);
+    fail(at, `${citeName(at)} is required: the member that identifies each element`);
     return undefined;
   }
   if (typeof value === 'string') {
     if (value !== '') return value;
-    fail(at, `${at} must not be empty`);
+    fail(at, `${citeName(at)} must not be empty`);
     return undefined;
   }
   if (!Array.isArray(value)) {
-    fail(at, `${at} must be a member name or a list of member names, one per level`);
+    fail(at, `${citeName(at)} must be a member name or a list of member names, one per level`);
     return undefined;
   }
   const names: string[] = [];
   value.forEach((name, i) => {
     if (typeof name === 'string' && name !== '') names.push(name);
-    else fail(`${at}[${i}]`, `${at}[${i}] must be a non-empty string`);
+    else fail(`${at}[${i}]`, `${citeName(at)}[${i}] must be a non-empty string`);
   });
   if (names.length !== value.length || levels === undefined) return undefined;
   if (names.length !== levels) {
-    fail(at, `${at} has ${count(names.length, 'name')} for ${count(levels, 'level')}`);
+    fail(at, `${citeName(at)} has ${count(names.length, 'name')} for ${count(levels, 'level')}`);
     return undefined;
   }
   const [first = ''] = names;
@@ -240,7 +240,7 @@ function readKey(
 function readOrderBy(value: JsonValue, fail: Add): OrderKey[] | undefined {
   const at = 'forEach.orderBy';
   if (!Array.isArray(value)) {
-    fail(at, `${at} must be a list of order keys { path, type, dir }`);
+    fail(at, `${citeName(at)} must be a list of order keys { path, type, dir }`);
     return undefined;
   }
   const keys: OrderKey[] = [];
@@ -248,27 +248,28 @@ function readOrderBy(value: JsonValue, fail: Add): OrderKey[] | undefined {
   value.forEach((item, i) => {
     const here = `${at}[${i}]`;
     if (!isJsonObject(item)) {
-      fail(here, `${here} must be an order key { path, type, dir }`);
+      fail(here, `${citeName(here)} must be an order key { path, type, dir }`);
       return;
     }
     for (const key of Object.keys(item)) {
       if (!ORDER_KEYS.includes(key)) {
-        fail(`${here}.${key}`, `${here} has an unknown key ${quoteText(key)}`);
+        fail(`${here}.${key}`, `${citeName(here)} has an unknown key ${quoteText(key)}`);
       }
     }
     const path = readMember(item.path, `${here}.path`, fail);
     const type = ORDER_TYPES.find((t) => t === item.type);
     if (type === undefined) {
-      fail(`${here}.type`, `${here}.type must be one of ${ORDER_TYPES.join(', ')}`);
+      fail(`${here}.type`, `${citeName(here)}.type must be one of ${ORDER_TYPES.join(', ')}`);
     }
     const dir = item.dir === 'asc' || item.dir === 'desc' ? item.dir : undefined;
-    if (dir === undefined) fail(`${here}.dir`, `${here}.dir must be asc or desc`);
+    if (dir === undefined) fail(`${here}.dir`, `${citeName(here)}.dir must be asc or desc`);
     if (path === undefined) return;
     const earlier = firstAt.get(path);
     if (earlier !== undefined) {
       fail(
         `${here}.path`,
-        `${here}.path repeats ${at}[${earlier}].path: a key already compared cannot break a tie`,
+        `${citeName(here)}.path repeats ${citeName(at)}[${earlier}].path: a key already ` +
+          `compared cannot break a tie`,
       );
       return;
     }
@@ -281,7 +282,7 @@ function readOrderBy(value: JsonValue, fail: Add): OrderKey[] | undefined {
 function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer> | undefined {
   const at = 'forEach.dimensions';
   if (!isJsonObject(value)) {
-    fail(at, `${at} must be an object of JSON pointers into the element`);
+    fail(at, `${citeName(at)} must be an object of JSON pointers into the element`);
     return undefined;
   }
   const entries: [string, JsonPointer][] = [];
@@ -318,7 +319,7 @@ function readMember(
       ? 'must name a member of the element, not the element itself'
       : (onePointProblem(segments) ?? (subject ? subjectSegmentProblem(segments) : undefined));
   if (problem !== undefined) {
-    fail(at, `${at} ${problem}`);
+    fail(at, `${citeName(at)} ${problem}`);
     return undefined;
   }
   return typeof value === 'string' ? value : undefined;
@@ -330,25 +331,28 @@ function readSegmentsForm(
 ): { segments: { from: JsonPointer; until: JsonPointer; facts: JsonPointer[] } } | undefined {
   for (const key of Object.keys(value)) {
     if (key !== 'segments') {
-      fail(`forEach.${key}`, `forEach.${key} cannot be combined with forEach.segments`);
+      fail(`forEach.${key}`, `forEach.${citeName(key)} cannot be combined with forEach.segments`);
     }
   }
   const at = 'forEach.segments';
   const segments = value.segments;
   if (!isJsonObject(segments)) {
-    fail(at, `${at} must be an object { from, until, facts }`);
+    fail(at, `${citeName(at)} must be an object { from, until, facts }`);
     return undefined;
   }
   for (const key of Object.keys(segments)) {
     if (!SEGMENTS_KEYS.includes(key)) {
-      fail(`${at}.${key}`, `${at} has an unknown key ${quoteText(key)}`);
+      fail(`${at}.${key}`, `${citeName(at)} has an unknown key ${quoteText(key)}`);
     }
   }
   const from = readNamedDate(segments.from, `${at}.from`, fail);
   const until = readNamedDate(segments.until, `${at}.until`, fail);
   const empty = from !== undefined && from === until;
   if (empty) {
-    fail(`${at}.until`, `${at}.until must differ from ${at}.from: the period would be empty`);
+    fail(
+      `${at}.until`,
+      `${citeName(at)}.until must differ from ${citeName(at)}.from: the period would be empty`,
+    );
   }
   // Read even after a problem above, so that every problem is reported at once.
   const facts = readFacts(segments.facts, `${at}.facts`, fail);
@@ -368,14 +372,14 @@ function readNamedDate(value: JsonValue | undefined, at: string, fail: Add): str
   if (head === '$dates' && name !== undefined && name !== '' && name !== '-' && !rest.length) {
     return typeof value === 'string' ? value : undefined;
   }
-  fail(at, `${at} must name a date: /$dates/<name>`);
+  fail(at, `${citeName(at)} must name a date: /$dates/<name>`);
   return undefined;
 }
 
 /** The facts of `segments`, sorted by pointer without duplicates, or `undefined`. */
 function readFacts(value: JsonValue | undefined, at: string, fail: Add): string[] | undefined {
   if (!Array.isArray(value)) {
-    fail(at, `${at} must be a list of JSON pointers to facts`);
+    fail(at, `${citeName(at)} must be a list of JSON pointers to facts`);
     return undefined;
   }
   const facts: string[] = [];
@@ -391,7 +395,7 @@ function readFacts(value: JsonValue | undefined, at: string, fail: Add): string[
           ? `must point into the input data: ${quoteText(first)} is an engine variable`
           : onePointProblem(segments);
     if (problem === undefined) facts.push(item);
-    else fail(here, `${here} ${problem}`);
+    else fail(here, `${citeName(here)} ${problem}`);
   });
   if (facts.length !== value.length) return undefined;
   return [...new Set(facts)].sort(comparePointers);
@@ -404,13 +408,13 @@ function pointerSegments(
   fail: Add,
 ): string[] | undefined {
   if (typeof value !== 'string') {
-    fail(at, `${at} must be a JSON pointer: got a value of type ${typeName(value)}`);
+    fail(at, `${citeName(at)} must be a JSON pointer: got a value of type ${typeName(value)}`);
     return undefined;
   }
   try {
     return parsePointer(value);
   } catch (error) {
-    fail(at, `${at} must be a JSON pointer: ${describeError(error)}`);
+    fail(at, `${citeName(at)} must be a JSON pointer: ${reasonOf(error)}`);
     return undefined;
   }
 }

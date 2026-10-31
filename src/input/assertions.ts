@@ -1,5 +1,5 @@
 import { canonicalize } from '../canonical.js';
-import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { parsePointer, parseReadPointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
@@ -9,7 +9,6 @@ import { isCivilDate, isInstant } from '../time/civil.js';
 import {
   checkText,
   childPointer,
-  cite,
   expectPlainObject,
   readFields,
   requireFields,
@@ -179,22 +178,22 @@ export function readAssertion(
   if (has('by')) checkText(field('by'), at('by'), add);
   const method = field('method');
   if (has('method') && !isAssertionMethod(method)) {
-    add(at('method'), `${cite(at('method'))} must be one of ${ASSERTION_METHODS.join(', ')}`);
+    add(at('method'), `${citeName(at('method'))} must be one of ${ASSERTION_METHODS.join(', ')}`);
   }
   const when = field('at');
   if (has('at') && !isCivilDate(when) && !isInstant(when)) {
-    add(at('at'), `${cite(at('at'))} must be ${DATE_FORMS}`);
+    add(at('at'), `${citeName(at('at'))} must be ${DATE_FORMS}`);
   }
   const status = field('status');
   if (has('status') && !isAssertionStatus(status)) {
-    add(at('status'), `${cite(at('status'))} must be one of ${ASSERTION_STATUSES.join(', ')}`);
+    add(at('status'), `${citeName(at('status'))} must be one of ${ASSERTION_STATUSES.join(', ')}`);
   }
   if (has('basis')) checkText(field('basis'), at('basis'), add);
   const evidence = field('evidenceDigest');
   if (has('evidenceDigest') && !isSha256(evidence)) {
     add(
       at('evidenceDigest'),
-      `${cite(at('evidenceDigest'))} must be a lowercase sha256 hex string`,
+      `${citeName(at('evidenceDigest'))} must be a lowercase sha256 hex string`,
     );
   }
   const confidence = field('confidence');
@@ -202,13 +201,13 @@ export function readAssertion(
     has('confidence') &&
     !(typeof confidence === 'number' && confidence >= 0 && confidence <= 1)
   ) {
-    add(at('confidence'), `${cite(at('confidence'))} must be a number from 0 to 1`);
+    add(at('confidence'), `${citeName(at('confidence'))} must be a number from 0 to 1`);
   }
   const complete = field('complete');
   if (has('complete') && complete !== false) {
     add(
       at('complete'),
-      `${cite(at('complete'))} must be false: a list is complete by default: omit complete`,
+      `${citeName(at('complete'))} must be false: a list is complete by default: omit complete`,
     );
   }
   const source = readSourceField(fields.values, method, at('source'), add, reader);
@@ -257,12 +256,12 @@ function readSourceField(
 ): FactAssertion['source'] {
   const present = fields.has('source');
   if (method === 'decision' && !present) {
-    add(path, `${cite(path)} is required with method "decision"`);
+    add(path, `${citeName(path)} is required with method "decision"`);
     return undefined;
   }
   if (!present) return undefined;
   if (method !== 'decision' && isAssertionMethod(method)) {
-    add(path, `${cite(path)} is only allowed with method "decision"`);
+    add(path, `${citeName(path)} is only allowed with method "decision"`);
     return undefined;
   }
   return readSource(fields.get('source'), path, add, reader);
@@ -288,12 +287,12 @@ function readSource(
   const digest = fields.values.get('proofDigest');
   const digestPath = childPointer(path, 'proofDigest');
   if (fields.values.has('proofDigest') && !isSha256(digest)) {
-    fail(digestPath, `${cite(digestPath)} must be a lowercase sha256 hex string`);
+    fail(digestPath, `${citeName(digestPath)} must be a lowercase sha256 hex string`);
   }
   const output = fields.values.get('output');
   const outputPath = childPointer(path, 'output');
   if (fields.values.has('output') && checkText(output, outputPath, fail)) {
-    const problem = citedNameProblem(output, cite(outputPath), 'output');
+    const problem = citedNameProblem(output, outputPath, 'output');
     if (problem !== undefined) fail(outputPath, problem);
   }
   const subject = fields.values.get('subject');
@@ -301,7 +300,8 @@ function readSource(
   if (fields.values.has('subject') && !isSubject(subject)) {
     fail(
       subjectPath,
-      `${cite(subjectPath)} must be a subject: a JSON pointer whose reserved segments are well ` +
+      `${citeName(subjectPath)} must be a subject: a JSON pointer whose reserved segments are ` +
+        `well ` +
         'formed',
     );
   }

@@ -1,4 +1,4 @@
-import { describeError, SpecError, unreadableMessage } from '../errors.js';
+import { reasonOf, SpecError, unreadableMessage } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import {
@@ -193,7 +193,7 @@ export function effectiveOnProblem(value: string): string | undefined {
   try {
     segments = parsePointer(value);
   } catch (error) {
-    return `effectiveOn must be a JSON pointer: ${describeError(error)}`;
+    return `effectiveOn must be a JSON pointer: ${reasonOf(error)}`;
   }
   const [head, ...rest] = segments;
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;

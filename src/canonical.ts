@@ -1,4 +1,4 @@
-import { quoteText, SpecError } from './errors.js';
+import { citeName, quoteText, SpecError } from './errors.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
@@ -78,7 +78,7 @@ function writeObject(value: object, path: string, ancestors: Set<object>): strin
     }
     out = `[${items.join(',')}]`;
   } else {
-    if (!isPlainObject(value)) fail(path, `an instance of ${constructorName(value)}`);
+    if (!isPlainObject(value)) fail(path, `an instance of ${citeName(constructorName(value))}`);
     const record = value as Record<string, unknown>;
     const members: string[] = [];
     for (const key of Object.keys(record).sort()) {

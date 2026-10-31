@@ -1,11 +1,10 @@
-import { unreadableMessage } from '../errors.js';
+import { citeName, unreadableMessage } from '../errors.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
 import {
   announce,
   childPointer,
-  cite,
   expectPlainObject,
   readFields,
   readMember,
@@ -51,7 +50,7 @@ export function validateTemporalFact(value: unknown, path: string): RuleValidati
     (reader) => {
       readFact(value, path, reader);
     },
-    (error) => ({ path, message: unreadableMessage(cite(path), error) }),
+    (error) => ({ path, message: unreadableMessage(path, error) }),
     true,
   ).issues;
 }
@@ -66,7 +65,7 @@ function readFact(value: unknown, path: string, reader: Reader): void {
       length = value.length;
     }
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return;
   }
   // Not a list, or a Proxy announcing an impossible length.
@@ -76,11 +75,11 @@ function readFact(value: unknown, path: string, reader: Reader): void {
     !Number.isSafeInteger(length) ||
     length < 0
   ) {
-    add(path, `${cite(path)} must be a list of periods { from, until, value }`);
+    add(path, `${citeName(path)} must be a list of periods { from, until, value }`);
     return;
   }
   if (length === 0) {
-    add(path, `${cite(path)} is empty: omit the fact: an empty history says nothing`);
+    add(path, `${citeName(path)} is empty: omit the fact: an empty history says nothing`);
     return;
   }
   announce(reader, length, path);
@@ -105,19 +104,19 @@ function readPeriod(value: unknown, path: string, reader: Reader): Omit<Span, 'i
   requireFields(fields, path, ['from'], add);
   const untilPath = childPointer(path, 'until');
   if (!values.has('until') && !fields.failed.has('until')) {
-    add(untilPath, `${cite(untilPath)} is required: null has no end`);
+    add(untilPath, `${citeName(untilPath)} is required: null has no end`);
   }
   requireFields(fields, path, ['value'], add);
 
   const from = values.get('from');
   const fromPath = childPointer(path, 'from');
   if (values.has('from') && !isCivilDate(from)) {
-    add(fromPath, `${cite(fromPath)} must be a civil date YYYY-MM-DD`);
+    add(fromPath, `${citeName(fromPath)} must be a civil date YYYY-MM-DD`);
   }
   const until = values.get('until');
   const untilValid = until === null || isCivilDate(until);
   if (values.has('until') && !untilValid) {
-    add(untilPath, `${cite(untilPath)} must be a civil date YYYY-MM-DD or null`);
+    add(untilPath, `${citeName(untilPath)} must be a civil date YYYY-MM-DD or null`);
   }
   const encoding = values.has('value')
     ? walkJson(values.get('value'), childPointer(path, 'value'), reader)
@@ -125,7 +124,7 @@ function readPeriod(value: unknown, path: string, reader: Reader): Omit<Span, 'i
   if (!isCivilDate(from) || !values.has('until') || !untilValid) return undefined;
   const end = isCivilDate(until) ? until : null;
   if (end !== null && end <= from) {
-    add(untilPath, `${cite(untilPath)} must be after from ${from}: the period is empty`);
+    add(untilPath, `${citeName(untilPath)} must be after from ${from}: the period is empty`);
     return undefined;
   }
   return { from, until: end, value: encoding };
@@ -144,18 +143,18 @@ function checkOrder(spans: readonly Span[], path: string, reader: Reader): void 
     if (previous !== undefined && span.from < previous.from) {
       reader.add(
         at,
-        `${cite(at)} must start after ${cite(`${path}/${previous.index}`)}: periods are ` +
+        `${citeName(at)} must start after ${citeName(`${path}/${previous.index}`)}: periods are ` +
           'sorted by from',
       );
     } else if (end !== undefined && (end === null || span.from < end)) {
-      reader.add(at, `overlap at ${cite(at)}`);
+      reader.add(at, `overlap at ${citeName(at)}`);
     } else if (
       previous !== undefined &&
       previous.until === span.from &&
       previous.value !== undefined &&
       previous.value === span.value
     ) {
-      reader.add(at, `merge adjacent periods with the same value at ${cite(at)}`);
+      reader.add(at, `merge adjacent periods with the same value at ${citeName(at)}`);
     }
     if (end === undefined || (end !== null && (span.until === null || span.until > end))) {
       end = span.until;

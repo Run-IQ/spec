@@ -142,7 +142,7 @@ describe('toReferenceDate: grammar of an instant (M-2)', () => {
     );
     const huge = '9'.repeat(1_000_000);
     expect(specError(() => toReferenceDate(huge)).message).toBe(
-      `a reference date ${FORMS}; got "${'9'.repeat(100)}…"`,
+      `a reference date ${FORMS}; got "${'9'.repeat(256)}…"`,
     );
   });
 });

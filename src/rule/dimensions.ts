@@ -1,4 +1,4 @@
-import { quoteText, SpecError, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
@@ -46,12 +46,12 @@ const SPEC_SHAPE = 'a value or an object { ref?, anyOf, except?, match? }';
  * lone UTF-16 surrogate.
  */
 export function dimensionValueProblem(value: unknown, path: string): string | undefined {
-  if (typeof value !== 'string') return `${path} must be a string`;
-  if (value === '') return `${path} must not be empty`;
+  if (typeof value !== 'string') return `${citeName(path)} must be a string`;
+  if (value === '') return `${citeName(path)} must not be empty`;
   if (hasLoneSurrogate(value)) return loneSurrogateMessage(path);
   const colon = value.indexOf(':');
-  if (colon === 0) return `${path} has an empty code system before ":"`;
-  if (colon === value.length - 1) return `${path} has an empty code after ":"`;
+  if (colon === 0) return `${citeName(path)} has an empty code system before ":"`;
+  if (colon === value.length - 1) return `${citeName(path)} has an empty code after ":"`;
   return undefined;
 }
 
@@ -97,7 +97,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     return undefined;
   }
   if (!isPlainObject(value)) {
-    add(path, `${path} must be ${SPEC_SHAPE}`);
+    add(path, `${citeName(path)} must be ${SPEC_SHAPE}`);
     return undefined;
   }
   let valid = true;
@@ -108,7 +108,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
   const fields: Record<string, unknown> = {};
   for (const key of Object.keys(value)) {
     if (!SPEC_KEYS.includes(key)) {
-      fail(`${path}.${key}`, `${path} has an unknown key ${quoteText(key)}`);
+      fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
       continue;
     }
     fields[key] = value[key];
@@ -116,7 +116,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
 
   const ref = fields.ref;
   if (ref !== undefined && (typeof ref !== 'string' || ref === '')) {
-    fail(`${path}.ref`, `${path}.ref must be a non-empty string`);
+    fail(`${path}.ref`, `${citeName(path)}.ref must be a non-empty string`);
   } else if (typeof ref === 'string' && hasLoneSurrogate(ref)) {
     fail(`${path}.ref`, loneSurrogateMessage(`${path}.ref`));
   }
@@ -128,18 +128,18 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
       : readValues(fields.except, `${path}.except`, false, plain, fail);
   const match = fields.match;
   if (match !== undefined && match !== 'any' && match !== 'all') {
-    fail(`${path}.match`, `${path}.match must be "any" or "all"`);
+    fail(`${path}.match`, `${citeName(path)}.match must be "any" or "all"`);
   }
   if (except !== undefined && except.length > 0 && ref === undefined) {
     fail(
       `${path}.except`,
-      `${path}.except needs ref: without a referential a value only equals itself`,
+      `${citeName(path)}.except needs ref: without a referential a value only equals itself`,
     );
   }
   if (anyOf !== undefined && except !== undefined) {
     const repeated = except.find((v) => anyOf.includes(v));
     if (repeated !== undefined) {
-      fail(`${path}.except`, `${path}.except repeats anyOf value ${quoteText(repeated)}`);
+      fail(`${path}.except`, `${citeName(path)}.except repeats anyOf value ${quoteText(repeated)}`);
     }
   }
   if (!valid || anyOf === undefined || except === undefined) return undefined;
@@ -163,12 +163,15 @@ function readValues(
   fail: Add,
 ): string[] | undefined {
   if (!Array.isArray(value)) {
-    fail(path, `${path} must be ${required ? 'a non-empty array' : 'an array'} of values`);
+    fail(
+      path,
+      `${citeName(path)} must be ${required ? 'a non-empty array' : 'an array'} of values`,
+    );
     return undefined;
   }
   const items: unknown[] = Array.from(value);
   if (required && items.length === 0) {
-    fail(path, `${path} must list at least one value`);
+    fail(path, `${citeName(path)} must list at least one value`);
     return undefined;
   }
   let valid = true;
@@ -180,7 +183,7 @@ function readValues(
       fail(at, problem);
     } else if (plain && typeof item === 'string' && item.includes(':')) {
       valid = false;
-      fail(at, `${at} must not be qualified: the referential fixes the code system`);
+      fail(at, `${citeName(at)} must not be qualified: the referential fixes the code system`);
     }
   });
   return valid ? [...new Set(items as string[])].sort() : undefined;
@@ -212,7 +215,7 @@ export function normalizeDimensionSpec(spec: unknown, path = 'dimension'): Dimen
   const normal = readDimensionSpec(spec, path, (at, message) => problems.add(at, message));
   const [first] = problems.messages();
   if (first !== undefined || normal === undefined) {
-    throw new SpecError('INVALID_RULE', first ?? `${path} must be ${SPEC_SHAPE}`);
+    throw new SpecError('INVALID_RULE', first ?? `${citeName(path)} must be ${SPEC_SHAPE}`);
   }
   return normal;
 }
@@ -253,8 +256,8 @@ export function isUnnamable(name: string): boolean {
  */
 export function unnamableNameMessage(path: string, kind: string, name: string): string {
   return name === ''
-    ? `${path} must not have an empty ${kind} name`
-    : `${path} must not have a ${kind} name "${name}"`;
+    ? `${citeName(path)} must not have an empty ${kind} name`
+    : `${citeName(path)} must not have a ${kind} name ${quoteText(name)}`;
 }
 
 /**
@@ -263,5 +266,7 @@ export function unnamableNameMessage(path: string, kind: string, name: string): 
  * name starting with `$` is the engine's (D-3).
  */
 export function reservedDimensionNameMessage(path: string): string {
-  return `${path} must not start with "$": dimension names starting with "$" are reserved`;
+  return (
+    `${citeName(path)} must not start with "$": dimension names starting with "$" are ` + `reserved`
+  );
 }

@@ -35,33 +35,84 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
     expectBoundedIssues(validateRuleDefinition({ ...BASE_RULE, exceptions }).issues);
   });
 
-  it('validateRuleDefinition cuts a path and a message longer than 1024 code units', () => {
+  it('validateRuleDefinition cuts a path at 1024 and cites a key at 256 code units', () => {
     const key = `$${LONG}`;
     const { issues } = validateRuleDefinition({ ...BASE_RULE, dimensions: { [key]: 'FR' } });
     const text = `dimensions.${key}`;
     expect(issues).toEqual([
       {
         path: `${text.slice(0, 1024)}…`,
-        message: `${text.slice(0, 1024)}…`,
+        message:
+          `${text.slice(0, 256)}… must not start with "$": ` +
+          'dimension names starting with "$" are reserved',
       },
     ]);
   });
 
+  const DIMENSION_RESERVED =
+    'must not start with "$": dimension names starting with "$" are reserved';
+  const MB = 'k'.repeat(1_000_000);
+
   it.each([
-    ['a 5000-character dimension name starting with $', { dimensions: { [`$${LONG}`]: 'FR' } }],
-    ['a 5000-character dimension name with an empty value', { dimensions: { [LONG]: '' } }],
-    ['an over-long tag with a lone surrogate', { tags: [`${LONG}\uD800`] }],
-    ['an over-long extension key with a lone surrogate', { [`${LONG}\uD800`]: 1 }],
-    ['an over-long id holding ":"', { id: `${LONG}:` }],
-    ['an over-long rule set', { ruleSet: `A${LONG}` }],
-    ['an over-long output name', { output: `a.${LONG}` }],
-    ['an over-long output name starting with $', { output: `$${LONG}` }],
-    ['an over-long effectiveOn', { effectiveOn: `/$dates/$${LONG}` }],
-    ['an over-long params key with a lone surrogate', { params: { [`${LONG}\uD800`]: 1 } }],
-    ['an over-long params value with a lone surrogate', { params: { a: `${LONG}\uD800` } }],
+    [
+      'a 5000-character dimension name starting with $',
+      { dimensions: { [`$${LONG}`]: 'FR' } },
+      `dimensions.$${'x'.repeat(244)}… ${DIMENSION_RESERVED}`,
+    ],
+    [
+      'a 1 MB dimension name starting with $',
+      { dimensions: { [`$${MB}`]: 'FR' } },
+      `dimensions.$${'k'.repeat(244)}… ${DIMENSION_RESERVED}`,
+    ],
+    [
+      'a 5000-character dimension name with an empty value',
+      { dimensions: { [LONG]: '' } },
+      `dimensions.${'x'.repeat(245)}… must not be empty`,
+    ],
+    [
+      'an over-long tag with a lone surrogate',
+      { tags: [`${LONG}\uD800`] },
+      'tags[0] contains a lone UTF-16 surrogate',
+    ],
+    [
+      'an over-long extension key with a lone surrogate',
+      { [`${LONG}\uD800`]: 1 },
+      `rule definition has an extension key with a lone UTF-16 surrogate: "${'x'.repeat(256)}…"`,
+    ],
+    ['an over-long id holding ":"', { id: `${LONG}:` }, 'id must not contain ":"'],
+    [
+      'an over-long rule set',
+      { ruleSet: `A${LONG}` },
+      'ruleSet must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$',
+    ],
+    ['an over-long output name', { output: `a.${LONG}` }, 'output name must not contain "."'],
+    [
+      'an over-long output name starting with $',
+      { output: `$${LONG}` },
+      'output must not start with "$": output names starting with "$" are reserved',
+    ],
+    [
+      'an over-long effectiveOn',
+      { effectiveOn: `/$dates/$${LONG}` },
+      'effectiveOn must not name a date starting with "$": date names starting with "$" are ' +
+        'reserved',
+    ],
+    [
+      'an over-long params key with a lone surrogate',
+      { params: { [`${LONG}\uD800`]: 1 } },
+      'Value at "params" cannot be serialized to canonical JSON: a key with a lone UTF-16 ' +
+        'surrogate',
+    ],
+    [
+      'an over-long params value with a lone surrogate',
+      { params: { a: `${LONG}\uD800` } },
+      'Value at "params.a" cannot be serialized to canonical JSON: ' +
+        'a string with a lone UTF-16 surrogate',
+    ],
     [
       'an over-long forEach dimension name',
       { forEach: { path: '/xs', key: 'id', dimensions: { [`$${LONG}`]: '/p' } } },
+      `forEach.dimensions.$${'x'.repeat(236)}… ${DIMENSION_RESERVED}`,
     ],
     [
       'an over-long selector dimension name',
@@ -70,13 +121,18 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
         params: {},
         exceptions: [{ kind: 'inhibit', targets: { dimensions: { [`$${LONG}`]: 'FR' } } }],
       },
+      `exceptions[0].targets.dimensions.$${'x'.repeat(222)}… ${DIMENSION_RESERVED}`,
     ],
-    ['an over-long dimension spec value', { dimensions: { pays: { anyOf: [`${LONG}\uD800`] } } }],
-  ])('normalize throws the first issue of the validator, cut alike: %s', (_, patch) => {
+    [
+      'an over-long dimension spec value',
+      { dimensions: { pays: { anyOf: [`${LONG}\uD800`] } } },
+      'dimensions.pays.anyOf[0] contains a lone UTF-16 surrogate',
+    ],
+  ])("keeps the reason, and normalize throws the validator's message: %s", (_, patch, message) => {
     const rule = { ...BASE_RULE, ...patch };
     const [first] = validateRuleDefinition(rule).errors;
-    expect(first).toBeDefined();
-    expect(first?.length).toBeLessThanOrEqual(1025);
+    expect(first).toBe(message);
+    expect(message.length).toBeLessThanOrEqual(1025);
     expect(specError(() => normalizeRuleDefinition(rule)).message).toBe(first);
   });
 

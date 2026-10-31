@@ -1,4 +1,4 @@
-import { describeError, escapeText, quoteText, SpecError } from '../errors.js';
+import { citeName, quoteText, reasonOf, SpecError } from '../errors.js';
 import { dateTimeOf, typeName } from '../values.js';
 
 /**
@@ -162,7 +162,7 @@ function offsetMinutes(offset: string): number | undefined {
 function invalidDate(field: string, got: string): never {
   throw new SpecError(
     'INVALID_DATE',
-    `${field} must be a Date, a civil date YYYY-MM-DD or an instant ` +
+    `${citeName(field)} must be a Date, a civil date YYYY-MM-DD or an instant ` +
       'YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; ' +
       `got ${got}`,
   );
@@ -255,7 +255,8 @@ export function civilDateIn(
   if (beyond !== undefined) return beyond;
   throw new SpecError(
     'INVALID_DATE',
-    `calendar.toCivilDate returned ${describeResult(day)} for ${at} in ${zone}: ` +
+    `calendar.toCivilDate returned ${describeResult(day)} for ${citeName(at)} in ` +
+      `${citeName(zone)}: ` +
       'not a civil date YYYY-MM-DD',
   );
 }
@@ -272,7 +273,8 @@ export function startOfDayIn(
   if (beyond !== undefined) return beyond;
   throw new SpecError(
     'INVALID_DATE',
-    `calendar.startOfDay returned ${describeResult(start)} for ${day} in ${zone}: ` +
+    `calendar.startOfDay returned ${describeResult(start)} for ${citeName(day)} in ` +
+      `${citeName(zone)}: ` +
       'not a canonical instant YYYY-MM-DDTHH:MM:SS.sssZ',
   );
 }
@@ -300,7 +302,7 @@ function callCalendar(
     if (error instanceof SpecError) throw new SpecError('INVALID_DATE', error.message);
     throw new SpecError(
       'INVALID_DATE',
-      `calendar.${method} failed for ${value} in ${zone}: ${escapeText(describeError(error))}`,
+      `calendar.${method} failed for ${citeName(value)} in ${citeName(zone)}: ${reasonOf(error)}`,
     );
   }
 }
@@ -320,7 +322,7 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
     if (offset === undefined) {
       throw new SpecError(
         'INVALID_DATE',
-        `${user} knows UTC and ±HH:MM offsets only: use windowContains with a calendar ` +
+        `${citeName(user)} knows UTC and ±HH:MM offsets only: use windowContains with a calendar ` +
           `for ${quoteText(zone)}`,
       );
     }

@@ -1,3 +1,4 @@
+import { citeName } from '../errors.js';
 import type { CivilDate } from '../time/civil.js';
 
 /** The start of a period with no `from`: before every civil date. */
@@ -122,7 +123,7 @@ function cycleMessage(cycle: readonly string[], date: CivilDate): string {
   });
   const rotated = [...cycle.slice(start), ...cycle.slice(0, start)];
   const when = date === ALWAYS ? 'from the beginning' : `from ${date}`;
-  return `cycle ${[...rotated, rotated[0] ?? ''].join(' > ')} ${when}`;
+  return `cycle ${citeName([...rotated, rotated[0] ?? ''].join(' > '))} ${when}`;
 }
 
 /** Adjacency of one direction: node -> neighbour -> number of active memberships. */

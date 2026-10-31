@@ -1,5 +1,5 @@
 import { reservedOutputNameMessage } from '../decision/output.js';
-import { quoteText, SpecError } from '../errors.js';
+import { citeName, quoteText, SpecError } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { typeName } from '../values.js';
 
@@ -119,8 +119,8 @@ export function ruleSetOf(ruleSet: string, name: string): string {
  */
 export function ruleSetIdMessage(path: string, value: unknown): string {
   return typeof value === 'string' && value.includes('.')
-    ? `${path} ${NO_DOT}`
-    : `${path} must be a rule set id matching ${RULE_SET_GRAMMAR}`;
+    ? `${citeName(path)} ${NO_DOT}`
+    : `${citeName(path)} must be a rule set id matching ${RULE_SET_GRAMMAR}`;
 }
 
 /**
@@ -138,24 +138,28 @@ export function citedNameProblem(
 ): string | undefined {
   if (kind === 'output') {
     if (isReservedName(name)) return reservedOutputNameMessage(path);
-    if (name.includes('.')) return `${path} name must not contain "."`;
+    if (name.includes('.')) return `${citeName(path)} name must not contain "."`;
   }
   const parts = name.split(':');
   if (parts.length === 1) return undefined;
-  if (parts.length > 2) return `${path} name must hold at most one ":": <rule set>:<name>`;
+  if (parts.length > 2)
+    return `${citeName(path)} name must hold at most one ":": <rule set>:<name>`;
   const [set = '', bare = ''] = parts;
   if (set === LOCAL_RULE_SET) {
-    return `${path} name must not be qualified by "local": a local name is written bare`;
+    return `${citeName(path)} name must not be qualified by "local": a local name is written bare`;
   }
   if (!RULE_SET_ID.test(set)) {
-    return `${path} name must start with a rule set id before ":": ${RULE_SET_GRAMMAR}`;
+    return `${citeName(path)} name must start with a rule set id before ":": ${RULE_SET_GRAMMAR}`;
   }
   if (bare === '') {
-    return `${path} name must name ${kind === 'output' ? 'an output' : 'a rule'} after ":"`;
+    return (
+      `${citeName(path)} name must name ${kind === 'output' ? 'an output' : 'a rule'} ` +
+      `after ":"`
+    );
   }
   if (kind === 'output' && isReservedName(bare)) {
     return (
-      `${path} name must not start with "$" after ":": ` +
+      `${citeName(path)} name must not start with "$" after ":": ` +
       'output names starting with "$" are reserved'
     );
   }

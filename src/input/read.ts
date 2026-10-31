@@ -1,4 +1,4 @@
-import { escapeText, quoteText, unreadableMessage } from '../errors.js';
+import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
@@ -119,14 +119,9 @@ export function childPointer(pointer: string, key: string): string {
   return `${pointer}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
 }
 
-/** `path` as a message cites it: escaped, at most 100 UTF-16 code units (`escapeText`). */
-export function cite(path: string): string {
-  return escapeText(path);
-}
-
 /** The message refusing a key of the object at `path` that holds a lone UTF-16 surrogate. */
 export function surrogateKeyMessage(path: string, key: string): string {
-  return `${cite(path)} has a key with a lone UTF-16 surrogate: ${quoteText(key)}`;
+  return `${citeName(path)} has a key with a lone UTF-16 surrogate: ${quoteText(key)}`;
 }
 
 /**
@@ -144,10 +139,10 @@ export function expectPlainObject(
   try {
     if (isPlainObject(value)) return true;
   } catch (error) {
-    add(path, unreadableMessage(cite(label), error));
+    add(path, unreadableMessage(label, error));
     return false;
   }
-  add(path, `${cite(label)} must be ${shape}`);
+  add(path, `${citeName(label)} must be ${shape}`);
   return false;
 }
 
@@ -159,7 +154,7 @@ export function ownKeys(value: object, path: string, add: Add): string[] | undef
   try {
     return Object.keys(value);
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return undefined;
   }
 }
@@ -178,7 +173,7 @@ export function readMember(
     const member: unknown = Reflect.get(value, key);
     return { value: member };
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return 'failed';
   }
 }
@@ -216,7 +211,7 @@ export function readFields(
   for (const key of keys) {
     if (!known.includes(key)) {
       const at = hasLoneSurrogate(key) ? path : join(path, key);
-      add(at, `${cite(label)} has an unknown key ${quoteText(key)}`);
+      add(at, `${citeName(label)} has an unknown key ${quoteText(key)}`);
       continue;
     }
     const read = readMember(value, key, join(path, key), add);
@@ -236,7 +231,7 @@ export function requireFields(
 ): void {
   for (const key of required) {
     if (!fields.values.has(key) && !fields.failed.has(key)) {
-      add(join(path, key), `${cite(join(path, key))} is required`);
+      add(join(path, key), `${citeName(join(path, key))} is required`);
     }
   }
 }
@@ -244,11 +239,11 @@ export function requireFields(
 /** True for a non-empty string without lone surrogate; reports any other value at `path`. */
 export function checkText(value: unknown, path: string, add: Add): value is string {
   if (typeof value !== 'string' || value === '') {
-    add(path, `${cite(path)} must be a non-empty string`);
+    add(path, `${citeName(path)} must be a non-empty string`);
     return false;
   }
   if (hasLoneSurrogate(value)) {
-    add(path, loneSurrogateMessage(cite(path)));
+    add(path, loneSurrogateMessage(path));
     return false;
   }
   return true;
@@ -417,16 +412,16 @@ function openValue(
   const { add } = reader;
   const contentBefore = contentIssues(reader);
   const notJson = (what: string): undefined => {
-    add(path, `${cite(path)} is not JSON: ${what}`);
+    add(path, `${citeName(path)} is not JSON: ${what}`);
     return undefined;
   };
   switch (typeof value) {
     case 'string':
-      if (hasLoneSurrogate(value)) add(path, loneSurrogateMessage(cite(path)));
+      if (hasLoneSurrogate(value)) add(path, loneSurrogateMessage(path));
       return undefined;
     case 'number':
       if (!Number.isFinite(value)) return notJson(String(value));
-      if (Math.abs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${cite(path)}`);
+      if (Math.abs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${citeName(path)}`);
       return undefined;
     case 'boolean':
       return undefined;
@@ -453,7 +448,7 @@ function openValue(
       );
     }
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return undefined;
   }
   const seen = reader.heights.get(node);
@@ -473,7 +468,7 @@ function openValue(
       length = keys.length;
     }
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return undefined;
   }
   // Only a Proxy can announce such a length.
@@ -514,7 +509,7 @@ function checkKeys(
     if (hasLoneSurrogate(key)) add(path, surrogateKeyMessage(path, key));
     else if (reservedRoot && key.startsWith('$')) {
       const at = childPointer(path, key);
-      add(at, `reserved key ${cite(at)}`);
+      add(at, `reserved key ${citeName(at)}`);
     } else kept.push(key);
   }
   return kept;
@@ -523,5 +518,5 @@ function checkKeys(
 /** Reports that the value at `path` sits too deep (a problem of the path, not of the value). */
 function reportTooDeep(path: string, reader: Reader): void {
   reader.depthIssues += 1;
-  reader.add(path, `${cite(path)} nests values more than ${reader.maxDepth} levels deep`);
+  reader.add(path, `${citeName(path)} nests values more than ${reader.maxDepth} levels deep`);
 }

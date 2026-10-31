@@ -1,4 +1,4 @@
-import { SpecError } from '../errors.js';
+import { quoteText, SpecError } from '../errors.js';
 
 /** A canonical decimal: no leading zero, no trailing fractional zero, no exponent. */
 const CANONICAL = /^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/;
@@ -34,7 +34,7 @@ export function toCanonicalDecimal(text: string): string {
   if (!parts) {
     throw new SpecError(
       'INVALID_DECIMAL',
-      `Not a decimal: ${JSON.stringify(text)} (expected an optional "-", digits, and an ` +
+      `Not a decimal: ${quoteText(text)} (expected an optional "-", digits, and an ` +
         'optional "." followed by digits; no exponent, no spaces)',
     );
   }

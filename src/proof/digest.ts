@@ -2,7 +2,7 @@ import { canonicalize } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { isCanonicalDecimal } from '../decision/decimal.js';
 import { isReservedOutputName } from '../decision/output.js';
-import { SpecError } from '../errors.js';
+import { citeName, SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
 import { readUnsignedProof } from './validate.js';
@@ -77,7 +77,7 @@ export function unlistedCitations(p: UnsignedProof): string[] {
   const issues = new Set<string>();
   for (const cited of [...p.applied, ...p.skipped, ...p.exceptions]) {
     const key = `${cited.ruleId}@${cited.version}`;
-    if (!listed.has(key)) issues.add(`cited rule not listed: ${key}`);
+    if (!listed.has(key)) issues.add(`cited rule not listed: ${citeName(key)}`);
   }
   const outputNames = Object.keys(p.outputs).sort();
   const citedIds = [
@@ -85,7 +85,7 @@ export function unlistedCitations(p: UnsignedProof): string[] {
     ...p.exceptions.flatMap((exception) => exception.affected),
   ];
   for (const id of citedIds) {
-    if (!listedIds.has(id)) issues.add(`cited rule not listed: ${id}`);
+    if (!listedIds.has(id)) issues.add(`cited rule not listed: ${citeName(id)}`);
   }
   return [...issues];
 }
@@ -115,20 +115,20 @@ export function strataProblems(p: UnsignedProof): string[] {
   const issues = new Set<string>();
   const placed = new Set<string>();
   for (const name of p.strata.flat()) {
-    if (!Object.hasOwn(p.outputs, name)) issues.add(`stratum output unknown: ${name}`);
-    if (placed.has(name)) issues.add(`stratum output repeated: ${name}`);
+    if (!Object.hasOwn(p.outputs, name)) issues.add(`stratum output unknown: ${citeName(name)}`);
+    if (placed.has(name)) issues.add(`stratum output repeated: ${citeName(name)}`);
     placed.add(name);
   }
   for (const name of Object.keys(p.outputs).sort()) {
-    if (!placed.has(name)) issues.add(`output not in strata: ${name}`);
+    if (!placed.has(name)) issues.add(`output not in strata: ${citeName(name)}`);
   }
   const members = p.strata.map((names) => new Set(names));
   const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
     const key = `${entry.ruleId}@${entry.version}`;
     const names = members[entry.stratum];
-    if (!names) issues.add(`stratum out of range: ${key}`);
+    if (!names) issues.add(`stratum out of range: ${citeName(key)}`);
     else if (output !== undefined && !names.has(output)) {
-      issues.add(`step stratum mismatch: ${key}`);
+      issues.add(`step stratum mismatch: ${citeName(key)}`);
     }
   };
   for (const step of p.applied) place(step, step.output);
@@ -148,7 +148,7 @@ export function reservedOutputNames(p: UnsignedProof): string[] {
     ...p.applied.map((step) => step.output),
   ];
   const reserved = new Set(names.filter(isReservedOutputName));
-  return [...reserved].map((name) => `output name reserved: ${name}`);
+  return [...reserved].map((name) => `output name reserved: ${citeName(name)}`);
 }
 
 /**
@@ -173,7 +173,7 @@ export function nonCanonicalDecimals(p: UnsignedProof): string[] {
   for (const name of Object.keys(p.outputs).sort()) {
     if (!isDecimal(name)) continue;
     if (!canonical(p.outputs[name]?.value ?? null) || failing.has(name)) {
-      issues.push(`decimal value not canonical: ${name}`);
+      issues.push(`decimal value not canonical: ${citeName(name)}`);
     }
   }
   return issues;

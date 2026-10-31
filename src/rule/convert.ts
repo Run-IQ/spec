@@ -1,5 +1,5 @@
 import { canonicalize } from '../canonical.js';
-import { SpecError } from '../errors.js';
+import { citeName, SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject } from '../values.js';
@@ -58,7 +58,7 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   const { id, version, checksum, payload } = unknownRecord;
   const name = `${String(id)}@${String(version)}`;
   const fail = (reason: string): never => {
-    throw new SpecError('INVALID_RULE', `Stored rule ${name}: ${reason}`);
+    throw new SpecError('INVALID_RULE', `Stored rule ${citeName(name)}: ${reason}`);
   };
   if (typeof id !== 'string' || typeof version !== 'number') {
     fail('malformed record: id must be a string and version a number');
@@ -71,23 +71,29 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
   try {
     parsed = JSON.parse(payload as string);
   } catch (error) {
-    fail(`payload is not valid JSON (${messageOf(error)})`);
+    fail(`payload is not valid JSON (${citeName(messageOf(error))})`);
   }
   if (!isPlainObject(parsed)) return fail('invalid definition: the payload must be a JSON object');
   if (parsed.id !== id || parsed.version !== version) {
-    fail(`id/version mismatch: the payload holds ${String(parsed.id)}@${String(parsed.version)}`);
+    fail(
+      `id/version mismatch: the payload holds ` +
+        `${citeName(String(parsed.id))}@${citeName(String(parsed.version))}`,
+    );
   }
 
   let definition: RuleDefinition;
   try {
     definition = normalizeRuleDefinition(parsed as RuleDefinitionInput);
   } catch (error) {
-    return fail(`invalid definition: ${messageOf(error)}`);
+    return fail(`invalid definition: ${citeName(messageOf(error))}`);
   }
   if (canonicalize(definition) !== payload) fail('payload is not canonical');
   const computed = sha256Hex(payload as string);
   if (computed !== checksum) {
-    fail(`checksum mismatch: the record holds ${String(checksum)}, the payload gives ${computed}`);
+    fail(
+      `checksum mismatch: the record holds ${citeName(String(checksum))}, the payload gives ` +
+        `${computed}`,
+    );
   }
   return executableOf(definition, computed);
 }

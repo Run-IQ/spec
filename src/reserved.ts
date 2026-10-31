@@ -1,3 +1,4 @@
+import { citeName } from './errors.js';
 /**
  * The variables the engine puts in the evaluation context, each read by a pointer
  * (`/$outputs/x`, `/$dates/effective`). Every name that starts with `$` is reserved
@@ -26,13 +27,14 @@ export const ENGINE_VARIABLES: readonly string[] = Object.freeze([
  * `meta.dates`): `$dates.<name>` never holds a reserved name (ruling 9G round 2).
  */
 export function reservedDateNameMessage(path: string): string {
-  return `${path} must not start with "$": date names starting with "$" are reserved`;
+  return `${citeName(path)} must not start with "$": date names starting with "$" are reserved`;
 }
 
 /** Internal: the message refusing a pointer `/$dates/$…` at `path` (`effectiveOn`, segments). */
 export function reservedDatePointerMessage(path: string): string {
   return (
-    `${path} must not name a date starting with "$": ` + 'date names starting with "$" are reserved'
+    `${citeName(path)} must not name a date starting with "$": ` +
+    'date names starting with "$" are reserved'
   );
 }
 

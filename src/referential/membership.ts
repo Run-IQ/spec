@@ -1,4 +1,4 @@
-import { SpecError, unreadableMessage } from '../errors.js';
+import { citeName, SpecError, unreadableMessage } from '../errors.js';
 import {
   dimensionValueProblem,
   normalizeDimensionSpec,
@@ -80,7 +80,7 @@ export function resolveMembership(
     if (typeof group !== 'string' || !Object.hasOwn(groups, group)) {
       throw new SpecError(
         'INVALID_REFERENTIAL',
-        `group ${String(group)} not in referential ${referential.id}`,
+        `group ${citeName(String(group))} not in referential ${citeName(referential.id)}`,
       );
     }
     const read = readValue(referential, value, at);
@@ -130,7 +130,7 @@ export function matchDimension(
     } else {
       const referential = referentials.get(ref);
       if (referential === undefined) {
-        throw new SpecError('INVALID_REFERENTIAL', `unknown referential ${ref}`);
+        throw new SpecError('INVALID_REFERENTIAL', `unknown referential ${citeName(ref)}`);
       }
       const targets = [...anyOf, ...except].map((t) => readTarget(referential, t));
       const resolver = new Resolver(referential, at, maxDepth);
@@ -208,24 +208,33 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
     if (own === undefined) {
       return {
         kind: 'unknown',
-        why: `code system ${system} is not declared by referential ${referential.id}`,
+        why:
+          `code system ${citeName(system)} is not declared by referential ` +
+          `${citeName(referential.id)}`,
       };
     }
-    if (system !== own) return { kind: 'unknown', why: `code system ${system} is not ${own}` };
+    if (system !== own)
+      return { kind: 'unknown', why: `code system ${citeName(system)} is not ${citeName(own)}` };
   }
   if (Object.hasOwn(referential.groups, code)) {
-    throw new SpecError('INVALID_INPUT', `input value ${value} is a group of ${referential.id}`);
+    throw new SpecError(
+      'INVALID_INPUT',
+      `input value ${citeName(value)} is a group of ${citeName(referential.id)}`,
+    );
   }
   const codes = referential.codes;
   if (codes === undefined) return { kind: 'code', code };
   if (!Object.hasOwn(codes, code)) {
-    return { kind: 'unknown', why: `code ${code} not in referential ${referential.id}` };
+    return {
+      kind: 'unknown',
+      why: `code ${citeName(code)} not in referential ${citeName(referential.id)}`,
+    };
   }
   const periods = codes[code] ?? [];
   const valid = periods.some((p) => p.from <= at && (p.until == null || at < p.until));
   return valid
     ? { kind: 'code', code }
-    : { kind: 'unknown', why: `code ${code} not valid at ${at}` };
+    : { kind: 'unknown', why: `code ${citeName(code)} not valid at ${citeName(at)}` };
 }
 
 /**
@@ -238,7 +247,8 @@ function readTarget(referential: Referential, target: string): Target {
   if (codes !== undefined && !Object.hasOwn(codes, target)) {
     throw new SpecError(
       'INVALID_REFERENTIAL',
-      `${target} is neither a group nor a code of referential ${referential.id}`,
+      `${citeName(target)} is neither a group nor a code of referential ` +
+        `${citeName(referential.id)}`,
     );
   }
   return { kind: 'code', code: target };
@@ -266,7 +276,8 @@ function combine(
   const unknown = judged.find((j) => j.membership.result === 'unknown')?.membership;
   if (all) {
     const failed = judged.find((j) => j.membership.result === false);
-    if (failed) return { result: false, why: `input value ${failed.value} does not match` };
+    if (failed)
+      return { result: false, why: `input value ${citeName(failed.value)} does not match` };
   } else if (!judged.some((j) => j.membership.result === true)) {
     return unknown?.result === 'unknown'
       ? { result: 'unknown', why: unknown.why }
@@ -378,7 +389,9 @@ class Resolver {
     if (frame.exhaustive) return { result: false };
     return {
       result: 'unknown',
-      why: `${value} in ${frame.group} is unknown: ${frame.group} is not exhaustive`,
+      why:
+        `${citeName(value)} in ${citeName(frame.group)} is unknown: ${citeName(frame.group)} ` +
+        `is not exhaustive`,
     };
   }
 

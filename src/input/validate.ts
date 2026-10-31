@@ -1,4 +1,4 @@
-import { unreadableMessage } from '../errors.js';
+import { citeName, unreadableMessage } from '../errors.js';
 import { reservedDateNameMessage } from '../reserved.js';
 import {
   dimensionValueProblem,
@@ -14,7 +14,6 @@ import {
   announce,
   checkText,
   childPointer,
-  cite,
   expectPlainObject,
   ownKeys,
   readFields,
@@ -165,9 +164,9 @@ function readDates(value: unknown, reader: Reader): void {
   const path = '/meta/dates';
   eachMember(value, path, reader, (key, at, date) => {
     if (isUnnamable(key)) reader.add(path, unnamableNameMessage(path, 'date', key));
-    else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(cite(at)));
+    else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(at));
     else if (!isCivilDate(date) && !isInstant(date)) {
-      reader.add(at, `${cite(at)} must be ${DATE_FORMS}`);
+      reader.add(at, `${citeName(at)} must be ${DATE_FORMS}`);
     }
   });
 }
@@ -188,7 +187,7 @@ function readList(
     if (!Array.isArray(value)) return 'not a list';
     length = value.length;
   } catch (error) {
-    add(path, unreadableMessage(cite(path), error));
+    add(path, unreadableMessage(path, error));
     return 'failed';
   }
   // Only a Proxy can announce such a length.
@@ -217,12 +216,12 @@ function readTags(value: unknown, reader: Reader): void {
   const texts =
     tags === 'not a list' ? [] : tags.filter((tag): tag is string => typeof tag === 'string');
   if (tags === 'not a list' || texts.length !== tags.length) {
-    reader.add(path, `${path} must be an array of strings`);
+    reader.add(path, `${citeName(path)} must be an array of strings`);
     return;
   }
   texts.forEach((tag, i) => {
     const at = `${path}/${i}`;
-    if (tag === '') reader.add(at, `${at} must be a non-empty string`);
+    if (tag === '') reader.add(at, `${citeName(at)} must be a non-empty string`);
     else if (hasLoneSurrogate(tag)) reader.add(at, loneSurrogateMessage(at));
   });
   if (!strictlySorted(texts)) reader.add(path, 'tags must be sorted without duplicates');
@@ -236,7 +235,7 @@ function readDimensions(value: unknown, reader: Reader): void {
       return;
     }
     if (key.startsWith('$')) {
-      reader.add(at, reservedDimensionNameMessage(cite(at)));
+      reader.add(at, reservedDimensionNameMessage(at));
       return;
     }
     readDimension(dimension, at, reader);
@@ -247,19 +246,19 @@ function readDimensions(value: unknown, reader: Reader): void {
 function readDimension(value: unknown, path: string, reader: Reader): void {
   const { add } = reader;
   if (typeof value === 'string') {
-    const problem = dimensionValueProblem(value, cite(path));
+    const problem = dimensionValueProblem(value, path);
     if (problem !== undefined) add(path, problem);
     return;
   }
   const values = readList(value, path, reader);
   if (values === 'failed') return;
   if (values === 'not a list') {
-    add(path, `${cite(path)} must be a value or a sorted list of at least two values`);
+    add(path, `${citeName(path)} must be a value or a sorted list of at least two values`);
     return;
   }
   let valid = true;
   values.forEach((item, i) => {
-    const problem = dimensionValueProblem(item, cite(`${path}/${i}`));
+    const problem = dimensionValueProblem(item, `${path}/${i}`);
     if (problem !== undefined) {
       add(`${path}/${i}`, problem);
       valid = false;
@@ -267,11 +266,11 @@ function readDimension(value: unknown, path: string, reader: Reader): void {
   });
   const texts = values.filter((item): item is string => typeof item === 'string');
   if (!valid || texts.length !== values.length) return;
-  if (texts.length === 0) add(path, `${cite(path)} must not be an empty list`);
+  if (texts.length === 0) add(path, `${citeName(path)} must not be an empty list`);
   else if (texts.length === 1) {
-    add(path, `${cite(path)} holds a single value: write it as a string, not a list`);
+    add(path, `${citeName(path)} holds a single value: write it as a string, not a list`);
   } else if (!strictlySorted(texts)) {
-    add(path, `${cite(path)} must be sorted without duplicates`);
+    add(path, `${citeName(path)} must be sorted without duplicates`);
   }
 }
 

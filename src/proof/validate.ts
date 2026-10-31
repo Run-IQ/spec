@@ -9,7 +9,7 @@ import {
 } from '../decision/output.js';
 import {
   describeError,
-  escapeText,
+  citeName,
   quoteText,
   SpecError,
   specErrorPath,
@@ -46,27 +46,28 @@ const SIGNATURE_BASE64URL = /^[A-Za-z0-9_-]{85}[AQgw]$/;
 const DATE_FORMS = 'YYYY-MM-DD, or a date-time with Z or an offset';
 
 const nonEmptyString: Check = (value, path, add) => {
-  if (typeof value !== 'string' || value === '') add(path, `${path} must be a non-empty string`);
+  if (typeof value !== 'string' || value === '')
+    add(path, `${citeName(path)} must be a non-empty string`);
 };
 
 const anyString: Check = (value, path, add) => {
-  if (typeof value !== 'string') add(path, `${path} must be a string`);
+  if (typeof value !== 'string') add(path, `${citeName(path)} must be a string`);
 };
 
 const version: Check = (value, path, add) => {
-  if (!isRuleVersion(value)) add(path, `${path} must be a positive integer`);
+  if (!isRuleVersion(value)) add(path, `${citeName(path)} must be a positive integer`);
 };
 
 /** A stratum index: a safe integer, 0 or more. Whether `strata` has it is checked later. */
 const stratum: Check = (value, path, add) => {
   if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
-    add(path, `${path} must be a non-negative integer`);
+    add(path, `${citeName(path)} must be a non-negative integer`);
   }
 };
 
 const sha256: Check = (value, path, add) => {
   if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
-    add(path, `${path} must be a lowercase sha256 hex string`);
+    add(path, `${citeName(path)} must be a lowercase sha256 hex string`);
   }
 };
 
@@ -84,13 +85,14 @@ function isoDate(nullable: boolean): Check {
         if (!(error instanceof SpecError)) throw error;
       }
     }
-    add(path, `${path} must be ${nullable ? 'null or ' : ''}an ISO date: ${DATE_FORMS}`);
+    add(path, `${citeName(path)} must be ${nullable ? 'null or ' : ''}an ISO date: ${DATE_FORMS}`);
   };
 }
 
 /** A format listed in `PROOF_FORMATS`; an unknown one is reported by `formatGate`. */
 const proofFormat: Check = (value, path, add) => {
-  if (!isProofFormat(value)) add(path, `${path} must be one of ${PROOF_FORMATS.join(', ')}`);
+  if (!isProofFormat(value))
+    add(path, `${citeName(path)} must be one of ${PROOF_FORMATS.join(', ')}`);
 };
 
 /**
@@ -100,19 +102,19 @@ const proofFormat: Check = (value, path, add) => {
 function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue | undefined {
   const format = members.get('format');
   if (typeof format !== 'string' || isProofFormat(format)) return undefined;
-  return { path: 'format', message: `unknown format: ${escapeText(format)}` };
+  return { path: 'format', message: `unknown format: ${citeName(format)}` };
 }
 
 function constant(expected: string): Check {
   return (value, path, add) => {
-    if (value !== expected) add(path, `${path} must be "${expected}"`);
+    if (value !== expected) add(path, `${citeName(path)} must be "${expected}"`);
   };
 }
 
 function oneOf(allowed: readonly string[]): Check {
   return (value, path, add) => {
     if (!allowed.some((item) => item === value)) {
-      add(path, `${path} must be one of ${allowed.join(', ')}`);
+      add(path, `${citeName(path)} must be one of ${allowed.join(', ')}`);
     }
   };
 }
@@ -134,7 +136,7 @@ const json: Check = (value, path, add) => {
 function listOf(item: Check): Check {
   return (value, path, add) => {
     if (!Array.isArray(value)) {
-      add(path, `${path} must be an array`);
+      add(path, `${citeName(path)} must be an array`);
       return;
     }
     Array.from(value as unknown[]).forEach((v, i) => item(v, `${path}[${i}]`, add));
@@ -145,12 +147,12 @@ function listOf(item: Check): Check {
 function mapOf(item: Check, summary: string): Check {
   return (value, path, add) => {
     if (!isPlainObject(value)) {
-      add(path, `${path} must be an object of ${summary}`);
+      add(path, `${citeName(path)} must be an object of ${summary}`);
       return;
     }
     for (const [name, entry] of Object.entries(value)) {
       if (entry === undefined) continue;
-      if (name === '') add(path, `${path} has an empty name`);
+      if (name === '') add(path, `${citeName(path)} has an empty name`);
       else item(entry, `${path}.${name}`, add);
     }
   };
@@ -177,7 +179,7 @@ function checkObject(
   ignored: ReadonlySet<string>,
 ): ReadonlyMap<string, unknown> | undefined {
   if (!isPlainObject(value)) {
-    add(path, `${path} must be an object ${shape.summary}`);
+    add(path, `${citeName(path)} must be an object ${shape.summary}`);
     return undefined;
   }
   const members = new Map<string, unknown>(Object.entries(value));
@@ -189,12 +191,12 @@ function checkObject(
   const at = (key: string): string => (path ? `${path}.${key}` : key);
   for (const key of members.keys()) {
     if (ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
-    add(at(key), `${path || 'proof'} has an unknown key ${quoteText(key)}`);
+    add(at(key), `${citeName(path || 'proof')} has an unknown key ${quoteText(key)}`);
   }
   for (const [key, check] of Object.entries(shape.fields)) {
     const field = members.get(key);
     if (field !== undefined) check(field, at(key), add);
-    else if (!shape.optional?.includes(key)) add(at(key), `${at(key)} is required`);
+    else if (!shape.optional?.includes(key)) add(at(key), `${citeName(at(key))} is required`);
   }
   return members;
 }
@@ -285,7 +287,10 @@ const SIGNATURE: Shape = {
     keyId: nonEmptyString,
     value: (value, path, add) => {
       if (typeof value !== 'string' || !SIGNATURE_BASE64URL.test(value)) {
-        add(path, `${path} must be an ed25519 signature in unpadded base64url (86 characters)`);
+        add(
+          path,
+          `${citeName(path)} must be an ed25519 signature in unpadded base64url (86 characters)`,
+        );
       }
     },
   },
@@ -454,7 +459,7 @@ function checkUniqueRules(rules: unknown, add: Add): void {
       return;
     }
     const key = `${rule.id}@${rule.version}`;
-    if (seen.has(key)) add(`rules[${i}]`, `rules[${i}] repeats ${key}`);
+    if (seen.has(key)) add(`rules[${i}]`, `rules[${i}] repeats ${citeName(key)}`);
     seen.add(key);
   });
 }

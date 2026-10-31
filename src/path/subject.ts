@@ -1,4 +1,4 @@
-import { quoteText, SpecError } from '../errors.js';
+import { citeName, quoteText, SpecError } from '../errors.js';
 import { daysInMonth } from '../rule/date.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 import { parsePointer } from './pointer.js';
@@ -104,5 +104,8 @@ function keyText(value: unknown, what: string): string {
   }
   if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
   const got = typeof value === 'number' ? String(value) : typeName(value);
-  throw new SpecError('INVALID_PATH', `${what} must be a string or a safe integer, got ${got}`);
+  throw new SpecError(
+    'INVALID_PATH',
+    `${citeName(what)} must be a string or a safe integer, got ${got}`,
+  );
 }

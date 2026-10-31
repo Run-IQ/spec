@@ -1,5 +1,5 @@
 import { toJsonValue } from '../canonical.js';
-import { describeError, unreadableMessage } from '../errors.js';
+import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
@@ -133,10 +133,10 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       key = `${definition.id}@${definition.version}`;
       checksum = sha256Hex(payload);
     } catch (error) {
-      invalid(`rule invalid: rules[${i}]: ${describeError(error)}`);
+      invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
       return;
     }
-    if (given.has(key)) invalid(`duplicate rule: ${key}`);
+    if (given.has(key)) invalid(`duplicate rule: ${citeName(key)}`);
     else given.set(key, checksum);
   });
 
@@ -145,11 +145,11 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
     const key = `${ref.id}@${ref.version}`;
     cited.add(key);
     const checksum = given.get(key);
-    if (checksum === undefined) invalid(`rule missing: ${key}`);
-    else if (checksum !== ref.checksum) invalid(`rule checksum mismatch: ${key}`);
+    if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);
+    else if (checksum !== ref.checksum) invalid(`rule checksum mismatch: ${citeName(key)}`);
   }
   for (const key of given.keys()) {
-    if (!cited.has(key)) invalid(`unexpected rule: ${key}`);
+    if (!cited.has(key)) invalid(`unexpected rule: ${citeName(key)}`);
   }
   return findings;
 }
