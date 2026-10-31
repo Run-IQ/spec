@@ -18,7 +18,7 @@ const base = {
   params: { rate: 0.05, base: 'orderTotal' },
   condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'orderTotal' }, 0] } },
   priority: 10,
-  effectiveFrom: '2025-01-01',
+  effectiveFrom: '2025-01-01T00:00:00Z',
   effectiveUntil: '2026-01-01T00:00:00+01:00',
   dimensions: { country: 'TG' },
   tags: ['vat', 'b2c', 'vat'],
@@ -41,7 +41,7 @@ function thrown(fn: () => unknown): SpecError {
 }
 
 describe('toExecutableRule', () => {
-  it('normalizes, turns the dates into Date objects and adds the checksum', () => {
+  it('normalizes, turns instant bounds into Date objects and adds the checksum', () => {
     const rule = toExecutableRule(base);
     expect(rule).toEqual({
       id: 'vat-std',
@@ -58,6 +58,21 @@ describe('toExecutableRule', () => {
       checksum: computeRuleChecksum(base),
     });
     expect(rule.effectiveFrom).toBeInstanceOf(Date);
+  });
+
+  it('keeps civil bounds as YYYY-MM-DD strings (D-13)', () => {
+    const rule = toExecutableRule({
+      ...base,
+      effectiveFrom: '2025-01-01',
+      effectiveUntil: '2026-01-01',
+      timeZone: '+00:00',
+      effectiveOn: '/$dates/facture',
+    });
+    expect(rule.effectiveFrom).toBe('2025-01-01');
+    expect(rule.effectiveUntil).toBe('2026-01-01');
+    expect(rule.timeZone).toBe('UTC');
+    expect(rule.effectiveOn).toBe('/$dates/facture');
+    expect(fromStoredRecord(storedRecordOf(rule))).toEqual(rule);
   });
 
   it('keeps effectiveUntil null for an open-ended rule', () => {
@@ -200,7 +215,14 @@ describe('fromStoredRecord: the payload must be canonical', () => {
   const reversed = Object.fromEntries(Object.entries(parsed).reverse());
   const variants: [string, string][] = [
     ['reordered keys', JSON.stringify(reversed)],
-    ['a date-only date', record.payload.replace('2025-01-01T00:00:00.000Z', '2025-01-01')],
+    [
+      'an instant with an offset',
+      record.payload.replace('2025-01-01T00:00:00.000Z', '2025-01-01T01:00:00+01:00'),
+    ],
+    [
+      'an instant without milliseconds',
+      record.payload.replace('2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00Z'),
+    ],
     ['unsorted and duplicate tags', record.payload.replace('["b2c","vat"]', '["vat","b2c","vat"]')],
     [
       'an embedded checksum field',
@@ -223,6 +245,15 @@ describe('fromStoredRecord: the payload must be canonical', () => {
       expect(error.code).toBe('INVALID_RULE');
       expect(error.message).toContain('vat-std@2: payload is not canonical');
     }
+  });
+
+  it('rejects a time zone written +00:00 instead of UTC', () => {
+    const utc = storedRecordOf({ ...base, timeZone: 'UTC' });
+    const payload = utc.payload.replace('"UTC"', '"+00:00"');
+    expect(payload).not.toBe(utc.payload);
+    const error = thrown(() => fromStoredRecord({ ...utc, checksum: sha256(payload), payload }));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toContain('vat-std@2: payload is not canonical');
   });
 
   it('the checksum is the sha256 of the stored payload', () => {

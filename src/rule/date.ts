@@ -1,12 +1,18 @@
 import { quoteText, SpecError } from '../errors.js';
+import { daysInMonth } from '../time/civil.js';
 import { dateTimeOf } from '../values.js';
+
+export { daysInMonth };
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})$/;
 
 /**
- * Parses a rule date. Accepted forms only:
+ * Parses a date of a decision PROOF (`evaluatedAt`, `sealedAt`), in the grammar rule dates had
+ * before civil time: Task 9J gives proofs the reference dates of rules. Rule windows read their
+ * bounds with `toReferenceDate` (`time/civil.ts`), which keeps a civil date civil (D-13).
+ * Accepted forms only:
  * - a valid `Date`, from any realm;
  * - `YYYY-MM-DD`, read as UTC midnight;
  * - an ISO 8601 date-time WITH `Z` or a `±HH:MM` offset (seconds and fraction optional).
@@ -70,15 +76,6 @@ function build(
   result.setUTCHours(hour, minute - offsetMinutes, second, ms);
   if (Number.isNaN(result.getTime())) invalid(field, quoteText(raw));
   return result;
-}
-
-/** Internal: the number of days of `month` (1 to 12) in `year`, proleptic Gregorian calendar. */
-export function daysInMonth(year: number, month: number): number {
-  if (month === 2) {
-    const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
-    return leap ? 29 : 28;
-  }
-  return [4, 6, 9, 11].includes(month) ? 30 : 31;
 }
 
 function invalid(field: string, what: string): never {

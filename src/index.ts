@@ -7,7 +7,9 @@
  * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
  * `schema/decision-proof.schema.json`; `PROOF_FORMATS`); JSON pointers (`parsePointer`,
  * `comparePointers`), subjects (`isSubject`, `subjectContains`) and the reserved `$` names
- * (`ENGINE_VARIABLES`, `isReservedName`).
+ * (`ENGINE_VARIABLES`, `isReservedName`); civil time (`CivilDate`, `Instant`,
+ * `toReferenceDate`, `isTimeZone`, `CivilCalendar`), rule windows (`windowContains`) and
+ * coexisting versions (`findOverlappingVersions`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -47,6 +49,18 @@ export { canonicalRulePayload } from './rule/payload.js';
 export { computeRuleChecksum, verifyRuleChecksum } from './rule/checksum.js';
 export { computeRuleFingerprint } from './rule/fingerprint.js';
 export { isEffectiveAt } from './rule/effective.js';
+export { windowContains } from './rule/window.js';
+export type { RuleWindow } from './rule/window.js';
+export { findOverlappingVersions } from './rule/versions.js';
+export type { VersionedRuleWindow, VersionOverlap } from './rule/versions.js';
+export {
+  isCivilDate,
+  isInstant,
+  isTimeZone,
+  normalizeTimeZone,
+  toReferenceDate,
+} from './time/civil.js';
+export type { CivilCalendar, CivilDate, Instant } from './time/civil.js';
 export type { ExecutableRule, ExecutableRuleBase } from './rule/executable.js';
 export type { StoredRuleRecord } from './rule/stored.js';
 export { fromStoredRecord, toExecutableRule, toStoredPayload } from './rule/convert.js';

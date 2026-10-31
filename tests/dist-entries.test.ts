@@ -4,6 +4,8 @@ import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import type { CivilCalendar } from '../src/index.js';
+import { fixedCalendar } from './helpers.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
@@ -48,6 +50,22 @@ type Entry = {
   isSubject: (value: unknown) => boolean;
   subjectContains: (scope: string, subject: string) => boolean;
   toCanonicalDecimal: (text: string) => string;
+  toReferenceDate: (value: Date | string) => string;
+  isCivilDate: (value: unknown) => boolean;
+  isInstant: (value: unknown) => boolean;
+  isTimeZone: (zone: unknown) => boolean;
+  normalizeTimeZone: (zone: string) => string;
+  windowContains: (
+    rule: { effectiveFrom: string; effectiveUntil: string | null },
+    at: string,
+    timeZone: string,
+    calendar: CivilCalendar,
+  ) => boolean | 'unknown';
+  findOverlappingVersions: (
+    rules: readonly { id: string; version: number; effectiveFrom: string; effectiveUntil: null }[],
+    timeZone: string,
+    calendar: CivilCalendar,
+  ) => unknown[];
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -177,6 +195,30 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(() => entry.parsePointer('a')).toThrow(
         expect.objectContaining({ code: 'INVALID_PATH' }),
       );
+    }
+  });
+
+  it('every built entry exports civil time, windows and version overlaps', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    for (const entry of entries) {
+      expect(entry.toReferenceDate('2026-01-01T01:00:00+01:00')).toBe('2026-01-01T00:00:00.000Z');
+      expect(entry.isCivilDate('2024-02-29')).toBe(true);
+      expect(entry.isInstant('2026-01-01T00:00:00Z')).toBe(false);
+      expect(entry.isTimeZone('Europe/Paris')).toBe(true);
+      expect(entry.normalizeTimeZone('-00:00')).toBe('UTC');
+      const rule = { effectiveFrom: '2026-01-01', effectiveUntil: null };
+      expect(
+        entry.windowContains(rule, '2025-12-31T23:30:00.000Z', 'Europe/Paris', fixedCalendar),
+      ).toBe(true);
+      const versions = [1, 2].map((version) => ({ id: 'R1', version, ...rule }));
+      expect(entry.findOverlappingVersions(versions, 'UTC', fixedCalendar)).toEqual([
+        { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' },
+      ]);
     }
   });
 

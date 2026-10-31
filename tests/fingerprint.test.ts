@@ -196,7 +196,10 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
     });
 
     it('different effectiveFrom', () => {
-      expect(fp({ ...rich, effectiveFrom: '2025-06-15T12:00:00+02:00' })).toBe(fp(rich));
+      expect(fp({ ...rich, effectiveFrom: '2025-06-15' })).toBe(fp(rich));
+      expect(
+        fp({ ...rich, effectiveFrom: '2025-06-15T12:00:00+02:00', effectiveUntil: null }),
+      ).toBe(fp(rich));
     });
 
     it('different effectiveUntil, including null and absent', () => {

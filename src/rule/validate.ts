@@ -3,9 +3,11 @@ import type { JsonValue } from '../canonical.js';
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
-import { parseRuleDate } from './date.js';
+import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
+import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
@@ -26,11 +28,15 @@ class Issues {
 /**
  * Checks a rule definition without throwing and reports every problem found. Accepts exactly
  * what `normalizeRuleDefinition` accepts, and agrees with `schema/rule-definition.schema.json`
- * on JSON documents, plus one check JSON Schema cannot express: `effectiveUntil` must be after
- * `effectiveFrom`. It checks the closed `exceptions` format and the constraints of the
- * reserved model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses
- * output names starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit`
- * output and in selector `outputs`. Every text (a string field, a tag, a dimension key or
+ * on JSON documents, plus checks JSON Schema cannot express: `effectiveUntil` must be after
+ * `effectiveFrom`, an instant must stay within the years 0000 to 9999 once its offset is applied,
+ * and an `effectiveOn` must hold no lone UTF-16 surrogate. Both bounds must have the same form (two
+ * civil dates or two instants, D-13); `timeZone` must pass `isTimeZone`; `effectiveOn` must point
+ * to `/$dates/<name>`, `/$item/<path>` (with a `forEach`) or `/$segment/from` (with
+ * `forEach.segments`). It checks the closed `exceptions` format and the constraints of the reserved
+ * model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses output names
+ * starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit` output and in selector
+ * `outputs`. Every text (a string field, a tag, a dimension key or
  * value, an extension key, any string inside `params`, `condition.value`, `exceptions` or an
  * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
  * valid rule always has a checksum. JSON Schema cannot express this check. Like
@@ -86,12 +92,14 @@ function definitionIssues(value: unknown): {
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
   const until =
     value.effectiveUntil == null ? null : checkDate(value.effectiveUntil, 'effectiveUntil', errors);
-  if (from !== undefined && until != null && until.getTime() <= from.getTime()) {
-    errors.add(
-      'effectiveUntil',
-      'effectiveUntil must be after effectiveFrom: the window would be empty',
-    );
+  if (from !== undefined && until !== undefined) {
+    const problem = windowShapeProblem(from, until);
+    if (problem !== undefined) errors.add('effectiveUntil', problem);
   }
+  if (value.timeZone != null && !isTimeZone(value.timeZone)) {
+    errors.add('timeZone', timeZoneMessage(value.timeZone));
+  }
+  if (value.effectiveOn != null) checkEffectiveOn(value.effectiveOn, value.forEach, errors);
 
   if (value.condition != null) checkCondition(value.condition, errors);
   for (const field of OPTIONAL_STRINGS) {
@@ -162,13 +170,20 @@ function checkExceptions(value: unknown, errors: Issues): void {
   for (const issue of readRuleExceptions(json).issues) errors.add(issue.path, issue.message);
 }
 
-function checkDate(value: unknown, field: string, errors: Issues): Date | undefined {
+function checkDate(value: unknown, field: string, errors: Issues): CivilDate | Instant | undefined {
   try {
-    return parseRuleDate(value, field);
+    return readReferenceDate(value, field);
   } catch (error) {
     addError(error, field, errors);
     return undefined;
   }
+}
+
+function checkEffectiveOn(value: unknown, forEach: unknown, errors: Issues): void {
+  const problem =
+    effectiveOnIssue(value) ??
+    (typeof value === 'string' ? effectiveOnContextProblem(value, forEach) : undefined);
+  if (problem !== undefined) errors.add('effectiveOn', problem);
 }
 
 function checkCondition(value: unknown, errors: Issues): void {

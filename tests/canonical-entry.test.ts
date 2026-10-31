@@ -93,8 +93,18 @@ describe('@run-iq/spec/canonical', () => {
       if (seen.has(file)) return;
       seen.add(file);
       const code = readFileSync(file, 'utf8');
-      for (const match of code.matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)) {
-        const spec = match[1]!;
+      // Static imports and re-exports (`import … from '…'`, `export … from '…'`, `import '…'`)
+      // and dynamic `import('…')`; a string that merely ends with "from" is not an import.
+      const imports = new RegExp(
+        [
+          String.raw`^\s*(?:import|export)\b[^;]*?\bfrom\s*'([^']+)'`,
+          String.raw`^\s*import\s*'([^']+)'`,
+          String.raw`\bimport\s*\(\s*'([^']+)'`,
+        ].join('|'),
+        'gm',
+      );
+      for (const match of code.matchAll(imports)) {
+        const spec = (match[1] ?? match[2] ?? match[3])!;
         if (spec.startsWith('.')) visit(resolve(dirname(file), spec.replace(/\.js$/, '.ts')));
         else if (!/^@noble\/(?:hashes|curves)\//.test(spec)) nodeImports.push(`${file}: ${spec}`);
       }

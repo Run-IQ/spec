@@ -1,9 +1,11 @@
+import type { CivilDate } from '../time/civil.js';
 import type { RuleDefinitionBase } from './definition.js';
 
 /**
  * The named fields of a rule ready for evaluation, without the extension index signature, so
  * that `Omit`/`Pick` keep their types. Same content as `RuleDefinitionBase`, with:
- * - `effectiveFrom` / `effectiveUntil` as `Date` (half-open window, see `isEffectiveAt`);
+ * - `effectiveFrom` / `effectiveUntil`: a civil date stays a `YYYY-MM-DD` string, an instant
+ *   becomes a `Date` (half-open window, see `windowContains`);
  * - `params` and `condition.value` as `unknown`, so a plugin can narrow them;
  * - `checksum`: `computeRuleChecksum` of the definition.
  */
@@ -15,10 +17,10 @@ export interface ExecutableRuleBase extends Readonly<
 > {
   readonly params: unknown;
   readonly condition?: { readonly dsl: string; readonly value: unknown };
-  /** Inclusive start. */
-  readonly effectiveFrom: Date;
-  /** Exclusive end; `null` for no end. */
-  readonly effectiveUntil: Date | null;
+  /** Inclusive start: a civil date, or an instant as a `Date`. */
+  readonly effectiveFrom: CivilDate | Date;
+  /** Exclusive end, of the same form as `effectiveFrom`; `null` for no end. */
+  readonly effectiveUntil: CivilDate | Date | null;
   /** Always present, `{}` when the rule has no dimension. */
   readonly dimensions: Readonly<Record<string, string>>;
   /** Sorted, without duplicates. */

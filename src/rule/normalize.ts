@@ -3,19 +3,22 @@ import type { JsonValue } from '../canonical.js';
 import { SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
-import { parseRuleDate } from './date.js';
+import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
 import type { RuleValidationIssue } from './validate.js';
+import { effectiveOnContextProblem, readEffectiveOn, readRuleWindow } from './window.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
 
 /**
  * Builds the canonical definition of a rule, so that the same data always gives the same
  * definition however it was written:
- * - dates become full UTC ISO strings (see `parseRuleDate` for the accepted forms);
+ * - a civil bound `YYYY-MM-DD` stays civil; an instant bound becomes its canonical form
+ *   `YYYY-MM-DDTHH:MM:SS.sssZ` (D-13; see `toReferenceDate` for the accepted forms);
+ * - `timeZone` is written by `normalizeTimeZone` (`+00:00` and `-00:00` become `UTC`);
  * - defaults are made explicit: `effectiveUntil: null`, `dimensions: {}`, `tags: []`;
  * - `tags` are sorted and deduplicated;
  * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs` and `models` are
@@ -29,8 +32,11 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
  * positive integer), for a malformed `exceptions` list, for a rule of model `EXCEPTION_MODEL`
  * with an `output` or without exceptions, for an output name starting with `$` (in `output`,
- * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), or when
- * `effectiveUntil <= effectiveFrom` (an empty window), for a lone UTF-16 surrogate in a string
+ * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), when
+ * `effectiveUntil <= effectiveFrom` (an empty window), for bounds of two forms (one civil, one
+ * instant: `effectiveFrom and effectiveUntil must both be civil dates or both instants`), for an
+ * invalid `timeZone` (`isTimeZone`) or `effectiveOn` (`/$dates/<name>`, `/$item/<path>` with a
+ * `forEach`, `/$segment/from` with `forEach.segments`), for a lone UTF-16 surrogate in a string
  * field, a tag, a dimension key or value or an extension key, `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
@@ -52,16 +58,7 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
 function normalize(input: RuleDefinitionInput): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
 
-  const from = parseRuleDate(input.effectiveFrom, 'effectiveFrom');
-  const until =
-    input.effectiveUntil == null ? null : parseRuleDate(input.effectiveUntil, 'effectiveUntil');
-  if (until !== null && until.getTime() <= from.getTime()) {
-    invalidRule(
-      `effectiveUntil (${until.toISOString()}) must be after ` +
-        `effectiveFrom (${from.toISOString()}): ` +
-        'the window [effectiveFrom, effectiveUntil) would be empty',
-    );
-  }
+  const { from, until } = readRuleWindow(input.effectiveFrom, input.effectiveUntil);
 
   const out: Record<string, unknown> = {
     id: requireString(input.id, 'id'),
@@ -69,12 +66,19 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     model: requireString(input.model, 'model'),
     params: requireParams(input.params),
     priority: requireNumber(input.priority, 'priority'),
-    effectiveFrom: from.toISOString(),
-    effectiveUntil: until === null ? null : until.toISOString(),
+    effectiveFrom: from,
+    effectiveUntil: until,
     dimensions: normalizeDimensions(input.dimensions),
     tags: normalizeTags(input.tags),
   };
 
+  if (input.timeZone != null) out.timeZone = requireTimeZone(input.timeZone, 'INVALID_RULE');
+  if (input.effectiveOn != null) {
+    const pointer = readEffectiveOn(input.effectiveOn);
+    const problem = effectiveOnContextProblem(pointer, input.forEach);
+    if (problem !== undefined) invalidRule(problem);
+    out.effectiveOn = pointer;
+  }
   if (input.condition != null) out.condition = normalizeCondition(input.condition);
   for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
     const value = input[field];

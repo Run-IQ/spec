@@ -51,7 +51,11 @@ describe('Date from another realm (item 4)', () => {
     };
     expect(normalizeRuleDefinition(rule).effectiveFrom).toBe('2025-01-01T00:00:00.000Z');
     expect(computeRuleChecksum(rule)).toBe(
-      computeRuleChecksum({ ...base, effectiveUntil: '2026-01-01' }),
+      computeRuleChecksum({
+        ...base,
+        effectiveFrom: '2025-01-01T00:00:00Z',
+        effectiveUntil: '2026-01-01T00:00:00Z',
+      }),
     );
   });
 

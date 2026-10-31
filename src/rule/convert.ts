@@ -1,6 +1,7 @@
 import { canonicalize } from '../canonical.js';
 import { SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
+import { isCivilDate } from '../time/civil.js';
 import { isPlainObject } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
@@ -22,7 +23,8 @@ export function toStoredPayload(input: RuleDefinitionInput): { payload: string; 
 }
 
 /**
- * Normalizes a definition into a rule ready for evaluation: dates become `Date`, `checksum`
+ * Normalizes a definition into a rule ready for evaluation: a civil bound stays a `YYYY-MM-DD`
+ * string, an instant bound becomes a `Date` (D-13), `checksum`
  * is computed (a `checksum` in `input` is ignored). Throws `SpecError` like
  * `normalizeRuleDefinition`.
  *
@@ -92,11 +94,16 @@ export function fromStoredRecord(record: StoredRuleRecord): ExecutableRule {
 
 function executableOf(definition: RuleDefinition, checksum: string): ExecutableRule {
   const rule: Record<string, unknown> = { ...definition };
-  rule.effectiveFrom = new Date(definition.effectiveFrom);
+  rule.effectiveFrom = boundOf(definition.effectiveFrom);
   rule.effectiveUntil =
-    definition.effectiveUntil === null ? null : new Date(definition.effectiveUntil);
+    definition.effectiveUntil === null ? null : boundOf(definition.effectiveUntil);
   rule.checksum = checksum;
   return rule as ExecutableRule;
+}
+
+/** A civil date stays a string; a canonical instant becomes a `Date`. */
+function boundOf(bound: string): string | Date {
+  return isCivilDate(bound) ? bound : new Date(bound);
 }
 
 function messageOf(error: unknown): string {

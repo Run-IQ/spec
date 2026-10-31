@@ -11,15 +11,21 @@ const base = {
 };
 
 describe('computeRuleChecksum', () => {
-  it('dates équivalentes, même checksum', () => {
-    const h = computeRuleChecksum(base);
+  it('instants équivalents, même checksum', () => {
+    const instant = { ...base, effectiveFrom: '2025-01-01T00:00:00.000Z' };
+    const h = computeRuleChecksum(instant);
     expect(computeRuleChecksum({ ...base, effectiveFrom: new Date('2025-01-01T00:00:00Z') })).toBe(
       h,
     );
-    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00.000Z' })).toBe(h);
-    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00Z' })).toBe(h);
+    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00Z' })).toBe(h);
     expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T01:00:00+01:00' })).toBe(h);
     expect(computeRuleChecksum({ ...base, effectiveFrom: '2024-12-31T19:00:00-05:00' })).toBe(h);
+  });
+
+  it('une date civile reste civile : checksum différent de celui de son minuit UTC (D-13)', () => {
+    expect(computeRuleChecksum(base)).not.toBe(
+      computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00.000Z' }),
+    );
   });
 
   it('défauts absents ou explicites, même checksum', () => {
@@ -62,8 +68,16 @@ describe('computeRuleChecksum', () => {
   });
 
   it('valeur de référence figée', () => {
+    // D-13: '2025-01-01' stays civil, so this checksum changed with Task 9D.
     expect(computeRuleChecksum(base)).toMatchInlineSnapshot(
-      `"fe6cf3c88e0ee9a78cb98aec238999209d82ee44c4ee7b0c0ed69e334e0bca99"`,
+      `"9e0794daa99ac486a3deb903c5e21b5a6cf45303aa69f42c997b32e48bb718f3"`,
+    );
+  });
+
+  it("valeur de référence d'une borne instant, inchangée depuis avant D-13", () => {
+    // The value `base` had when '2025-01-01' was read as UTC midnight.
+    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00.000Z' })).toBe(
+      'fe6cf3c88e0ee9a78cb98aec238999209d82ee44c4ee7b0c0ed69e334e0bca99',
     );
   });
 
@@ -90,9 +104,17 @@ describe('verifyRuleChecksum', () => {
   it('accepts a rule sealed with its own checksum, however its dates are written', () => {
     const checksum = computeRuleChecksum(base);
     expect(verifyRuleChecksum({ ...base, checksum })).toBe(true);
+    const instant = computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00Z' });
+    expect(
+      verifyRuleChecksum({
+        ...base,
+        effectiveFrom: new Date('2025-01-01T00:00:00Z'),
+        checksum: instant,
+      }),
+    ).toBe(true);
     expect(
       verifyRuleChecksum({ ...base, effectiveFrom: new Date('2025-01-01T00:00:00Z'), checksum }),
-    ).toBe(true);
+    ).toBe(false);
   });
 
   it('compares exact lowercase hex: an uppercase copy does not match', () => {

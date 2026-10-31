@@ -37,6 +37,18 @@ export type { RuleException, RuleSelector } from './rule/exceptions.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
 export { canonicalRulePayload } from './rule/payload.js';
 export { isEffectiveAt } from './rule/effective.js';
+export { windowContains } from './rule/window.js';
+export type { RuleWindow } from './rule/window.js';
+export { findOverlappingVersions } from './rule/versions.js';
+export type { VersionedRuleWindow, VersionOverlap } from './rule/versions.js';
+export {
+  isCivilDate,
+  isInstant,
+  isTimeZone,
+  normalizeTimeZone,
+  toReferenceDate,
+} from './time/civil.js';
+export type { CivilCalendar, CivilDate, Instant } from './time/civil.js';
 export type { ExecutableRule, ExecutableRuleBase } from './rule/executable.js';
 export type { StoredRuleRecord } from './rule/stored.js';
 export { validateRuleDefinition } from './rule/validate.js';

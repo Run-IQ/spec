@@ -43,6 +43,8 @@ const VALID: [string, unknown][] = [
       ...base,
       condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'x' }, 1] } },
       effectiveUntil: '2026-01-01',
+      timeZone: 'Europe/Paris',
+      effectiveOn: '/$dates/facture',
       output: 'tax',
       dimensions: { country: 'TG' },
       tags: ['vat'],
@@ -65,6 +67,8 @@ const VALID: [string, unknown][] = [
       dominanceGroup: null,
       exceptions: null,
       sourceRef: null,
+      timeZone: null,
+      effectiveOn: null,
       checksum: null,
       jurisdiction: null,
     },
@@ -78,16 +82,31 @@ const VALID: [string, unknown][] = [
     { ...base, params: null, condition: { dsl: 'x', value: null } },
   ],
   [
-    'a date-time with Z and 9 fraction digits',
-    { ...base, effectiveFrom: '2025-01-01T10:20:30.123456789Z' },
+    'a date-time with Z and 3 fraction digits',
+    { ...base, effectiveFrom: '2025-01-01T10:20:30.123Z' },
+  ],
+  ['a date-time with an offset', { ...base, effectiveFrom: '2025-01-01T10:30:00+05:30' }],
+  ['civil leap days', { ...base, effectiveFrom: '2024-02-29', effectiveUntil: '2400-02-29' }],
+  [
+    'instant leap days',
+    {
+      ...base,
+      effectiveFrom: '2024-02-29T00:00:00Z',
+      effectiveUntil: '2400-02-29T00:00:00-23:59',
+    },
+  ],
+  ['an offset time zone', { ...base, timeZone: '-09:30' }],
+  [
+    'effectiveOn on an item, with forEach',
+    { ...base, effectiveOn: '/$item/emission', forEach: { path: '/factures', key: 'id' } },
   ],
   [
-    'a date-time with an offset and no seconds',
-    { ...base, effectiveFrom: '2025-01-01T10:30+05:30' },
-  ],
-  [
-    'a leap day',
-    { ...base, effectiveFrom: '2024-02-29', effectiveUntil: '2400-02-29T00:00:00-23:59' },
+    'effectiveOn on a segment, with forEach.segments',
+    {
+      ...base,
+      effectiveOn: '/$segment/from',
+      forEach: { segments: { from: '/a', until: '/b', facts: [] } },
+    },
   ],
   [
     'a large integer version, a negative fractional priority',
@@ -96,7 +115,11 @@ const VALID: [string, unknown][] = [
   ['duplicate tags and a string checksum', { ...base, tags: ['b', 'a', 'b', ''], checksum: 'abc' }],
   [
     'a window of one millisecond',
-    { ...base, effectiveFrom: '2025-01-01', effectiveUntil: '2025-01-01T00:00:00.001Z' },
+    {
+      ...base,
+      effectiveFrom: '2025-01-01T00:00:00Z',
+      effectiveUntil: '2025-01-01T00:00:00.001Z',
+    },
   ],
 ];
 
@@ -114,6 +137,39 @@ const INVALID: [string, unknown][] = [
   ['a non-leap February 29', { ...base, effectiveFrom: '2023-02-29' }],
   ['a date-time without a time zone (A8)', { ...base, effectiveFrom: '2025-01-01T00:00' }],
   ['an invalid effectiveUntil', { ...base, effectiveUntil: '2025-13-01' }],
+  ['four fraction digits', { ...base, effectiveFrom: '2025-01-01T00:00:00.1234Z' }],
+  ['a date-time without seconds', { ...base, effectiveFrom: '2025-01-01T00:00Z' }],
+  ['a civil from and an instant until (I7b)', { ...base, effectiveUntil: '2026-01-01T00:00:00Z' }],
+  [
+    'an instant from and a civil until (I7b)',
+    { ...base, effectiveFrom: '2025-01-01T00:00:00Z', effectiveUntil: '2026-01-01' },
+  ],
+  ['a time zone without area', { ...base, timeZone: 'Paris' }],
+  ['a lowercase time zone', { ...base, timeZone: 'europe/paris' }],
+  ['an offset time zone +24:00', { ...base, timeZone: '+24:00' }],
+  ['an empty time zone', { ...base, timeZone: '' }],
+  ['a numeric time zone', { ...base, timeZone: 1 }],
+  ['effectiveOn on a fact', { ...base, effectiveOn: '/revenue' }],
+  ['effectiveOn that is not a pointer', { ...base, effectiveOn: 'revenue' }],
+  ['effectiveOn with a bad escape', { ...base, effectiveOn: '/$dates/a~2' }],
+  ['effectiveOn on a nested date', { ...base, effectiveOn: '/$dates/a/b' }],
+  ['effectiveOn without a date name', { ...base, effectiveOn: '/$dates/' }],
+  ["effectiveOn with a '-' segment", { ...base, effectiveOn: '/$dates/-' }],
+  ['effectiveOn on $segment/until', { ...base, effectiveOn: '/$segment/until' }],
+  ['effectiveOn on an item, without forEach', { ...base, effectiveOn: '/$item/emission' }],
+  [
+    'effectiveOn on an item, with a null forEach',
+    { ...base, effectiveOn: '/$item/emission', forEach: null },
+  ],
+  [
+    'effectiveOn on a segment, without segments',
+    { ...base, effectiveOn: '/$segment/from', forEach: { path: '/a', key: 'id' } },
+  ],
+  [
+    'effectiveOn on a segment, with null segments',
+    { ...base, effectiveOn: '/$segment/from', forEach: { segments: null } },
+  ],
+  ['a numeric effectiveOn', { ...base, effectiveOn: 7 }],
   ['an unknown condition key', { ...base, condition: { dsl: 'x', value: 1, extra: true } }],
   ['a condition without value', { ...base, condition: { dsl: 'x' } }],
   ['an empty output', { ...base, output: '' }],
@@ -124,8 +180,13 @@ const INVALID: [string, unknown][] = [
 
 /** JSON Schema cannot compare two fields: only the validator (and normalize) reject these. */
 const VALIDATOR_ONLY: [string, unknown][] = [
-  ['an empty window (until == from)', { ...base, effectiveUntil: '2025-01-01T00:00:00Z' }],
+  ['an empty window (until == from)', { ...base, effectiveUntil: '2025-01-01' }],
   ['a reversed window (until < from)', { ...base, effectiveUntil: '2024-12-31' }],
+  [
+    'an offset that moves the instant before year 0000',
+    { ...base, effectiveFrom: '0000-01-01T00:00:00+00:01' },
+  ],
+  ['a lone surrogate in an effectiveOn date name', { ...base, effectiveOn: '/$dates/\uD800' }],
 ];
 
 describe('validateRuleDefinition, JSON schema and normalize agree', () => {
@@ -156,6 +217,8 @@ describe('validateRuleDefinition, JSON schema and normalize agree', () => {
 
   it('the schema documents the validator-only window check', () => {
     expect(JSON.stringify(schema)).toMatch(/effectiveUntil.*after.*effectiveFrom/);
+    expect(JSON.stringify(schema)).toMatch(/years 0000 to 9999/);
+    expect(JSON.stringify(schema)).toMatch(/lone UTF-16 surrogate/);
   });
 });
 
@@ -255,10 +318,83 @@ describe('date pattern parity', () => {
     '2025-01-01T00:00:00',
     '20250101',
     '',
+    '0000-01-01',
+    '9999-12-31',
+    '2025-01-01T00:00:00Z',
+    '2025-01-01T00:00:00.123Z',
+    '2025-01-01T00:00:00.1234Z',
+    '2025-01-01T00:00:00+23:59',
+    '2025-01-01T00:00:00-14:00',
+    '9999-12-31T23:59:59.999Z',
+    '+12025-01-01T00:00:00Z',
   ];
 
   it.each(dates)('schema, validator and normalize agree on %j', (date) => {
     const value = { ...base, effectiveFrom: date };
+    const expected = normalizeAccepts(value);
+    expect(validateRuleDefinition(value).valid).toBe(expected);
+    expect(schemaAccepts(value)).toBe(expected);
+  });
+});
+
+describe('time zone and effectiveOn pattern parity', () => {
+  const zones = [
+    'UTC',
+    '+01:00',
+    '-09:30',
+    '+23:59',
+    '+24:00',
+    '+01:60',
+    'Europe/Paris',
+    'America/Argentina/Buenos_Aires',
+    'Etc/GMT+5',
+    'America/Port-au-Prince',
+    'Paris',
+    'europe/paris',
+    'Europe/9x',
+    'Europe//Paris',
+    'Europe/Paris/',
+    'utc',
+    '',
+  ];
+
+  it.each(zones)('schema, validator and normalize agree on the time zone %j', (timeZone) => {
+    const value = { ...base, timeZone };
+    const expected = normalizeAccepts(value);
+    expect(validateRuleDefinition(value).valid).toBe(expected);
+    expect(schemaAccepts(value)).toBe(expected);
+  });
+
+  const pointers = [
+    '/$dates/facture',
+    '/$dates/a~0b~1c',
+    '/$dates/',
+    '/$dates',
+    '/$dates/-',
+    '/$dates/--',
+    '/$dates/a/b',
+    '/$item/x',
+    '/$item/',
+    '/$item/-',
+    '/$item/a/-/b',
+    '/$item/a/0',
+    '/$segment/from',
+    '/$segment/from/x',
+    '/$segment',
+    '/$segments/from',
+    '/$datesX/a',
+    '/revenue',
+    '',
+    '/',
+    '/$dates/a~',
+  ];
+
+  it.each(pointers)('schema, validator and normalize agree on effectiveOn %j', (effectiveOn) => {
+    const value = {
+      ...base,
+      effectiveOn,
+      forEach: { path: '/x', key: 'id', segments: { from: '/a', until: '/b', facts: [] } },
+    };
     const expected = normalizeAccepts(value);
     expect(validateRuleDefinition(value).valid).toBe(expected);
     expect(schemaAccepts(value)).toBe(expected);

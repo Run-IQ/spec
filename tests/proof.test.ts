@@ -630,8 +630,9 @@ describe('verifyProof: invalid, with a readable issue', () => {
     expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [broken, ruleB] })).toEqual({
       status: 'invalid',
       issues: [
-        'rule invalid: rules[0]: effectiveFrom must be a Date, YYYY-MM-DD, or an ISO date-time ' +
-          'with Z or an offset; got "yesterday"',
+        'rule invalid: rules[0]: effectiveFrom must be a Date, a civil date YYYY-MM-DD or an ' +
+          'instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; ' +
+          'got "yesterday"',
         'rule missing: r1@1',
       ],
     });

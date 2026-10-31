@@ -1,26 +1,31 @@
 import { SpecError } from '../errors.js';
+import { fixedOffsetCalendar, readReferenceDate } from '../time/civil.js';
 import { dateTimeOf } from '../values.js';
-import { parseRuleDate } from './date.js';
+import { windowContains } from './window.js';
+import type { RuleWindow } from './window.js';
+
+const OFFSETS_ONLY = fixedOffsetCalendar('isEffectiveAt');
 
 /**
- * Half-open validity window `[effectiveFrom, effectiveUntil)`: true when
- * `from <= at && (until == null || at < until)`. `effectiveUntil` is EXCLUDED.
- * Dates accept the same forms as `normalizeRuleDefinition`; an invalid one throws
- * `SpecError` (`INVALID_DATE`).
+ * Whether the half-open window `[effectiveFrom, effectiveUntil)` of `rule` contains the instant
+ * `at`: `windowContains` with the default time zone `UTC` (D-12). A civil bound is compared with
+ * the civil date of `at` in the rule's `timeZone`, else in `UTC`; `effectiveUntil` is EXCLUDED.
+ *
+ * Without a time zone database, it knows `UTC` and fixed offsets `±HH:MM` only: a rule with
+ * civil bounds and an IANA `timeZone` throws `SpecError` (`INVALID_DATE`); use `windowContains`
+ * with a calendar. Bounds accept the forms of `normalizeRuleDefinition`. Throws `SpecError`
+ * (`INVALID_DATE`) for an invalid date and as `windowContains` does.
  */
-export function isEffectiveAt(
-  rule: {
-    readonly effectiveFrom: Date | string;
-    readonly effectiveUntil?: Date | string | null | undefined;
-  },
-  at: Date,
-): boolean {
-  const time = dateTimeOf(at);
+export function isEffectiveAt(rule: RuleWindow, at: Date): boolean {
+  let time: number | undefined;
+  try {
+    time = dateTimeOf(at);
+  } catch {
+    time = undefined;
+  }
   if (time === undefined || Number.isNaN(time)) {
     throw new SpecError('INVALID_DATE', 'at must be a valid Date');
   }
-  const from = parseRuleDate(rule.effectiveFrom, 'effectiveFrom').getTime();
-  if (time < from) return false;
-  if (rule.effectiveUntil == null) return true;
-  return time < parseRuleDate(rule.effectiveUntil, 'effectiveUntil').getTime();
+  // An instant is never 'unknown': only a civil date can fall inside a day cut by a bound.
+  return windowContains(rule, readReferenceDate(at, 'at'), 'UTC', OFFSETS_ONLY) === true;
 }

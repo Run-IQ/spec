@@ -1,7 +1,12 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
   computeRuleChecksum,
+  findOverlappingVersions,
   isCanonicalDecimal,
+  isCivilDate,
+  isInstant,
+  toReferenceDate,
+  windowContains,
   OUTPUTS_VARIABLE,
   toCanonicalDecimal,
   computeRuleFingerprint,
@@ -13,7 +18,11 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type {
+  CivilCalendar,
+  CivilDate,
   ExecutableRule,
+  Instant,
+  VersionOverlap,
   JsonValue,
   OutputDeclaration,
   OutputRounding,
@@ -125,11 +134,13 @@ describe('ExecutableRule types (A6)', () => {
     effectiveFrom: '2025-01-01',
   });
 
-  it('has typed named fields, Date bounds and a checksum', () => {
+  it('has typed named fields, civil or Date bounds and a checksum', () => {
     expectTypeOf(rule.priority).toEqualTypeOf<number>();
     expectTypeOf(rule.params).toEqualTypeOf<unknown>();
-    expectTypeOf(rule.effectiveFrom).toEqualTypeOf<Date>();
-    expectTypeOf(rule.effectiveUntil).toEqualTypeOf<Date | null>();
+    expectTypeOf(rule.effectiveFrom).toEqualTypeOf<CivilDate | Date>();
+    expectTypeOf(rule.effectiveUntil).toEqualTypeOf<CivilDate | Date | null>();
+    expectTypeOf(rule.timeZone).toEqualTypeOf<string | undefined>();
+    expectTypeOf(rule.effectiveOn).toEqualTypeOf<string | undefined>();
     expectTypeOf(rule.checksum).toEqualTypeOf<string>();
     expectTypeOf(rule.tags).toEqualTypeOf<readonly string[]>();
     expectTypeOf(rule.dimensions).toEqualTypeOf<Readonly<Record<string, string>>>();
@@ -200,5 +211,22 @@ describe('decimal outputs, rounding and strata (9A)', () => {
     expectTypeOf<ProofStep['unrounded']>().toEqualTypeOf<JsonValue | undefined>();
     expectTypeOf<ProofSkip['stratum']>().toEqualTypeOf<number>();
     expectTypeOf<ProofException['stratum']>().toEqualTypeOf<number>();
+  });
+});
+
+describe('civil time types (Task 9D)', () => {
+  it('types the reference dates, the window answer and the overlaps', () => {
+    expectTypeOf(toReferenceDate).returns.toEqualTypeOf<CivilDate | Instant>();
+    expectTypeOf(windowContains).returns.toEqualTypeOf<boolean | 'unknown'>();
+    expectTypeOf(findOverlappingVersions).returns.toEqualTypeOf<VersionOverlap[]>();
+    expectTypeOf<VersionOverlap['versions']>().toEqualTypeOf<[number, number]>();
+    expectTypeOf<VersionOverlap['kind']>().toEqualTypeOf<'overlap' | 'effectiveOn'>();
+    expectTypeOf<CivilCalendar['startOfDay']>().returns.toEqualTypeOf<Instant>();
+  });
+
+  it('isCivilDate and isInstant narrow unknown values to strings', () => {
+    const value: unknown = '2026-01-01';
+    if (isCivilDate(value)) expectTypeOf(value).toEqualTypeOf<string>();
+    if (isInstant(value)) expectTypeOf(value).toEqualTypeOf<string>();
   });
 });

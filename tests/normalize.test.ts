@@ -25,17 +25,20 @@ const base = {
 };
 
 const invalidDate = expect.objectContaining({ code: 'INVALID_DATE' });
+const DATE_FORMS =
+  'must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z ' +
+  'or ±HH:MM, in the years 0000 to 9999';
 const invalidRule = expect.objectContaining({ code: 'INVALID_RULE' });
 
 describe('normalizeRuleDefinition: shape', () => {
-  it('fills the defaults and writes dates as full UTC ISO strings', () => {
+  it('fills the defaults and keeps a civil date civil (D-13)', () => {
     expect(normalizeRuleDefinition(base)).toEqual({
       id: 'r1',
       version: 1,
       model: 'PERCENTAGE',
       params: { rate: 0.05, base: 'orderTotal' },
       priority: 1,
-      effectiveFrom: '2025-01-01T00:00:00.000Z',
+      effectiveFrom: '2025-01-01',
       effectiveUntil: null,
       dimensions: {},
       tags: [],
@@ -46,7 +49,9 @@ describe('normalizeRuleDefinition: shape', () => {
     const def = normalizeRuleDefinition({
       ...base,
       condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'x' }, 1] } },
-      effectiveUntil: new Date('2026-01-01T00:00:00Z'),
+      effectiveUntil: '2026-01-01',
+      timeZone: 'Europe/Paris',
+      effectiveOn: '/$dates/facture',
       output: 'tax',
       dimensions: { country: 'TG' },
       tags: ['vat'],
@@ -63,8 +68,10 @@ describe('normalizeRuleDefinition: shape', () => {
       params: { rate: 0.05, base: 'orderTotal' },
       condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'x' }, 1] } },
       priority: 1,
-      effectiveFrom: '2025-01-01T00:00:00.000Z',
-      effectiveUntil: '2026-01-01T00:00:00.000Z',
+      effectiveFrom: '2025-01-01',
+      effectiveUntil: '2026-01-01',
+      timeZone: 'Europe/Paris',
+      effectiveOn: '/$dates/facture',
       output: 'tax',
       dimensions: { country: 'TG' },
       tags: ['vat'],
@@ -88,6 +95,8 @@ describe('normalizeRuleDefinition: shape', () => {
       dominanceGroup: undefined,
       exceptions: undefined,
       sourceRef: undefined,
+      timeZone: undefined,
+      effectiveOn: undefined,
       jurisdiction: undefined,
     });
     expect(Object.keys(def).sort()).toEqual(
@@ -122,50 +131,60 @@ describe('normalizeRuleDefinition: shape', () => {
   });
 });
 
-describe('normalizeRuleDefinition: dates (A1)', () => {
+describe('normalizeRuleDefinition: dates (A1, D-13)', () => {
   it.each([
-    ['YYYY-MM-DD as UTC midnight', '2025-03-15', '2025-03-15T00:00:00.000Z'],
+    ['a civil date', '2025-03-15'],
+    ['a leap day', '2024-02-29'],
+    ['the first day of year 0000', '0000-01-01'],
+    ['the last day of year 9999', '9999-12-31'],
+  ])('keeps %s civil', (_label, input) => {
+    expect(normalizeRuleDefinition({ ...base, effectiveFrom: input }).effectiveFrom).toBe(input);
+  });
+
+  it('keeps a civil effectiveUntil civil', () => {
+    expect(
+      normalizeRuleDefinition({
+        ...base,
+        effectiveFrom: '0000-01-01',
+        effectiveUntil: '9999-12-31',
+      }),
+    ).toMatchObject({ effectiveFrom: '0000-01-01', effectiveUntil: '9999-12-31' });
+  });
+
+  it.each([
     ['date-time with Z', '2025-03-15T10:20:30Z', '2025-03-15T10:20:30.000Z'],
     ['date-time with milliseconds and Z', '2025-03-15T10:20:30.123Z', '2025-03-15T10:20:30.123Z'],
-    ['date-time without seconds, with Z', '2025-03-15T10:20Z', '2025-03-15T10:20:00.000Z'],
+    ['one decimal', '2025-03-15T10:20:30.5Z', '2025-03-15T10:20:30.500Z'],
     ['positive offset', '2025-03-15T10:20:30+02:00', '2025-03-15T08:20:30.000Z'],
     ['negative offset', '2025-03-15T10:20:30-03:30', '2025-03-15T13:50:30.000Z'],
     ['offset crossing the day', '2025-01-01T00:30:00+01:00', '2024-12-31T23:30:00.000Z'],
-    ['leap day', '2024-02-29', '2024-02-29T00:00:00.000Z'],
-  ])('accepts %s', (_label, input, expected) => {
+    ['offset into a leap day', '2024-03-01T00:30:00+01:00', '2024-02-29T23:30:00.000Z'],
+  ])('writes an instant as the canonical UTC form: %s', (_label, input, expected) => {
     expect(normalizeRuleDefinition({ ...base, effectiveFrom: input }).effectiveFrom).toBe(expected);
     expect(
-      normalizeRuleDefinition({ ...base, effectiveFrom: '2000-01-01', effectiveUntil: input })
-        .effectiveUntil,
+      normalizeRuleDefinition({
+        ...base,
+        effectiveFrom: '0000-01-01T00:00:00Z',
+        effectiveUntil: input,
+      }).effectiveUntil,
     ).toBe(expected);
   });
 
-  it.each([
-    [
-      'microseconds (as Postgres writes them)',
-      '2025-03-15T10:20:30.123456Z',
-      '2025-03-15T10:20:30.123Z',
-    ],
-    ['nanoseconds', '2025-03-15T10:20:30.123456789+00:00', '2025-03-15T10:20:30.123Z'],
-    ['no rounding up', '2025-03-15T10:20:30.999999Z', '2025-03-15T10:20:30.999Z'],
-    ['one digit', '2025-03-15T10:20:30.5Z', '2025-03-15T10:20:30.500Z'],
-  ])('truncates fractional seconds beyond milliseconds: %s', (_label, input, expected) => {
-    expect(normalizeRuleDefinition({ ...base, effectiveFrom: input }).effectiveFrom).toBe(expected);
+  it("'2025-01-01T01:00:00+01:00' becomes '2025-01-01T00:00:00.000Z'", () => {
+    expect(
+      normalizeRuleDefinition({ ...base, effectiveFrom: '2025-01-01T01:00:00+01:00' })
+        .effectiveFrom,
+    ).toBe('2025-01-01T00:00:00.000Z');
   });
 
-  it('two inputs differing only below the millisecond give the same checksum', () => {
-    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-03-15T10:20:30.123456Z' })).toBe(
-      computeRuleChecksum({ ...base, effectiveFrom: '2025-03-15T10:20:30.123Z' }),
+  it('a civil bound and the instant of its UTC midnight have different checksums (D-13)', () => {
+    // Same meaning in the default time zone UTC, but a civil date follows the rule's time zone.
+    expect(computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01' })).not.toBe(
+      computeRuleChecksum({ ...base, effectiveFrom: '2025-01-01T00:00:00.000Z' }),
     );
   });
 
-  it('rejects more than nine fractional digits', () => {
-    expect(() =>
-      normalizeRuleDefinition({ ...base, effectiveFrom: '2025-03-15T10:20:30.1234567890Z' }),
-    ).toThrow(invalidDate);
-  });
-
-  it('accepts a Date', () => {
+  it('accepts a Date, as an instant', () => {
     expect(
       normalizeRuleDefinition({ ...base, effectiveFrom: new Date(Date.UTC(2025, 2, 15, 10)) })
         .effectiveFrom,
@@ -175,27 +194,44 @@ describe('normalizeRuleDefinition: dates (A1)', () => {
   it.each([
     ['a date-time without time zone', '2025-01-01T00:00'],
     ['a date-time with seconds and no time zone', '2025-01-01T00:00:00'],
+    ['a date-time without seconds', '2025-03-15T10:20Z'],
+    ['four decimals', '2025-03-15T10:20:30.1234Z'],
+    ['microseconds (as Postgres writes them)', '2025-03-15T10:20:30.123456Z'],
+    ['a lowercase z', '2025-01-01T00:00:00z'],
+    ['a lowercase t', '2025-01-01t00:00:00Z'],
+    ['a leap second', '2025-12-31T23:59:60Z'],
+    ['offset hour 24', '2025-01-01T00:00:00+24:00'],
     ['free text', 'pas une date'],
     ['an empty string', ''],
     ['a non-existent day', '2025-02-30'],
     ['Feb 29 of a common year', '2025-02-29'],
     ['month 13', '2025-13-01'],
     ['hour 24', '2025-01-01T24:00:00Z'],
-    ['minute 60', '2025-01-01T23:60Z'],
-    ['an offset without colon', '2025-01-01T10:00+0100'],
-    ['a space instead of T', '2025-01-01 10:00Z'],
+    ['minute 60', '2025-01-01T23:60:00Z'],
+    ['an offset without colon', '2025-01-01T10:00:00+0100'],
+    ['a space instead of T', '2025-01-01 10:00:00Z'],
     ['a year-month only', '2025-01'],
     ['a US date', '01/02/2025'],
     ['an expanded year', '+002025-01-01'],
     ['surrounding spaces', ' 2025-01-01 '],
+    ['an instant before year 0000', '0000-01-01T00:00:00+01:00'],
   ])('rejects %s', (_label, input) => {
-    expect(() => normalizeRuleDefinition({ ...base, effectiveFrom: input })).toThrow(invalidDate);
+    const error = specError(() => normalizeRuleDefinition({ ...base, effectiveFrom: input }));
+    expect(error.code).toBe('INVALID_DATE');
+    expect(error.message.startsWith(`effectiveFrom ${DATE_FORMS}; got "`)).toBe(true);
     expect(() => normalizeRuleDefinition({ ...base, effectiveUntil: input })).toThrow(invalidDate);
   });
 
-  it('rejects an invalid Date', () => {
-    expect(() => normalizeRuleDefinition({ ...base, effectiveFrom: new Date('x') })).toThrow(
-      invalidDate,
+  it('rejects an invalid Date and a Date outside the years 0000 to 9999', () => {
+    expect(
+      specError(() => normalizeRuleDefinition({ ...base, effectiveFrom: new Date('x') })),
+    ).toMatchObject({
+      code: 'INVALID_DATE',
+      message: `effectiveFrom ${DATE_FORMS}; got an invalid Date`,
+    });
+    const far = new Date(Date.UTC(10000, 0, 1));
+    expect(specError(() => normalizeRuleDefinition({ ...base, effectiveFrom: far })).message).toBe(
+      `effectiveFrom ${DATE_FORMS}; got a Date outside the years 0000 to 9999`,
     );
   });
 
@@ -208,13 +244,20 @@ describe('normalizeRuleDefinition: dates (A1)', () => {
 });
 
 describe('normalizeRuleDefinition: validity window [from, until)', () => {
+  const empty = (until: string, from: string) =>
+    `effectiveUntil (${until}) must be after effectiveFrom (${from}): ` +
+    'the window [effectiveFrom, effectiveUntil) would be empty';
+
   it('rejects effectiveUntil equal to effectiveFrom (the window would be empty)', () => {
-    expect(() => normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01' })).toThrow(
-      invalidRule,
-    );
-    expect(() =>
-      normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01T01:00:00+01:00' }),
-    ).toThrow(invalidRule);
+    expect(
+      specError(() => normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01' })),
+    ).toMatchObject({ code: 'INVALID_RULE', message: empty('2025-01-01', '2025-01-01') });
+    const instant = { ...base, effectiveFrom: '2025-01-01T00:00:00Z' };
+    expect(
+      specError(() =>
+        normalizeRuleDefinition({ ...instant, effectiveUntil: '2025-01-01T01:00:00+01:00' }),
+      ).message,
+    ).toBe(empty('2025-01-01T00:00:00.000Z', '2025-01-01T00:00:00.000Z'));
   });
 
   it('rejects effectiveUntil before effectiveFrom', () => {
@@ -222,15 +265,166 @@ describe('normalizeRuleDefinition: validity window [from, until)', () => {
       invalidRule,
     );
     expect(() =>
-      normalizeRuleDefinition({ ...base, effectiveUntil: '2024-12-31T23:59:59.999Z' }),
+      normalizeRuleDefinition({
+        ...base,
+        effectiveFrom: '2025-01-01T00:00:00Z',
+        effectiveUntil: '2024-12-31T23:59:59.999Z',
+      }),
     ).toThrow(invalidRule);
   });
 
-  it('accepts effectiveUntil one millisecond after effectiveFrom', () => {
+  it('accepts effectiveUntil one day, or one millisecond, after effectiveFrom', () => {
+    expect(normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-02' }).effectiveUntil).toBe(
+      '2025-01-02',
+    );
     expect(
-      normalizeRuleDefinition({ ...base, effectiveUntil: '2025-01-01T00:00:00.001Z' })
-        .effectiveUntil,
+      normalizeRuleDefinition({
+        ...base,
+        effectiveFrom: '2025-01-01T00:00:00Z',
+        effectiveUntil: '2025-01-01T00:00:00.001Z',
+      }).effectiveUntil,
     ).toBe('2025-01-01T00:00:00.001Z');
+  });
+
+  it('rejects a rule mixing a civil bound and an instant bound (I7b, D-13)', () => {
+    const message = 'effectiveFrom and effectiveUntil must both be civil dates or both instants';
+    for (const rule of [
+      { ...base, effectiveUntil: '2026-01-01T00:00:00Z' },
+      { ...base, effectiveUntil: new Date('2026-01-01T00:00:00Z') },
+      { ...base, effectiveFrom: new Date(0), effectiveUntil: '2026-01-01' },
+    ]) {
+      expect(specError(() => normalizeRuleDefinition(rule))).toMatchObject({
+        code: 'INVALID_RULE',
+        message,
+      });
+      expect(validateRuleDefinition(rule).issues).toEqual([{ path: 'effectiveUntil', message }]);
+    }
+  });
+
+  it('a null effectiveUntil goes with both forms', () => {
+    expect(normalizeRuleDefinition({ ...base, effectiveUntil: null }).effectiveUntil).toBeNull();
+    expect(
+      normalizeRuleDefinition({ ...base, effectiveFrom: new Date(0), effectiveUntil: null })
+        .effectiveUntil,
+    ).toBeNull();
+  });
+});
+
+describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
+  const zones = 'timeZone must be UTC, ±HH:MM or an IANA name Area/Location';
+
+  it.each(['UTC', '+01:00', '-09:30', 'Europe/Paris', 'America/Argentina/Buenos_Aires'])(
+    'accepts the time zone %j',
+    (timeZone) => {
+      expect(normalizeRuleDefinition({ ...base, timeZone }).timeZone).toBe(timeZone);
+      expect(validateRuleDefinition({ ...base, timeZone }).valid).toBe(true);
+    },
+  );
+
+  it("writes '+00:00' and '-00:00' as 'UTC'", () => {
+    expect(normalizeRuleDefinition({ ...base, timeZone: '+00:00' }).timeZone).toBe('UTC');
+    expect(normalizeRuleDefinition({ ...base, timeZone: '-00:00' }).timeZone).toBe('UTC');
+  });
+
+  it('drops a null timeZone and a null effectiveOn, as absent', () => {
+    const rule = normalizeRuleDefinition({ ...base, timeZone: null, effectiveOn: null });
+    expect(rule).not.toHaveProperty('timeZone');
+    expect(rule).not.toHaveProperty('effectiveOn');
+  });
+
+  it.each([
+    ['Paris', '"Paris"'],
+    ['+24:00', '"+24:00"'],
+    ['europe/paris', '"europe/paris"'],
+    ['', '""'],
+    ['Europe/Paris\uD800', '"Europe/Paris\\ud800"'],
+    [5, 'a value of type number'],
+  ])('refuses the time zone %j', (timeZone, got) => {
+    const rule = { ...base, timeZone } as RuleDefinitionInput;
+    const message = `${zones}; got ${got}`;
+    expect(specError(() => normalizeRuleDefinition(rule))).toMatchObject({
+      code: 'INVALID_RULE',
+      message,
+    });
+    expect(validateRuleDefinition(rule).issues).toEqual([{ path: 'timeZone', message }]);
+  });
+
+  it.each([
+    ['/$dates/facture', {}],
+    ['/$dates/a~1b', {}],
+    ['/$item/emission', { forEach: { path: '/factures', key: 'id' } }],
+    ['/$item/dates/0/at', { forEach: { path: '/factures', key: 'id' } }],
+    ['/$segment/from', { forEach: { segments: { from: '/a', until: '/b', facts: [] } } }],
+  ])('accepts effectiveOn %j', (effectiveOn, extra) => {
+    const rule = { ...base, ...extra, effectiveOn };
+    expect(normalizeRuleDefinition(rule).effectiveOn).toBe(effectiveOn);
+    expect(validateRuleDefinition(rule).valid).toBe(true);
+  });
+
+  it.each([
+    ['/revenue', {}, 'effectiveOn must start with /$dates/, /$item/ or /$segment/'],
+    ['', {}, 'effectiveOn must start with /$dates/, /$item/ or /$segment/'],
+    ['/$outputs/x', {}, 'effectiveOn must start with /$dates/, /$item/ or /$segment/'],
+    ['/$dates', {}, 'effectiveOn must name one date: /$dates/<name>'],
+    ['/$dates/', {}, 'effectiveOn must name one date: /$dates/<name>'],
+    ['/$dates/a/b', {}, 'effectiveOn must name one date: /$dates/<name>'],
+    ['/$item', { forEach: {} }, 'effectiveOn must name a field of the item: /$item/<path>'],
+    ['/$dates/-', {}, "effectiveOn must not hold a '-' segment: '-' is not an index"],
+    ['/$item/x/-', { forEach: {} }, "effectiveOn must not hold a '-' segment: '-' is not an index"],
+    ['/$segment/until', {}, 'effectiveOn must be /$segment/from to read a segment'],
+    ['/$item/emission', {}, 'effectiveOn reads $item without forEach'],
+    ['/$item/emission', { forEach: null }, 'effectiveOn reads $item without forEach'],
+    ['/$segment/from', {}, 'effectiveOn reads $segment without segments'],
+    [
+      '/$segment/from',
+      { forEach: { path: '/a', key: 'id' } },
+      'effectiveOn reads $segment without segments',
+    ],
+    [
+      'revenue',
+      {},
+      'effectiveOn must be a JSON pointer: invalid JSON pointer "revenue": ' +
+        'must be empty or start with "/"',
+    ],
+    [
+      '/$dates/a~2',
+      {},
+      'effectiveOn must be a JSON pointer: invalid JSON pointer "/$dates/a~2": ' +
+        '"~" must be followed by 0 or 1',
+    ],
+    [
+      '/$dates/\uD800',
+      {},
+      'effectiveOn must be a JSON pointer: invalid JSON pointer "/$dates/\\ud800": ' +
+        'contains a lone UTF-16 surrogate',
+    ],
+    [7, {}, 'effectiveOn must be a JSON pointer: got a value of type number'],
+  ])('refuses effectiveOn %j', (effectiveOn, extra, message) => {
+    const rule = { ...base, ...extra, effectiveOn } as RuleDefinitionInput;
+    expect(specError(() => normalizeRuleDefinition(rule))).toMatchObject({
+      code: 'INVALID_RULE',
+      message,
+    });
+    expect(validateRuleDefinition(rule).issues).toEqual([{ path: 'effectiveOn', message }]);
+  });
+
+  it('reads a huge effectiveOn in linear time, and cuts it in a message', () => {
+    const deep = `/$item${'/a'.repeat(200_000)}`;
+    const items = { forEach: { path: '/x', key: 'id' } };
+    expect(normalizeRuleDefinition({ ...base, ...items, effectiveOn: deep }).effectiveOn).toBe(
+      deep,
+    );
+    const bad = `${deep}/~`;
+    const issues = validateRuleDefinition({ ...base, ...items, effectiveOn: bad }).issues;
+    expect(issues).toHaveLength(1);
+    expect(issues[0]?.message.length).toBeLessThan(250);
+  });
+
+  it('timeZone and effectiveOn enter the checksum', () => {
+    const h = computeRuleChecksum(base);
+    expect(computeRuleChecksum({ ...base, timeZone: 'Europe/Paris' })).not.toBe(h);
+    expect(computeRuleChecksum({ ...base, effectiveOn: '/$dates/facture' })).not.toBe(h);
+    expect(computeRuleChecksum({ ...base, timeZone: null, effectiveOn: undefined })).toBe(h);
   });
 });
 
@@ -498,8 +692,7 @@ describe('lone UTF-16 surrogates in a rule definition', () => {
       'effectiveFrom',
       { effectiveFrom: `2025-01-01${LONE}` },
       'effectiveFrom',
-      'effectiveFrom must be a Date, YYYY-MM-DD, or an ISO date-time with Z or an offset; ' +
-        `got "2025-01-01${escaped}"`,
+      `effectiveFrom ${DATE_FORMS}; got "2025-01-01${escaped}"`,
       'INVALID_DATE',
     ],
   ];

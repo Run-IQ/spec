@@ -1,4 +1,6 @@
 import type { JsonValue } from '../canonical.js';
+import type { JsonPointer } from '../path/pointer.js';
+import type { CivilDate, Instant } from '../time/civil.js';
 import type { RuleException } from './exceptions.js';
 
 export interface RuleCondition {
@@ -10,11 +12,12 @@ export interface RuleCondition {
  * The named content fields of a rule, without the extension index signature, so that
  * `Omit`/`Pick` on it keep their types. Use `RuleDefinition` for a full definition.
  *
- * Dates are full UTC ISO 8601 strings (`2025-01-01T00:00:00.000Z`).
- * The validity window is half-open: `[effectiveFrom, effectiveUntil)`. A rule is effective at
- * `at` when `effectiveFrom <= at` and (`effectiveUntil` is null or `at < effectiveUntil`):
+ * The bounds are both civil dates (`2025-01-01`) or both canonical instants
+ * (`2025-01-01T00:00:00.000Z`), D-13: a civil date stays civil and is read in the rule's time
+ * zone. The validity window is half-open: `[effectiveFrom, effectiveUntil)`. A rule is effective
+ * at `at` when `effectiveFrom <= at` and (`effectiveUntil` is null or `at < effectiveUntil`):
  * `effectiveUntil` itself is EXCLUDED, so a successor can start exactly when its predecessor
- * ends. `isEffectiveAt` implements it.
+ * ends. `windowContains` implements it, crossing civil dates and instants in a time zone.
  */
 export interface RuleDefinitionBase {
   id: string;
@@ -24,10 +27,21 @@ export interface RuleDefinitionBase {
   params: JsonValue;
   condition?: RuleCondition;
   priority: number;
-  /** Inclusive start, full UTC ISO string. */
-  effectiveFrom: string;
-  /** Exclusive end, full UTC ISO string; `null` for no end. */
-  effectiveUntil: string | null;
+  /** Inclusive start: a civil date, or a canonical instant. */
+  effectiveFrom: CivilDate | Instant;
+  /** Exclusive end, of the same form as `effectiveFrom`; `null` for no end. */
+  effectiveUntil: CivilDate | Instant | null;
+  /**
+   * The time zone of the window: `UTC`, `±HH:MM` or an IANA name (`isTimeZone`), written by
+   * `normalizeTimeZone` (`+00:00` is `UTC`). Absent: the rule set's, then the engine's default.
+   */
+  timeZone?: string;
+  /**
+   * The reference date the window is compared with (D-12): `/$dates/<name>` (a named date of
+   * the input), `/$item/<path>` (a date of the current item; needs `forEach`) or
+   * `/$segment/from` (needs `forEach.segments`). Absent: the decision's reference date.
+   */
+  effectiveOn?: JsonPointer;
   output?: string;
   dimensions: Record<string, string>;
   /** Sorted, without duplicates. */
@@ -46,7 +60,8 @@ export interface RuleDefinitionBase {
  * level. Extensions enter the checksum and the fingerprint. `checksum` is never part of it.
  *
  * Null at the top level: for every optional named field (`condition`, `effectiveUntil`,
- * `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`, `sourceRef`) and every
+ * `timeZone`, `effectiveOn`, `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`,
+ * `sourceRef`) and every
  * extension field, `null`, `undefined` and absence are the same input, so the checksum and
  * fingerprint do not depend on how a database writes empty columns. Normalization drops them,
  * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). An empty
@@ -72,10 +87,20 @@ export interface RuleDefinitionInputBase {
   readonly params: unknown;
   readonly condition?: { readonly dsl: string; readonly value: unknown } | null | undefined;
   readonly priority: number;
-  /** `Date`, `YYYY-MM-DD` (UTC midnight) or an ISO date-time with `Z` or an offset. */
+  /**
+   * `YYYY-MM-DD` (stays a civil date), or an instant: a `Date` or
+   * `YYYY-MM-DDTHH:MM:SS[.sss]` with `Z` or `±HH:MM` (see `toReferenceDate`).
+   */
   readonly effectiveFrom: Date | string;
-  /** Same forms as `effectiveFrom`; absent, `undefined` or `null` means no end. */
+  /**
+   * Same forms as `effectiveFrom`, and the same form as it (both civil or both instants);
+   * absent, `undefined` or `null` means no end.
+   */
   readonly effectiveUntil?: Date | string | null | undefined;
+  /** `UTC`, `±HH:MM` or an IANA name; `+00:00` and `-00:00` are written `UTC`. */
+  readonly timeZone?: string | null | undefined;
+  /** `/$dates/<name>`, `/$item/<path>` (with `forEach`) or `/$segment/from`. */
+  readonly effectiveOn?: string | null | undefined;
   readonly output?: string | null | undefined;
   /** A `null` or `undefined` value means the dimension is unset: the key is dropped. */
   readonly dimensions?: Readonly<Record<string, string | null | undefined>> | null | undefined;
@@ -102,6 +127,8 @@ export const RESERVED_RULE_FIELDS: readonly string[] = [
   'priority',
   'effectiveFrom',
   'effectiveUntil',
+  'timeZone',
+  'effectiveOn',
   'output',
   'dimensions',
   'tags',
