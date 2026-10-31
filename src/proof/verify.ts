@@ -3,7 +3,7 @@ import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from '../rule/definition.js';
 import { normalizeRuleDefinition } from '../rule/normalize.js';
 import { isPlainObject } from '../values.js';
-import { contentDigest } from './digest.js';
+import { contentDigest, unlistedCitations } from './digest.js';
 import { keyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
 import { validateProof } from './validate.js';
@@ -21,11 +21,13 @@ interface Finding {
  * 1. The shape (`validateProof`). A malformed proof is `invalid` with the validation messages,
  *    and nothing else is checked.
  * 2. The digest, recomputed from the content: `digest mismatch` makes it `invalid`.
- * 3. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
+ * 3. Internal consistency: each rule cited in `applied`, `skipped` or `exceptions` must be
+ *    listed in `rules`, otherwise `cited rule not listed: id@version` makes it `invalid`.
+ * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
  *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters), leave it at best
  *    `consistent`: nothing proves who produced it. `signature invalid` makes it `invalid`.
  *    `trustedKeys` maps a key id to a hex ed25519 public key.
- * 4. With `rules`, the rules the decision claims to have received: the set of
+ * 5. With `rules`, the rules the decision claims to have received: the set of
  *    `{ id, version, checksum }` of `rules` (each checksum recomputed as
  *    `sha256Hex(canonicalRulePayload(rule))`) must equal the set in `proof.rules`. Each
  *    difference makes it `invalid`: `rule missing: id@version` (in the proof, not given),
@@ -57,6 +59,7 @@ function verify(p: unknown, options: unknown): ProofVerification {
 
   const findings: Finding[] = [];
   if (contentDigest(p) !== p.digest) findings.push({ message: 'digest mismatch', invalid: true });
+  for (const message of unlistedCitations(p)) findings.push({ message, invalid: true });
   if (options !== undefined && !isPlainObject(options)) {
     findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });
   }

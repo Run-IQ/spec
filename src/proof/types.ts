@@ -64,7 +64,7 @@ export interface ProofException {
 
 /**
  * The content of a decision proof, before sealing. The format is closed: no other key is
- * allowed. Lists are hashed in the order given, so the producer sorts them (`rules` and
+ * allowed. Every rule cited in `applied`, `skipped` and `exceptions` is listed in `rules`. Lists are hashed in the order given, so the producer sorts them (`rules` and
  * `applied` by id then version, `skipped` by id) for two evaluations of the same decision to
  * give the same digest.
  *

@@ -392,8 +392,52 @@ describe('verifyProof: invalid, with a readable issue', () => {
     proof.rules.pop();
     expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
       status: 'invalid',
-      issues: ['digest mismatch', 'unexpected rule: r2@2'],
+      issues: ['digest mismatch', 'cited rule not listed: r2@2', 'unexpected rule: r2@2'],
     });
+    expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch', 'cited rule not listed: r2@2'],
+    });
+  });
+
+  it.each([
+    ['applied', (p: UnsignedProof) => p.applied.push({ ...p.applied[0]!, version: 2 }), 'r1@2'],
+    [
+      'skipped',
+      (p: UnsignedProof) => p.skipped.push({ ruleId: 'r3', version: 1, reason: 'INACTIVE_DATE' }),
+      'r3@1',
+    ],
+    [
+      'exceptions',
+      (p: UnsignedProof) =>
+        p.exceptions.push({ ruleId: 'r4', version: 1, kind: 'inhibit', affected: ['r1'] }),
+      'r4@1',
+    ],
+  ])('a rule cited in %s but not listed in rules', (_name, cite, key) => {
+    const content = unsigned();
+    cite(content);
+    // sealProof refuses such a proof: seal it by hand, as a faulty producer would.
+    const proof: DecisionProof = { ...content, digest: sha256Hex(canonicalize(content)) };
+    const resigned = { ...proof, signature: signed().signature };
+    expect(verifyProof(proof)).toEqual({
+      status: 'invalid',
+      issues: [`cited rule not listed: ${key}`, 'unsigned'],
+    });
+    expect(verifyProof(resigned, { trustedKeys: TRUSTED }).issues).toContain(
+      `cited rule not listed: ${key}`,
+    );
+    expect(verifyProof(resigned, { trustedKeys: TRUSTED }).status).toBe('invalid');
+    const error = specError(() => sealProof(content));
+    expect(error.code).toBe('INVALID_PROOF');
+    expect(error.message).toBe(`Cannot seal the proof: cited rule not listed: ${key}`);
+  });
+
+  it('reports a rule cited several times once', () => {
+    const content = unsigned();
+    content.applied.push({ ...content.applied[0]!, ruleId: 'r5' });
+    content.skipped.push({ ruleId: 'r5', version: 1, reason: 'DOMINATED' });
+    const proof: DecisionProof = { ...content, digest: sha256Hex(canonicalize(content)) };
+    expect(verifyProof(proof).issues).toEqual(['cited rule not listed: r5@1', 'unsigned']);
   });
 
   it('a digest recomputed after tampering, without a new signature', () => {
