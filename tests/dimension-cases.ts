@@ -49,6 +49,18 @@ export const REFUSED_DIMENSIONS: [string, unknown, string, string][] = [
     'dimensions.pays.except[0] has an empty code system before ":"',
   ],
   [
+    'a qualified value in anyOf with ref',
+    { ref: 'nace', anyOf: ['J', 'nace-2.1:62.10'] },
+    'dimensions.pays.anyOf[1]',
+    'dimensions.pays.anyOf[1] must not be qualified: the referential fixes the code system',
+  ],
+  [
+    'a qualified value in except with ref',
+    { ref: 'nace', anyOf: ['J'], except: ['nace-2.1:62.10'] },
+    'dimensions.pays.except[0]',
+    'dimensions.pays.except[0] must not be qualified: the referential fixes the code system',
+  ],
+  [
     'except without ref',
     { anyOf: ['FR', 'DE'], except: ['DK'] },
     'dimensions.pays.except',

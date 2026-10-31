@@ -6,17 +6,16 @@ import {
   sha256Hex,
   validateReferential,
 } from '../src/index.js';
-import type { Referential, ReferentialMember } from '../src/index.js';
+import type { Referential, ReferentialLimits, ReferentialMember } from '../src/index.js';
 import { referentialCheckSteps } from '../src/referential/validate.js';
 import { nestedReferential, specError, ueReferential } from './helpers.js';
 
 /**
- * The most cycle and depth sweep steps allowed per node of a tree-shaped referential: one path
- * search and two longest-chain walks per membership, each bounded by the subtree or the chain
- * (at most 4 levels here), about 12 steps per node; c = 20 leaves room without allowing a
- * quadratic sweep.
+ * The most cycle and depth sweep steps allowed per node in the work-bound tests. Measured:
+ * 2.8 (layered), 3.0 (fan-in), 5.5 (33 000 one-day periods), 4.75 (chains); a quadratic sweep
+ * takes thousands per node on these shapes.
  */
-const STEPS_PER_NODE = 20;
+const STEPS_PER_NODE = 10;
 
 /** 10 000 groups on 4 levels (10, 100, 1 000, 8 890), each a member twice, on adjacent periods. */
 function layeredReferential(): Referential {
@@ -37,6 +36,42 @@ function layeredReferential(): Referential {
   });
   for (const leaf of previous) groups[leaf]?.push(...twice(`code-${leaf}`));
   return withGroups(groups);
+}
+
+/** `HUB` holding `leaves` groups, itself held by `parents` groups; every group exhaustive. */
+function fanIn(leaves: number, parents: number): Referential {
+  const groups: Record<string, ReferentialMember[]> = {};
+  groups.HUB = Array.from({ length: leaves }, (_, i) => ({ value: `L${i}` }));
+  for (let i = 0; i < leaves; i++) groups[`L${i}`] = [{ value: `x${i}` }];
+  for (let i = 0; i < parents; i++) groups[`R${i}`] = [{ value: 'HUB' }];
+  return withGroups(groups);
+}
+
+/** `HUB` holding `leaves` empty groups, held by `ROOT` on `days` separate one-day periods. */
+function dailyHub(leaves: number, days: number): Referential {
+  const groups: Record<string, ReferentialMember[]> = {};
+  groups.HUB = Array.from({ length: leaves }, (_, i) => ({ value: `L${i}` }));
+  for (let i = 0; i < leaves; i++) groups[`L${i}`] = [];
+  const day = (i: number): string =>
+    new Date(Date.UTC(2000, 0, 1) + i * 86_400_000).toISOString().slice(0, 10);
+  groups.ROOT = Array.from({ length: days }, (_, i) => ({
+    value: 'HUB',
+    from: day(2 * i),
+    until: day(2 * i + 1),
+  }));
+  return withGroups(groups);
+}
+
+/**
+ * `HUB` holding `leaves` empty groups and, on `days` one-day periods, the group `Y`; `ROOT`
+ * holds `HUB` on the same periods.
+ */
+function toggledHub(leaves: number, days: number): Referential {
+  const r = dailyHub(leaves, days);
+  const daily = r.groups.ROOT?.members ?? [];
+  r.groups.Y = { exhaustive: true, members: [] };
+  r.groups.HUB?.members.push(...daily.map((m) => ({ ...m, value: 'Y' })));
+  return r;
 }
 
 /** A referential with only the given groups, every group exhaustive. */
@@ -465,23 +500,144 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     const r = layeredReferential();
     const nodes = 10_000 + 2 * (10_000 - 10) + 2 * 8890;
     expect(validateReferential(r)).toEqual([]);
-    // About 2 steps per node here (97 500 measured; each search walks one subtree); a sweep that
-    // searched the whole graph for each membership would take about 10^8 steps.
+    // 157 160 steps measured (2.8 per node); a sweep that searched the whole graph for each
+    // membership would take about 10^8 steps.
     expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
   });
 
-  it('checks a long chain of groups in linear work', () => {
-    const r = nestedReferential(64);
-    expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * 64 * 64);
+  it('checks a chain of groups in linear work: twice as long, twice the steps', () => {
+    const steps = [256, 512, 1024].map((depth) => {
+      const r = nestedReferential(depth);
+      expect(validateReferential(r, { maxDepth: 1024 })).toEqual([]);
+      const taken = referentialCheckSteps(r, { maxDepth: 1024 });
+      // A chain of n groups has 2n nodes (n groups, n members).
+      expect(taken).toBeLessThanOrEqual(STEPS_PER_NODE * 2 * depth);
+      return taken;
+    });
+    const [short = 0, middle = 0, long = 0] = steps;
+    expect(middle).toBeLessThanOrEqual(2.1 * short);
+    expect(long).toBeLessThanOrEqual(2.1 * middle);
   });
 
-  it('refuses invalid options with a SpecError', () => {
-    expect(() => validateReferential(ueReferential(), { maxNodes: 0 })).toThrow(
-      expect.objectContaining({ code: 'INVALID_REFERENTIAL' }),
+  it('checks a fan-in in linear work: a hub of 19 000 groups held by 19 000 groups (I1)', () => {
+    const r = fanIn(19_000, 19_000);
+    const nodes = 1 + 3 * 19_000 + 2 * 19_000;
+    expect(validateReferential(r)).toEqual([]);
+    expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
+  });
+
+  it('checks 33 000 one-day periods of one membership in linear work (I1)', () => {
+    const r = dailyHub(30_000, 33_000);
+    const nodes = 2 + 30_000 + 30_000 + 33_000;
+    expect(validateReferential(r)).toEqual([]);
+    expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
+  });
+
+  it('refuses a referential whose sweep exceeds maxSteps, by name (I1)', () => {
+    const r = layeredReferential();
+    expect(validateReferential(r, { maxSteps: 1000 })).toEqual([
+      { path: 'groups', message: 'referential too complex: more than 1000 steps' },
+    ]);
+    expect(referentialCheckSteps(r, { maxSteps: 1000 })).toBe(1001);
+    expect(specError(() => normalizeReferential(r, { maxSteps: 1000 })).message).toBe(
+      'referential too complex: more than 1000 steps',
     );
-    expect(() => validateReferential(ueReferential(), { maxDepth: 1.5 })).toThrow(
-      expect.objectContaining({ code: 'INVALID_REFERENTIAL' }),
+  });
+
+  it('defaults maxSteps to 100 steps per allowed node, and stops there', () => {
+    // A shape whose sweep is quadratic: each of 1 000 days re-marks the 1 000 groups of HUB.
+    const r = toggledHub(1000, 1000);
+    const nodes = 2 * 1000 + 2 * 1000 + 3;
+    expect(validateReferential(r)).toEqual([]);
+    expect(validateReferential(r, { maxNodes: nodes })).toEqual([
+      { path: 'groups', message: `referential too complex: more than ${100 * nodes} steps` },
+    ]);
+    expect(referentialCheckSteps(r, { maxNodes: nodes })).toBe(100 * nodes + 1);
+  });
+
+  it('refuses invalid options with a SpecError, never a raw error (M3)', () => {
+    const throwing = {
+      get maxNodes(): number {
+        throw new Error('opt');
+      },
+    };
+    const cases: [unknown, string][] = [
+      [{ maxNodes: 0 }, 'maxNodes must be a positive integer'],
+      [{ maxDepth: 1.5 }, 'maxDepth must be a positive integer'],
+      [{ maxSteps: -1 }, 'maxSteps must be a positive integer'],
+      [{ maxDepth: '64' }, 'maxDepth must be a positive integer'],
+      [{ maxDepth: 1025 }, 'maxDepth must be at most 1024'],
+      [null, 'options must be an object'],
+      [throwing, 'options could not be read: opt'],
+    ];
+    for (const [options, message] of cases) {
+      // The types refuse these options; a caller without types can still pass them.
+      const limits = options as ReferentialLimits;
+      for (const call of [
+        () => validateReferential(ueReferential(), limits),
+        () => normalizeReferential(ueReferential(), limits),
+        () => computeReferentialDigest(ueReferential(), limits),
+      ]) {
+        const error = specError(call);
+        expect(error.code).toBe('INVALID_REFERENTIAL');
+        expect(error.message).toBe(message);
+      }
+    }
+    expect(validateReferential(nestedReferential(1024), { maxDepth: 1024 })).toEqual([]);
+  });
+
+  it('names an unreadable member list at groups.<g>.members (M6)', () => {
+    const r = ueReferential();
+    const group = r.groups.UE;
+    if (group) {
+      group.members = new Proxy(group.members, {
+        get(target, key, receiver): unknown {
+          if (key === 'length') throw new Error('len');
+          return Reflect.get(target, key, receiver);
+        },
+      });
+    }
+    expect(validateReferential(r)).toEqual([
+      { path: 'groups.UE.members', message: 'groups.UE.members could not be read: len' },
+    ]);
+  });
+
+  it('names unreadable keys of groups and codes, without throwing', () => {
+    const keysThrow = new Proxy(
+      {},
+      {
+        ownKeys(): never {
+          throw new Error('keys');
+        },
+      },
     );
+    expect(validateReferential({ ...ueReferential(), groups: keysThrow })).toEqual([
+      { path: 'groups', message: 'groups could not be read: keys' },
+    ]);
+    expect(validateReferential({ ...ueReferential(), codes: keysThrow })).toEqual([
+      { path: 'codes', message: 'codes could not be read: keys' },
+    ]);
+  });
+
+  it('counts the groups from their keys, before reading any group (M9)', () => {
+    const names = Array.from({ length: 100_001 }, (_, i) => `G${i}`);
+    const groups = new Proxy(
+      {},
+      {
+        ownKeys: (): string[] => names,
+        getOwnPropertyDescriptor: (): PropertyDescriptor => ({
+          value: undefined,
+          enumerable: true,
+          configurable: true,
+        }),
+        get(): never {
+          throw new Error('group read');
+        },
+      },
+    );
+    expect(validateReferential({ ...ueReferential(), groups })).toEqual([
+      { path: '', message: 'referential too large: 100001 nodes' },
+    ]);
   });
 });
 
@@ -716,6 +872,52 @@ describe('normalizeReferential', () => {
     expect(validateReferential(r)).toEqual([
       { path: 'groups.A.members', message: 'groups.A.members lists x twice from the beginning' },
     ]);
+  });
+
+  it('merges adjacent periods with one source: one meaning, one digest (M1)', () => {
+    const split = ueReferential();
+    const members = split.groups.UE?.members ?? [];
+    const fr = members.findIndex((m) => m.value === 'FR');
+    members.splice(
+      fr,
+      1,
+      { value: 'FR', from: '1958-01-01', until: '2000-01-01' },
+      { value: 'FR', from: '2000-01-01', until: '2010-01-01' },
+      { value: 'FR', from: '2010-01-01' },
+    );
+    expect(validateReferential(split)).toEqual([]);
+    expect(normalizeReferential(split)).toEqual(normalizeReferential(ueReferential()));
+    expect(computeReferentialDigest(split)).toBe(computeReferentialDigest(ueReferential()));
+    const codes = {
+      ...withGroups({}),
+      codes: {
+        x: [
+          { from: '2010-01-01', sourceRef: 's' },
+          { from: '2000-01-01', until: '2010-01-01', sourceRef: 's' },
+        ],
+      },
+    };
+    expect(normalizeReferential(codes).codes).toEqual({
+      x: [{ from: '2000-01-01', sourceRef: 's' }],
+    });
+  });
+
+  it('keeps the boundary between two sources: a source is content (M1)', () => {
+    const sourced = (second: string): Referential =>
+      withGroups({
+        A: [
+          { value: 'x', from: '2000-01-01', until: '2010-01-01', sourceRef: 'a' },
+          { value: 'x', from: '2010-01-01', sourceRef: second },
+        ],
+      });
+    expect(normalizeReferential(sourced('b')).groups.A?.members).toEqual([
+      { value: 'x', from: '2000-01-01', until: '2010-01-01', sourceRef: 'a' },
+      { value: 'x', from: '2010-01-01', sourceRef: 'b' },
+    ]);
+    expect(normalizeReferential(sourced('a')).groups.A?.members).toEqual([
+      { value: 'x', from: '2000-01-01', sourceRef: 'a' },
+    ]);
+    expect(computeReferentialDigest(sourced('b'))).not.toBe(computeReferentialDigest(sourced('a')));
   });
 
   it('is idempotent', () => {

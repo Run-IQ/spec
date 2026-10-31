@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { matchDimension, resolveMembership, validateReferential } from '../src/index.js';
-import type { Referential } from '../src/index.js';
+import type { Referential, ReferentialLimits } from '../src/index.js';
 import { nestedReferential, specError, ueReferential } from './helpers.js';
 
 const ue = ueReferential();
@@ -90,13 +90,16 @@ describe('resolveMembership', () => {
     });
   });
 
-  it('a group is in the groups that hold it, and is itself', () => {
-    expect(resolveMembership(ue, 'EEE', 'UE', '2026-01-01')).toEqual({
-      result: true,
-      via: ['EEE'],
-    });
-    expect(resolveMembership(ue, 'UE', 'UE', '2026-01-01')).toEqual({ result: true, via: [] });
-    expect(resolveMembership(ue, 'UE', 'EEE', '2026-01-01')).toEqual({ result: false });
+  it('refuses a group as the value: an input names an entity, not a group (M8)', () => {
+    for (const [group, value] of [
+      ['EEE', 'UE'],
+      ['UE', 'UE'],
+      ['UE', 'EEE'],
+    ] as const) {
+      const error = specError(() => resolveMembership(ue, group, value, '2026-01-01'));
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toBe(`input value ${value} is a group of ue`);
+    }
   });
 
   it('XX is unknown in a group that is not exhaustive', () => {
@@ -172,11 +175,66 @@ describe('resolveMembership', () => {
     expect(resolveMembership(ue, 'UE', 'ZZ', '2026-01-01')).toEqual({ result: false });
   });
 
-  it('a group name is never read as a missing code', () => {
-    expect(resolveMembership(ueWithCodes(), 'UE', 'UE', '2026-01-01')).toEqual({
+  it('a group name is never read as a missing code: it is refused as a value', () => {
+    const error = specError(() => resolveMembership(ueWithCodes(), 'UE', 'UE', '2026-01-01'));
+    expect(error.code).toBe('INVALID_INPUT');
+    expect(error.message).toBe('input value UE is a group of ue');
+  });
+
+  it('honours maxDepth, up to 1 024, and walks without recursion (I2)', () => {
+    const deep = nestedReferential(100);
+    const error = specError(() => resolveMembership(deep, 'G1', 'x', '2026-01-01'));
+    expect(error.code).toBe('INVALID_REFERENTIAL');
+    expect(error.message).toBe('group nesting deeper than 64');
+    expect(resolveMembership(deep, 'G1', 'x', '2026-01-01', { maxDepth: 100 })).toEqual({
       result: true,
-      via: [],
+      via: Array.from({ length: 100 }, (_, i) => `G${i + 1}`),
     });
+    expect(
+      specError(() => resolveMembership(deep, 'G1', 'x', '2026-01-01', { maxDepth: 99 })).message,
+    ).toBe('group nesting deeper than 99');
+    const deepest = nestedReferential(1024);
+    expect(resolveMembership(deepest, 'G1', 'x', '2026-01-01', { maxDepth: 1024 }).result).toBe(
+      true,
+    );
+    const ceiling = specError(() =>
+      resolveMembership(deepest, 'G1', 'x', '2026-01-01', { maxDepth: 1025 }),
+    );
+    expect(ceiling.code).toBe('INVALID_REFERENTIAL');
+    expect(ceiling.message).toBe('maxDepth must be at most 1024');
+  });
+
+  it('stops on a cycle of an unvalidated referential with a SpecError', () => {
+    const r: Referential = {
+      ...ueReferential(),
+      groups: {
+        A: { exhaustive: true, members: [{ value: 'B' }] },
+        B: { exhaustive: true, members: [{ value: 'A' }] },
+      },
+    };
+    const error = specError(() => resolveMembership(r, 'A', 'x', '2026-01-01'));
+    expect(error.code).toBe('INVALID_REFERENTIAL');
+    expect(error.message).toBe('group nesting deeper than 64');
+  });
+
+  it('refuses invalid options with a SpecError (M3)', () => {
+    const throwing = {
+      get maxDepth(): number {
+        throw new Error('opt');
+      },
+    };
+    const cases: [unknown, string][] = [
+      [null, 'options must be an object'],
+      [throwing, 'options could not be read: opt'],
+      [{ maxDepth: 0 }, 'maxDepth must be a positive integer'],
+    ];
+    for (const [options, message] of cases) {
+      // The types refuse these options; a caller without types can still pass them.
+      const limits = options as ReferentialLimits;
+      const error = specError(() => resolveMembership(ue, 'UE', 'FR', '2026-01-01', limits));
+      expect(error.code).toBe('INVALID_REFERENTIAL');
+      expect(error.message).toBe(message);
+    }
   });
 
   it('resolves 64 nested groups without overflowing the stack', () => {
@@ -411,12 +469,12 @@ describe('matchDimension', () => {
     ).toEqual({ result: 'unknown', why: 'code YU not valid at 2026-01-01' });
     expect(
       matchDimension(
-        { ref: 'nace', anyOf: ['nace-2.1:62.10'] },
-        '62.10',
+        { ref: 'nace', anyOf: ['62.10'] },
+        'nace-2.1:62.10',
         '2026-01-01',
         new Map([['nace', nace]]),
       ),
-    ).toEqual({ result: true, values: ['62.10'], via: [] });
+    ).toEqual({ result: true, values: ['nace-2.1:62.10'], via: [] });
   });
 
   it('refuses a ref absent from the table', () => {
@@ -440,7 +498,7 @@ describe('matchDimension', () => {
     expect(error.message).toBe('UEE is neither a group nor a code of referential ue');
   });
 
-  it('refuses a rule value of another code system', () => {
+  it('refuses a qualified rule value with ref: the referential fixes the code system (M2)', () => {
     const error = specError(() =>
       matchDimension(
         { ref: 'nace', anyOf: ['nace-2:62.10'] },
@@ -449,8 +507,52 @@ describe('matchDimension', () => {
         new Map([['nace', nace]]),
       ),
     );
-    expect(error.code).toBe('INVALID_REFERENTIAL');
-    expect(error.message).toBe('nace-2:62.10 is not of code system nace-2.1 of referential nace');
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe(
+      'dimension.anyOf[0] must not be qualified: the referential fixes the code system',
+    );
+  });
+
+  it('refuses a group as an input value (M8)', () => {
+    for (const spec of [
+      { ref: 'ue', anyOf: ['MONDE'], except: ['FR'] },
+      { ref: 'ue', anyOf: ['FR'] },
+    ]) {
+      const error = specError(() => matchDimension(spec, ['DK', 'UE'], '2026-01-01', tables));
+      expect(error.code).toBe('INVALID_INPUT');
+      expect(error.message).toBe('input value UE is a group of ue');
+    }
+  });
+
+  it('names an unreadable input as INVALID_INPUT (M5)', () => {
+    const input = new Proxy(['FR'], {
+      get(target, key, receiver): unknown {
+        if (key === 'length') throw new Error('in');
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const error = specError(() => matchDimension('FR', input, '2026-01-01', tables));
+    expect(error.code).toBe('INVALID_INPUT');
+    expect(error.message).toBe('input could not be read: in');
+    // The types refuse a number; a caller without types can still pass one.
+    const number = 1 as unknown as string;
+    const shape = specError(() => matchDimension('FR', number, '2026-01-01', tables));
+    expect(shape.code).toBe('INVALID_INPUT');
+    expect(shape.message).toBe('input must be a value or an array of values');
+  });
+
+  it('takes the limits of validateReferential (I2)', () => {
+    const deep = new Map([['deep', nestedReferential(100)]]);
+    const spec = { ref: 'deep', anyOf: ['G1'] };
+    expect(specError(() => matchDimension(spec, 'x', '2026-01-01', deep)).message).toBe(
+      'group nesting deeper than 64',
+    );
+    expect(matchDimension(spec, 'x', '2026-01-01', deep, { maxDepth: 100 }).result).toBe(true);
+    // The types refuse null options; a caller without types can still pass them.
+    const nullLimits = null as unknown as ReferentialLimits;
+    expect(specError(() => matchDimension(spec, 'x', '2026-01-01', deep, nullLimits)).code).toBe(
+      'INVALID_REFERENTIAL',
+    );
   });
 
   it('refuses an invalid spec, input or date with a SpecError', () => {

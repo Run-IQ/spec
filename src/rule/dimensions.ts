@@ -12,8 +12,10 @@ import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values
  *   `'all'` asks every one to.
  *
  * A value is a non-empty code, or `<system>:<code>` (the first `:` separates; both parts
- * non-empty: `nace-2.1:62.10`). `except` needs `ref`: without a referential a value only equals
- * itself, so `except` could never remove anything.
+ * non-empty: `nace-2.1:62.10`). With `ref`, the values are unqualified: the referential fixes
+ * the code system, so `nace-2.1:62.10` and `62.10` cannot be two spellings of one rule.
+ * `except` needs `ref`: without a referential a value only equals itself, so `except` could
+ * never remove anything.
  *
  * Normal form (one rule, one checksum): `anyOf` and `except` sorted by UTF-16 code unit without
  * duplicates, an empty `except` and `match: 'any'` dropped, and `{ anyOf: [v] }` alone (no `ref`,
@@ -117,9 +119,12 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
   } else if (typeof ref === 'string' && hasLoneSurrogate(ref)) {
     fail(`${path}.ref`, loneSurrogateMessage(`${path}.ref`));
   }
-  const anyOf = readValues(fields.anyOf, `${path}.anyOf`, true, fail);
+  const plain = ref !== undefined;
+  const anyOf = readValues(fields.anyOf, `${path}.anyOf`, true, plain, fail);
   const except =
-    fields.except === undefined ? [] : readValues(fields.except, `${path}.except`, false, fail);
+    fields.except === undefined
+      ? []
+      : readValues(fields.except, `${path}.except`, false, plain, fail);
   const match = fields.match;
   if (match !== undefined && match !== 'any' && match !== 'all') {
     fail(`${path}.match`, `${path}.match must be "any" or "all"`);
@@ -145,11 +150,15 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
   );
 }
 
-/** The values of a list, sorted and deduplicated; `undefined` after reporting a problem. */
+/**
+ * The values of a list, sorted and deduplicated; `undefined` after reporting a problem. With
+ * `plain` (the spec has `ref`), a qualified value is refused.
+ */
 function readValues(
   value: unknown,
   path: string,
   required: boolean,
+  plain: boolean,
   fail: Add,
 ): string[] | undefined {
   if (!Array.isArray(value)) {
@@ -163,10 +172,14 @@ function readValues(
   }
   let valid = true;
   items.forEach((item, i) => {
-    const problem = dimensionValueProblem(item, `${path}[${i}]`);
+    const at = `${path}[${i}]`;
+    const problem = dimensionValueProblem(item, at);
     if (problem !== undefined) {
       valid = false;
-      fail(`${path}[${i}]`, problem);
+      fail(at, problem);
+    } else if (plain && typeof item === 'string' && item.includes(':')) {
+      valid = false;
+      fail(at, `${at} must not be qualified: the referential fixes the code system`);
     }
   });
   return valid ? [...new Set(items as string[])].sort() : undefined;

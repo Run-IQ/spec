@@ -522,7 +522,7 @@
       "pattern": "^[^:]+(?::[\\s\\S]+)?$"
     },
     "dimensionSpec": {
-      "description": "What a rule asks of one dimension: a value (equality), or { ref?, anyOf, except?, match? }. except needs ref. NOT expressible in JSON Schema, checked only by validateRuleDefinition and normalizeRuleDefinition: an except value must not repeat an anyOf value.",
+      "description": "What a rule asks of one dimension: a value (equality), or { ref?, anyOf, except?, match? }. except needs ref. With ref, the values of anyOf and except are unqualified (no ':'): the referential fixes the code system. NOT expressible in JSON Schema, checked only by validateRuleDefinition and normalizeRuleDefinition: an except value must not repeat an anyOf value.",
       "anyOf": [
         {
           "$ref": "#/$defs/dimensionValue"
@@ -557,27 +557,56 @@
             }
           },
           "additionalProperties": false,
-          "if": {
-            "required": [
-              "except"
-            ],
-            "properties": {
-              "except": {
-                "type": "array",
-                "minItems": 1
+          "allOf": [
+            {
+              "if": {
+                "required": [
+                  "except"
+                ],
+                "properties": {
+                  "except": {
+                    "type": "array",
+                    "minItems": 1
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "ref"
+                ],
+                "properties": {
+                  "ref": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  }
+                }
+              }
+            },
+            {
+              "if": {
+                "required": [
+                  "ref"
+                ]
+              },
+              "then": {
+                "properties": {
+                  "anyOf": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[^:]+$"
+                    }
+                  },
+                  "except": {
+                    "type": "array",
+                    "items": {
+                      "type": "string",
+                      "pattern": "^[^:]+$"
+                    }
+                  }
+                }
               }
             }
-          },
-          "then": {
-            "required": [
-              "ref"
-            ],
-            "properties": {
-              "ref": {
-                "$ref": "#/$defs/nonEmptyString"
-              }
-            }
-          }
+          ]
         }
       ]
     }

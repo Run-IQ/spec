@@ -7,7 +7,8 @@ import {
 import type { DimensionSpec } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
-import { DEFAULT_MAX_GROUP_DEPTH } from './validate.js';
+import { readLimits } from './limits.js';
+import type { ReferentialLimits } from './limits.js';
 import type { Membership, Referential, ReferentialMember } from './types.js';
 
 /**
@@ -20,16 +21,26 @@ export type DimensionMatch =
   | { result: false; why: string }
   | { result: 'unknown'; why: string };
 
-/** A value read in a referential: a group name, a valid code, or an unknown membership. */
-type ReadValue =
-  | { kind: 'group'; name: string }
-  | { kind: 'code'; code: string }
-  | { kind: 'unknown'; why: string };
+/** An input value read in a referential: a valid code, or an unknown membership. */
+type ReadValue = { kind: 'code'; code: string } | { kind: 'unknown'; why: string };
+
+/** A value of a rule's spec read in a referential: a group or a code. */
+type Target = { kind: 'group'; name: string } | { kind: 'code'; code: string };
+
+/** One group being resolved by `Resolver.inGroup`: its nested groups left to ask. */
+interface Frame {
+  group: string;
+  exhaustive: boolean;
+  nested: readonly string[];
+  next: number;
+  unknown: Membership | undefined;
+}
 
 /**
  * Whether `value` belongs to `group` of the referential at the civil date `at`, in three values
  * (Kleene), as `Referential` defines it:
- * - `value` equal to `group`: true, `via: []`;
+ * - `value` names an entity (a code), never a group: a group name is refused
+ *   (`input value UE is a group of ue`);
  * - a value written `<system>:<code>` is read in the referential's `codeSystem` only (another
  *   system, or a referential without one: unknown); with `codes`, a value absent from them
  *   (`code ZZ not in referential ue`) or not valid at `at` (`code YU not valid at 2026-01-01`)
@@ -41,32 +52,39 @@ type ReadValue =
  *
  * `via` goes from `group` down to the group that holds the value directly; a direct membership
  * wins, then the nested groups in code-unit order of their names, so `via` does not depend on
- * the order of members. Each group is resolved at most once per call: linear in the size of
- * the referential.
+ * the order of members. Each group is resolved at most once per call, by an iterative walk:
+ * linear in the size of the referential, and no stack overflow whatever its depth.
+ *
+ * `options` are those of `validateReferential`; `maxDepth` (default 64, at most 1 024) bounds
+ * the nesting walked.
  *
  * Expects a valid referential (`validateReferential`). Throws `SpecError`:
  * `INVALID_REFERENTIAL` for an unknown group (`group ASEAN not in referential ue`), nesting
- * deeper than 64 or a referential that cannot be read; `INVALID_DATE` when `at` is not a civil
- * date; `INVALID_INPUT` for an invalid value.
+ * deeper than `maxDepth` (a cycle included), a referential that cannot be read, or invalid
+ * options; `INVALID_DATE` when `at` is not a civil date; `INVALID_INPUT` for an invalid value
+ * or a group name as value.
  */
 export function resolveMembership(
   referential: Referential,
   group: string,
   value: string,
   at: CivilDate,
+  options: ReferentialLimits = {},
 ): Membership {
+  const { maxDepth } = readLimits(options);
   return guarded(() => {
     requireDate(at);
     const problem = dimensionValueProblem(value, 'value');
     if (problem !== undefined) throw new SpecError('INVALID_INPUT', problem);
     const groups = referential.groups;
-    if (!Object.hasOwn(groups, group)) {
+    if (typeof group !== 'string' || !Object.hasOwn(groups, group)) {
       throw new SpecError(
         'INVALID_REFERENTIAL',
-        `group ${group} not in referential ${referential.id}`,
+        `group ${String(group)} not in referential ${referential.id}`,
       );
     }
-    return new Resolver(referential, at).member(group, readValue(referential, value, at));
+    const read = readValue(referential, value, at);
+    return new Resolver(referential, at, maxDepth).member(group, read);
   });
 }
 
@@ -76,20 +94,27 @@ export function resolveMembership(
  * - without `ref`, an input value matches when it equals a value of the spec;
  * - with `ref`, through the referential of that id in `referentials`: an input value matches
  *   when it belongs to a group of `anyOf` or equals a code of it (OR), and belongs to none of
- *   `except` (NOT OR), each membership judged at `at` by `resolveMembership`;
+ *   `except` (NOT OR), each membership judged at `at` by `resolveMembership` (so an input
+ *   value that is a group name is refused);
  * - `match: 'any'` (default) is an OR over the input values, `'all'` an AND.
  *
- * Throws `SpecError`: `INVALID_RULE` for an invalid spec; `INVALID_REFERENTIAL` for a `ref`
- * absent from `referentials` (`unknown referential ue`), a value of the spec the referential
- * does not know when it declares `codes`, or a value of another code system; `INVALID_INPUT`
- * for an empty input list or an invalid input value; `INVALID_DATE` for an invalid `at`.
+ * `options` are those of `validateReferential` (`maxDepth` bounds the nesting walked).
+ *
+ * Throws `SpecError`: `INVALID_RULE` for an invalid spec (a qualified value with `ref`
+ * included: the referential fixes the code system); `INVALID_REFERENTIAL` for a `ref` absent
+ * from `referentials` (`unknown referential ue`), a value of the spec the referential does not
+ * know when it declares `codes`, or invalid options; `INVALID_INPUT` for an input that cannot
+ * be read, an empty input list, an invalid input value or a group name as input value;
+ * `INVALID_DATE` for an invalid `at`.
  */
 export function matchDimension(
   spec: DimensionSpec,
   input: string | readonly string[],
   at: CivilDate,
   referentials: ReadonlyMap<string, Referential>,
+  options: ReferentialLimits = {},
 ): DimensionMatch {
+  const { maxDepth } = readLimits(options);
   return guarded(() => {
     const normal = normalizeDimensionSpec(spec);
     requireDate(at);
@@ -108,7 +133,7 @@ export function matchDimension(
         throw new SpecError('INVALID_REFERENTIAL', `unknown referential ${ref}`);
       }
       const targets = [...anyOf, ...except].map((t) => readTarget(referential, t));
-      const resolver = new Resolver(referential, at);
+      const resolver = new Resolver(referential, at, maxDepth);
       const of = (value: ReadValue, from: number, to: number): Membership =>
         anyMember(targets.slice(from, to).map((target) => resolver.target(target, value)));
       judge = (raw) => {
@@ -142,8 +167,18 @@ function requireDate(at: unknown): void {
 }
 
 /** The input values, sorted without duplicates; never empty. */
-function readInput(input: string | readonly string[]): string[] {
-  const list: unknown[] = typeof input === 'string' ? [input] : Array.from(input);
+function readInput(input: unknown): string[] {
+  let list: unknown[];
+  if (typeof input === 'string') list = [input];
+  else if (!Array.isArray(input)) {
+    throw new SpecError('INVALID_INPUT', 'input must be a value or an array of values');
+  } else {
+    try {
+      list = Array.from(input);
+    } catch (error) {
+      throw new SpecError('INVALID_INPUT', unreadableMessage('input', error));
+    }
+  }
   if (list.length === 0) {
     throw new SpecError('INVALID_INPUT', 'a dimension input must hold at least one value');
   }
@@ -154,10 +189,13 @@ function readInput(input: string | readonly string[]): string[] {
     );
     if (problem !== undefined) throw new SpecError('INVALID_INPUT', problem);
   });
-  return [...new Set(list as string[])].sort();
+  return [...new Set(list.map(String))].sort();
 }
 
-/** An input value as the referential reads it at `at`. */
+/**
+ * An input value as the referential reads it at `at`. Throws `INVALID_INPUT` for a group
+ * name: an input names an entity, not a group.
+ */
 function readValue(referential: Referential, value: string, at: CivilDate): ReadValue {
   const { system, code } = splitQualified(value);
   if (system !== undefined) {
@@ -170,7 +208,9 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
     }
     if (system !== own) return { kind: 'unknown', why: `code system ${system} is not ${own}` };
   }
-  if (Object.hasOwn(referential.groups, code)) return { kind: 'group', name: code };
+  if (Object.hasOwn(referential.groups, code)) {
+    throw new SpecError('INVALID_INPUT', `input value ${value} is a group of ${referential.id}`);
+  }
   const codes = referential.codes;
   if (codes === undefined) return { kind: 'code', code };
   if (!Object.hasOwn(codes, code)) {
@@ -183,27 +223,20 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
     : { kind: 'unknown', why: `code ${code} not valid at ${at}` };
 }
 
-/** A value of a rule's spec, as the referential knows it: a group or a code. */
-function readTarget(referential: Referential, target: string): ReadValue {
-  const { system, code } = splitQualified(target);
-  const own = referential.codeSystem;
-  if (system !== undefined && system !== own) {
-    throw new SpecError(
-      'INVALID_REFERENTIAL',
-      own === undefined
-        ? `${target} is qualified but referential ${referential.id} declares no code system`
-        : `${target} is not of code system ${own} of referential ${referential.id}`,
-    );
-  }
-  if (Object.hasOwn(referential.groups, code)) return { kind: 'group', name: code };
+/**
+ * A value of a rule's spec, as the referential knows it: a group or a code. The spec is
+ * normal, so the value is unqualified: with `ref`, the referential fixes the code system.
+ */
+function readTarget(referential: Referential, target: string): Target {
+  if (Object.hasOwn(referential.groups, target)) return { kind: 'group', name: target };
   const codes = referential.codes;
-  if (codes !== undefined && !Object.hasOwn(codes, code)) {
+  if (codes !== undefined && !Object.hasOwn(codes, target)) {
     throw new SpecError(
       'INVALID_REFERENTIAL',
       `${target} is neither a group nor a code of referential ${referential.id}`,
     );
   }
-  return { kind: 'code', code };
+  return { kind: 'code', code: target };
 }
 
 /** Kleene OR of memberships: the first true (in order), else the first unknown, else false. */
@@ -253,74 +286,99 @@ class Resolver {
   constructor(
     private readonly referential: Referential,
     private readonly at: CivilDate,
+    private readonly maxDepth: number,
   ) {}
 
   /** `value` (already read) in the group or code `target`. */
-  target(target: ReadValue, value: ReadValue): Membership {
+  target(target: Target, value: ReadValue): Membership {
     if (value.kind === 'unknown') return { result: 'unknown', why: value.why };
     if (target.kind === 'code') {
-      return value.kind === 'code' && value.code === target.code
-        ? { result: true, via: [] }
-        : { result: false };
+      return value.code === target.code ? { result: true, via: [] } : { result: false };
     }
-    return target.kind === 'group' ? this.member(target.name, value) : { result: false };
+    return this.member(target.name, value);
   }
 
   /** `value` (already read) in `group`. */
   member(group: string, value: ReadValue): Membership {
     if (value.kind === 'unknown') return { result: 'unknown', why: value.why };
-    if (value.kind === 'group' && value.name === group) return { result: true, via: [] };
-    const name = value.kind === 'group' ? value.name : value.code;
-    const memo = this.memo.get(name) ?? new Map<string, Membership>();
-    this.memo.set(name, memo);
-    return this.inGroup(group, name, 1, memo);
+    const memo = this.memo.get(value.code) ?? new Map<string, Membership>();
+    this.memo.set(value.code, memo);
+    return this.inGroup(group, value.code, memo);
   }
 
-  private inGroup(
+  /**
+   * `value` in `group`, by an iterative depth-first walk: a direct member wins, then the nested
+   * groups in name order; the first true ends a group, else its first unknown, else its
+   * exhaustiveness decides. More than `maxDepth` groups on the walk (a cycle included) throws.
+   */
+  private inGroup(group: string, value: string, memo: Map<string, Membership>): Membership {
+    const stack: Frame[] = [];
+    let result = this.open(group, value, memo, stack);
+    while (stack.length > 0) {
+      const frame = stack[stack.length - 1];
+      if (frame === undefined) break;
+      if (result !== undefined) {
+        // `result` answers the nested group `frame.nested[frame.next]`.
+        frame.next++;
+        if (result.result === true) {
+          result = this.close(frame, { result: true, via: [frame.group, ...result.via] }, memo);
+          stack.pop();
+          continue;
+        }
+        if (result.result === 'unknown') frame.unknown ??= result;
+        result = undefined;
+      }
+      const name = frame.nested[frame.next];
+      if (name === undefined) {
+        result = this.close(frame, this.settle(frame, value), memo);
+        stack.pop();
+        continue;
+      }
+      result = this.open(name, value, memo, stack);
+    }
+    return result ?? { result: false };
+  }
+
+  /** The membership of `group` if known at once; otherwise pushes its frame. */
+  private open(
     group: string,
     value: string,
-    depth: number,
     memo: Map<string, Membership>,
-  ): Membership {
+    stack: Frame[],
+  ): Membership | undefined {
     const known = memo.get(group);
     if (known !== undefined) return known;
-    if (depth > DEFAULT_MAX_GROUP_DEPTH) {
-      throw new SpecError(
-        'INVALID_REFERENTIAL',
-        `group nesting deeper than ${DEFAULT_MAX_GROUP_DEPTH}`,
-      );
+    if (stack.length >= this.maxDepth) {
+      throw new SpecError('INVALID_REFERENTIAL', `group nesting deeper than ${this.maxDepth}`);
     }
     const groups = this.referential.groups;
     const entry = groups[group];
     const active = (entry?.members ?? []).filter((m) => this.isActive(m));
-    let result: Membership;
     if (active.some((m) => m.value === value)) {
-      result = { result: true, via: [group] };
-    } else {
-      const nested = [...new Set(active.map((m) => m.value))]
-        .filter((name) => Object.hasOwn(groups, name))
-        .sort();
-      let unknown: Membership | undefined;
-      let found: Membership | undefined;
-      for (const name of nested) {
-        const sub = this.inGroup(name, value, depth + 1, memo);
-        if (sub.result === true) {
-          found = { result: true, via: [group, ...sub.via] };
-          break;
-        }
-        if (sub.result === 'unknown' && unknown === undefined) unknown = sub;
-      }
-      if (found !== undefined) result = found;
-      else if (unknown !== undefined) result = unknown;
-      else if (entry?.exhaustive === true) result = { result: false };
-      else {
-        result = {
-          result: 'unknown',
-          why: `${value} in ${group} is unknown: ${group} is not exhaustive`,
-        };
-      }
+      const direct: Membership = { result: true, via: [group] };
+      memo.set(group, direct);
+      return direct;
     }
-    memo.set(group, result);
+    const nested = [...new Set(active.map((m) => m.value))]
+      .filter((name) => Object.hasOwn(groups, name))
+      .sort();
+    const exhaustive = entry?.exhaustive === true;
+    stack.push({ group, exhaustive, nested, next: 0, unknown: undefined });
+    return undefined;
+  }
+
+  /** The membership of a group whose nested groups all answered without true. */
+  private settle(frame: Frame, value: string): Membership {
+    if (frame.unknown !== undefined) return frame.unknown;
+    if (frame.exhaustive) return { result: false };
+    return {
+      result: 'unknown',
+      why: `${value} in ${frame.group} is unknown: ${frame.group} is not exhaustive`,
+    };
+  }
+
+  private close(frame: Frame, result: Membership, memo: Map<string, Membership>): Membership {
+    memo.set(frame.group, result);
     return result;
   }
 

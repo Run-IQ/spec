@@ -6,13 +6,14 @@ import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import { readLimits } from './limits.js';
+import type { Limits, ReferentialLimits } from './limits.js';
+import { ALWAYS, sweepNesting } from './nesting.js';
+import type { Edge, Work } from './nesting.js';
 import { REFERENTIAL_FORMAT } from './types.js';
 import type { Period, Referential, ReferentialMember } from './types.js';
 
-/** Default bound on the nodes of a referential: its code periods, groups and members. */
-export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
-/** Default bound on the nesting of groups: the groups of the longest chain at any date. */
-export const DEFAULT_MAX_GROUP_DEPTH = 64;
+export type { ReferentialLimits } from './limits.js';
 
 const KEYS: readonly string[] = [
   'format',
@@ -28,36 +29,13 @@ const GROUP_KEYS: readonly string[] = ['exhaustive', 'members', 'sourceRef'];
 const MEMBER_KEYS: readonly string[] = ['value', 'from', 'until', 'sourceRef'];
 const PERIOD_KEYS: readonly string[] = ['from', 'until', 'sourceRef'];
 
-/** The start of a period with no `from`: before every civil date. */
-const ALWAYS = '';
-
 /** One period, `[from, until)`; `from` is `ALWAYS` when the period has no start. */
 interface Span {
   from: CivilDate;
   until: CivilDate | null;
 }
 
-/** A group-in-group membership: `group` holds `member` during `span`. */
-interface Edge {
-  group: string;
-  member: string;
-  span: Span;
-}
-
 type Add = (path: string, message: string) => void;
-
-/** Options of `validateReferential` and `normalizeReferential`. */
-export interface ReferentialLimits {
-  /** Most nodes (code periods, groups and members); default 100 000. */
-  maxNodes?: number;
-  /** Most groups on one chain of nesting at any date; default 64. */
-  maxDepth?: number;
-}
-
-/** Counts the elementary steps of the cycle and depth sweep (tests bound the work with it). */
-interface Work {
-  steps: number;
-}
 
 /**
  * Checks a referential document (`Referential`) without throwing and returns every problem
@@ -66,29 +44,35 @@ interface Work {
  * what JSON Schema cannot express:
  * - size: more than `maxNodes` nodes (default 100 000; the periods of `codes`, the groups and
  *   their members) stops the check with `referential too large: <n> nodes`, counted from the
- *   lengths of the lists before any member is read;
+ *   keys of `codes` and `groups` before any group is read, then from the lengths of the lists
+ *   before any member is read;
  * - a period must not be empty (`until` after `from`); the periods of one code, and those of
  *   one value listed twice in a group, must not overlap;
  * - a value is never both a code and a group; with `codes`, every member is a group or a code;
  * - no cycle of groups at any date: the dates where memberships start and end are swept in
- *   order; each group-in-group membership that starts is checked by a backward path search in
- *   the memberships active at that date (`cycle A > B > A from 2020-01-01`; `from the
- *   beginning` for memberships without `from`). Worst case O(E·(V+E)) for E group-in-group
- *   memberships and V groups, bounded by `maxNodes`;
- * - nesting at most `maxDepth` groups deep (default 64) at any date, measured in the same sweep
+ *   order; each group-in-group membership that starts is checked by a search that alternates
+ *   forward from the member and backward from the group, so it costs at most twice the smaller
+ *   side (`cycle A > B > A from 2020-01-01`; `from the beginning` for memberships without
+ *   `from`);
+ * - nesting at most `maxDepth` groups deep (default 64, at most 1 024) at any date, measured in
+ *   the same sweep from heights kept per group and recomputed only where a membership changed
  *   (`group nesting deeper than 64`);
+ * - work: the sweep counts its steps (each edge read, each height marked or recomputed) and
+ *   stops past `maxSteps` (default 100 per allowed node: 10 000 000) with `referential too
+ *   complex: more than <n> steps`, so that no document costs minutes of work;
  * - no text with a lone UTF-16 surrogate.
  *
  * Each property is read once. A property that cannot be read (a getter or a Proxy trap that
  * throws) gives `<path> could not be read: <reason>`; the value itself unreadable gives
  * `referential could not be read: <reason>`. Throws `SpecError` (`INVALID_REFERENTIAL`) only
- * for invalid options: `maxNodes` and `maxDepth` must be positive integers.
+ * for invalid options: not an object, unreadable, a limit that is not a positive integer, or
+ * `maxDepth` above 1 024.
  */
 export function validateReferential(
   value: unknown,
   options: ReferentialLimits = {},
 ): RuleValidationIssue[] {
-  return check(value, options, { steps: 0 }).issues;
+  return check(value, readLimits(options)).issues;
 }
 
 /**
@@ -97,7 +81,10 @@ export function validateReferential(
  *   last) and `sourceRef` (absent first), in UTF-16 code units; the periods of each code sorted
  *   the same way by `from`, `until` and `sourceRef`;
  * - `until: null` written as an absent `until` (no end), on members and code periods;
- * - an entry listed twice, identical once normalized, kept once.
+ * - an entry listed twice, identical once normalized, kept once;
+ * - two periods of one value (or one code) that meet (`until` of one is `from` of the next)
+ *   and have the same `sourceRef` merged into one; with different sources the boundary stays,
+ *   since the source is content.
  *
  * Reads each property of `referential` once and returns a copy that shares nothing with it.
  * Throws `SpecError` (`INVALID_REFERENTIAL`) with the first issue of `validateReferential` when
@@ -107,7 +94,7 @@ export function normalizeReferential(
   referential: unknown,
   options: ReferentialLimits = {},
 ): Referential {
-  const { issues, normal } = check(referential, options, { steps: 0 });
+  const { issues, normal } = check(referential, readLimits(options));
   const [first] = issues;
   if (first !== undefined || normal === undefined) {
     throw new SpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
@@ -134,40 +121,29 @@ export function computeReferentialDigest(
  * `value`, so that tests bound the work without a clock.
  */
 export function referentialCheckSteps(value: unknown, options: ReferentialLimits = {}): number {
-  const work = { steps: 0 };
-  check(value, options, work);
-  return work.steps;
+  return check(value, readLimits(options)).steps;
 }
 
 function check(
   value: unknown,
-  options: ReferentialLimits,
-  work: Work,
-): { issues: RuleValidationIssue[]; normal: Referential | undefined } {
-  const maxNodes = readOption(options.maxNodes, DEFAULT_MAX_REFERENTIAL_NODES, 'maxNodes');
-  const maxDepth = readOption(options.maxDepth, DEFAULT_MAX_GROUP_DEPTH, 'maxDepth');
+  limits: Limits,
+): { issues: RuleValidationIssue[]; normal: Referential | undefined; steps: number } {
+  const work: Work = { steps: 0, limit: limits.maxSteps };
   const issues: RuleValidationIssue[] = [];
   const add: Add = (path, message) => {
     issues.push({ path, message });
   };
   let normal: Referential | undefined;
   try {
-    normal = readReferential(value, maxNodes, maxDepth, add, work);
+    normal = readReferential(value, limits, add, work);
   } catch (error) {
     return {
       issues: [{ path: '', message: unreadableMessage('referential', error) }],
       normal: undefined,
+      steps: work.steps,
     };
   }
-  return { issues, normal: issues.length === 0 ? normal : undefined };
-}
-
-function readOption(value: number | undefined, fallback: number, name: string): number {
-  if (value === undefined) return fallback;
-  if (!Number.isSafeInteger(value) || value < 1) {
-    throw new SpecError('INVALID_REFERENTIAL', `${name} must be a positive integer`);
-  }
-  return value;
+  return { issues, normal: issues.length === 0 ? normal : undefined, steps: work.steps };
 }
 
 /** A group as read once: its raw members, read after the size check. */
@@ -185,8 +161,7 @@ interface RawGroup {
  */
 function readReferential(
   value: unknown,
-  maxNodes: number,
-  maxDepth: number,
+  limits: Limits,
   add: Add,
   work: Work,
 ): Referential | undefined {
@@ -213,13 +188,21 @@ function readReferential(
     }
   }
 
-  // Size first, from the lengths of the lists: no member is read before it.
-  const codes = fields.codes === undefined ? undefined : readCodeLists(fields.codes, add);
-  const groups = readGroups(fields.groups, add);
+  // Size first: from the keys (each code has a period, each group is a node) before any code
+  // or group is read, then from the lengths of the lists before any member is read.
+  const codeKeys = fields.codes === undefined ? [] : ownKeys(fields.codes, 'codes', add);
+  const groupKeys = ownKeys(fields.groups, 'groups', add);
+  if (codeKeys === undefined || groupKeys === undefined) return undefined;
+  if (codeKeys.length + groupKeys.length > limits.maxNodes) {
+    add('', `referential too large: ${codeKeys.length + groupKeys.length} nodes`);
+    return undefined;
+  }
+  const codes = fields.codes === undefined ? undefined : readCodeLists(fields.codes, codeKeys, add);
+  const groups = readGroups(fields.groups, groupKeys, add);
   let nodes = 0;
   for (const periods of codes?.values() ?? []) nodes += periods?.length ?? 0;
   for (const group of groups ?? []) nodes += 1 + group.length;
-  if (nodes > maxNodes) {
+  if (nodes > limits.maxNodes) {
     add('', `referential too large: ${nodes} nodes`);
     return undefined;
   }
@@ -255,7 +238,14 @@ function readReferential(
     if (group.sourceRef !== undefined) normalGroup.sourceRef = group.sourceRef;
     defineField(normalGroups, group.name, normalGroup);
   }
-  if (membersValid) checkNesting(edges, maxDepth, add, work);
+  if (membersValid) {
+    const found = sweepNesting(edges, limits.maxDepth, work);
+    if (found.cycle !== undefined) add('groups', found.cycle);
+    if (found.tooDeep) add('groups', `group nesting deeper than ${limits.maxDepth}`);
+    if (found.tooComplex) {
+      add('groups', `referential too complex: more than ${limits.maxSteps} steps`);
+    }
+  }
 
   const normal: Referential = {
     format: REFERENTIAL_FORMAT,
@@ -377,14 +367,31 @@ function nameProblem(name: string, kind: 'code' | 'group name'): string | undefi
   return undefined;
 }
 
+/**
+ * The own keys of `codes` or `groups`, read once: `[]` when the value is not an object (its
+ * reader reports it), `undefined` after reporting keys that cannot be read.
+ */
+function ownKeys(value: unknown, path: string, add: Add): string[] | undefined {
+  try {
+    return isPlainObject(value) ? Object.keys(value) : [];
+  } catch (error) {
+    add(path, unreadableMessage(path, error));
+    return undefined;
+  }
+}
+
 /** The codes and their period lists (`undefined` for an unreadable or refused list). */
-function readCodeLists(value: unknown, add: Add): Map<string, readonly unknown[] | undefined> {
+function readCodeLists(
+  value: unknown,
+  keys: readonly string[],
+  add: Add,
+): Map<string, readonly unknown[] | undefined> {
   const codes = new Map<string, readonly unknown[] | undefined>();
   if (!isPlainObject(value)) {
     add('codes', 'codes must be an object of period lists');
     return codes;
   }
-  for (const code of Object.keys(value)) {
+  for (const code of keys) {
     const path = `codes.${code}`;
     const problem = nameProblem(code, 'code');
     if (problem !== undefined) {
@@ -413,13 +420,13 @@ function readCodeLists(value: unknown, add: Add): Map<string, readonly unknown[]
 }
 
 /** The groups, each read once with the length of its member list; `undefined` if refused. */
-function readGroups(value: unknown, add: Add): RawGroup[] | undefined {
+function readGroups(value: unknown, keys: readonly string[], add: Add): RawGroup[] | undefined {
   if (!isPlainObject(value)) {
     add('groups', 'groups must be an object of groups');
     return undefined;
   }
   const groups: RawGroup[] = [];
-  for (const name of Object.keys(value)) {
+  for (const name of keys) {
     const path = `groups.${name}`;
     const problem = nameProblem(name, 'group name');
     if (problem !== undefined) {
@@ -454,12 +461,19 @@ function readGroup(value: unknown, name: string, path: string, add: Add): RawGro
     return refused;
   }
   const list: readonly unknown[] = members;
+  let length: number;
+  try {
+    length = list.length;
+  } catch (error) {
+    add(`${path}.members`, unreadableMessage(`${path}.members`, error));
+    return refused;
+  }
   return {
     name,
     exhaustive: exhaustive === true,
     sourceRef: typeof fields.sourceRef === 'string' ? fields.sourceRef : undefined,
     members: list,
-    length: list.length,
+    length,
   };
 }
 
@@ -482,7 +496,7 @@ function checkPeriods(periods: readonly unknown[], path: string, add: Add): Peri
   const normal = sortedUnique(read, compareSpans);
   const overlap = firstOverlap(normal.map((p) => ({ from: p.from, until: p.until ?? null })));
   if (overlap !== undefined) add(path, `${path} has overlapping periods from ${overlap}`);
-  return normal;
+  return mergeAdjacent(normal);
 }
 
 function readPeriod(value: unknown, path: string, add: Add): Period | undefined {
@@ -578,7 +592,9 @@ function checkMembers(
     const spans = byValue.get(member.value) ?? [];
     spans.push(span);
     byValue.set(member.value, spans);
-    if (groupNames.has(member.value)) edges.push({ group: group.name, member: member.value, span });
+    if (groupNames.has(member.value)) {
+      edges.push({ group: group.name, member: member.value, ...span });
+    }
   }
   for (const [value, spans] of byValue) {
     const overlap = spans.length > 1 ? firstOverlap(spans) : undefined;
@@ -587,7 +603,35 @@ function checkMembers(
       add(path, `${path} lists ${value} twice ${when}`);
     }
   }
-  return valid ? normal : undefined;
+  return valid ? mergeAdjacent(normal) : undefined;
+}
+
+/**
+ * Sorted entries with two neighbours of one value that meet (`until` of the first is `from`
+ * of the second) and have the same `sourceRef` merged into one: one meaning, one form.
+ */
+function mergeAdjacent<T extends { value?: string; from?: string; until?: string | null }>(
+  sorted: readonly (T & { sourceRef?: string })[],
+): T[] {
+  const out: (T & { sourceRef?: string })[] = [];
+  for (const entry of sorted) {
+    const last = out[out.length - 1];
+    if (
+      last !== undefined &&
+      last.value === entry.value &&
+      last.sourceRef === entry.sourceRef &&
+      last.until != null &&
+      last.until === entry.from
+    ) {
+      const merged = { ...last };
+      if (entry.until == null) delete merged.until;
+      else merged.until = entry.until;
+      out[out.length - 1] = merged;
+    } else {
+      out.push(entry);
+    }
+  }
+  return out;
 }
 
 function readMember(
@@ -642,148 +686,4 @@ function readMember(
   if (end !== undefined) normal.until = end;
   if (typeof fields.sourceRef === 'string') normal.sourceRef = fields.sourceRef;
   return normal;
-}
-
-/**
- * Sweeps the dates where group-in-group memberships start and end, in order. At each date the
- * memberships that end are removed first (`until` is excluded), then those that start are
- * added one by one: a backward path search from the member to the group finds a cycle, and the
- * longest chain through the new membership measures the nesting. Reports the first cycle
- * found and the first excess of depth.
- */
-function checkNesting(edges: readonly Edge[], maxDepth: number, add: Add, work: Work): void {
-  const starts = new Map<CivilDate, Edge[]>();
-  const ends = new Map<CivilDate, Edge[]>();
-  for (const edge of edges) {
-    pushTo(starts, edge.span.from, edge);
-    if (edge.span.until !== null) pushTo(ends, edge.span.until, edge);
-  }
-  const dates = [...new Set([...starts.keys(), ...ends.keys()])].sort();
-  const down = new Graph(work);
-  const up = new Graph(work);
-  const added = new Set<Edge>();
-  let cycleFound = false;
-  let tooDeep = false;
-  for (const date of dates) {
-    for (const edge of ends.get(date) ?? []) {
-      if (!added.delete(edge)) continue;
-      down.remove(edge.group, edge.member);
-      up.remove(edge.member, edge.group);
-    }
-    const starting = (starts.get(date) ?? []).sort(compareEdges);
-    for (const edge of starting) {
-      const back = down.path(edge.member, edge.group);
-      if (back !== undefined) {
-        if (!cycleFound) add('groups', cycleMessage([edge.group, ...back], date));
-        cycleFound = true;
-        continue;
-      }
-      down.add(edge.group, edge.member);
-      up.add(edge.member, edge.group);
-      added.add(edge);
-      if (!tooDeep) {
-        const depth =
-          up.longest(edge.group, maxDepth + 1) + down.longest(edge.member, maxDepth + 1);
-        if (depth > maxDepth) {
-          add('groups', `group nesting deeper than ${maxDepth}`);
-          tooDeep = true;
-        }
-      }
-    }
-  }
-}
-
-function pushTo(map: Map<CivilDate, Edge[]>, key: CivilDate, edge: Edge): void {
-  const list = map.get(key);
-  if (list) list.push(edge);
-  else map.set(key, [edge]);
-}
-
-function compareEdges(a: Edge, b: Edge): number {
-  if (a.group !== b.group) return a.group < b.group ? -1 : 1;
-  if (a.member !== b.member) return a.member < b.member ? -1 : 1;
-  return 0;
-}
-
-/** `cycle A > B > A from <date>`, the cycle written from its smallest group name. */
-function cycleMessage(cycle: readonly string[], date: CivilDate): string {
-  let start = 0;
-  cycle.forEach((name, i) => {
-    if (name < (cycle[start] ?? name)) start = i;
-  });
-  const rotated = [...cycle.slice(start), ...cycle.slice(0, start)];
-  const when = date === ALWAYS ? 'from the beginning' : `from ${date}`;
-  return `cycle ${[...rotated, rotated[0] ?? ''].join(' > ')} ${when}`;
-}
-
-/** A directed multigraph of group names, with counted edges. */
-class Graph {
-  private readonly next = new Map<string, Map<string, number>>();
-
-  constructor(private readonly work: Work) {}
-
-  add(from: string, to: string): void {
-    const targets = this.next.get(from) ?? new Map<string, number>();
-    targets.set(to, (targets.get(to) ?? 0) + 1);
-    this.next.set(from, targets);
-  }
-
-  remove(from: string, to: string): void {
-    const targets = this.next.get(from);
-    const count = targets?.get(to) ?? 0;
-    if (count > 1) targets?.set(to, count - 1);
-    else targets?.delete(to);
-  }
-
-  /**
-   * The nodes of a path from `from` to `to`, `from` included and `to` excluded
-   * (`[from, …]`), or `undefined` when there is none. Breadth-first, iterative.
-   */
-  path(from: string, to: string): string[] | undefined {
-    const parent = new Map<string, string | null>([[from, null]]);
-    const queue = [from];
-    for (let head = 0; head < queue.length; head++) {
-      const node = queue[head] ?? '';
-      this.work.steps++;
-      if (node === to) {
-        const path: string[] = [];
-        for (let at = parent.get(node); at !== null && at !== undefined; at = parent.get(at)) {
-          path.unshift(at);
-        }
-        return path;
-      }
-      for (const target of [...(this.next.get(node)?.keys() ?? [])].sort()) {
-        this.work.steps++;
-        if (!parent.has(target)) {
-          parent.set(target, node);
-          queue.push(target);
-        }
-      }
-    }
-    return undefined;
-  }
-
-  /**
-   * The number of nodes of the longest path starting at `from`, capped at `cap`: the search
-   * never goes deeper than `cap`, so it never overflows the stack. Exact values are memoized;
-   * a capped one is not. The graph is acyclic: a membership that would close a cycle is never
-   * added.
-   */
-  longest(from: string, cap: number): number {
-    const exact = new Map<string, number>();
-    const walk = (node: string, budget: number): number => {
-      this.work.steps++;
-      const known = exact.get(node);
-      if (known !== undefined) return Math.min(known, budget);
-      if (budget <= 1) return 1;
-      let best = 1;
-      for (const target of this.next.get(node)?.keys() ?? []) {
-        best = Math.max(best, 1 + walk(target, budget - 1));
-        if (best >= budget) return budget;
-      }
-      exact.set(node, best);
-      return best;
-    };
-    return walk(from, cap);
-  }
 }
