@@ -42,3 +42,39 @@ export class SpecError extends Error {
     );
   }
 }
+
+/**
+ * Internal: a readable description of any thrown value, without ever throwing. A hostile value
+ * (a Proxy, a null-prototype object, an Error whose `message` getter throws) gives
+ * `'unreadable value'`.
+ */
+export function describeError(error: unknown): string {
+  try {
+    if (error instanceof Error) {
+      const message: unknown = error.message;
+      if (typeof message === 'string') return message;
+    }
+  } catch {
+    return 'unreadable value';
+  }
+  switch (typeof error) {
+    case 'string':
+      return error;
+    case 'number':
+    case 'boolean':
+    case 'bigint':
+    case 'symbol':
+      return String(error);
+    default:
+      return 'unreadable value';
+  }
+}
+
+/** Internal: the `path` of a `SpecError`, or `undefined` for anything else; never throws. */
+export function specErrorPath(error: unknown): string | undefined {
+  try {
+    return error instanceof SpecError && error.path ? error.path : undefined;
+  } catch {
+    return undefined;
+  }
+}

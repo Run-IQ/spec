@@ -28,7 +28,7 @@ export interface ProofRuleRef {
   sourceRef?: string;
 }
 
-/** The final value of one output, and the rules that contributed to it. */
+/** The final value of one output, and the ids of the rules that contributed to it. */
 export interface ProofOutput {
   type: OutputType;
   combine: CombineStrategy;
@@ -54,7 +54,7 @@ export interface ProofSkip {
   detail?: string;
 }
 
-/** One exception that took effect, and the rules (or outputs, for `shortCircuit`) it affected. */
+/** One exception that took effect, and the ids of the rules it affected. */
 export interface ProofException {
   ruleId: string;
   version: number;
@@ -64,9 +64,11 @@ export interface ProofException {
 
 /**
  * The content of a decision proof, before sealing. The format is closed: no other key is
- * allowed. Every rule cited in `applied`, `skipped` and `exceptions` is listed in `rules`. Lists are hashed in the order given, so the producer sorts them (`rules` and
- * `applied` by id then version, `skipped` by id) for two evaluations of the same decision to
- * give the same digest.
+ * allowed. Every rule the proof cites is listed in `rules`: the `ruleId` and `version` of
+ * `applied`, `skipped` and `exceptions`, and the rule ids of output `contributors` and
+ * exception `affected`. Lists are hashed in the order given, so the producer sorts them
+ * (`rules` and `applied` by id then version, `skipped` by id) for two evaluations of the same
+ * decision to give the same digest.
  *
  * Dates are ISO strings: `YYYY-MM-DD`, or a date-time with `Z` or an offset.
  */

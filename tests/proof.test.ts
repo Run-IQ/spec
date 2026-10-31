@@ -276,6 +276,28 @@ describe('signProof', () => {
     );
   });
 
+  it('refuses to sign a proof citing a rule it does not list', () => {
+    const content = unsigned();
+    content.applied.push({ ...content.applied[0]!, ruleId: 'r9' });
+    const proof: DecisionProof = { ...content, digest: sha256Hex(canonicalize(content)) };
+    const error = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
+    expect(error.code).toBe('INVALID_PROOF');
+    expect(error.message).toBe('Cannot sign the proof: cited rule not listed: r9@1');
+  });
+
+  it('signs the content it read, read once', () => {
+    let reads = 0;
+    const proof = sealed();
+    const genuineDigest = proof.digest;
+    Object.defineProperty(proof, 'digest', {
+      enumerable: true,
+      get: () => (++reads <= 2 ? genuineDigest : 'f'.repeat(64)),
+    });
+    const result = signProof(proof, RFC_SECRET, 'executor-1');
+    expect(result).toEqual(signed());
+    expect(Object.getOwnPropertyDescriptor(result, 'digest')?.get).toBeUndefined();
+  });
+
   it('refuses to sign a malformed proof', () => {
     const error = specError(() =>
       signProof({ ...sealed(), digest: 'x' }, RFC_SECRET, 'executor-1'),
@@ -432,6 +454,30 @@ describe('verifyProof: invalid, with a readable issue', () => {
     expect(error.message).toBe(`Cannot seal the proof: cited rule not listed: ${key}`);
   });
 
+  it.each([
+    ['outputs contributors', (p: UnsignedProof) => p.outputs.value!.contributors.push('r7'), 'r7'],
+    [
+      'exceptions affected',
+      (p: UnsignedProof) =>
+        p.exceptions.push({ ruleId: 'r1', version: 1, kind: 'inhibit', affected: ['r8'] }),
+      'r8',
+    ],
+  ])('a rule id in %s that rules does not list', (_name, cite, id) => {
+    const content = unsigned();
+    cite(content);
+    const proof: DecisionProof = { ...content, digest: sha256Hex(canonicalize(content)) };
+    expect(verifyProof(proof)).toEqual({
+      status: 'invalid',
+      issues: [`cited rule not listed: ${id}`, 'unsigned'],
+    });
+    expect(specError(() => sealProof(content)).message).toBe(
+      `Cannot seal the proof: cited rule not listed: ${id}`,
+    );
+    expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
+      `Cannot sign the proof: cited rule not listed: ${id}`,
+    );
+  });
+
   it('reports a rule cited several times once', () => {
     const content = unsigned();
     content.applied.push({ ...content.applied[0]!, ruleId: 'r5' });
@@ -471,10 +517,13 @@ describe('verifyProof: invalid, with a readable issue', () => {
     });
   });
 
-  it('a trusted key of the right length that is not a curve point', () => {
-    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': 'f'.repeat(64) } })).toEqual({
-      status: 'invalid',
-      issues: ['signature invalid'],
+  it.each([
+    ['not a curve point', 'f'.repeat(64)],
+    ['a small-order point (the identity)', `01${'0'.repeat(62)}`],
+  ])('a trusted key of the right length that is %s', (_name, key) => {
+    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': key } })).toEqual({
+      status: 'consistent',
+      issues: ['trusted key malformed'],
     });
   });
 
@@ -587,6 +636,149 @@ describe('verifyProof: invalid, with a readable issue', () => {
     expect(verifyProof(hostile)).toEqual({
       status: 'invalid',
       issues: ['proof could not be read: boom'],
+    });
+  });
+});
+
+describe('verifyProof: hostile input', () => {
+  /**
+   * Content B (a changed output) carrying the signature of proof A. Its `digest` getter returns
+   * B's digest for the first `cut` reads, then A's.
+   */
+  function forged(cut: number): DecisionProof {
+    const genuine = signed();
+    const content = sealProof({
+      ...unsigned(),
+      outputs: { value: { type: 'number', combine: 'sum', value: 999999, contributors: ['r1'] } },
+    });
+    const proof: DecisionProof = { ...content, signature: genuine.signature! };
+    let reads = 0;
+    Object.defineProperty(proof, 'digest', {
+      enumerable: true,
+      get: () => (++reads <= cut ? content.digest : genuine.digest),
+    });
+    return proof;
+  }
+
+  it.each([1, 2, 3, 4, 5, 6])(
+    'a digest getter that changes after %i reads is never authentic',
+    (cut) => {
+      const result = verifyProof(forged(cut), { trustedKeys: TRUSTED });
+      expect(result.status).toBe('invalid');
+      expect(result.issues).toHaveLength(1);
+      expect(['digest mismatch', 'signature invalid']).toContain(result.issues[0]);
+    },
+  );
+
+  it.each([1, 2, 3, 4, 5, 6])(
+    'a signature getter that changes after %i reads is never authentic',
+    (cut) => {
+      const genuine = signed();
+      const content = sealProof({ ...unsigned(), requestId: 'req-2' });
+      const own = signProof(content, RFC_SECRET, 'other');
+      let reads = 0;
+      const proof: DecisionProof = { ...content };
+      Object.defineProperty(proof, 'signature', {
+        enumerable: true,
+        get: () => (++reads <= cut ? own.signature : genuine.signature),
+      });
+      const result = verifyProof(proof, { trustedKeys: TRUSTED });
+      expect(result.status).not.toBe('authentic');
+    },
+  );
+
+  it('reads each property of the proof a bounded number of times', () => {
+    let reads = 0;
+    const proof = signed();
+    const digest = proof.digest;
+    Object.defineProperty(proof, 'digest', {
+      enumerable: true,
+      get: () => {
+        reads++;
+        return digest;
+      },
+    });
+    expect(verifyProof(proof, { trustedKeys: TRUSTED }).status).toBe('authentic');
+    // Once by validation, once for the snapshot every later check uses.
+    expect(reads).toBe(2);
+  });
+
+  const throwing = (thrown: () => unknown): DecisionProof => {
+    const proof = signed();
+    Object.defineProperty(proof, 'digest', {
+      enumerable: true,
+      get: () => {
+        throw thrown();
+      },
+    });
+    return proof;
+  };
+  const errorWithThrowingMessage = (): Error => {
+    const error = new Error('x');
+    Object.defineProperty(error, 'message', {
+      get: () => {
+        throw 1;
+      },
+    });
+    return error;
+  };
+  const prototypeTrap = new Proxy(
+    {},
+    {
+      getPrototypeOf: () => {
+        throw Object.create(null);
+      },
+    },
+  );
+  let deep: unknown = 0;
+  for (let i = 0; i < 200_000; i++) deep = [deep];
+
+  it.each([
+    [
+      'a getter throwing a null-prototype object',
+      throwing(() => Object.create(null)),
+      'unreadable value',
+    ],
+    ['a getter throwing a number', throwing(() => 7), '7'],
+    [
+      'a getter throwing an Error whose message throws',
+      throwing(errorWithThrowingMessage),
+      'unreadable value',
+    ],
+    ['a Proxy whose getPrototypeOf throws', prototypeTrap, 'unreadable value'],
+  ])('%s: invalid, without throwing', (_name, value, reason) => {
+    expect(verifyProof(value, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: [`proof could not be read: ${reason}`],
+    });
+  });
+
+  it('a very deeply nested output value: invalid, without throwing', () => {
+    const proof = sealed();
+    const tampered = { ...proof, outputs: { value: { ...proof.outputs.value!, value: deep } } };
+    const result = verifyProof(tampered);
+    expect(result.status).toBe('invalid');
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]).toMatch(/call stack/);
+  });
+
+  it('a hostile entry in the rules option', () => {
+    const rule = {};
+    Object.defineProperty(rule, 'id', {
+      enumerable: true,
+      get: () => {
+        throw Object.create(null);
+      },
+    });
+    expect(
+      verifyProof(signed(), { trustedKeys: TRUSTED, rules: [rule as RuleDefinitionInput] }),
+    ).toEqual({
+      status: 'invalid',
+      issues: [
+        'rule invalid: rules[0]: unreadable value',
+        'rule missing: r1@1',
+        'rule missing: r2@2',
+      ],
     });
   });
 });

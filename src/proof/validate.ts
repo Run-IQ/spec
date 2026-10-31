@@ -1,12 +1,14 @@
 import { toJsonValue } from '../canonical.js';
+import type { JsonValue } from '../canonical.js';
 import { COMBINE_STRATEGIES, OUTPUT_TYPES } from '../decision/output.js';
-import { SpecError } from '../errors.js';
+import { describeError, SpecError, specErrorPath } from '../errors.js';
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isPlainObject } from '../values.js';
 import { PROOF_FORMAT } from './types.js';
+import type { DecisionProof, UnsignedProof } from './types.js';
 
 type Add = (path: string, message: string) => void;
 type Check = (value: unknown, path: string, add: Add) => void;
@@ -77,8 +79,7 @@ const json: Check = (value, path, add) => {
   try {
     toJsonValue(value, path);
   } catch (error) {
-    if (!(error instanceof Error)) throw error;
-    add(error instanceof SpecError && error.path ? error.path : path, error.message);
+    add(specErrorPath(error) ?? path, describeError(error));
   }
 };
 
@@ -108,12 +109,16 @@ function mapOf(item: Check, summary: string): Check {
 }
 
 function objectOf(shape: Shape): Check {
-  return (value, path, add) => checkObject(value, path, shape, add, new Set());
+  return (value, path, add) => {
+    checkObject(value, path, shape, add, new Set());
+  };
 }
 
 /**
  * Checks a closed object. Unknown keys are reported first, then each field in order. An
  * `undefined` member counts as absent, as in the canonical form; keys in `ignored` are skipped.
+ * Each own property is read once, so an accessor cannot answer two checks differently. Returns
+ * the members read, or `undefined` when `value` is not an object.
  */
 function checkObject(
   value: unknown,
@@ -121,21 +126,23 @@ function checkObject(
   shape: Shape,
   add: Add,
   ignored: ReadonlySet<string>,
-): void {
+): ReadonlyMap<string, unknown> | undefined {
   if (!isPlainObject(value)) {
     add(path, `${path} must be an object ${shape.summary}`);
-    return;
+    return undefined;
   }
+  const members = new Map<string, unknown>(Object.entries(value));
   const at = (key: string): string => (path ? `${path}.${key}` : key);
-  for (const key of Object.keys(value)) {
-    if (value[key] === undefined || ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
+  for (const [key, member] of members) {
+    if (member === undefined || ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
     add(at(key), `${path || 'proof'} has an unknown key "${key}"`);
   }
   for (const [key, check] of Object.entries(shape.fields)) {
-    const field = value[key];
+    const field = members.get(key);
     if (field !== undefined) check(field, at(key), add);
     else if (!shape.optional?.includes(key)) add(at(key), `${at(key)} is required`);
   }
+  return members;
 }
 
 const RULE_REF: Shape = {
@@ -254,12 +261,57 @@ export function validateProof(value: unknown): {
   return { errors: issues.map((issue) => issue.message), issues };
 }
 
+/** Internal: a proof read by `readDecisionProof` or `readUnsignedProof`. */
+export type ProofRead<T> = { proof: T; errors: [] } | { proof: undefined; errors: string[] };
+
 /**
- * Internal: the problems of the content `sealProof` hashes. `digest` and `signature` are
- * ignored, since sealing replaces them.
+ * Internal: a validated, plain-JSON snapshot of a sealed proof, or the validation messages.
+ *
+ * `value` is validated, then copied to JSON reading each property exactly once, and the copy is
+ * validated again. Callers check and use ONLY the snapshot: an accessor or a Proxy cannot show
+ * one value to the digest check and another to the signature check.
  */
-export function unsignedProofIssues(value: unknown): RuleValidationIssue[] {
-  return collect(value, UNSIGNED_PROOF, SEAL_KEYS);
+export function readDecisionProof(value: unknown): ProofRead<DecisionProof> {
+  const { snapshot, errors } = readSnapshot(value, DECISION_PROOF, new Set());
+  return conforms<DecisionProof>(snapshot, errors)
+    ? { proof: snapshot, errors: [] }
+    : { proof: undefined, errors };
+}
+
+/**
+ * Internal: like `readDecisionProof`, for the content `sealProof` hashes: `digest` and
+ * `signature` are ignored and left out of the snapshot, since sealing replaces them.
+ */
+export function readUnsignedProof(value: unknown): ProofRead<UnsignedProof> {
+  const { snapshot, errors } = readSnapshot(value, UNSIGNED_PROOF, SEAL_KEYS);
+  return conforms<UnsignedProof>(snapshot, errors)
+    ? { proof: snapshot, errors: [] }
+    : { proof: undefined, errors };
+}
+
+/** `errors` are those found in `snapshot` against the shape of `T`: none means it is a `T`. */
+function conforms<T>(snapshot: unknown, errors: readonly string[]): snapshot is T {
+  return errors.length === 0;
+}
+
+/** The JSON snapshot of `value` and the problems of `value` or of the snapshot. */
+function readSnapshot(
+  value: unknown,
+  shape: Shape,
+  ignored: ReadonlySet<string>,
+): { snapshot: unknown; errors: string[] } {
+  const messages = (issues: RuleValidationIssue[]): string[] => issues.map((i) => i.message);
+  const first = collect(value, shape, ignored);
+  if (first.length > 0) return { snapshot: undefined, errors: messages(first) };
+
+  let snapshot: JsonValue;
+  try {
+    snapshot = toJsonValue(value, '');
+  } catch (error) {
+    return { snapshot: undefined, errors: [describeError(error)] };
+  }
+  if (isPlainObject(snapshot)) for (const key of ignored) delete snapshot[key];
+  return { snapshot, errors: messages(collect(snapshot, shape, ignored)) };
 }
 
 function collect(
@@ -275,8 +327,8 @@ function collect(
     add('', 'a decision proof must be a plain object');
     return issues;
   }
-  checkObject(value, '', shape, add, ignored);
-  checkUniqueRules(value.rules, add);
+  const members = checkObject(value, '', shape, add, ignored);
+  checkUniqueRules(members?.get('rules'), add);
   return issues;
 }
 

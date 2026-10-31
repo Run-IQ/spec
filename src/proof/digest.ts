@@ -2,7 +2,7 @@ import { canonicalize } from '../canonical.js';
 import { SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
-import { unsignedProofIssues } from './validate.js';
+import { readUnsignedProof } from './validate.js';
 
 /**
  * The digest a proof keeps in place of its input: `sha256Hex(canonicalize(input))`. Key order
@@ -18,40 +18,53 @@ export function computeInputDigest(input: ProofInput): string {
  * content is every key but `digest` and `signature`. A `digest` or `signature` already on `p`
  * is dropped, so sealing again gives a fresh, unsigned proof.
  *
- * The copy is plain JSON data, detached from `p`, without `undefined` members. Lists keep
- * their order: the producer sorts them (see `UnsignedProof`).
+ * `p` is read once into a plain-JSON copy (each property read exactly once); that copy is what
+ * is validated, hashed and returned, detached from `p` and without `undefined` members. Lists
+ * keep their order: the producer sorts them (see `UnsignedProof`).
  *
  * Throws `SpecError` (`INVALID_PROOF`), naming the first problem, when the content is not a
- * valid unsigned proof (see `validateProof`) or is not internally consistent: every rule cited
- * in `applied`, `skipped` and `exceptions` must be listed in `rules`
- * (`cited rule not listed: id@version`).
+ * valid unsigned proof (see `validateProof`) or is not internally consistent (see
+ * `unlistedCitations`: `cited rule not listed: ...`).
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
-  const [issue] = unsignedProofIssues(p);
-  if (issue) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${issue.message}`);
-  const [uncited] = unlistedCitations(p);
+  const { proof, errors } = readUnsignedProof(p);
+  if (!proof) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
+  const [uncited] = unlistedCitations(proof);
   if (uncited) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${uncited}`);
-  const canonical = canonicalize(proofContent(p));
-  // The canonical form of a valid unsigned proof parses back to the same proof, as plain JSON.
-  const content = JSON.parse(canonical) as UnsignedProof;
-  return { ...content, digest: sha256Hex(canonical) };
+  return { ...proof, digest: contentDigest(proof) };
 }
 
-/** Internal: the digest `p` should carry, computed from its content. */
+/**
+ * Internal: the digest `p` should carry, computed from its content. `p` must be a plain-JSON
+ * snapshot (`readDecisionProof`, `readUnsignedProof`), never a caller's live object.
+ */
 export function contentDigest(p: UnsignedProof): string {
   return sha256Hex(canonicalize(proofContent(p)));
 }
 
 /**
- * Internal: one `cited rule not listed: id@version` issue for each rule cited in `applied`,
- * `skipped` or `exceptions` (in that order, each once) that `rules` does not list.
+ * Internal: the citations of rules that `p.rules` does not list, each reported once, in this
+ * order:
+ * - each `ruleId@version` of `applied`, `skipped` and `exceptions`:
+ *   `cited rule not listed: id@version`;
+ * - each rule id in the `contributors` of `outputs` (by output name) and in the `affected` of
+ *   `exceptions`, which name rules by id only: `cited rule not listed: id`.
  */
 export function unlistedCitations(p: UnsignedProof): string[] {
   const listed = new Set(p.rules.map((rule) => `${rule.id}@${rule.version}`));
+  const listedIds = new Set(p.rules.map((rule) => rule.id));
   const issues = new Set<string>();
   for (const cited of [...p.applied, ...p.skipped, ...p.exceptions]) {
     const key = `${cited.ruleId}@${cited.version}`;
     if (!listed.has(key)) issues.add(`cited rule not listed: ${key}`);
+  }
+  const outputNames = Object.keys(p.outputs).sort();
+  const citedIds = [
+    ...outputNames.flatMap((name) => p.outputs[name]?.contributors ?? []),
+    ...p.exceptions.flatMap((exception) => exception.affected),
+  ];
+  for (const id of citedIds) {
+    if (!listedIds.has(id)) issues.add(`cited rule not listed: ${id}`);
   }
   return [...issues];
 }

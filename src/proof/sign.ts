@@ -1,10 +1,9 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
-import { canonicalize } from '../canonical.js';
 import { SpecError } from '../errors.js';
-import { contentDigest } from './digest.js';
+import { contentDigest, unlistedCitations } from './digest.js';
 import type { DecisionProof } from './types.js';
-import { validateProof } from './validate.js';
+import { readDecisionProof } from './validate.js';
 
 const KEY_HEX = /^[0-9a-fA-F]{64}$/;
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -24,20 +23,26 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  * characters of `p.digest`, in base64url without padding. An earlier signature is replaced.
  * ed25519 signatures are deterministic: the same proof and key give the same value.
  *
+ * `p` is read once into a plain-JSON copy (each property read exactly once); that copy is what
+ * is checked, signed and returned, so the signature always covers the returned content.
+ *
  * Throws `SpecError`:
- * - `INVALID_PROOF` when `p` is malformed (see `validateProof`) or its `digest` does not match
- *   its content: a proof is never signed for content it does not hold;
+ * - `INVALID_PROOF` when `p` is malformed (see `validateProof`), its `digest` does not match
+ *   its content, or it cites a rule its `rules` does not list (see `sealProof`): a proof is
+ *   never signed for content it does not hold;
  * - `INVALID_KEY` when `privateKeyHex` is not 64 hex characters or `keyId` is empty.
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
-  const [issue] = validateProof(p).issues;
-  if (issue) throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${issue.message}`);
-  if (contentDigest(p) !== p.digest) {
+  const { proof, errors } = readDecisionProof(p);
+  if (!proof) throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${errors[0]}`);
+  if (contentDigest(proof) !== proof.digest) {
     throw new SpecError(
       'INVALID_PROOF',
       'Cannot sign the proof: its digest does not match its content; seal it again',
     );
   }
+  const [uncited] = unlistedCitations(proof);
+  if (uncited) throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${uncited}`);
   if (typeof keyId !== 'string' || keyId === '') {
     throw new SpecError('INVALID_KEY', 'keyId must be a non-empty string');
   }
@@ -48,15 +53,28 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
       'privateKey must be 64 hex characters (an ed25519 secret key)',
     );
   }
-  const value = toBase64Url(ed25519.sign(utf8ToBytes(p.digest), secretKey));
-  // `p` is a valid proof: its canonical form parses back to the same proof, as plain JSON.
-  const copy = JSON.parse(canonicalize(p)) as DecisionProof;
-  return { ...copy, signature: { alg: 'ed25519', keyId, value } };
+  const value = toBase64Url(ed25519.sign(utf8ToBytes(proof.digest), secretKey));
+  return { ...proof, signature: { alg: 'ed25519', keyId, value } };
 }
 
 /** Internal: the 32 bytes of a hex ed25519 key (either case), or `undefined` if malformed. */
 export function keyBytes(hex: unknown): Uint8Array | undefined {
   return typeof hex === 'string' && KEY_HEX.test(hex) ? hexToBytes(hex) : undefined;
+}
+
+/**
+ * Internal: the bytes of a hex ed25519 public key, or `undefined` when it is not 64 hex
+ * characters, does not decode to a curve point (strict RFC 8032 encoding), or is a small-order
+ * point, which no honest key is.
+ */
+export function publicKeyBytes(hex: unknown): Uint8Array | undefined {
+  const bytes = keyBytes(hex);
+  if (!bytes) return undefined;
+  try {
+    return ed25519.Point.fromBytes(bytes).isSmallOrder() ? undefined : bytes;
+  } catch {
+    return undefined;
+  }
 }
 
 /**
