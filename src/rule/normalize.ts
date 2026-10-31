@@ -136,7 +136,9 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     throwFirst(read.issues);
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
-  throwFirst(exceptionModelIssues(input));
+  throwFirst(
+    exceptionModelIssues({ model: input.model, output: out.output, exceptions: input.exceptions }),
+  );
   const forEachInput = input.forEach;
   const forEach = forEachInput == null ? undefined : readForEachField(forEachInput);
   if (forEach !== undefined) out.forEach = forEach;

@@ -239,9 +239,10 @@ export function readRuleExceptions(
  * Internal to `@run-iq/spec` (not exported from the package): shared by
  * `normalizeRuleDefinition` and `validateRuleDefinition` so that they cannot disagree.
  *
- * The constraints of `EXCEPTION_MODEL` on a rule, checked on its raw fields: no `output`
- * (`null` counts as absent) and a non-empty `exceptions` list (`null` and `[]` count as
- * absent). Any other model gives no issue.
+ * The constraints of `EXCEPTION_MODEL` on a rule: no `output` and a non-empty `exceptions` list
+ * (`null` and `[]` count as absent). `output` is the normalized one (see `normalizedOutput`):
+ * the default output (`value`, `<own set>:value`) is absent, exactly as in the normal form.
+ * Any other model gives no issue.
  */
 export function exceptionModelIssues(rule: {
   readonly model?: unknown;
@@ -250,7 +251,7 @@ export function exceptionModelIssues(rule: {
 }): RuleValidationIssue[] {
   if (rule.model !== EXCEPTION_MODEL) return [];
   const issues: RuleValidationIssue[] = [];
-  if (rule.output != null) {
+  if (rule.output !== undefined) {
     issues.push({
       path: 'output',
       message: `output must be absent: a rule of model "${EXCEPTION_MODEL}" produces no output`,
@@ -265,6 +266,24 @@ export function exceptionModelIssues(rule: {
     });
   }
   return issues;
+}
+
+/**
+ * Internal: the `output` the normal form keeps for a raw `output` in a rule of `ruleSet`:
+ * `undefined` for an absent (`null`) or default one (`value`, `<ruleSet>:value`, D-37), the
+ * shortest spelling otherwise. Any other value (not a string, an invalid name) is returned
+ * as is, to be refused. With `ruleSet` `undefined` (not a rule set id), a qualified name is
+ * not judged: `undefined` too, since the rule set issue already refuses the rule.
+ */
+export function normalizedOutput(output: unknown, ruleSet: string | undefined): unknown {
+  if (output == null) return undefined;
+  if (typeof output !== 'string' || citedNameProblem(output, 'output', 'output') !== undefined) {
+    return output;
+  }
+  if (ruleSet === undefined)
+    return output.includes(':') || output === DEFAULT_OUTPUT ? undefined : output;
+  const shortest = shortestFrom(ruleSet, output);
+  return shortest === DEFAULT_OUTPUT ? undefined : shortest;
 }
 
 type Add = (path: string, message: string) => void;

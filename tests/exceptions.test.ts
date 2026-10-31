@@ -78,6 +78,29 @@ describe('EXCEPTION_MODEL', () => {
     expect(normalizeError(value)).toMatchObject({ code: 'INVALID_RULE', message });
   });
 
+  it.each([
+    ['value', undefined],
+    ['value', 'rgpd'],
+    ['rgpd:value', 'rgpd'],
+  ])('accepts output %s in rule set %s, the default output, as absent', (output, ruleSet) => {
+    const absent = { ...carrier, ruleSet };
+    const value = { ...absent, output };
+    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(normalizeRuleDefinition(value)).not.toHaveProperty('output');
+    expect(computeRuleChecksum(value)).toBe(computeRuleChecksum(absent));
+  });
+
+  it.each([
+    ['rgpd:x', 'rgpd'],
+    ['rgpd:value', undefined],
+    ['rgpd:value', 'interne'],
+  ])('refuses output %s in rule set %s, which is not the default', (output, ruleSet) => {
+    const value = { ...carrier, ruleSet, output };
+    const message = 'output must be absent: a rule of model "@run-iq/exception" produces no output';
+    expect(issuesOf(value)).toEqual([{ path: 'output', message }]);
+    expect(normalizeError(value)).toMatchObject({ code: 'INVALID_RULE', message });
+  });
+
   it('accepts a null output, which means absent', () => {
     expect(validateRuleDefinition({ ...carrier, output: null }).valid).toBe(true);
     expect(computeRuleChecksum({ ...carrier, output: null })).toBe(computeRuleChecksum(carrier));

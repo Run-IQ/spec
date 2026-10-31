@@ -293,6 +293,11 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
     ],
     ['a rule of the exception model', carrier],
     ['a rule of the exception model with a null output', { ...carrier, output: null }],
+    ["the exception model with output 'value', the default", { ...carrier, output: 'value' }],
+    [
+      'the exception model of a pack with its own default output',
+      { ...carrier, ruleSet: 'rgpd', output: 'rgpd:value' },
+    ],
     ['an output on another model', { ...base, output: 'tax', exceptions: carrier.exceptions }],
   ];
 
@@ -306,6 +311,11 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
     ['the exception model with null exceptions', { ...carrier, exceptions: null }],
     ['the exception model with an empty list', { ...carrier, exceptions: [] }],
     ['the exception model with an output', { ...carrier, output: 'tax' }],
+    [
+      'the exception model with an own-set output',
+      { ...carrier, ruleSet: 'rgpd', output: 'rgpd:x' },
+    ],
+    ["the exception model with local's default output", { ...carrier, output: 'local:value' }],
   ];
 
   it.each(accepted)('accepts %s', (_name, value) => {
@@ -318,6 +328,23 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
     expect(validateRuleDefinition(value).valid).toBe(false);
     expect(schemaAccepts(value)).toBe(false);
     expect(normalizeAccepts(value)).toBe(false);
+  });
+
+  it.each([
+    ['a local rule', { ...carrier, output: 'rgpd:value' }],
+    ['a rule of another pack', { ...carrier, ruleSet: 'interne', output: 'rgpd:value' }],
+  ])(
+    "validator-only: rejects another set's value on the exception model, in %s",
+    (_label, value) => {
+      expect(validateRuleDefinition(value).valid).toBe(false);
+      expect(normalizeAccepts(value)).toBe(false);
+      expect(schemaAccepts(value)).toBe(true);
+    },
+  );
+
+  it('the schema documents the validator-only exception model output check', () => {
+    expect(JSON.stringify(schema)).toMatch(/exception.*value.*qualified by another rule set/);
+    expect(JSON.stringify(schema)).toMatch(/selector's outputs name outputs.*any other is refused/);
   });
 
   it('validator-only: rejects a selector whose except repeats anyOf (the schema cannot)', () => {

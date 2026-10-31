@@ -7,7 +7,7 @@ import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import { readDimensionSpec, reservedDimensionNameMessage } from './dimensions.js';
-import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { exceptionModelIssues, normalizedOutput, readRuleExceptions } from './exceptions.js';
 import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
 import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
@@ -40,12 +40,13 @@ class Issues {
  * `forEach.segments`; `$item` also needs `forEach.path` without `groupBy`). It checks the closed
  * `forEach` format (`ForEach`; JSON Schema cannot count the key names per level, find a repeated
  * `orderBy` path, or compare `segments.from` with `segments.until`), the closed `exceptions`
- * format and the constraints of the reserved model `EXCEPTION_MODEL` (no `output`, a non-empty
- * `exceptions` list); it refuses an `id` holding `:`, a `ruleSet` that is not a rule set id, and
- * output names that are not `name` or `<rule set>:<name>` (D-4: at most one `:`, no `.`, no `$`
- * at the start of either part, ruling R36) in `output`, in a `shortCircuit` output and in
- * selector `outputs`, and a selector id of a rule set the selector does not target (JSON Schema
- * cannot relate it to the rule's `ruleSet`). Each dimension must be a `DimensionSpec`; JSON
+ * format and the constraints of the reserved model `EXCEPTION_MODEL` (no `output` but the
+ * default, a non-empty `exceptions` list); it refuses an `id` holding `:`, a `ruleSet` that is
+ * not a rule set id, and output names that are not `name` or `<rule set>:<name>` (D-4: at most
+ * one `:`, no `.`, no `$` at the start of either part, ruling R36) in `output`, in a
+ * `shortCircuit` output and in selector `outputs`, a selector id of a rule set the selector does
+ * not target, and an exception carrier's `<other set>:value` output (JSON Schema cannot relate
+ * them to the rule's `ruleSet`). Each dimension must be a `DimensionSpec`; JSON
  * Schema cannot refuse an `except` value repeated in `anyOf`. Every text (a string field, a tag,
  * a dimension key or value, an extension key, any string inside `params`, `condition.value`,
  * `forEach`, `exceptions` or an
@@ -134,7 +135,12 @@ function definitionIssues(value: unknown): {
   if (value.dimensions != null) checkDimensions(value.dimensions, errors);
   if (value.tags != null) checkTags(value.tags, errors);
   if (value.exceptions != null) checkExceptions(value.exceptions, ruleSet, errors);
-  for (const issue of exceptionModelIssues(value)) errors.add(issue.path, issue.message);
+  const modelIssues = exceptionModelIssues({
+    model: value.model,
+    output: normalizedOutput(value.output, ruleSet),
+    exceptions: value.exceptions,
+  });
+  for (const issue of modelIssues) errors.add(issue.path, issue.message);
 
   // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
   const forEachValue = value.forEach;
