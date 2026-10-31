@@ -4,7 +4,13 @@ import { citeName, isOwnError, quoteText, unreadableMessage } from '../errors.js
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import {
+  hasLoneSurrogate,
+  isPlainObject,
+  loneSurrogateMessage,
+  readList,
+  withValueBudget,
+} from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
@@ -61,7 +67,10 @@ type Issues = IssueList;
  * `<field> could not be read: <reason>`. A free-form value (`params`, `condition.value`, an
  * extension) nested more than `MAX_JSON_DEPTH` (1000) levels deep gives `<path> is nested
  * deeper than 1000 levels` at its first container past the limit (`params.a…`); the copy keeps
- * its own stack, so it never overflows the call stack. Anything else that cannot be read (a top-level property, the object itself)
+ * its own stack, so it never overflows the call stack. An array with a hole gives `<path> has a
+ * hole at index <i>: arrays must be dense`, and one call reads at most `MAX_JSON_VALUES` values
+ * (`<path> is too large: more than 10000000 values`, a list's size counted before any element
+ * is read). Anything else that cannot be read (a top-level property, the object itself)
  * gives the single issue `rule definition could not be read: <reason>` at `''`.
  *
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
@@ -78,7 +87,7 @@ export function validateRuleDefinition(value: unknown): {
   issues: RuleValidationIssue[];
 } {
   try {
-    return definitionIssues(value);
+    return withValueBudget(() => definitionIssues(value));
   } catch (error) {
     const unreadable = new IssueList();
     unreadable.add('', unreadableMessage('rule definition', error));
@@ -279,7 +288,11 @@ function checkDimensions(value: unknown, errors: Issues): void {
 }
 
 function checkTags(value: unknown, errors: Issues): void {
-  const tags: unknown[] | undefined = Array.isArray(value) ? Array.from(value) : undefined;
+  const tags = Array.isArray(value) ? readList(value, 'tags') : undefined;
+  if (typeof tags === 'string') {
+    errors.add('tags', tags);
+    return;
+  }
   if (!tags || !tags.every((t) => typeof t === 'string')) {
     errors.add('tags', 'tags must be an array of strings');
     return;

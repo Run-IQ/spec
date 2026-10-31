@@ -367,8 +367,7 @@ describe('governingAssertion', () => {
     expect(specError(() => governingAssertion(proxy, '/x'))).toMatchObject({
       code: 'INVALID_INPUT',
       message:
-        "assertions could not be read: Cannot perform 'getOwnPropertyDescriptor' on a proxy " +
-        'that has been revoked',
+        "assertions could not be read: Cannot perform 'ownKeys' on a proxy that has been revoked",
     });
   });
 

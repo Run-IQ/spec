@@ -1,5 +1,5 @@
 import { isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
-import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
+import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
 
 /**
  * A JSON Pointer (RFC 6901): `""` is the root, every other pointer is `/` followed by segments
@@ -62,9 +62,10 @@ export function formatPointer(segments: readonly string[]): JsonPointer {
 
 /**
  * A plain copy of `segments`, read by index up to a `length` read once (never through an
- * iterator a caller could override). Throws `SpecError` (`INVALID_PATH`) for anything but an
- * array, and for an array that cannot be read (a Proxy trap or a getter that throws, a revoked
- * Proxy).
+ * iterator a caller could override; `readList`). Throws `SpecError` (`INVALID_PATH`) for anything
+ * but an array, for an array that cannot be read (a Proxy trap or a getter that throws, a
+ * revoked Proxy), with a hole, or claiming more than `MAX_JSON_VALUES` elements (checked before
+ * any is read).
  */
 function readSegments(segments: readonly string[]): unknown[] {
   let items: unknown[];
@@ -72,10 +73,9 @@ function readSegments(segments: readonly string[]): unknown[] {
     if (!Array.isArray(segments)) {
       throw newSpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
     }
-    const list: readonly unknown[] = segments;
-    const length = list.length;
-    items = [];
-    for (let i = 0; i < length; i++) items.push(list[i]);
+    const read = readList(segments, 'JSON pointer segments');
+    if (typeof read === 'string') throw newSpecError('INVALID_PATH', read);
+    items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_PATH', unreadableMessage('JSON pointer segments', error));

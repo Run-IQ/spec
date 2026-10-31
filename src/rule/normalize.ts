@@ -3,7 +3,13 @@ import type { JsonValue } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
 import { isReservedName } from '../reserved.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import {
+  hasLoneSurrogate,
+  isPlainObject,
+  loneSurrogateMessage,
+  readList,
+  withValueBudget,
+} from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import {
@@ -83,15 +89,18 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
  * (`params`, `condition.value`, `forEach`, `exceptions`, an extension: a getter or a Proxy trap
- * that throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, or `<field> is too
- * deeply nested` when it overflows the call stack, as in `validateRuleDefinition`; anything
+ * that throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, as in
+ * `validateRuleDefinition`; a free-form value nested too deep, holding an array with a hole or
+ * more than `MAX_JSON_VALUES` values gives `NON_SERIALIZABLE` (`<path> is nested deeper than
+ * 1000 levels`, `<path> has a hole at index <i>: arrays must be dense`, `<path> is too large:
+ * more than 10000000 values`, the list's size counted before any element is read); anything
  * else that cannot be read gives `rule definition could not be read: <reason>`. A message (and
  * a `NON_SERIALIZABLE` path) longer than 1024 code units is cut there and followed by `…`,
  * exactly as `validateRuleDefinition` cuts its issues: both give the same first message.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   try {
-    return normalize(input);
+    return withValueBudget(() => normalize(input));
   } catch (error) {
     // Cut as `validateRuleDefinition` cuts its issues, so both give the same first message.
     if (isOwnError(error)) {
@@ -255,7 +264,8 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
 function normalizeTags(value: unknown): string[] {
   if (value == null) return [];
   if (!Array.isArray(value)) invalidRule('tags must be an array of strings');
-  const tags: unknown[] = Array.from(value);
+  const tags = readList(value, 'tags');
+  if (typeof tags === 'string') invalidRule(tags);
   for (const tag of tags) {
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }

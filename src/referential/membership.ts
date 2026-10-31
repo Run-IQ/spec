@@ -7,6 +7,7 @@ import {
 import type { DimensionSpec } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
+import { readList } from '../values.js';
 import { readLimits } from './limits.js';
 import type { ReferentialLimits } from './limits.js';
 import type { Membership, Referential, ReferentialMember } from './types.js';
@@ -174,7 +175,9 @@ function readInput(input: unknown): string[] {
     if (!Array.isArray(input)) {
       throw newSpecError('INVALID_INPUT', 'input must be a value or an array of values');
     }
-    list = Array.from(input);
+    const read = readList(input, 'input');
+    if (typeof read === 'string') throw newSpecError('INVALID_INPUT', read);
+    list = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_INPUT', unreadableMessage('input', error));

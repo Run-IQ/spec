@@ -1,4 +1,5 @@
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
+import { MAX_JSON_VALUES } from '../values.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -14,7 +15,7 @@ export const STEPS_PER_NODE = 100;
  * `resolveMembership` and `matchDimension`.
  */
 export interface ReferentialLimits {
-  /** Most nodes (code periods, groups and members); default 100 000. */
+  /** Most nodes (code periods, groups and members); default 100 000, at most 10 000 000. */
   maxNodes?: number;
   /** Most groups on one chain of nesting at any date; default 64, at most 1 024. */
   maxDepth?: number;
@@ -40,8 +41,8 @@ export interface Limits {
 
 /**
  * Internal: reads `options` once each. Throws `SpecError` (`INVALID_REFERENTIAL`) for options
- * that are not an object, cannot be read, or hold a value that is not a positive integer, or a
- * `maxDepth` above 1 024.
+ * that are not an object, cannot be read, or hold a value that is not a positive integer, a
+ * `maxNodes` above `MAX_JSON_VALUES` (10 000 000), or a `maxDepth` above 1 024.
  */
 export function readLimits(options: unknown): Limits {
   if (options === undefined) {
@@ -65,6 +66,11 @@ export function readLimits(options: unknown): Limits {
     throw newSpecError('INVALID_REFERENTIAL', unreadableMessage('options', error));
   }
   const nodes = positive(maxNodes, DEFAULT_MAX_REFERENTIAL_NODES, 'maxNodes');
+  if (nodes > MAX_JSON_VALUES) {
+    // Every list is read up to its claimed length once the size check passed: the shared
+    // budget of values bounds the nodes too.
+    throw newSpecError('INVALID_REFERENTIAL', `maxNodes must be at most ${MAX_JSON_VALUES}`);
+  }
   const depth = positive(maxDepth, DEFAULT_MAX_GROUP_DEPTH, 'maxDepth');
   if (depth > MAX_GROUP_DEPTH_CEILING) {
     throw newSpecError(

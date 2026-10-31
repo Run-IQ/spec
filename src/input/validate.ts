@@ -17,6 +17,7 @@ import {
   expectPlainObject,
   ownKeys,
   readFields,
+  readElement,
   readMember,
   requireFields,
   runCheck,
@@ -44,10 +45,11 @@ const PLAIN_OBJECT = 'a plain object';
  * express: `meta.tags` and each list of dimension values sorted by UTF-16 code unit
  * (`tags must be sorted without duplicates`); no text or key with a lone UTF-16 surrogate;
  * values at most `MAX_JSON_DEPTH` (1000) levels below `data` or `meta.context`
- * (`<pointer> is nested deeper than 1000 levels`, at the first container past the limit); at most `MAX_INPUT_VALUES`
- * (10 000 000) property values in all, counted before they are read (`input too large: more
- * than 10000000 values`, which stops the check); the reserved segments of a `source.subject`
- * well formed (`isSubject`).
+ * (`<pointer> is nested deeper than 1000 levels`, at the first container past the limit);
+ * lists without holes (`<pointer> has a hole at index <i>: arrays must be dense`); at most
+ * `MAX_JSON_VALUES` (10 000 000) property values in all, counted before they are read
+ * (`<pointer> is too large: more than 10000000 values`, which stops the check); the reserved
+ * segments of a `source.subject` well formed (`isSubject`).
  *
  * The canonical form is closed: `data` and `meta` with exactly `tenantId`, `dates`, `tags`,
  * `dimensions`, `context` and `assertions` (the former `effectiveDate` is
@@ -197,7 +199,7 @@ function readList(
   announce(reader, length, path);
   const items: unknown[] = [];
   for (let i = 0; i < length; i++) {
-    const read = readMember(value, i, `${path}/${i}`, add);
+    const read = readElement(value, i, path, add);
     if (read === 'failed') return 'failed';
     items.push(read.value);
   }

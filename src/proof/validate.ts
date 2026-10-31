@@ -20,7 +20,7 @@ import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { isPlainObject } from '../values.js';
+import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { isProofFormat, PROOF_FORMATS } from './formats.js';
 import type { DecisionProof, UnsignedProof } from './types.js';
 
@@ -141,7 +141,9 @@ function listOf(item: Check): Check {
       add(path, `${citeName(path)} must be an array`);
       return;
     }
-    Array.from(value as unknown[]).forEach((v, i) => item(v, `${path}[${i}]`, add));
+    const items = readList(value, path);
+    if (typeof items === 'string') add(path, items);
+    else items.forEach((v, i) => item(v, `${path}[${i}]`, add));
   };
 }
 
@@ -370,7 +372,7 @@ export function validateProof(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
-  const issues = collect(value, DECISION_PROOF, new Set());
+  const issues = withValueBudget(() => collect(value, DECISION_PROOF, new Set()));
   return { errors: issues.map((issue) => issue.message), issues };
 }
 
@@ -385,7 +387,9 @@ export type ProofRead<T> = { proof: T; errors: [] } | { proof: undefined; errors
  * one value to the digest check and another to the signature check.
  */
 export function readDecisionProof(value: unknown): ProofRead<DecisionProof> {
-  const { snapshot, errors } = readSnapshot(value, DECISION_PROOF, new Set());
+  const { snapshot, errors } = withValueBudget(() =>
+    readSnapshot(value, DECISION_PROOF, new Set()),
+  );
   return conforms<DecisionProof>(snapshot, errors)
     ? { proof: snapshot, errors: [] }
     : { proof: undefined, errors };
@@ -396,7 +400,9 @@ export function readDecisionProof(value: unknown): ProofRead<DecisionProof> {
  * `signature` are ignored and left out of the snapshot, since sealing replaces them.
  */
 export function readUnsignedProof(value: unknown): ProofRead<UnsignedProof> {
-  const { snapshot, errors } = readSnapshot(value, UNSIGNED_PROOF, SEAL_KEYS);
+  const { snapshot, errors } = withValueBudget(() =>
+    readSnapshot(value, UNSIGNED_PROOF, SEAL_KEYS),
+  );
   return conforms<UnsignedProof>(snapshot, errors)
     ? { proof: snapshot, errors: [] }
     : { proof: undefined, errors };
@@ -454,9 +460,11 @@ function collect(
 
 /** Validator-only: two rule references with the same id and version. */
 function checkUniqueRules(rules: unknown, add: Add): void {
-  if (!Array.isArray(rules)) return;
+  // The list itself was checked (and any problem of it reported) by the shape of `rules`.
+  const items = Array.isArray(rules) ? readList(rules, 'rules') : [];
+  if (typeof items === 'string') return;
   const seen = new Set<string>();
-  Array.from(rules as unknown[]).forEach((rule, i) => {
+  items.forEach((rule, i) => {
     if (!isPlainObject(rule) || typeof rule.id !== 'string' || !isRuleVersion(rule.version)) {
       return;
     }

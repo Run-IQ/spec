@@ -7,7 +7,7 @@ import {
   startOfDayIn,
 } from '../time/civil.js';
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
-import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
+import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
 import { isRuleVersion } from './definition.js';
 import { isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { DEFAULT_EFFECTIVE_ON, readEffectiveOn, resolveWindow } from './window.js';
@@ -294,10 +294,9 @@ export function readVersionGroups(
     if (!Array.isArray(rules)) {
       throw newSpecError('INVALID_RULE', 'rules must be an array of rules');
     }
-    const list: readonly unknown[] = rules;
-    const length = list.length;
-    items = [];
-    for (let i = 0; i < length; i++) items.push(list[i]);
+    const read = readList(rules, 'rules');
+    if (typeof read === 'string') throw newSpecError('INVALID_RULE', read);
+    items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_RULE', unreadableMessage('rules', error));

@@ -11,6 +11,76 @@ import { citeName } from './errors.js';
  * it. `core`'s `maxInputDepth` stays at or below it.
  */
 export const MAX_JSON_DEPTH = 1000;
+
+/**
+ * The most values one call of this package reads from its caller: each element of a list, each
+ * member of an object, counted BEFORE any is read (a list's claimed `length` first). Past it the
+ * value is refused (`<path> is too large: more than 10000000 values`), so the work is bounded by
+ * a count, never by a clock, even for a sparse array of length 2^32 - 1 or a Proxy that claims
+ * 10^12 elements. Every walk of a caller value shares it: the copy of a free-form value, the
+ * canonical form, the readers of rules, proofs, referentials, pointers and inputs.
+ */
+export const MAX_JSON_VALUES = 10_000_000;
+
+/** The values the current call may still read; `undefined` outside `withValueBudget`. */
+let budget: { remaining: number } | undefined;
+
+/**
+ * Internal: runs `read` with one budget of `MAX_JSON_VALUES` values, shared by every walk it
+ * makes (a nested call, as `verifyProof` normalizing a rule, shares the budget of the outer one).
+ * Calls are synchronous, so the budget is the current call's alone.
+ */
+export function withValueBudget<T>(read: () => T): T {
+  if (budget !== undefined) return read();
+  budget = { remaining: MAX_JSON_VALUES };
+  try {
+    return read();
+  } finally {
+    budget = undefined;
+  }
+}
+
+/**
+ * Internal: spends `count` values of the current budget, before they are read; false (nothing
+ * spent) when fewer remain, or when `count` is not a count. Outside `withValueBudget`, one read
+ * of at most `MAX_JSON_VALUES` values is allowed.
+ */
+export function spendValues(count: number): boolean {
+  const left = budget === undefined ? MAX_JSON_VALUES : budget.remaining;
+  if (!Number.isSafeInteger(count) || count < 0 || count > left) return false;
+  if (budget !== undefined) budget.remaining = left - count;
+  return true;
+}
+
+/** Internal: the problem of a value whose reading would pass `MAX_JSON_VALUES`. */
+export function tooLargeMessage(path: string): string {
+  return `${citeName(path)} is too large: more than ${MAX_JSON_VALUES} values`;
+}
+
+/** Internal: the problem of an array with no element at `index` (a hole is not JSON). */
+export function holeMessage(path: string, index: number): string {
+  return `${citeName(path)} has a hole at index ${index}: arrays must be dense`;
+}
+
+/**
+ * Internal: the elements of the caller's array `list`, read once each, or the problem that
+ * stops the read: a `length` that is not a count (only a Proxy claims one), a list too large for
+ * the budget (checked before any element is read), or a hole. A getter or a Proxy trap that
+ * throws is passed on: each caller reads under its own guard.
+ */
+export function readList(list: readonly unknown[], path: string): unknown[] | string {
+  const length: unknown = list.length;
+  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+    return `${citeName(path)} has an invalid length`;
+  }
+  if (!spendValues(length)) return tooLargeMessage(path);
+  const items: unknown[] = [];
+  for (let i = 0; i < length; i++) {
+    if (!(i in list)) return holeMessage(path, i);
+    items.push(list[i]);
+  }
+  return items;
+}
 /**
  * Value classification shared by `canonicalize` and the rule normalizer. Both checks work
  * across realms (vm contexts, iframes, worker globals), where `instanceof` fails.

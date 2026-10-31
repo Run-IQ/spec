@@ -6,8 +6,11 @@ import {
   dateTimeOf,
   hasLoneSurrogate,
   isPlainObject,
+  holeMessage,
   loneSurrogateMessage,
   MAX_JSON_DEPTH,
+  MAX_JSON_VALUES,
+  tooLargeMessage,
 } from '../values.js';
 
 /**
@@ -16,26 +19,16 @@ import {
  * assertion functions.
  */
 
-/**
- * The most property values one check reads (each key of an object, each element of a list,
- * counted before any is read): past it the input is refused as too large, so that the work is
- * bounded by a count, never by a clock, even for a Proxy announcing 10^12 elements.
- */
-export const MAX_INPUT_VALUES = 10_000_000;
-
 export type Add = (path: string, message: string) => void;
 
 /** Stops a check once its `IssueList` is full (`MAX_ISSUES`, `src/issues.ts`). */
 class IssueLimitReached {}
 
-/** Stops a check as soon as the budget of `MAX_INPUT_VALUES` reads is spent. */
+/** Stops a check as soon as the budget of `MAX_JSON_VALUES` reads is spent. */
 class InputTooLarge {
   readonly message: string;
-  constructor(
-    readonly path: string,
-    max: number,
-  ) {
-    this.message = `input too large: more than ${max} values`;
+  constructor(readonly path: string) {
+    this.message = tooLargeMessage(path);
   }
 }
 
@@ -72,7 +65,7 @@ function createReader(encode: boolean): Reader {
     issues,
     depthIssues: 0,
     reads: 0,
-    maxValues: MAX_INPUT_VALUES,
+    maxValues: MAX_JSON_VALUES,
     maxDepth: MAX_JSON_DEPTH,
     heights: new Map(),
   };
@@ -83,7 +76,7 @@ function createReader(encode: boolean): Reader {
  * Internal: runs one check with a fresh reader and returns the problems it listed, in the order
  * found, bounded by `IssueList` (at most 100, then one saying that further problems were not
  * listed), and the reads it made. Never throws: past the read budget the check stops with
- * `input too large`; any other error (a Proxy trap outside a guarded read) is reported by
+ * `<path> is too large`; any other error (a Proxy trap outside a guarded read) is reported by
  * `unreadable` (its path and message). With `encode`, `walkJson` encodes values.
  */
 export function runCheck(
@@ -109,7 +102,7 @@ export function runCheck(
 /** Counts `n` reads about to happen at `path`; throws `InputTooLarge` past the budget. */
 export function announce(reader: Reader, n: number, path: string): void {
   reader.reads += n;
-  if (reader.reads > reader.maxValues) throw new InputTooLarge(path, reader.maxValues);
+  if (reader.reads > reader.maxValues) throw new InputTooLarge(path);
 }
 
 /** The pointer of the member `key` of the value at `pointer` (RFC 6901 escapes). */
@@ -174,6 +167,30 @@ export function readMember(
     add(path, unreadableMessage(path, error));
     return 'failed';
   }
+}
+
+/**
+ * Reads the element `index` of the list at `listPath` once, as `readMember` does; a hole (no
+ * element at `index`: a hole is not JSON) is reported at `listPath` instead
+ * (`<path> has a hole at index <i>: arrays must be dense`).
+ */
+export function readElement(
+  list: object,
+  index: number,
+  listPath: string,
+  add: Add,
+): { value: unknown } | 'failed' {
+  const path = `${listPath}/${index}`;
+  try {
+    if (!Reflect.has(list, index)) {
+      add(listPath, holeMessage(listPath, index));
+      return 'failed';
+    }
+  } catch (error) {
+    add(path, unreadableMessage(path, error));
+    return 'failed';
+  }
+  return readMember(list, index, path, add);
 }
 
 /** The fields of a closed object, each read once (`readFields`). */
@@ -352,7 +369,10 @@ export function walkJson(
     if (key === undefined) continue;
     frame.pending = key;
     const at = typeof key === 'number' ? `${frame.path}/${key}` : childPointer(frame.path, key);
-    const read = readMember(frame.node, key, at, reader.add);
+    const read =
+      typeof key === 'number'
+        ? readElement(frame.node, key, frame.path, reader.add)
+        : readMember(frame.node, key, at, reader.add);
     if (read === 'failed') settle(0, undefined, false);
     else visit(read.value, at, frame.depth + 1, false);
   }

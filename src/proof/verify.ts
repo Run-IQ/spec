@@ -4,7 +4,7 @@ import { sha256Hex } from '../hash.js';
 import { boundMessages } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
 import { canonicalRulePayload } from '../rule/payload.js';
-import { isPlainObject } from '../values.js';
+import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { contentDigest, inconsistencies } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
@@ -67,7 +67,7 @@ export function verifyProof(
   o?: { trustedKeys?: Record<string, string>; rules?: ReadonlyArray<RuleDefinitionInput> },
 ): ProofVerification {
   try {
-    return verify(p, o);
+    return withValueBudget(() => verify(p, o));
   } catch (error) {
     // A hostile value (a Proxy, a throwing getter) can still throw while being read.
     return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
@@ -120,8 +120,10 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
     findings.push({ message, invalid: true });
   };
 
+  const items = readList(rules, 'rules');
+  if (typeof items === 'string') return [{ message: items, invalid: true }];
   const given = new Map<string, string>();
-  Array.from(rules as unknown[]).forEach((rule, i) => {
+  items.forEach((rule, i) => {
     let key: string;
     let checksum: string;
     try {

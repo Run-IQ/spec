@@ -2,7 +2,7 @@ import type { JsonValue } from '../canonical.js';
 import { DEFAULT_OUTPUT } from '../decision/output.js';
 import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { isReservedName } from '../reserved.js';
-import { isPlainObject, typeName } from '../values.js';
+import { isPlainObject, readList as readCallerList, typeName, withValueBudget } from '../values.js';
 import {
   readDimensionSpec,
   isUnnamable,
@@ -107,6 +107,10 @@ export function matchesSelector(
   selector: RuleSelector,
   carrier: string = LOCAL_RULE_SET,
 ): boolean {
+  return withValueBudget(() => matches(rule, selector, carrier));
+}
+
+function matches(rule: unknown, selector: unknown, carrier: unknown): boolean {
   const target = readOnce('rule', () => copyRule(rule));
   const wanted = readOnce('selector', () => copySelector(selector));
   const { ruleSet } = target;
@@ -178,14 +182,14 @@ function copyRule(rule: unknown): RuleCopy {
   if (typeof model !== 'string' || model === '') {
     selectorError('rule.model must be a non-empty string');
   }
-  if (!isStringArray(tags)) selectorError('rule.tags must be an array of strings');
+  const tagList = stringList(tags, 'rule.tags');
   if (output !== undefined && typeof output !== 'string') {
     selectorError('rule.output must be a string when present');
   }
   if (!isPlainObject(dimensions)) {
     selectorError('rule.dimensions must be an object of dimension specs');
   }
-  return { id, ruleSet, tags: [...tags], dimensions: copyEntries(dimensions), output, model };
+  return { id, ruleSet, tags: tagList, dimensions: copyEntries(dimensions), output, model };
 }
 
 /** The fields of `selector` that `matchesSelector` reads, checked and copied once. */
@@ -197,10 +201,7 @@ function copySelector(selector: unknown): RuleSelector {
   for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
     const value = selector[field];
     if (value === undefined) continue;
-    if (!isStringArray(value)) {
-      selectorError(`selector.${citeName(field)} must be an array of strings`);
-    }
-    copy[field] = [...value];
+    copy[field] = stringList(value, `selector.${field}`);
   }
   const dimensions = selector.dimensions;
   if (dimensions !== undefined) {
@@ -219,8 +220,17 @@ function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
   return Object.fromEntries(Object.keys(value).map((key) => [key, value[key]]));
 }
 
-function isStringArray(value: unknown): value is string[] {
-  return Array.isArray(value) && value.every((item) => typeof item === 'string');
+/**
+ * A copy of the caller's list of strings at `path`, each element read once (`readList`: no hole,
+ * at most `MAX_JSON_VALUES` elements, counted before any is read); `INVALID_RULE` otherwise.
+ */
+function stringList(value: unknown, path: string): string[] {
+  const items = Array.isArray(value) ? readCallerList(value, path) : undefined;
+  if (typeof items === 'string') selectorError(items);
+  if (items === undefined || !items.every((item): item is string => typeof item === 'string')) {
+    selectorError(`${citeName(path)} must be an array of strings`);
+  }
+  return items;
 }
 
 function selectorError(message: string): never {

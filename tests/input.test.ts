@@ -1,8 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { validateProofInput } from '../src/index.js';
 import { reservedDimensionNameMessage } from '../src/rule/dimensions.js';
-import { MAX_INPUT_VALUES } from '../src/input/read.js';
-import { MAX_JSON_DEPTH } from '../src/values.js';
+import { MAX_JSON_DEPTH, MAX_JSON_VALUES } from '../src/values.js';
 import { inputCheckReads } from '../src/input/validate.js';
 import { expectBoundedIssues, nested, proofInput, sortedByPath } from './helpers.js';
 
@@ -328,7 +327,7 @@ describe('validateProofInput: data and context', () => {
   it('refuses a hole in a list', () => {
     // eslint-disable-next-line no-sparse-arrays -- the hole is the case under test
     expect(dataIssues({ a: [1, , 3] })).toEqual([
-      { path: '/data/a/1', message: '/data/a/1 is not JSON: undefined' },
+      { path: '/data/a', message: '/data/a has a hole at index 1: arrays must be dense' },
     ]);
   });
 
@@ -568,8 +567,8 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     ]);
   });
 
-  it(`refuses more than ${MAX_INPUT_VALUES} values before reading them`, () => {
-    expect(MAX_INPUT_VALUES).toBe(10_000_000);
+  it(`refuses more than ${MAX_JSON_VALUES} values before reading them`, () => {
+    expect(MAX_JSON_VALUES).toBe(10_000_000);
     let indexReads = 0;
     const huge = new Proxy([], {
       get(target, key) {
@@ -579,13 +578,13 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
       },
     });
     expect(validateProofInput(proofInput({}, { huge: huge as never }))).toEqual([
-      { path: '/data/huge', message: 'input too large: more than 10000000 values' },
+      { path: '/data/huge', message: '/data/huge is too large: more than 10000000 values' },
     ]);
     expect(indexReads).toBe(0);
     const sparse: unknown[] = [];
     sparse.length = 2 ** 32 - 1;
     expect(validateProofInput(proofInput({}, { sparse: sparse as never }))).toEqual([
-      { path: '/data/sparse', message: 'input too large: more than 10000000 values' },
+      { path: '/data/sparse', message: '/data/sparse is too large: more than 10000000 values' },
     ]);
   });
 

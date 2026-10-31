@@ -1,6 +1,6 @@
 import { citeName, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage, readList } from '../values.js';
 
 /**
  * What a rule asks of one dimension of the input (D-18):
@@ -169,7 +169,11 @@ function readValues(
     );
     return undefined;
   }
-  const items: unknown[] = Array.from(value);
+  const items = readList(value, path);
+  if (typeof items === 'string') {
+    fail(path, items);
+    return undefined;
+  }
   if (required && items.length === 0) {
     fail(path, `${citeName(path)} must list at least one value`);
     return undefined;

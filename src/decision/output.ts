@@ -3,7 +3,7 @@ import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from
 import { isReservedName } from '../reserved.js';
 import { IssueList, pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { isPlainObject } from '../values.js';
+import { isPlainObject, readList } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 
 /**
@@ -284,7 +284,11 @@ function checkEnumValues(
     add(path, `${citeName(path)} must be an array of non-empty strings`);
     return;
   }
-  const items: unknown[] = Array.from(values);
+  const items = readList(values, path);
+  if (typeof items === 'string') {
+    add(path, items);
+    return;
+  }
   if (items.length === 0) {
     add(path, `${citeName(path)} must not be empty: an enum output needs at least one value`);
     return;
@@ -346,7 +350,9 @@ function readDeclaration(declaration: unknown): { type: OutputType; values: read
     if (!Array.isArray(values)) {
       throw newSpecError('INVALID_RULE', 'the values of an enum output must be an array');
     }
-    return { type, values: Array.from(values as readonly unknown[]) };
+    const items = readList(values, 'output declaration.values');
+    if (typeof items === 'string') throw newSpecError('INVALID_RULE', items);
+    return { type, values: items };
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_RULE', unreadableMessage('output declaration', error));

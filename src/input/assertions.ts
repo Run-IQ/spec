@@ -48,27 +48,38 @@ export const DATE_FORMS = 'a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:M
  * a pointer never covers anything. Throws `SpecError` (`INVALID_PATH`) when `pointer` is not a
  * JSON pointer or holds a `-` segment (as an assertion key cannot: it names nothing), and
  * `SpecError` (`INVALID_INPUT`, `assertions could not be read: …`) when
- * `assertions` cannot be read (a getter or a Proxy trap that throws), never a raw error. Reads
- * at most one assertion; costs one lookup per segment of `pointer`.
+ * `assertions` cannot be read (a getter or a Proxy trap that throws), never a raw error.
+ *
+ * Cost: `pointer` is parsed once (linear in its length), the own keys of `assertions` are listed
+ * once, and each key is compared once with `pointer` (linear in the total length of the keys);
+ * no prefix of `pointer` is built, so a pointer of 40 000 segments costs no more than its text.
+ * The value of a covering key is read longest first, until one is not `undefined`.
  */
 export function governingAssertion(
   assertions: Readonly<Record<JsonPointer, FactAssertion>>,
   pointer: JsonPointer,
 ): { pointer: JsonPointer; assertion: FactAssertion } | undefined {
-  const segments = parseReadPointer(pointer);
-  const prefixes: string[] = [''];
-  for (const segment of segments) {
-    prefixes.push(childPointer(prefixes[prefixes.length - 1] ?? '', segment));
-  }
-  for (let i = prefixes.length - 1; i >= 0; i--) {
-    const prefix = prefixes[i] ?? '';
-    const found = guarded('assertions', () =>
-      Object.hasOwn(assertions, prefix) ? { assertion: assertions[prefix] } : undefined,
-    );
-    if (found?.assertion !== undefined) return { pointer: prefix, assertion: found.assertion };
+  parseReadPointer(pointer);
+  const keys = guarded('assertions', () => Reflect.ownKeys(assertions));
+  // A valid pointer has one written form, so a key covers `pointer` exactly when its text
+  // starts `pointer`'s at a segment boundary: no prefix of `pointer` is ever built.
+  const covering = keys
+    .filter((key): key is string => typeof key === 'string' && covers(key, pointer))
+    .sort((a, b) => b.length - a.length);
+  for (const key of covering) {
+    const found = guarded('assertions', () => assertions[key]);
+    if (found !== undefined) return { pointer: key, assertion: found };
   }
   return undefined;
 }
+
+/** True when the pointer `key` names `pointer` or one of its ancestors (segment-wise). */
+function covers(key: string, pointer: string): boolean {
+  if (!pointer.startsWith(key)) return false;
+  return pointer.length === key.length || pointer.charCodeAt(key.length) === SLASH;
+}
+
+const SLASH = 0x2f;
 
 /**
  * True when a decision resting on `assertion` can only be provisional (D-7): its status is

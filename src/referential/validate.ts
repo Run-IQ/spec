@@ -6,7 +6,7 @@ import type { RuleValidationIssue } from '../issues.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import { hasLoneSurrogate, holeMessage, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { readLimits, STEPS_PER_NODE } from './limits.js';
 import type { Limits, ReferentialLimits } from './limits.js';
 import { ALWAYS, sweepNesting } from './nesting.js';
@@ -398,8 +398,8 @@ function readCodeLists(
   value: unknown,
   keys: readonly string[],
   add: Add,
-): Map<string, readonly unknown[] | undefined> {
-  const codes = new Map<string, readonly unknown[] | undefined>();
+): Map<string, PeriodList | undefined> {
+  const codes = new Map<string, PeriodList | undefined>();
   if (!isPlainObject(value)) {
     add('codes', 'codes must be an object of period lists');
     return codes;
@@ -419,17 +419,30 @@ function readCodeLists(
       codes.set(code, undefined);
       continue;
     }
-    if (!Array.isArray(periods)) {
+    // The length is read once: the size check and the read of the periods both use it.
+    const length: unknown = Array.isArray(periods) ? periods.length : undefined;
+    if (!Array.isArray(periods) || !isCount(length)) {
       add(path, `${citeName(path)} must be an array of periods`);
       codes.set(code, undefined);
-    } else if (periods.length === 0) {
+    } else if (length === 0) {
       add(path, `${citeName(path)} must list at least one period`);
       codes.set(code, undefined);
     } else {
-      codes.set(code, periods);
+      codes.set(code, { list: periods, length });
     }
   }
   return codes;
+}
+
+/** A list of periods with its `length`, read once. */
+interface PeriodList {
+  readonly list: readonly unknown[];
+  readonly length: number;
+}
+
+/** True for a list length: a safe integer, 0 or more (only a Proxy claims anything else). */
+function isCount(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
 }
 
 /** The groups, each read once with the length of its member list; `undefined` if refused. */
@@ -480,11 +493,15 @@ function readGroup(value: unknown, name: string, path: string, add: Add): RawGro
     return refused;
   }
   const list: readonly unknown[] = members;
-  let length: number;
+  let length: unknown;
   try {
     length = list.length;
   } catch (error) {
     add(`${path}.members`, unreadableMessage(`${path}.members`, error));
+    return refused;
+  }
+  if (!isCount(length)) {
+    add(`${path}.members`, `${citeName(path)}.members must be an array of members`);
     return refused;
   }
   return {
@@ -500,13 +517,17 @@ function readGroup(value: unknown, name: string, path: string, add: Add): RawGro
  * Checks the periods of one code and returns them in normal form: sorted, `until: null`
  * dropped, identical ones kept once. Identical periods are one period, not an overlap.
  */
-function checkPeriods(periods: readonly unknown[], path: string, add: Add): Period[] {
+function checkPeriods(periods: PeriodList, path: string, add: Add): Period[] {
   const read: Period[] = [];
-  const length = periods.length;
+  const { list, length } = periods;
   for (let i = 0; i < length; i++) {
     const at = `${path}[${i}]`;
     try {
-      const period = readPeriod(periods[i], at, add);
+      if (!(i in list)) {
+        add(path, holeMessage(path, i));
+        continue;
+      }
+      const period = readPeriod(list[i], at, add);
       if (period !== undefined) read.push(period);
     } catch (error) {
       add(at, unreadableMessage(at, error));
@@ -603,7 +624,8 @@ function checkMembers(
     const at = `${path}[${i}]`;
     let member: ReferentialMember | undefined;
     try {
-      member = readMember(members[i], at, codes, groupNames, add);
+      if (i in members) member = readMember(members[i], at, codes, groupNames, add);
+      else add(path, holeMessage(path, i));
     } catch (error) {
       add(at, unreadableMessage(at, error));
     }

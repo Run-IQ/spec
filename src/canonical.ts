@@ -1,5 +1,14 @@
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
-import { dateTimeOf, hasLoneSurrogate, isPlainObject, MAX_JSON_DEPTH } from './values.js';
+import {
+  dateTimeOf,
+  hasLoneSurrogate,
+  holeMessage,
+  isPlainObject,
+  MAX_JSON_DEPTH,
+  spendValues,
+  tooLargeMessage,
+  withValueBudget,
+} from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
 
@@ -8,7 +17,7 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * sorted by UTF-16 code unit at every depth, no whitespace, numbers written as ECMAScript writes
  * them (`1e+30`, `0.002`, `333333333.3333333`), strings escaped as `JSON.stringify` escapes them.
  * - a `Date` (from any realm) becomes its ISO string;
- * - an `undefined` property is omitted, an `undefined` (or hole) in an array becomes `null`;
+ * - an `undefined` property is omitted, an `undefined` in an array becomes `null`;
  * - `-0` is written `0`.
  *
  * Throws `SpecError` (`NON_SERIALIZABLE`) for `NaN`, `±Infinity`, bigints, functions, symbols,
@@ -20,7 +29,11 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * included) is reported at its own path: `a value that could not be read: <reason>`, the reason
  * cited (escaped, cut at 256 characters).
  *
- * The walk keeps its own stack, not the JavaScript call stack: any depth is accepted.
+ * The walk keeps its own stack, not the JavaScript call stack: any depth is accepted. An array
+ * with a hole is refused (`<path> has a hole at index <i>: arrays must be dense`): a hole is not
+ * JSON. At most `MAX_JSON_VALUES` (10 000 000) values are read, each list's claimed length
+ * counted before any element is read: past it, `<path> is too large: more than 10000000
+ * values`.
  *
  * Strings are data, as in JCS (RFC 8785): no Unicode normalization is applied, so `"é"`
  * written precomposed (U+00E9) and decomposed (U+0065 U+0301) give different output.
@@ -42,7 +55,7 @@ export function canonicalizeAt(value: unknown, path: string): string {
   if (typeof root !== 'string') {
     throw newSpecError('INVALID_PATH', `path must be a string, got a value of type ${typeof root}`);
   }
-  return write(value, root, true, Infinity);
+  return withValueBudget(() => write(value, root, true, Infinity));
 }
 
 /**
@@ -121,7 +134,12 @@ function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: numb
     let keys: string[] | undefined;
     let length: number;
     if (read(path, () => Array.isArray(node))) {
-      length = read(path, () => (node as unknown[]).length);
+      const claimed: unknown = read(path, () => (node as unknown[]).length);
+      // Only a Proxy claims a length that is not a count.
+      if (typeof claimed !== 'number' || !Number.isSafeInteger(claimed) || claimed < 0) {
+        fail(path, 'an array with an invalid length');
+      }
+      length = claimed as number;
     } else {
       if (!read(path, () => isPlainObject(node))) {
         const name = read(path, () => constructorName(node));
@@ -136,6 +154,10 @@ function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: numb
         `${citeName(path)} is nested deeper than ${maxDepth} levels`,
         path,
       );
+    }
+    // Counted before any member is read: a sparse array or a Proxy may claim 2^32 - 1.
+    if (!spendValues(length)) {
+      throw newSpecError('NON_SERIALIZABLE', tooLargeMessage(path || '(root)'), path);
     }
     ancestors.add(node);
     stack.push({ node, path, keys, length, index: 0, out: '', pending: '' });
@@ -156,6 +178,9 @@ function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: numb
     const { node, keys } = frame;
     if (keys === undefined) {
       const path = `${frame.path}[${i}]`;
+      if (!read(path, () => i in node)) {
+        throw newSpecError('NON_SERIALIZABLE', holeMessage(frame.path || '(root)', i), frame.path);
+      }
       const item = read(path, () => (node as unknown[])[i]);
       if (item === undefined) emit('null');
       else open(item, path);

@@ -8,7 +8,7 @@ import {
   childPointer,
   expectPlainObject,
   readFields,
-  readMember,
+  readElement,
   requireFields,
   runCheck,
   walkJson,
@@ -89,7 +89,7 @@ function readFact(value: unknown, path: string, reader: Reader): void {
   const spans: Span[] = [];
   for (let index = 0; index < length; index++) {
     const at = `${path}/${index}`;
-    const read = readMember(list, index, at, add);
+    const read = readElement(list, index, path, add);
     if (read === 'failed') continue;
     const span = readPeriod(read.value, at, reader);
     if (span !== undefined) spans.push({ index, ...span });

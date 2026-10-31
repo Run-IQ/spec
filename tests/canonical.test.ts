@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, canonicalizeAt, SpecError } from '../src/index.js';
+import { specError } from './helpers.js';
 
 const nonSerializable = expect.objectContaining({ code: 'NON_SERIALIZABLE' });
 
@@ -44,10 +45,19 @@ describe('canonicalize', () => {
     expect(canonicalize({ a: { b: undefined } })).toBe('{"a":{}}');
   });
 
-  it('turns undefined and holes in arrays into null', () => {
+  it('turns undefined in an array into null, and refuses a hole: it is not JSON', () => {
     expect(canonicalize([1, undefined, 3])).toBe('[1,null,3]');
-    // eslint-disable-next-line no-sparse-arrays
-    expect(canonicalize([1, , 3])).toBe('[1,null,3]');
+    // eslint-disable-next-line no-sparse-arrays -- the hole is the case under test
+    expect(specError(() => canonicalize({ a: [1, , 3] }))).toMatchObject({
+      code: 'NON_SERIALIZABLE',
+      path: 'a',
+      message: 'a has a hole at index 1: arrays must be dense',
+    });
+    // eslint-disable-next-line no-sparse-arrays -- the hole is the case under test
+    expect(specError(() => canonicalize([, 1]))).toMatchObject({
+      path: '',
+      message: '(root) has a hole at index 0: arrays must be dense',
+    });
   });
 
   it('serialises a Date as its ISO string', () => {
