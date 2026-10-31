@@ -5,20 +5,7 @@ import type { RuleException } from '../rule/exceptions.js';
 /** The format a decision proof declares in `format`. */
 export const PROOF_FORMAT = 'run-iq.proof/1';
 
-/**
- * What a decision's input digest covers: the facts and the evaluation metadata, exactly as
- * evaluated. The proof holds only its digest (`computeInputDigest`), never the input itself.
- */
-export interface ProofInput {
-  data: { [k: string]: JsonValue };
-  meta: {
-    tenantId: string;
-    effectiveDate: string | null;
-    tags: string[];
-    dimensions: Record<string, string>;
-    context: { [k: string]: JsonValue };
-  };
-}
+export type { ProofInput } from '../input/types.js';
 
 /** A rule the evaluation received: its identity and its checksum (`computeRuleChecksum`). */
 export interface ProofRuleRef {

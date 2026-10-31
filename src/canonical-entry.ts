@@ -102,6 +102,19 @@ export type {
   UnsignedProof,
 } from './proof/types.js';
 export { computeInputDigest, sealProof } from './proof/digest.js';
+export type {
+  AssertionMethod,
+  AssertionStatus,
+  FactAssertion,
+  TemporalValue,
+} from './input/types.js';
+export {
+  computeAssertionDigest,
+  governingAssertion,
+  isProvisionalAssertion,
+} from './input/assertions.js';
+export { validateProofInput } from './input/validate.js';
+export { validateTemporalFact } from './input/temporal.js';
 export { createSigningKeyPair, signProof } from './proof/sign.js';
 export { verifyProof } from './proof/verify.js';
 export { validateProof } from './proof/validate.js';

@@ -187,7 +187,10 @@ const proof = sealProof({
   sealedAt: '2025-06-01T10:00:00.000Z',
   inputDigest: computeInputDigest({
     data: { orderTotal: 200 },
-    meta: { tenantId: 'shop', effectiveDate: '2025-06-01', tags: [], dimensions: {}, context: {} },
+    meta: {
+      tenantId: 'shop', dates: { effective: '2025-06-01' }, tags: [], dimensions: {},
+      context: {}, assertions: {},
+    },
   }),
   rules: [{ id: 'shipping-fee', version: 1, checksum: computeRuleChecksum(rule) }],
   versions: { engine: '1.0.0-next.1', plugins: {}, dsls: {} },

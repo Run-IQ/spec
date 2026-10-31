@@ -80,6 +80,14 @@ type Entry = {
   isPackId: (value: unknown) => boolean;
   packIdProblem: (value: unknown) => string | undefined;
   normalizeRuleDefinition: (rule: object) => Record<string, unknown>;
+  validateProofInput: (value: unknown) => { path: string; message: string }[];
+  validateTemporalFact: (value: unknown, path: string) => { path: string; message: string }[];
+  governingAssertion: (
+    assertions: Readonly<Record<string, unknown>>,
+    pointer: string,
+  ) => { pointer: string; assertion: unknown } | undefined;
+  isProvisionalAssertion: (assertion: object) => boolean;
+  computeAssertionDigest: (assertion: object) => string;
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -280,6 +288,42 @@ describeBuilt('built entries: one SpecError identity', () => {
       const normal = entry.normalizeRuleDefinition(rule);
       expect(normal.forEach).toEqual({ path: '/enfants', key: 'id' });
       expect(normal).not.toHaveProperty('ruleSet');
+    }
+  });
+
+  it('every built entry exports the proof input functions', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const assertion = { by: 'a', method: 'presumed', at: '2026-01-01', status: 'validated' };
+    const input = {
+      data: { x: 1 },
+      meta: {
+        tenantId: 't',
+        dates: {},
+        tags: [],
+        dimensions: {},
+        context: {},
+        assertions: { '/x': assertion },
+      },
+    };
+    const period = { from: '2026-01-01', until: null, value: 1 };
+    for (const entry of entries) {
+      expect(entry.validateProofInput(input)).toEqual([]);
+      expect(entry.validateTemporalFact([period, period], '/p')).toEqual([
+        { path: '/p[1]', message: 'overlap at /p[1]' },
+      ]);
+      expect(entry.governingAssertion({ '/x': assertion }, '/x/y')).toEqual({
+        pointer: '/x',
+        assertion,
+      });
+      expect(entry.isProvisionalAssertion(assertion)).toBe(true);
+      expect(entry.computeAssertionDigest(assertion)).toBe(
+        entry.sha256Hex('{"at":"2026-01-01","by":"a","method":"presumed","status":"validated"}'),
+      );
     }
   });
 

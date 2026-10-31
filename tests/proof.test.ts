@@ -57,10 +57,11 @@ const input: ProofInput = {
   data: { income: 1000 },
   meta: {
     tenantId: 't1',
-    effectiveDate: '2025-06-01T00:00:00.000Z',
+    dates: { effective: '2025-06-01T00:00:00.000Z' },
     tags: [],
     dimensions: {},
     context: {},
+    assertions: {},
   },
 };
 
@@ -171,8 +172,9 @@ describe('computeInputDigest', () => {
     expect(computeInputDigest(input)).toBe(nodeSha256(canonicalize(input)));
     expect(computeInputDigest(input)).toBe(
       nodeSha256(
-        '{"data":{"income":1000},"meta":{"context":{},"dimensions":{},' +
-          '"effectiveDate":"2025-06-01T00:00:00.000Z","tags":[],"tenantId":"t1"}}',
+        '{"data":{"income":1000},"meta":{"assertions":{},"context":{},' +
+          '"dates":{"effective":"2025-06-01T00:00:00.000Z"},"dimensions":{},"tags":[],' +
+          '"tenantId":"t1"}}',
       ),
     );
   });
@@ -183,9 +185,10 @@ describe('computeInputDigest', () => {
       meta: {
         context: {},
         tags: [],
+        assertions: {},
         dimensions: {},
         tenantId: 't1',
-        effectiveDate: '2025-06-01T00:00:00.000Z',
+        dates: { effective: '2025-06-01T00:00:00.000Z' },
       },
       data: { skipped: undefined, income: 1000 },
     } as unknown as ProofInput;

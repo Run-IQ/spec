@@ -1,6 +1,12 @@
 import { expect } from 'vitest';
 import { normalizeRuleDefinition, SpecError, validateRuleDefinition } from '../src/index.js';
-import type { CivilCalendar, Referential, RuleDefinitionInput } from '../src/index.js';
+import type {
+  CivilCalendar,
+  FactAssertion,
+  ProofInput,
+  Referential,
+  RuleDefinitionInput,
+} from '../src/index.js';
 
 /** The `SpecError` `call` throws; fails the test when it throws anything else, or nothing. */
 export function specError(call: () => unknown): SpecError {
@@ -134,4 +140,41 @@ export function expectRuleRefused(rule: object, path: string, message: string): 
     message,
   });
   expect(validateRuleDefinition(rule).issues).toEqual([{ path, message }]);
+}
+
+/** A valid assertion (`FactAssertion`): a person validated the fact. Spread it to vary. */
+export const HUMAN_ASSERTION: Readonly<FactAssertion> = Object.freeze({
+  by: 'agent-7',
+  method: 'human',
+  at: '2026-01-02',
+  status: 'validated',
+});
+
+/**
+ * A valid proof input (`ProofInput`), a fresh copy at each call: `data` and each field of
+ * `meta` can be replaced (`proofInput({ tags: ['a'] })`, `proofInput({}, { x: 1 })`).
+ */
+export function proofInput(
+  meta: Partial<ProofInput['meta']> = {},
+  data: ProofInput['data'] = { revenue: 1000 },
+): ProofInput {
+  return {
+    data,
+    meta: {
+      tenantId: 't1',
+      dates: { effective: '2026-01-01' },
+      tags: [],
+      dimensions: {},
+      context: {},
+      assertions: {},
+      ...meta,
+    },
+  };
+}
+
+/** A value whose deepest value is `levels` objects below it: `nested(1)` is `{ a: 1 }`. */
+export function nested(levels: number): unknown {
+  let value: unknown = 1;
+  for (let i = 0; i < levels; i++) value = { a: value };
+  return value;
 }

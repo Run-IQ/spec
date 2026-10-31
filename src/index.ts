@@ -13,7 +13,10 @@
  * `matchDimension`) and dated referentials (`Referential`, `validateReferential`, which agrees
  * with `schema/referential.schema.json`, `resolveMembership`, `computeReferentialDigest`);
  * collections (`ForEach`, `OrderKey`) and rule sets (`LOCAL_RULE_SET`, `qualifyName`,
- * `isRuleSetId`, `isPackId`, `packIdProblem`).
+ * `isRuleSetId`, `isPackId`, `packIdProblem`); the decision input (`ProofInput`,
+ * `validateProofInput`, which agrees with `schema/proof-input.schema.json`), the provenance of
+ * its facts (`FactAssertion`, `governingAssertion`, `isProvisionalAssertion`,
+ * `computeAssertionDigest`) and temporal facts (`TemporalValue`, `validateTemporalFact`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -119,6 +122,19 @@ export type {
   UnsignedProof,
 } from './proof/types.js';
 export { computeInputDigest, sealProof } from './proof/digest.js';
+export type {
+  AssertionMethod,
+  AssertionStatus,
+  FactAssertion,
+  TemporalValue,
+} from './input/types.js';
+export {
+  computeAssertionDigest,
+  governingAssertion,
+  isProvisionalAssertion,
+} from './input/assertions.js';
+export { validateProofInput } from './input/validate.js';
+export { validateTemporalFact } from './input/temporal.js';
 export { createSigningKeyPair, signProof } from './proof/sign.js';
 export { verifyProof } from './proof/verify.js';
 export { validateProof } from './proof/validate.js';
