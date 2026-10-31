@@ -133,7 +133,8 @@
         {
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)"
+            "pattern": "^(?!\\$)",
+            "minLength": 1
           },
           "additionalProperties": {
             "anyOf": [
@@ -156,7 +157,8 @@
         {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         }
       ]
@@ -399,9 +401,9 @@
       "pattern": "^(?:UTC|[+-](?:[01]\\d|2[0-3]):[0-5]\\d|[A-Z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$"
     },
     "effectiveOn": {
-      "description": "A JSON pointer (RFC 6901) to a reference date: /$dates/<name> (one non-empty name), /$item/<path> or /$segment/from. A '-' segment is refused.",
+      "description": "A JSON pointer (RFC 6901) to a reference date: /$dates/<name> (one non-empty name, not starting with $: date names starting with $ are reserved), /$item/<path> or /$segment/from. A '-' segment is refused.",
       "type": "string",
-      "pattern": "^/(?:\\$dates/(?!-$)(?:[^/~]|~[01])+|\\$item(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)+|\\$segment/from)$"
+      "pattern": "^/(?:\\$dates/(?!-$)(?!\\$)(?:[^/~]|~[01])+|\\$item(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)+|\\$segment/from)$"
     },
     "ruleException": {
       "description": "One exception: inhibit the targeted rules, substitute params into them (deep merge), or short-circuit one output to a value.",
@@ -481,13 +483,15 @@
         "tags": {
           "type": "array",
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "dimensions": {
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)"
+            "pattern": "^(?!\\$)",
+            "minLength": 1
           },
           "additionalProperties": {
             "$ref": "#/$defs/dimensionSpec"
@@ -851,9 +855,9 @@
       "pattern": "^(?:/(?!(?:-|\\*)(?:/|$))(?:[^/~]|~[01])*)+$"
     },
     "namedDate": {
-      "description": "A named date of the input: /$dates/<name>.",
+      "description": "A named date of the input: /$dates/<name>, the name non-empty and not starting with $.",
       "type": "string",
-      "pattern": "^/\\$dates/(?!-$)(?:[^/~]|~[01])+$"
+      "pattern": "^/\\$dates/(?!-$)(?!\\$)(?:[^/~]|~[01])+$"
     }
   }
 }

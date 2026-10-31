@@ -35,25 +35,31 @@
           "minLength": 1
         },
         "dates": {
-          "description": "The named dates; effective is the reference date of the decision. Each is a civil date or a canonical instant, never an offset (the caller normalizes first).",
+          "description": "The named dates (a name is non-empty and never starts with $, which is reserved); effective is the reference date of the decision. Each is a civil date or a canonical instant, never an offset (the caller normalizes first).",
           "type": "object",
           "additionalProperties": {
             "$ref": "#/$defs/date"
+          },
+          "propertyNames": {
+            "pattern": "^(?!\\$)",
+            "minLength": 1
           }
         },
         "tags": {
-          "description": "The scope the caller chose, sorted by UTF-16 code unit without duplicates (sorting checked by validateProofInput only).",
+          "description": "The scope the caller chose: non-empty texts sorted by UTF-16 code unit without duplicates (sorting checked by validateProofInput only).",
           "type": "array",
           "uniqueItems": true,
           "items": {
-            "type": "string"
+            "type": "string",
+            "minLength": 1
           }
         },
         "dimensions": {
-          "description": "A value, or a list of at least two values sorted without duplicates (sorting checked by validateProofInput only); a single value is written as a string. Names starting with $ are reserved.",
+          "description": "A value, or a list of at least two values sorted without duplicates (sorting checked by validateProofInput only); a single value is written as a string. Names are non-empty; names starting with $ are reserved.",
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?!\\$)"
+            "pattern": "^(?!\\$)",
+            "minLength": 1
           },
           "additionalProperties": {
             "anyOf": [
@@ -79,10 +85,10 @@
           }
         },
         "assertions": {
-          "description": "The provenance of facts, named dates and dimensions, keyed by the context pointer of what each covers: a fact (/revenue/total), /$dates or /$dates/<name>, /$dimensions or /$dimensions/<name>, or '' for everything. A '-' segment is not an index and is refused.",
+          "description": "The provenance of facts, named dates and dimensions, keyed by the context pointer of what each covers: a fact (/revenue/total), /$dates or /$dates/<name>, /$dimensions or /$dimensions/<name> (a name non-empty, never starting with $), or '' for everything. A '-' segment is not an index and is refused.",
           "type": "object",
           "propertyNames": {
-            "pattern": "^(?:|/\\$dates(?:/(?!-$)(?:[^/~]|~[01])*)?|/\\$dimensions(?:/(?!-$)(?!\\$)(?:[^/~]|~[01])*)?|/(?!-(?:/|$))(?!\\$)(?:[^/~]|~[01])*(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)*)$"
+            "pattern": "^(?:|/\\$dates(?:/(?!-$)(?!\\$)(?:[^/~]|~[01])+)?|/\\$dimensions(?:/(?!-$)(?!\\$)(?:[^/~]|~[01])+)?|/(?!-(?:/|$))(?!\\$)(?:[^/~]|~[01])*(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)*)$"
           },
           "additionalProperties": {
             "$ref": "#/$defs/assertion"
@@ -206,7 +212,8 @@
           "maximum": 1
         },
         "complete": {
-          "type": "boolean"
+          "description": "false on a collection that may miss elements; a list is complete by default, so true is never written.",
+          "const": false
         },
         "source": {
           "description": "The decision the fact comes from: its proof digest, the output it gave (qualified by its rule set unless local) and, for an output per element, the subject.",

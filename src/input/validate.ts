@@ -1,5 +1,10 @@
 import { unreadableMessage } from '../errors.js';
-import { dimensionValueProblem, reservedDimensionNameMessage } from '../rule/dimensions.js';
+import { reservedDateNameMessage } from '../reserved.js';
+import {
+  dimensionValueProblem,
+  emptyDimensionNameMessage,
+  reservedDimensionNameMessage,
+} from '../rule/dimensions.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
@@ -51,9 +56,10 @@ const PLAIN_OBJECT = 'a plain object';
  * caller (`core`) normalizes first. `data` and `meta.context` hold plain JSON without a number
  * of absolute value 2^53 or more (`number beyond 2^53 at /data/id`, D-5); a root key of `data`
  * starting with `$` is reserved (`reserved key /data/$x`, D-3). A dimension is a value or a
- * sorted list of at least two values; its name never starts with `$`. An assertion is keyed by
- * a context pointer (`assertionKeyProblem`), carries every required field, and `source` with
- * `method: 'decision'` only.
+ * sorted list of at least two values. Tags, dimension names and date names are never empty;
+ * dimension and date names never start with `$`. An assertion is keyed by a context pointer
+ * (`assertionKeyProblem`), carries every required field, `source` with `method: 'decision'`
+ * only, and `complete` only as `false` (a list is complete by default).
  *
  * Never throws. Each property is read once, even when several paths lead to one object. A
  * property that cannot be read (a getter or a Proxy trap that throws) gives `<pointer> could
@@ -156,8 +162,13 @@ function eachMember(
 }
 
 function readDates(value: unknown, reader: Reader): void {
-  eachMember(value, '/meta/dates', reader, (_key, at, date) => {
-    if (!isCivilDate(date) && !isInstant(date)) reader.add(at, `${cite(at)} must be ${DATE_FORMS}`);
+  const path = '/meta/dates';
+  eachMember(value, path, reader, (key, at, date) => {
+    if (key === '') reader.add(path, `${path} must not have an empty date name`);
+    else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(cite(at)));
+    else if (!isCivilDate(date) && !isInstant(date)) {
+      reader.add(at, `${cite(at)} must be ${DATE_FORMS}`);
+    }
   });
 }
 
@@ -210,13 +221,20 @@ function readTags(value: unknown, reader: Reader): void {
     return;
   }
   texts.forEach((tag, i) => {
-    if (hasLoneSurrogate(tag)) reader.add(`${path}/${i}`, loneSurrogateMessage(`${path}/${i}`));
+    const at = `${path}/${i}`;
+    if (tag === '') reader.add(at, `${at} must be a non-empty string`);
+    else if (hasLoneSurrogate(tag)) reader.add(at, loneSurrogateMessage(at));
   });
   if (!strictlySorted(texts)) reader.add(path, 'tags must be sorted without duplicates');
 }
 
 function readDimensions(value: unknown, reader: Reader): void {
-  eachMember(value, '/meta/dimensions', reader, (key, at, dimension) => {
+  const path = '/meta/dimensions';
+  eachMember(value, path, reader, (key, at, dimension) => {
+    if (key === '') {
+      reader.add(path, emptyDimensionNameMessage(path));
+      return;
+    }
     if (key.startsWith('$')) {
       reader.add(at, reservedDimensionNameMessage(cite(at)));
       return;

@@ -47,7 +47,7 @@ describe('validateProofInput: assertion keys', () => {
     ['every dimension', '/$dimensions'],
     ['the whole input', ''],
     ['an escaped key', '/a~1b/~0c'],
-    ['an empty key', '/'],
+    ['an empty data key', '/'],
   ])('accepts %s (%j)', (_name, key) => {
     expect(keyIssues(key)).toEqual([]);
   });
@@ -70,6 +70,9 @@ describe('validateProofInput: assertion keys', () => {
     ['/$dates/facture/day', '/meta/assertions/~1$dates~1facture~1day'],
     ['/$dimensions/pays/0', '/meta/assertions/~1$dimensions~1pays~10'],
     ['/$dimensions/$pays', '/meta/assertions/~1$dimensions~1$pays'],
+    ['/$dates/$x', '/meta/assertions/~1$dates~1$x'],
+    ['/$dates/', '/meta/assertions/~1$dates~1'],
+    ['/$dimensions/', '/meta/assertions/~1$dimensions~1'],
   ])('refuses %j: neither a fact, nor a named date, nor a dimension', (key, path) => {
     expect(keyIssues(key)).toEqual([
       {
@@ -222,15 +225,21 @@ describe('validateProofInput: assertion fields', () => {
     ]);
   });
 
-  it.each([true, false])('accepts complete: %j', (complete) => {
-    expect(issuesOf({ ...HUMAN_ASSERTION, complete })).toEqual([]);
+  it('accepts complete: false, the one written form of an incomplete list', () => {
+    expect(issuesOf({ ...HUMAN_ASSERTION, complete: false })).toEqual([]);
   });
 
-  it('refuses a complete that is not a boolean', () => {
-    expect(issuesOf({ ...HUMAN_ASSERTION, complete: 'no' })).toEqual([
-      { path: `${BASE}/complete`, message: `${BASE}/complete must be a boolean` },
-    ]);
-  });
+  it.each([true, 'no', null])(
+    'refuses complete: %j (a list is complete by default)',
+    (complete) => {
+      expect(issuesOf({ ...HUMAN_ASSERTION, complete })).toEqual([
+        {
+          path: `${BASE}/complete`,
+          message: `${BASE}/complete must be false: a list is complete by default: omit complete`,
+        },
+      ]);
+    },
+  );
 
   it.each(['2026-01-02', '2026-01-02T08:30:00.000Z'])('accepts at %j', (at) => {
     expect(issuesOf({ ...HUMAN_ASSERTION, at })).toEqual([]);
@@ -450,7 +459,16 @@ describe('computeAssertionDigest', () => {
       { ...full, by: 'ai-2' },
       { ...full, status: 'validated' },
       { ...full, confidence: 0.81 },
-      { ...full, complete: true },
+      {
+        by: 'ai-1',
+        method: 'decision',
+        at: '2026-01-02T08:00:00.000Z',
+        status: 'proposed',
+        basis: 'art. 4',
+        evidenceDigest: 'a'.repeat(64),
+        confidence: 0.8,
+        source: FULL_SOURCE,
+      },
       { ...full, source: { ...FULL_SOURCE, output: 'autre' } },
     ];
     for (const variant of variants) expect(computeAssertionDigest(variant)).not.toBe(digest);

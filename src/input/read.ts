@@ -1,4 +1,5 @@
 import { escapeText, quoteText, unreadableMessage } from '../errors.js';
+import { sha256Hex } from '../hash.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 
 /**
@@ -43,16 +44,22 @@ export interface Reader {
   readonly maxDepth: number;
   /** Each object walked: `open` while its members are read, then its height (`walkJson`). */
   readonly heights: Map<object, number | 'open'>;
+  /**
+   * When set, `walkJson` also gives each value its encoding (`valueEncoding`), kept here per
+   * object so that a value shared by many paths is encoded once.
+   */
+  readonly encodings?: Map<object, string | undefined>;
 }
 
-export function createReader(add: Add): Reader {
-  return {
+export function createReader(add: Add, encode = false): Reader {
+  const reader: Reader = {
     add,
     reads: 0,
     maxValues: MAX_INPUT_VALUES,
     maxDepth: MAX_INPUT_DEPTH,
     heights: new Map(),
   };
+  return encode ? { ...reader, encodings: new Map() } : reader;
 }
 
 /** Counts `n` reads about to happen at `path`; throws `InputTooLarge` past the budget. */
@@ -209,6 +216,9 @@ interface Frame {
   readonly length: number;
   index: number;
   height: number;
+  /** The key being read, and the encodings of the members read (with `reader.encodings`). */
+  pending: string | number;
+  readonly parts: [string | number, string | undefined][];
 }
 
 /**
@@ -222,18 +232,35 @@ interface Frame {
  * once, even when several paths lead to it: its height is kept, and a later path only checks
  * that the height still fits under `MAX_INPUT_DEPTH` there. Every member read is counted
  * (`announce`) before it happens.
+ *
+ * With `reader.encodings`, returns the encoding of `root` (`valueEncoding`), else `undefined`.
  */
-export function walkJson(root: unknown, path: string, reader: Reader, reservedRoot = false): void {
+export function walkJson(
+  root: unknown,
+  path: string,
+  reader: Reader,
+  reservedRoot = false,
+): string | undefined {
   const stack: Frame[] = [];
-  const settle = (height: number): void => {
+  let rootEncoding: string | undefined;
+  const settle = (height: number, encoding: string | undefined): void => {
     const parent = stack[stack.length - 1];
-    if (parent !== undefined) parent.height = Math.max(parent.height, height + 1);
+    if (parent === undefined) {
+      rootEncoding = encoding;
+      return;
+    }
+    parent.height = Math.max(parent.height, height + 1);
+    if (reader.encodings !== undefined) parent.parts.push([parent.pending, encoding]);
   };
   const visit = (value: unknown, at: string, depth: number, isRoot: boolean): void => {
     const frame = openValue(value, at, depth, reader, isRoot && reservedRoot);
-    if (frame === undefined) settle(0);
-    else if (typeof frame === 'number') settle(frame);
-    else stack.push(frame);
+    if (frame === undefined) settle(0, scalarEncoding(value));
+    else if (typeof frame === 'number') {
+      settle(
+        frame,
+        typeof value === 'object' && value !== null ? reader.encodings?.get(value) : undefined,
+      );
+    } else stack.push(frame);
   };
   visit(root, path, 0, true);
   while (stack.length > 0) {
@@ -242,17 +269,59 @@ export function walkJson(root: unknown, path: string, reader: Reader, reservedRo
     if (frame.index >= frame.length) {
       stack.pop();
       reader.heights.set(frame.node, frame.height);
-      settle(frame.height);
+      const encoding = reader.encodings === undefined ? undefined : containerEncoding(frame);
+      reader.encodings?.set(frame.node, encoding);
+      settle(frame.height, encoding);
       continue;
     }
     const i = frame.index;
     frame.index += 1;
     const key = frame.keys === undefined ? i : frame.keys[i];
     if (key === undefined) continue;
+    frame.pending = key;
     const at = typeof key === 'number' ? `${frame.path}/${key}` : childPointer(frame.path, key);
     const read = readMember(frame.node, key, at, reader.add);
-    if (read !== 'failed') visit(read.value, at, frame.depth + 1, false);
+    if (read === 'failed') settle(0, undefined);
+    else visit(read.value, at, frame.depth + 1, false);
   }
+  return reader.encodings === undefined ? undefined : rootEncoding;
+}
+
+/**
+ * The encoding of a JSON scalar: its JSON text (`-0` written `0`, as `canonicalize` writes
+ * it); `undefined` for a value that is not one. With `containerEncoding`, two values have the
+ * same encoding exactly when they have the same canonical form (up to sha256 collisions), at a
+ * cost linear in the number of distinct objects, never in the number of paths.
+ */
+function scalarEncoding(value: unknown): string | undefined {
+  if (value === null) return 'null';
+  switch (typeof value) {
+    case 'string':
+    case 'boolean':
+      return JSON.stringify(value);
+    case 'number':
+      return Number.isFinite(value) ? JSON.stringify(value) : undefined;
+    default:
+      return undefined;
+  }
+}
+
+/**
+ * The encoding of a list or an object: `#` and the sha256 of its members' encodings, written
+ * as a JSON list or object with sorted keys (`#…` never starts a scalar's JSON text); `undefined`
+ * when a member has none (a problem was reported).
+ */
+function containerEncoding(frame: Frame): string | undefined {
+  if (frame.parts.some(([, encoding]) => encoding === undefined)) return undefined;
+  if (frame.parts.length !== frame.length) return undefined;
+  const text =
+    frame.keys === undefined
+      ? `[${frame.parts.map(([, encoding]) => encoding).join(',')}]`
+      : `{${[...frame.parts]
+          .sort(([a], [b]) => (String(a) < String(b) ? -1 : 1))
+          .map(([key, encoding]) => `${JSON.stringify(key)}:${encoding}`)
+          .join(',')}}`;
+  return `#${sha256Hex(text)}`;
 }
 
 /**
@@ -338,7 +407,7 @@ function openValue(
     return 1;
   }
   reader.heights.set(node, 'open');
-  return { node, path, depth, keys, length: count, index: 0, height: 0 };
+  return { node, path, depth, keys, length: count, index: 0, height: 0, pending: 0, parts: [] };
 }
 
 /** The keys to read: a key with a lone surrogate, or a reserved root key, is reported instead. */

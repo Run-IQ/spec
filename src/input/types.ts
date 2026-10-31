@@ -37,8 +37,8 @@ export type AssertionStatus = 'proposed' | 'validated' | 'contested';
  * - `basis`: the ground, a legal reference or a reason;
  * - `evidenceDigest`: the lowercase sha256 hex of the evidence, kept elsewhere;
  * - `confidence`: from 0 to 1, as the asserter rated it;
- * - `complete`: on a collection, whether it lists every element (`false`: an unknown element
- *   may be missing);
+ * - `complete`: `false` on a collection that may miss elements; a list is complete by default,
+ *   so `true` is never written (one meaning, one written form);
  * - `source`: with `method: 'decision'` only, and required with it: the proof digest of the
  *   decision, the output it gave (qualified by its rule set unless `local`) and the subject of
  *   the element, for an output per element.
@@ -51,7 +51,7 @@ export interface FactAssertion {
   basis?: string;
   evidenceDigest?: string;
   confidence?: number;
-  complete?: boolean;
+  complete?: false;
   source?: { proofDigest: string; output: string; subject?: Subject };
 }
 
@@ -75,12 +75,14 @@ export interface TemporalValue {
  *
  * - `data`: the facts, plain JSON; a root key starting with `$` is reserved (D-3); no number of
  *   absolute value 2^53 or more (D-5); no text or key with a lone UTF-16 surrogate;
- * - `meta.dates`: the named dates, each a civil date `YYYY-MM-DD` or an instant
+ * - `meta.dates`: the named dates (a name is non-empty and never starts with `$`), each a
+ *   civil date `YYYY-MM-DD` or an instant
  *   `YYYY-MM-DDTHH:MM:SS.sssZ` (never an offset); `effective` is the reference date of the
  *   decision, absent when the caller gave none;
- * - `meta.tags`: the scope the caller chose, sorted by UTF-16 code unit without duplicates;
+ * - `meta.tags`: the scope the caller chose, non-empty texts sorted by UTF-16 code unit
+ *   without duplicates;
  * - `meta.dimensions`: a value, or a list of at least two values sorted without duplicates (one
- *   value is written as a string); no name starting with `$`;
+ *   value is written as a string); no empty name, no name starting with `$`;
  * - `meta.context`: free JSON the rules do not read (same number and text rules as `data`);
  * - `meta.assertions`: the provenance of facts, dates and dimensions, by context pointer.
  */

@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import * as canonicalEntry from '../src/canonical-entry.js';
 import { ENGINE_VARIABLES, isReservedName, OUTPUTS_VARIABLE } from '../src/index.js';
+import { BASE_RULE, expectRuleRefused } from './helpers.js';
 
 describe('ENGINE_VARIABLES', () => {
   it('lists the engine variables of D-3, in order', () => {
@@ -49,5 +50,35 @@ describe('both entries', () => {
   it('export the reserved names', () => {
     expect(canonicalEntry.ENGINE_VARIABLES).toBe(ENGINE_VARIABLES);
     expect(canonicalEntry.isReservedName).toBe(isReservedName);
+  });
+});
+
+describe('empty and reserved names in rules (ruling 9G round 2)', () => {
+  const DATE_RESERVED = 'date names starting with "$" are reserved';
+
+  it('refuses an empty tag', () => {
+    expectRuleRefused(
+      { ...BASE_RULE, tags: ['a', ''] },
+      'tags[1]',
+      'tags[1] must be a non-empty string',
+    );
+  });
+
+  it('refuses an empty dimension name, even unset', () => {
+    for (const value of ['FR', null]) {
+      expectRuleRefused(
+        { ...BASE_RULE, dimensions: { '': value } },
+        'dimensions',
+        'dimensions must not have an empty dimension name',
+      );
+    }
+  });
+
+  it('refuses an effectiveOn naming a date that starts with $', () => {
+    expectRuleRefused(
+      { ...BASE_RULE, effectiveOn: '/$dates/$x' },
+      'effectiveOn',
+      `effectiveOn must not name a date starting with "$": ${DATE_RESERVED}`,
+    );
   });
 });

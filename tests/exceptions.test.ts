@@ -147,7 +147,7 @@ describe('exceptions: accepted forms', () => {
   it('accepts a selector with every field', () => {
     const targets: RuleSelector = {
       ids: ['a'],
-      tags: ['vat', ''],
+      tags: ['vat'],
       dimensions: { country: 'TG', regime: { ref: 'regimes', anyOf: ['normal'] } },
       outputs: ['value'],
       models: ['PERCENTAGE'],

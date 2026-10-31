@@ -9,6 +9,7 @@ const SALARY: TemporalValue[] = [
 ];
 
 const check = (value: unknown): unknown => validateTemporalFact(value, '/salaire');
+const MERGE = 'merge adjacent periods with the same value at /salaire/1';
 
 describe('validateTemporalFact', () => {
   it('accepts periods that follow each other', () => {
@@ -24,6 +25,51 @@ describe('validateTemporalFact', () => {
       ]),
     ).toEqual([]);
     expect(check([])).toEqual([]);
+  });
+
+  it('refuses adjacent periods with the same value: one meaning, one written form', () => {
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: { a: 1, b: [2] } },
+        { from: '2026-01-15', until: null, value: { b: [2], a: 1 } },
+      ]),
+    ).toEqual([{ path: '/salaire/1', message: MERGE }]);
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: '3000' },
+        { from: '2026-01-15', until: '2026-02-01', value: '3000' },
+      ]),
+    ).toEqual([{ path: '/salaire/1', message: MERGE }]);
+  });
+
+  it('accepts the same value after a gap, and adjacent periods with different values', () => {
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: '3000' },
+        { from: '2026-01-16', until: null, value: '3000' },
+      ]),
+    ).toEqual([]);
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: 3000 },
+        { from: '2026-01-15', until: null, value: '3000' },
+      ]),
+    ).toEqual([]);
+  });
+
+  it('compares a value shared by many paths without walking every path', () => {
+    let a: unknown = 1;
+    let b: unknown = 1;
+    for (let i = 0; i < 60; i++) {
+      a = { l: a, r: a };
+      b = { r: b, l: b };
+    }
+    expect(
+      check([
+        { from: '2026-01-01', until: '2026-01-15', value: a },
+        { from: '2026-01-15', until: null, value: b },
+      ]),
+    ).toEqual([{ path: '/salaire/1', message: MERGE }]);
   });
 
   it.each([
@@ -49,7 +95,7 @@ describe('validateTemporalFact', () => {
       ],
     ],
   ])('refuses %s', (_name, periods) => {
-    expect(check(periods)).toEqual([{ path: '/salaire[1]', message: 'overlap at /salaire[1]' }]);
+    expect(check(periods)).toEqual([{ path: '/salaire/1', message: 'overlap at /salaire/1' }]);
   });
 
   it('reports an overlap with any earlier period, not only the previous one', () => {
@@ -60,16 +106,16 @@ describe('validateTemporalFact', () => {
         { from: '2026-04-01', until: '2026-05-01', value: 3 },
       ]),
     ).toEqual([
-      { path: '/salaire[1]', message: 'overlap at /salaire[1]' },
-      { path: '/salaire[2]', message: 'overlap at /salaire[2]' },
+      { path: '/salaire/1', message: 'overlap at /salaire/1' },
+      { path: '/salaire/2', message: 'overlap at /salaire/2' },
     ]);
   });
 
   it('refuses periods out of order: one meaning, one written form', () => {
     expect(check([...SALARY].reverse())).toEqual([
       {
-        path: '/salaire[1]',
-        message: '/salaire[1] must start after /salaire[0]: periods are sorted by from',
+        path: '/salaire/1',
+        message: '/salaire/1 must start after /salaire/0: periods are sorted by from',
       },
     ]);
   });
@@ -80,8 +126,8 @@ describe('validateTemporalFact', () => {
   ])('refuses a period that %s (until %s)', (_name, until) => {
     expect(check([{ from: '2026-01-15', until, value: 1 }])).toEqual([
       {
-        path: '/salaire[0].until',
-        message: '/salaire[0].until must be after from 2026-01-15: the period is empty',
+        path: '/salaire/0/until',
+        message: '/salaire/0/until must be after from 2026-01-15: the period is empty',
       },
     ]);
   });
@@ -92,31 +138,31 @@ describe('validateTemporalFact', () => {
     ['null', null],
   ])('refuses from as %s', (_name, from) => {
     expect(check([{ from, until: null, value: 1 }])).toEqual([
-      { path: '/salaire[0].from', message: '/salaire[0].from must be a civil date YYYY-MM-DD' },
+      { path: '/salaire/0/from', message: '/salaire/0/from must be a civil date YYYY-MM-DD' },
     ]);
   });
 
   it('refuses an until that is not a civil date or null, and an absent until', () => {
     expect(check([{ from: '2026-01-01', until: '2026-02-01T00:00:00.000Z', value: 1 }])).toEqual([
       {
-        path: '/salaire[0].until',
-        message: '/salaire[0].until must be a civil date YYYY-MM-DD or null',
+        path: '/salaire/0/until',
+        message: '/salaire/0/until must be a civil date YYYY-MM-DD or null',
       },
     ]);
     expect(check([{ from: '2026-01-01', value: 1 }])).toEqual([
-      { path: '/salaire[0].until', message: '/salaire[0].until is required: null has no end' },
+      { path: '/salaire/0/until', message: '/salaire/0/until is required: null has no end' },
     ]);
   });
 
   it('refuses an absent value, an unknown key and a period that is not an object', () => {
     expect(check([{ from: '2026-01-01', until: null }])).toEqual([
-      { path: '/salaire[0].value', message: '/salaire[0].value is required' },
+      { path: '/salaire/0/value', message: '/salaire/0/value is required' },
     ]);
     expect(check([{ from: '2026-01-01', until: null, value: 1, to: '2026-02-01' }])).toEqual([
-      { path: '/salaire[0].to', message: '/salaire[0] has an unknown key "to"' },
+      { path: '/salaire/0/to', message: '/salaire/0 has an unknown key "to"' },
     ]);
     expect(check(['2026-01-01'])).toEqual([
-      { path: '/salaire[0]', message: '/salaire[0] must be a period { from, until, value }' },
+      { path: '/salaire/0', message: '/salaire/0 must be a period { from, until, value }' },
     ]);
   });
 
@@ -138,12 +184,12 @@ describe('validateTemporalFact', () => {
       ]),
     ).toEqual([
       {
-        path: '/salaire[0].value/n',
-        message: 'number beyond 2^53 at /salaire[0].value/n',
+        path: '/salaire/0/value/n',
+        message: 'number beyond 2^53 at /salaire/0/value/n',
       },
       {
-        path: '/salaire[1].value/0',
-        message: '/salaire[1].value/0 contains a lone UTF-16 surrogate',
+        path: '/salaire/1/value/0',
+        message: '/salaire/1/value/0 contains a lone UTF-16 surrogate',
       },
     ]);
   });
@@ -157,7 +203,7 @@ describe('validateTemporalFact', () => {
       },
     });
     expect(check([period])).toEqual([
-      { path: '/salaire[0].value', message: '/salaire[0].value could not be read: boom' },
+      { path: '/salaire/0/value', message: '/salaire/0/value could not be read: boom' },
     ]);
     const { proxy, revoke } = Proxy.revocable([], {});
     revoke();
@@ -169,7 +215,7 @@ describe('validateTemporalFact', () => {
       },
     ]);
     const deep = check([{ from: '2026-01-01', until: null, value: nested(10_000) }]);
-    const path = `/salaire[0].value${'/a'.repeat(1000)}`;
+    const path = `/salaire/0/value${'/a'.repeat(1000)}`;
     expect(deep).toEqual([
       { path, message: `${path.slice(0, 100)}… nests values more than 1000 levels deep` },
     ]);

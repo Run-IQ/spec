@@ -6,7 +6,11 @@ import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
-import { readDimensionSpec, reservedDimensionNameMessage } from './dimensions.js';
+import {
+  emptyDimensionNameMessage,
+  readDimensionSpec,
+  reservedDimensionNameMessage,
+} from './dimensions.js';
 import { exceptionModelIssues, normalizedOutput, readRuleExceptions } from './exceptions.js';
 import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
@@ -265,6 +269,10 @@ function checkDimensions(value: unknown, errors: Issues): void {
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
+    if (key === '') {
+      errors.add('dimensions', emptyDimensionNameMessage('dimensions'));
+      continue;
+    }
     if (isReservedName(key)) {
       errors.add(`dimensions.${key}`, reservedDimensionNameMessage(`dimensions.${key}`));
       continue;
@@ -282,7 +290,8 @@ function checkTags(value: unknown, errors: Issues): void {
     return;
   }
   tags.forEach((tag, i) => {
-    if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
+    if (tag === '') errors.add(`tags[${i}]`, `tags[${i}] must be a non-empty string`);
+    else if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       errors.add(`tags[${i}]`, loneSurrogateMessage(`tags[${i}]`));
     }
   });

@@ -314,7 +314,7 @@ describeBuilt('built entries: one SpecError identity', () => {
     for (const entry of entries) {
       expect(entry.validateProofInput(input)).toEqual([]);
       expect(entry.validateTemporalFact([period, period], '/p')).toEqual([
-        { path: '/p[1]', message: 'overlap at /p[1]' },
+        { path: '/p/1', message: 'overlap at /p/1' },
       ]);
       expect(entry.governingAssertion({ '/x': assertion }, '/x/y')).toEqual({
         pointer: '/x',

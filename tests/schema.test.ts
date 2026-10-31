@@ -128,7 +128,7 @@ const VALID: [string, unknown][] = [
     'a large integer version, a negative fractional priority',
     { ...base, version: 1e6, priority: -2.5 },
   ],
-  ['duplicate tags and a string checksum', { ...base, tags: ['b', 'a', 'b', ''], checksum: 'abc' }],
+  ['duplicate tags and a string checksum', { ...base, tags: ['b', 'a', 'b'], checksum: 'abc' }],
   [
     'a window of one millisecond',
     {
@@ -155,6 +155,9 @@ const INVALID: [string, unknown][] = [
     ],
   ),
   ['a reserved dimension name (I1)', { ...base, dimensions: { $pays: 'FR' } }],
+  ['an empty dimension name', { ...base, dimensions: { '': 'FR' } }],
+  ['an empty tag', { ...base, tags: [''] }],
+  ['effectiveOn on a date name starting with $', { ...base, effectiveOn: '/$dates/$x' }],
   ['a non-string tag', { ...base, tags: ['a', 1] }],
   ['an impossible date', { ...base, effectiveFrom: '2025-02-30' }],
   ['a non-leap February 29', { ...base, effectiveFrom: '2023-02-29' }],
@@ -265,7 +268,7 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
       {
         ...base,
         exceptions: [
-          { kind: 'inhibit', targets: { ids: ['a', 'a'], tags: [''] } },
+          { kind: 'inhibit', targets: { ids: ['a', 'a'], tags: ['t', 't'] } },
           {
             kind: 'substitute',
             targets: { dimensions: { country: 'TG' }, outputs: ['vat'], models: ['M'] },

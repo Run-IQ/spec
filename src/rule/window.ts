@@ -1,5 +1,6 @@
 import { describeError, SpecError, unreadableMessage } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
+import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import {
   civilDateIn,
   isCivilDate,
@@ -198,6 +199,9 @@ export function effectiveOnProblem(value: string): string | undefined {
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;
   if (rest.includes('-')) return "effectiveOn must not hold a '-' segment: '-' is not an index";
   if (head === '$dates') {
+    if (rest.length === 1 && isReservedName(rest[0] ?? '')) {
+      return reservedDatePointerMessage('effectiveOn');
+    }
     return rest.length === 1 && rest[0] !== ''
       ? undefined
       : 'effectiveOn must name one date: /$dates/<name>';

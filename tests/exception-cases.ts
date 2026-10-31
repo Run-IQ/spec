@@ -4,6 +4,18 @@
  */
 export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
   [
+    'a selector with an empty tag',
+    [{ kind: 'inhibit', targets: { tags: ['a', ''] } }],
+    'exceptions[0].targets.tags[1]',
+    'exceptions[0].targets.tags[1] must be a non-empty string',
+  ],
+  [
+    'a selector with an empty dimension name',
+    [{ kind: 'inhibit', targets: { dimensions: { '': 'FR' } } }],
+    'exceptions[0].targets.dimensions',
+    'exceptions[0].targets.dimensions must not have an empty dimension name',
+  ],
+  [
     'a shortCircuit to a reserved output name (R36)',
     [{ kind: 'shortCircuit', output: '$outputs', value: 1 }],
     'exceptions[0].output',
@@ -141,13 +153,13 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'a non-string tag',
     [{ kind: 'inhibit', targets: { tags: ['vat', 1] } }],
     'exceptions[0].targets.tags[1]',
-    'exceptions[0].targets.tags[1] must be a string',
+    'exceptions[0].targets.tags[1] must be a non-empty string',
   ],
   [
     'tags that are not an array',
     [{ kind: 'inhibit', targets: { tags: 'vat' } }],
     'exceptions[0].targets.tags',
-    'exceptions[0].targets.tags must be an array of strings',
+    'exceptions[0].targets.tags must be an array of non-empty strings',
   ],
   [
     'a null selector field',

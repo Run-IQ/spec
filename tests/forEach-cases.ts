@@ -407,6 +407,13 @@ export const REFUSED_FOR_EACH: [string, unknown, string, string][] = [
     'forEach.segments has an unknown key "step"',
   ],
   [
+    'segments from a date name starting with $',
+    { segments: { from: '/$dates/$a', until: '/$dates/b', facts: [] } },
+    'forEach.segments.from',
+    'forEach.segments.from must not name a date starting with "$": ' +
+      'date names starting with "$" are reserved',
+  ],
+  [
     'segments from a fact',
     { segments: { from: '/debut', until: '/$dates/b', facts: [] } },
     'forEach.segments.from',

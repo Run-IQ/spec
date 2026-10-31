@@ -2,9 +2,9 @@ import type { JsonValue } from '../canonical.js';
 import { describeError, quoteText } from '../errors.js';
 import { comparePointers, parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
-import { isReservedName } from '../reserved.js';
+import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import { typeName } from '../values.js';
-import { reservedDimensionNameMessage } from './dimensions.js';
+import { emptyDimensionNameMessage, reservedDimensionNameMessage } from './dimensions.js';
 
 /** The types an order key compares its values as (`OrderKey`). */
 export type OrderKeyType = 'number' | 'decimal' | 'date' | 'dateTime' | 'string';
@@ -289,7 +289,7 @@ function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer
   for (const name of names) {
     const here = `${at}.${name}`;
     if (name === '') {
-      fail(at, `${at} must not have an empty dimension name`);
+      fail(at, emptyDimensionNameMessage(at));
     } else if (isReservedName(name)) {
       fail(here, reservedDimensionNameMessage(here));
     } else {
@@ -361,6 +361,10 @@ function readNamedDate(value: JsonValue | undefined, at: string, fail: Add): str
   const segments = pointerSegments(value, at, fail);
   if (segments === undefined) return undefined;
   const [head, name, ...rest] = segments;
+  if (head === '$dates' && name !== undefined && isReservedName(name) && !rest.length) {
+    fail(at, reservedDatePointerMessage(at));
+    return undefined;
+  }
   if (head === '$dates' && name !== undefined && name !== '' && name !== '-' && !rest.length) {
     return typeof value === 'string' ? value : undefined;
   }

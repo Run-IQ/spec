@@ -51,7 +51,6 @@ export const VALID_INPUTS: [string, Doc][] = [
   ],
   ['no named date', inputWith({ dates: {} })],
   ['sorted tags', inputWith({ tags: ['B', 'a', 'b'] })],
-  ['an empty tag', inputWith({ tags: [''] })],
   ['a multi-valued dimension', inputWith({ dimensions: { pays: ['FR', 'US'], secteur: 'C' } })],
   ['a qualified dimension value', inputWith({ dimensions: { secteur: 'nace-2.1:62.10' } })],
   [
@@ -85,7 +84,7 @@ export const VALID_INPUTS: [string, Doc][] = [
       complete: false,
     }),
   ],
-  ['confidence 1 and complete true', assertionWith({ confidence: 1, complete: true })],
+  ['confidence 1', assertionWith({ confidence: 1 })],
   ...[
     '',
     '/',
@@ -135,6 +134,14 @@ export const REFUSED_INPUTS: [string, Doc][] = [
   ['a source without method decision', assertionWith({ source: SOURCE })],
   ['method decision without source', assertionWith({ method: 'decision' })],
   ['complete as a text', assertionWith({ complete: 'no' })],
+  ['complete: true, the default written out', assertionWith({ complete: true })],
+  ['an empty tag', inputWith({ tags: ['', 'a'] })],
+  ['an empty dimension name', inputWith({ dimensions: { '': 'FR' } })],
+  ['an empty date name', inputWith({ dates: { '': '2026-01-01' } })],
+  ['a date name starting with $', inputWith({ dates: { $x: '2026-01-01' } })],
+  ['an assertion on a reserved date name', assertionAt('/$dates/$x')],
+  ['an assertion on an empty date name', assertionAt('/$dates/')],
+  ['an assertion on an empty dimension name', assertionAt('/$dimensions/')],
   ['an offset at', assertionWith({ at: '2026-01-02T09:00:00.000+01:00' })],
   ['an unknown assertion field', assertionWith({ note: 'x' })],
   [

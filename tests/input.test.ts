@@ -106,6 +106,19 @@ describe('validateProofInput: named dates', () => {
     ]);
   });
 
+  it('refuses an empty date name and one starting with $', () => {
+    expect(validateProofInput(proofInput({ dates: { '': '2026-01-01' } }))).toEqual([
+      { path: '/meta/dates', message: '/meta/dates must not have an empty date name' },
+    ]);
+    expect(validateProofInput(proofInput({ dates: { $x: '2026-01-01' } }))).toEqual([
+      {
+        path: '/meta/dates/$x',
+        message:
+          '/meta/dates/$x must not start with "$": date names starting with "$" are reserved',
+      },
+    ]);
+  });
+
   it('refuses a date name with a lone surrogate, naming its object', () => {
     expect(validateProofInput(proofInput({ dates: { 'd\uD800': '2026-01-01' } }))).toEqual([
       {
@@ -127,7 +140,7 @@ describe('validateProofInput: tags (pre-flight M-17)', () => {
     validateProofInput(proofInput({ tags: tags as string[] }));
   const unsorted = [{ path: '/meta/tags', message: 'tags must be sorted without duplicates' }];
 
-  it.each([[[]], [['a', 'b']], [['B', 'a']], [['é', 'é']], [['']]])(
+  it.each([[[]], [['a', 'b']], [['B', 'a']], [['é', 'é']]])(
     'accepts %j (UTF-16 code unit order)',
     (tags) => {
       expect(tagIssues(tags)).toEqual([]);
@@ -141,6 +154,12 @@ describe('validateProofInput: tags (pre-flight M-17)', () => {
   it.each([[['a', 1]], ['a'], [{ 0: 'a' }], [null]])('refuses %j as tags', (tags) => {
     expect(tagIssues(tags)).toEqual([
       { path: '/meta/tags', message: '/meta/tags must be an array of strings' },
+    ]);
+  });
+
+  it('refuses an empty tag', () => {
+    expect(tagIssues(['', 'a'])).toEqual([
+      { path: '/meta/tags/0', message: '/meta/tags/0 must be a non-empty string' },
     ]);
   });
 
@@ -196,6 +215,15 @@ describe('validateProofInput: dimensions', () => {
       '/meta/dimensions/$pays must not start with "$": dimension names starting with "$" are ' +
         'reserved',
     );
+  });
+
+  it('refuses an empty dimension name', () => {
+    expect(dimensionIssues({ '': 'FR' })).toEqual([
+      {
+        path: '/meta/dimensions',
+        message: '/meta/dimensions must not have an empty dimension name',
+      },
+    ]);
   });
 
   it('refuses a dimension name with a lone surrogate', () => {

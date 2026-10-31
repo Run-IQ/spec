@@ -238,9 +238,18 @@ function sameList(a: readonly string[], b: readonly string[]): boolean {
 }
 
 /**
+ * Internal: the message refusing an empty dimension name in the object at `path` (rule
+ * `dimensions`, selector `dimensions`, `forEach.dimensions`, input `meta.dimensions`): no
+ * reference can name it (ruling 9G round 2).
+ */
+export function emptyDimensionNameMessage(path: string): string {
+  return `${path} must not have an empty dimension name`;
+}
+
+/**
  * Internal: the message refusing a dimension name starting with `$` at `path` (rule
- * `dimensions`, selector `dimensions`, `forEach.dimensions`): every name starting with `$` is
- * the engine's (D-3).
+ * `dimensions`, selector `dimensions`, `forEach.dimensions`, input `meta.dimensions`): every
+ * name starting with `$` is the engine's (D-3).
  */
 export function reservedDimensionNameMessage(path: string): string {
   return `${path} must not start with "$": dimension names starting with "$" are reserved`;

@@ -6,7 +6,11 @@ import { isReservedName } from '../reserved.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
-import { readDimensionSpec, reservedDimensionNameMessage } from './dimensions.js';
+import {
+  emptyDimensionNameMessage,
+  readDimensionSpec,
+  reservedDimensionNameMessage,
+} from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
@@ -222,6 +226,7 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   const out: Record<string, DimensionSpec> = {};
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
+    if (key === '') invalidRule(emptyDimensionNameMessage('dimensions'));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
     if (v == null) continue; // null or undefined: the dimension is unset
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
@@ -243,6 +248,7 @@ function normalizeTags(value: unknown): string[] {
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }
   tags.forEach((tag, i) => {
+    if (tag === '') invalidRule(`tags[${i}] must be a non-empty string`);
     if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       invalidRule(loneSurrogateMessage(`tags[${i}]`));
     }

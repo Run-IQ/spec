@@ -129,8 +129,8 @@ export function computeAssertionDigest(assertion: FactAssertion): string {
  * Internal: the problem with `key` as a key of `meta.assertions`, or `undefined`: a JSON
  * pointer of the evaluation context, without a `-` segment (not an index), naming a fact
  * (`/revenue/total`), the named dates or one of them (`/$dates`, `/$dates/<name>`), the
- * dimensions or one of them (`/$dimensions`, `/$dimensions/<name>`, never `$` at the start of
- * the name), or everything (`''`). `key` holds no lone surrogate (checked before).
+ * dimensions or one of them (`/$dimensions`, `/$dimensions/<name>`; a name is never empty and
+ * never starts with `$`), or everything (`''`). `key` holds no lone surrogate (checked before).
  */
 export function assertionKeyProblem(key: string): string | undefined {
   const quoted = quoteText(key);
@@ -146,9 +146,10 @@ export function assertionKeyProblem(key: string): string | undefined {
   const [head, ...rest] = segments;
   if (head === undefined || !head.startsWith('$')) return undefined;
   const name = rest[0];
+  // A date or dimension name is never empty and never starts with `$` (ruling 9G round 2).
   const named =
-    rest.length <= 1 &&
-    (head === '$dates' || (head === '$dimensions' && !(name?.startsWith('$') ?? false)));
+    (head === '$dates' || head === '$dimensions') &&
+    (name === undefined || (rest.length === 1 && name !== '' && !name.startsWith('$')));
   return named
     ? undefined
     : `assertion key ${quoted} must name a fact, /$dates/<name> or /$dimensions/<name>`;
@@ -210,8 +211,11 @@ export function readAssertion(
     add(at('confidence'), `${cite(at('confidence'))} must be a number from 0 to 1`);
   }
   const complete = field('complete');
-  if (has('complete') && typeof complete !== 'boolean') {
-    add(at('complete'), `${cite(at('complete'))} must be a boolean`);
+  if (has('complete') && complete !== false) {
+    add(
+      at('complete'),
+      `${cite(at('complete'))} must be false: a list is complete by default: omit complete`,
+    );
   }
   const source = readSourceField(fields.values, method, at('source'), add, reader);
   const by = field('by');
@@ -229,7 +233,7 @@ export function readAssertion(
   if (typeof basis === 'string') snapshot.basis = basis;
   if (typeof evidence === 'string') snapshot.evidenceDigest = evidence;
   if (typeof confidence === 'number') snapshot.confidence = confidence;
-  if (typeof complete === 'boolean') snapshot.complete = complete;
+  if (complete === false) snapshot.complete = false;
   if (source !== undefined) snapshot.source = source;
   return snapshot;
 }

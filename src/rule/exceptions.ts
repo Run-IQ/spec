@@ -5,6 +5,7 @@ import { isReservedName } from '../reserved.js';
 import { isPlainObject, typeName } from '../values.js';
 import {
   readDimensionSpec,
+  emptyDimensionNameMessage,
   reservedDimensionNameMessage,
   sameDimensionSpec,
 } from './dimensions.js';
@@ -451,7 +452,7 @@ function readSelector(
   const ruleSets = readRuleSets(value.ruleSets, `${path}.ruleSets`, fail);
   const lists: Partial<Record<(typeof SELECTOR_LISTS)[number], string[]>> = {};
   for (const field of SELECTOR_LISTS) {
-    const list = readList(value[field], `${path}.${field}`, field !== 'tags', fail);
+    const list = readList(value[field], `${path}.${field}`, true, fail);
     if (list === undefined) continue;
     if (field === 'ids' || field === 'outputs') {
       list.forEach((name, i) => {
@@ -543,6 +544,10 @@ function readDimensions(
   }
   const entries: [string, DimensionSpec][] = [];
   for (const key of Object.keys(value).sort()) {
+    if (key === '') {
+      fail(path, emptyDimensionNameMessage(path));
+      continue;
+    }
     if (isReservedName(key)) {
       fail(`${path}.${key}`, reservedDimensionNameMessage(`${path}.${key}`));
       continue;
