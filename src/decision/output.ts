@@ -62,6 +62,19 @@ export const DEFAULT_OUTPUT = 'value';
  */
 export const OUTPUTS_VARIABLE = '$outputs';
 
+/**
+ * Internal: true for an output name that starts with `$`. Such names are reserved (ruling
+ * R36): `$outputs` and any future variable cannot collide with an output.
+ */
+export function isReservedOutputName(name: string): boolean {
+  return name.startsWith('$');
+}
+
+/** Internal: the message refusing the reserved output name at `path`. */
+export function reservedOutputNameMessage(path: string): string {
+  return `${path} must not start with "$": output names starting with "$" are reserved`;
+}
+
 /** The declaration of an output nobody declares: a number, summed. Frozen. */
 export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = Object.freeze({
   type: 'number',

@@ -1,5 +1,9 @@
 import type { JsonValue } from '../canonical.js';
-import { DEFAULT_OUTPUT } from '../decision/output.js';
+import {
+  DEFAULT_OUTPUT,
+  isReservedOutputName,
+  reservedOutputNameMessage,
+} from '../decision/output.js';
 import type { RuleValidationIssue } from './validate.js';
 
 /**
@@ -160,7 +164,11 @@ function readException(item: JsonValue, path: string, add: Add): RuleException |
 
   let exception: RuleException | undefined;
   if (kind === 'shortCircuit') {
-    const output = readNonEmptyString(item.output, `${path}.output`, fail);
+    let output = readNonEmptyString(item.output, `${path}.output`, fail);
+    if (output !== undefined && isReservedOutputName(output)) {
+      fail(`${path}.output`, reservedOutputNameMessage(`${path}.output`));
+      output = undefined;
+    }
     const value = item.value;
     if (value === undefined) fail(`${path}.value`, `${path}.value is required (null is a value)`);
     const reason =
@@ -204,6 +212,13 @@ function readSelector(
   const selector: RuleSelector = {};
   for (const field of SELECTOR_LISTS) {
     const list = readList(value[field], `${path}.${field}`, field !== 'tags', fail);
+    if (field === 'outputs') {
+      list?.forEach((name, i) => {
+        if (isReservedOutputName(name)) {
+          fail(`${path}.outputs[${i}]`, reservedOutputNameMessage(`${path}.outputs[${i}]`));
+        }
+      });
+    }
     if (list && list.length > 0) selector[field] = [...new Set(list)].sort();
   }
   const dimensions = readDimensions(value.dimensions, `${path}.dimensions`, fail);

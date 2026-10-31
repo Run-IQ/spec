@@ -810,18 +810,101 @@ describe('strata, decimals and rounding in a proof', () => {
     ]);
   });
 
+  it.each([
+    [
+      'an output key',
+      (p: UnsignedProof) => {
+        p.outputs.$risk = p.outputs.risk!;
+        delete p.outputs.risk;
+        p.strata = [['$risk'], ['fine']];
+        p.applied[0]!.output = '$risk';
+      },
+      'output name reserved: $risk',
+    ],
+    [
+      'a stratum name only',
+      (p: UnsignedProof) => (p.strata = [['risk', '$x'], ['fine']]),
+      'output name reserved: $x',
+    ],
+    [
+      'an applied step output only',
+      (p: UnsignedProof) => (p.applied[0]!.output = '$outputs'),
+      'output name reserved: $outputs',
+    ],
+  ])('refuses a reserved output name (R36) in %s', (_name, change, issue) => {
+    const content = staged();
+    change(content);
+    const proof = handSealed(content);
+    expect(verifyProof(proof).status).toBe('invalid');
+    expect(verifyProof(proof).issues).toContain(issue);
+    expect(specError(() => sealProof(content)).code).toBe('INVALID_PROOF');
+    expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).code).toBe('INVALID_PROOF');
+  });
+
+  it('reports a reserved key in outputs, strata and steps once', () => {
+    const content = staged();
+    content.outputs.$risk = content.outputs.risk!;
+    delete content.outputs.risk;
+    content.strata = [['$risk'], ['fine']];
+    content.applied[0]!.output = '$risk';
+    expect(verifyProof(handSealed(content)).issues).toEqual([
+      'output name reserved: $risk',
+      'unsigned',
+    ]);
+    expect(specError(() => sealProof(content)).message).toBe(
+      'Cannot seal the proof: output name reserved: $risk',
+    );
+  });
+
+  it.each([
+    ['a non-canonical value', (p: UnsignedProof) => (p.outputs.fine!.value = '100.130')],
+    ['a number value', (p: UnsignedProof) => (p.outputs.fine!.value = 100.13)],
+    ['a null value', (p: UnsignedProof) => (p.outputs.fine!.value = null)],
+    ['a "-0" value', (p: UnsignedProof) => (p.outputs.fine!.value = '-0')],
+    ['a non-canonical contribution', (p: UnsignedProof) => (p.applied[1]!.contribution = '1e2')],
+    ['a number contribution', (p: UnsignedProof) => (p.applied[1]!.contribution = 100.13)],
+    ['a non-canonical unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = '100.1250')],
+    ['a number unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = 100.125)],
+  ])('refuses a decimal output with %s', (_name, change) => {
+    const content = staged();
+    change(content);
+    const proof = handSealed(content);
+    expect(verifyProof(proof)).toEqual({
+      status: 'invalid',
+      issues: ['decimal value not canonical: fine', 'unsigned'],
+    });
+    expect(specError(() => sealProof(content)).message).toBe(
+      'Cannot seal the proof: decimal value not canonical: fine',
+    );
+    expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
+      'Cannot sign the proof: decimal value not canonical: fine',
+    );
+  });
+
+  it('checks decimals only on decimal outputs', () => {
+    const content = staged();
+    content.outputs.risk!.value = 150.5;
+    content.applied[0]!.contribution = 150.5;
+    content.applied[0]!.unrounded = '150.50';
+    expect(verifyProof(sealProof(content)).issues).toEqual(['unsigned']);
+  });
+
   it('reports every inconsistency once, citations first, in a fixed order', () => {
     const content = staged();
-    content.strata = [['risk', 'tax', 'tax'], []];
+    content.strata = [['risk', 'tax', 'tax', '$z'], []];
     content.applied[1]!.stratum = 1;
     content.skipped.push({ ruleId: 'r3', version: 1, reason: 'DOMINATED', stratum: 9 });
+    content.outputs.fine!.value = '1.0';
     expect(verifyProof(handSealed(content)).issues).toEqual([
       'cited rule not listed: r3@1',
       'stratum output unknown: tax',
       'stratum output repeated: tax',
+      'stratum output unknown: $z',
       'output not in strata: fine',
       'step stratum mismatch: r2@2',
       'stratum out of range: r3@1',
+      'output name reserved: $z',
+      'decimal value not canonical: fine',
       'unsigned',
     ]);
   });

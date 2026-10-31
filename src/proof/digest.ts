@@ -1,4 +1,7 @@
 import { canonicalize } from '../canonical.js';
+import type { JsonValue } from '../canonical.js';
+import { isCanonicalDecimal } from '../decision/decimal.js';
+import { isReservedOutputName } from '../decision/output.js';
 import { SpecError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
@@ -24,7 +27,8 @@ export function computeInputDigest(input: ProofInput): string {
  *
  * Throws `SpecError` (`INVALID_PROOF`), naming the first problem, when the content is not a
  * valid unsigned proof (see `validateProof`) or is not internally consistent (see
- * `inconsistencies`: `cited rule not listed: ...`, `step stratum mismatch: ...`).
+ * `inconsistencies`: `cited rule not listed: ...`, `step stratum mismatch: ...`,
+ * `output name reserved: ...`, `decimal value not canonical: ...`).
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
   const { proof, errors } = readUnsignedProof(p);
@@ -45,12 +49,18 @@ export function contentDigest(p: UnsignedProof): string {
 }
 
 /**
- * Internal: every way `p` contradicts itself, each reported once: first its unlisted citations
- * (`unlistedCitations`), then its strata problems (`strataProblems`). `p` must be a plain-JSON
- * snapshot that `validateProof` accepts.
+ * Internal: every way `p` contradicts itself, each reported once, in this order: its unlisted
+ * citations (`unlistedCitations`), its strata problems (`strataProblems`), its reserved output
+ * names (`reservedOutputNames`) and its non-canonical decimals (`nonCanonicalDecimals`). `p`
+ * must be a plain-JSON snapshot that `validateProof` accepts.
  */
 export function inconsistencies(p: UnsignedProof): string[] {
-  return [...unlistedCitations(p), ...strataProblems(p)];
+  return [
+    ...unlistedCitations(p),
+    ...strataProblems(p),
+    ...reservedOutputNames(p),
+    ...nonCanonicalDecimals(p),
+  ];
 }
 
 /**
@@ -121,4 +131,44 @@ export function strataProblems(p: UnsignedProof): string[] {
   for (const step of p.applied) place(step, step.output);
   for (const entry of [...p.skipped, ...p.exceptions]) place(entry);
   return [...issues];
+}
+
+/**
+ * Internal: each output name starting with `$` (reserved, ruling R36), reported once as
+ * `output name reserved: name`, looking at the keys of `outputs` (sorted), then the names of
+ * `strata` and the `output` of `applied`, in order.
+ */
+export function reservedOutputNames(p: UnsignedProof): string[] {
+  const names = [
+    ...Object.keys(p.outputs).sort(),
+    ...p.strata.flat(),
+    ...p.applied.map((step) => step.output),
+  ];
+  const reserved = new Set(names.filter(isReservedOutputName));
+  return [...reserved].map((name) => `output name reserved: ${name}`);
+}
+
+/**
+ * Internal: each `decimal` output (by sorted name) whose `value`, or the `contribution` or
+ * `unrounded` value of an applied rule feeding it, is not a canonical decimal string
+ * (`isCanonicalDecimal`), reported once as `decimal value not canonical: name`.
+ */
+export function nonCanonicalDecimals(p: UnsignedProof): string[] {
+  const canonical = (value: JsonValue): boolean =>
+    typeof value === 'string' && isCanonicalDecimal(value);
+  const issues: string[] = [];
+  for (const name of Object.keys(p.outputs).sort()) {
+    const output = p.outputs[name];
+    if (output?.type !== 'decimal') continue;
+    const steps = p.applied.filter((step) => step.output === name);
+    const valid =
+      canonical(output.value) &&
+      steps.every(
+        (step) =>
+          canonical(step.contribution) &&
+          (step.unrounded === undefined || canonical(step.unrounded)),
+      );
+    if (!valid) issues.push(`decimal value not canonical: ${name}`);
+  }
+  return issues;
 }

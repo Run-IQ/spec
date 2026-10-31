@@ -74,7 +74,7 @@
           "type": "null"
         },
         {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/outputName"
         }
       ]
     },
@@ -185,6 +185,11 @@
       "type": "string",
       "minLength": 1
     },
+    "outputName": {
+      "description": "An output name: a non-empty string not starting with $ (names starting with $ are reserved).",
+      "type": "string",
+      "pattern": "^[^$]"
+    },
     "ruleDate": {
       "description": "YYYY-MM-DD (UTC midnight) or an ISO 8601 date-time with Z or a +HH:MM/-HH:MM offset; seconds optional, 1 to 9 fraction digits. A real calendar date. A date-time without a time zone is refused.",
       "type": "string",
@@ -242,7 +247,7 @@
               "const": "shortCircuit"
             },
             "output": {
-              "$ref": "#/$defs/nonEmptyString"
+              "$ref": "#/$defs/outputName"
             },
             "value": {
               "description": "Any JSON value, null included."
@@ -280,7 +285,7 @@
         "outputs": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/nonEmptyString"
+            "$ref": "#/$defs/outputName"
           }
         },
         "models": {

@@ -4,6 +4,19 @@
  */
 export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
   [
+    'a shortCircuit to a reserved output name (R36)',
+    [{ kind: 'shortCircuit', output: '$outputs', value: 1 }],
+    'exceptions[0].output',
+    'exceptions[0].output must not start with "$": output names starting with "$" are reserved',
+  ],
+  [
+    'a selector naming a reserved output (R36)',
+    [{ kind: 'inhibit', targets: { outputs: ['vat', '$risk'] } }],
+    'exceptions[0].targets.outputs[1]',
+    'exceptions[0].targets.outputs[1] must not start with "$": ' +
+      'output names starting with "$" are reserved',
+  ],
+  [
     'a non-array',
     { kind: 'inhibit', targets: { ids: ['a'] } },
     'exceptions',

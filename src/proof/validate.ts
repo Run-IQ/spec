@@ -293,8 +293,10 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * - an output's `rounding` is checked as in an output declaration (`validateOutputDeclaration`),
  *   on a `number` or `decimal` output only.
  *
- * Whether `strata` covers `outputs` and holds each `stratum` is a consistency check, made by
- * `verifyProof`, `sealProof` and `signProof`, not by this function.
+ * Consistency is not checked here: whether every cited rule is listed, whether `strata` covers
+ * `outputs` and holds each `stratum`, whether an output name starts with the reserved `$`,
+ * and whether decimal values are canonical are checked by `verifyProof`, `sealProof` and
+ * `signProof` only. The JSON schema likewise checks the shape only.
  *
  * It agrees with `schema/decision-proof.schema.json` on JSON documents, plus one check JSON
  * Schema cannot express: no two entries of `rules` have the same id and version.

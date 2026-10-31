@@ -31,7 +31,10 @@ interface Finding {
  *    `stratum output unknown: name`, `stratum output repeated: name`,
  *    `output not in strata: name`, `stratum out of range: id@version` (an entry of `applied`,
  *    `skipped` or `exceptions` whose stratum `strata` does not have), and
- *    `step stratum mismatch: id@version` (an applied rule whose output is not in its stratum).
+ *    `step stratum mismatch: id@version` (an applied rule whose output is not in its stratum);
+ *    `output name reserved: name` (an output key, stratum name or step output starting with
+ *    `$`); and `decimal value not canonical: name` (a `decimal` output whose value, or an
+ *    applied contribution or `unrounded` value for it, is not a canonical decimal string).
  * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
  *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters, not a curve point, or
  *    a small-order point), leave it at best `consistent`: nothing proves who produced it.

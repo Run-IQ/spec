@@ -1,5 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
+import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
@@ -25,7 +26,8 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * Never mutates `input`; the result shares no reference with it.
  * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
  * positive integer), for a malformed `exceptions` list, for a rule of model `EXCEPTION_MODEL`
- * with an `output` or without exceptions, or when
+ * with an `output` or without exceptions, for an output name starting with `$` (in `output`,
+ * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), or when
  * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do.
@@ -59,6 +61,9 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
   for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
     const value = input[field];
     if (value != null) out[field] = requireString(value, field);
+  }
+  if (typeof out.output === 'string' && isReservedOutputName(out.output)) {
+    invalidRule(reservedOutputNameMessage('output'));
   }
   if (input.exceptions != null) {
     const read = readRuleExceptions(toJsonValue(input.exceptions, 'exceptions'));

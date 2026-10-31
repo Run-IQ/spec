@@ -1,5 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { computeRuleChecksum, normalizeRuleDefinition, SpecError } from '../src/index.js';
+import {
+  computeRuleChecksum,
+  normalizeRuleDefinition,
+  SpecError,
+  validateRuleDefinition,
+} from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
@@ -279,5 +284,27 @@ describe('normalizeRuleDefinition: invalid rules', () => {
     expect(() =>
       normalizeRuleDefinition({ ...base, id: '' } as unknown as RuleDefinitionInput),
     ).toThrow(SpecError);
+  });
+});
+
+describe('reserved output names (R36)', () => {
+  const message = 'output must not start with "$": output names starting with "$" are reserved';
+
+  it.each(['$outputs', '$', '$tax'])('refuses a rule output %j', (output) => {
+    const value = { ...base, output };
+    expect(validateRuleDefinition(value)).toEqual({
+      valid: false,
+      errors: [message],
+      issues: [{ path: 'output', message }],
+    });
+    expect(() => normalizeRuleDefinition(value)).toThrow(
+      expect.objectContaining({ code: 'INVALID_RULE', message }),
+    );
+  });
+
+  it('accepts a $ that is not the first character', () => {
+    const value = { ...base, output: 'tax$2025' };
+    expect(validateRuleDefinition(value).valid).toBe(true);
+    expect(normalizeRuleDefinition(value).output).toBe('tax$2025');
   });
 });

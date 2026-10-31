@@ -1,6 +1,7 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { SpecError } from '../errors.js';
+import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
@@ -27,7 +28,9 @@ class Issues {
  * what `normalizeRuleDefinition` accepts, and agrees with `schema/rule-definition.schema.json`
  * on JSON documents, plus one check JSON Schema cannot express: `effectiveUntil` must be after
  * `effectiveFrom`. It checks the closed `exceptions` format and the constraints of the
- * reserved model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list). Like
+ * reserved model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses
+ * output names starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit`
+ * output and in selector `outputs`. Like
  * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
  * Set, class instances, functions, `NaN`, `Infinity`...).
  *
@@ -70,6 +73,9 @@ export function validateRuleDefinition(value: unknown): {
   if (value.condition != null) checkCondition(value.condition, errors);
   for (const field of OPTIONAL_STRINGS) {
     if (value[field] != null) checkNonEmptyString(value[field], field, errors);
+  }
+  if (typeof value.output === 'string' && isReservedOutputName(value.output)) {
+    errors.add('output', reservedOutputNameMessage('output'));
   }
   if (value.dimensions != null) checkDimensions(value.dimensions, errors);
   if (value.tags != null) checkTags(value.tags, errors);

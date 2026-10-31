@@ -117,6 +117,8 @@ const INVALID: [string, unknown][] = [
   ['an unknown condition key', { ...base, condition: { dsl: 'x', value: 1, extra: true } }],
   ['a condition without value', { ...base, condition: { dsl: 'x' } }],
   ['an empty output', { ...base, output: '' }],
+  ['a reserved output name (R36)', { ...base, output: '$outputs' }],
+  ['an output name starting with $ (R36)', { ...base, output: '$' }],
   ['an array instead of an object', [base]],
 ];
 
