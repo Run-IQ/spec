@@ -2,11 +2,12 @@ import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
-import { isPlainObject } from '../values.js';
+import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
 import type { RuleValidationIssue } from './validate.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
@@ -29,7 +30,8 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * positive integer), for a malformed `exceptions` list, for a rule of model `EXCEPTION_MODEL`
  * with an `output` or without exceptions, for an output name starting with `$` (in `output`,
  * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), or when
- * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
+ * `effectiveUntil <= effectiveFrom` (an empty window), for a lone UTF-16 surrogate in a string
+ * field, a tag, a dimension key or value or an extension key, `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
  * (`params`, `condition.value`, `exceptions`, an extension: a getter or a Proxy trap that
@@ -90,7 +92,9 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
   for (const key of Object.keys(input)) {
     if (RESERVED.has(key)) continue;
     const value = input[key];
-    if (value != null) defineField(out, key, readJson(value, key));
+    if (value == null) continue;
+    if (hasLoneSurrogate(key)) invalidRule(extensionKeyMessage(key));
+    defineField(out, key, readJson(value, key));
   }
 
   return out as RuleDefinition;
@@ -133,7 +137,9 @@ function normalizeDimensions(value: unknown): Record<string, string> {
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
     if (v == null) continue; // null or undefined: the dimension is unset
+    if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
     if (typeof v !== 'string') invalidRule(`dimensions.${key} must be a string`);
+    if (hasLoneSurrogate(v)) invalidRule(loneSurrogateMessage(`dimensions.${key}`));
     defineField(out, key, v);
   }
   return out;
@@ -146,11 +152,17 @@ function normalizeTags(value: unknown): string[] {
   for (const tag of tags) {
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }
+  tags.forEach((tag, i) => {
+    if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
+      invalidRule(loneSurrogateMessage(`tags[${i}]`));
+    }
+  });
   return [...new Set(tags as string[])].sort();
 }
 
 function requireString(value: unknown, field: string): string {
   if (typeof value !== 'string' || value === '') invalidRule(`${field} must be a non-empty string`);
+  if (hasLoneSurrogate(value)) invalidRule(loneSurrogateMessage(field));
   return value;
 }
 

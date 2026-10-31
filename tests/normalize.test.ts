@@ -6,6 +6,7 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { specError } from './helpers.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
 function without(obj: object, key: string): RuleDefinitionInput {
@@ -319,17 +320,6 @@ describe('unreadable rule definitions', () => {
     });
   };
 
-  /** The `SpecError` `call` throws; fails the test when it throws anything else. */
-  function specErrorOf(call: () => unknown): SpecError {
-    try {
-      call();
-    } catch (error) {
-      if (error instanceof SpecError) return error;
-      throw error;
-    }
-    throw new Error('expected a SpecError');
-  }
-
   it('reports a throwing getter at the top level, and normalize refuses it', () => {
     const rule = { ...base };
     throwing(rule, 'id', new Error('boom'));
@@ -339,7 +329,7 @@ describe('unreadable rule definitions', () => {
       errors: [message],
       issues: [{ path: '', message }],
     });
-    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    const error = specError(() => normalizeRuleDefinition(rule));
     expect(error.code).toBe('INVALID_RULE');
     expect(error.message).toBe(message);
     expect(() => computeRuleChecksum(rule)).toThrow(
@@ -356,7 +346,7 @@ describe('unreadable rule definitions', () => {
       errors: ['exceptions could not be read: Symbol(kind)'],
       issues: [{ path: 'exceptions', message: 'exceptions could not be read: Symbol(kind)' }],
     });
-    const error = specErrorOf(() => normalizeRuleDefinition(rule as RuleDefinitionInput));
+    const error = specError(() => normalizeRuleDefinition(rule as RuleDefinitionInput));
     expect(error.code).toBe('INVALID_RULE');
     expect(error.message).toBe('exceptions could not be read: Symbol(kind)');
   });
@@ -368,7 +358,7 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition(rule).issues).toEqual([
       { path: 'params', message: 'params could not be read: nope' },
     ]);
-    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    const error = specError(() => normalizeRuleDefinition(rule));
     expect(error.code).toBe('INVALID_RULE');
     expect(error.message).toBe('params could not be read: nope');
   });
@@ -378,13 +368,13 @@ describe('unreadable rule definitions', () => {
     throwing(rates, 'reduced', new Error('nope'));
     const nested = { ...base, params: { rates: [rates] } };
     expect(validateRuleDefinition(nested).errors).toEqual(['params could not be read: nope']);
-    expect(specErrorOf(() => normalizeRuleDefinition(nested)).message).toBe(
+    expect(specError(() => normalizeRuleDefinition(nested)).message).toBe(
       'params could not be read: nope',
     );
     const value = {};
     throwing(value, 'var', new Error('x'));
     const condition = { ...base, condition: { dsl: 'jsonlogic', value } };
-    expect(specErrorOf(() => normalizeRuleDefinition(condition)).message).toBe(
+    expect(specError(() => normalizeRuleDefinition(condition)).message).toBe(
       'condition.value could not be read: x',
     );
     expect(validateRuleDefinition(condition).errors).toEqual([
@@ -393,7 +383,7 @@ describe('unreadable rule definitions', () => {
     const meta = {};
     throwing(meta, 'owner', new Error('y'));
     const extension = { ...base, meta };
-    expect(specErrorOf(() => normalizeRuleDefinition(extension)).message).toBe(
+    expect(specError(() => normalizeRuleDefinition(extension)).message).toBe(
       'meta could not be read: y',
     );
     expect(validateRuleDefinition(extension).errors).toEqual(['meta could not be read: y']);
@@ -408,7 +398,7 @@ describe('unreadable rule definitions', () => {
       errors: ['params is too deeply nested'],
       issues: [{ path: 'params', message: 'params is too deeply nested' }],
     });
-    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    const error = specError(() => normalizeRuleDefinition(rule));
     expect(error.code).toBe('INVALID_RULE');
     expect(error.message).toBe('params is too deeply nested');
   });
@@ -425,8 +415,109 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition(hostile).issues).toEqual([
       { path: '', message: 'rule definition could not be read: keys' },
     ]);
-    expect(specErrorOf(() => normalizeRuleDefinition(hostile as RuleDefinitionInput)).message).toBe(
+    expect(specError(() => normalizeRuleDefinition(hostile as RuleDefinitionInput)).message).toBe(
       'rule definition could not be read: keys',
     );
+  });
+});
+
+describe('lone UTF-16 surrogates in a rule definition', () => {
+  // Built from a code unit: an editor or a formatter could rewrite the character.
+  const LONE = String.fromCharCode(0xd800);
+  const escaped = '\\ud800';
+  const lone = (field: string): string => `${field} contains a lone UTF-16 surrogate`;
+  const notJson = (path: string): string =>
+    `Value at "${path}" cannot be serialized to canonical JSON: a string with a lone UTF-16 surrogate`;
+
+  // [label, fields changed on `base`, issue path, issue message, SpecError code of normalize]
+  const CASES: [string, Record<string, unknown>, string, string, string][] = [
+    ['id', { id: `r${LONE}` }, 'id', lone('id'), 'INVALID_RULE'],
+    ['model', { model: LONE }, 'model', lone('model'), 'INVALID_RULE'],
+    ['output', { output: `x${LONE}` }, 'output', lone('output'), 'INVALID_RULE'],
+    [
+      'dominanceGroup',
+      { dominanceGroup: LONE },
+      'dominanceGroup',
+      lone('dominanceGroup'),
+      'INVALID_RULE',
+    ],
+    ['sourceRef', { sourceRef: `art. ${LONE}` }, 'sourceRef', lone('sourceRef'), 'INVALID_RULE'],
+    [
+      'condition.dsl',
+      { condition: { dsl: LONE, value: true } },
+      'condition.dsl',
+      lone('condition.dsl'),
+      'INVALID_RULE',
+    ],
+    ['a tag', { tags: ['a', LONE] }, 'tags[1]', lone('tags[1]'), 'INVALID_RULE'],
+    [
+      'a dimension value',
+      { dimensions: { country: LONE } },
+      'dimensions.country',
+      lone('dimensions.country'),
+      'INVALID_RULE',
+    ],
+    [
+      'a dimension key',
+      { dimensions: { [LONE]: 'BJ' } },
+      'dimensions',
+      `dimensions has a key with a lone UTF-16 surrogate: "${escaped}"`,
+      'INVALID_RULE',
+    ],
+    [
+      'an extension key',
+      { [LONE]: 1 },
+      '',
+      `rule definition has an extension key with a lone UTF-16 surrogate: "${escaped}"`,
+      'INVALID_RULE',
+    ],
+    ['an extension value', { ext: { a: LONE } }, 'ext.a', notJson('ext.a'), 'NON_SERIALIZABLE'],
+    [
+      'params',
+      { params: { base: LONE } },
+      'params.base',
+      notJson('params.base'),
+      'NON_SERIALIZABLE',
+    ],
+    [
+      'condition.value',
+      { condition: { dsl: 'jsonlogic', value: { var: LONE } } },
+      'condition.value.var',
+      notJson('condition.value.var'),
+      'NON_SERIALIZABLE',
+    ],
+    [
+      'exceptions',
+      { exceptions: [{ kind: 'inhibit', targets: { ids: [LONE] } }] },
+      'exceptions[0].targets.ids[0]',
+      notJson('exceptions[0].targets.ids[0]'),
+      'NON_SERIALIZABLE',
+    ],
+    [
+      'effectiveFrom',
+      { effectiveFrom: `2025-01-01${LONE}` },
+      'effectiveFrom',
+      'effectiveFrom must be a Date, YYYY-MM-DD, or an ISO date-time with Z or an offset; ' +
+        `got "2025-01-01${escaped}"`,
+      'INVALID_DATE',
+    ],
+  ];
+
+  it.each(CASES)(
+    '%s: one issue, and normalize and the checksum refuse it alike',
+    (_l, change, path, message, code) => {
+      const rule = { ...base, ...change } as RuleDefinitionInput;
+      expect(validateRuleDefinition(rule).issues).toEqual([{ path, message }]);
+      const normalized = specError(() => normalizeRuleDefinition(rule));
+      expect(normalized.code).toBe(code);
+      expect(normalized.message).toBe(message);
+      expect(specError(() => computeRuleChecksum(rule)).message).toBe(message);
+    },
+  );
+
+  it('ignores a key with a lone surrogate whose value is null, as normalize drops it', () => {
+    const rule = { ...base, dimensions: { [LONE]: null }, [LONE]: null } as RuleDefinitionInput;
+    expect(validateRuleDefinition(rule).valid).toBe(true);
+    expect(computeRuleChecksum(rule)).toBe(computeRuleChecksum(base));
   });
 });

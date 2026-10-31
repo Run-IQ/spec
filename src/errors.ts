@@ -109,21 +109,31 @@ function isStackOverflow(error: unknown): boolean {
   }
 }
 
-/** Longest text a message cites before cutting it. */
+/** Longest text a message cites before cutting it, in UTF-16 code units. */
 const EXCERPT_LENGTH = 100;
 
 /**
- * Internal: `text` as a message cites it: its first 100 UTF-16 code units, followed by `…` when
- * it is longer, so a huge value never makes a huge message.
+ * Internal: `text` as a message cites it: at most its first 100 UTF-16 code units, cut between
+ * two code points (never inside a surrogate pair), followed by `…` when it is longer, so a huge
+ * value never makes a huge message.
  */
 export function excerpt(text: string): string {
-  return text.length > EXCERPT_LENGTH ? `${text.slice(0, EXCERPT_LENGTH)}…` : text;
+  if (text.length <= EXCERPT_LENGTH) return text;
+  const last = text.charCodeAt(EXCERPT_LENGTH - 1);
+  const next = text.charCodeAt(EXCERPT_LENGTH);
+  const splitsPair = last >= 0xd800 && last <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
+  return `${text.slice(0, splitsPair ? EXCERPT_LENGTH - 1 : EXCERPT_LENGTH)}…`;
 }
 
 /**
- * Internal: `text` quoted for a message, as a JSON string (a lone surrogate or a control
- * character is escaped), cut like `excerpt`.
+ * Internal: `text` cut like `excerpt`, with its control characters, lone surrogates, quotes and
+ * backslashes escaped as in a JSON string, without the surrounding quotes.
  */
+export function escapeText(text: string): string {
+  return JSON.stringify(excerpt(text)).slice(1, -1);
+}
+
+/** Internal: `text` quoted for a message, as a JSON string, cut like `excerpt`. */
 export function quoteText(text: string): string {
-  return JSON.stringify(excerpt(text));
+  return `"${escapeText(text)}"`;
 }

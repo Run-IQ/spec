@@ -5,21 +5,10 @@ import {
   formatPointer,
   groupSegment,
   isSubject,
-  SpecError,
   subjectContains,
 } from '../src/index.js';
 import type { Subject } from '../src/index.js';
-
-/** The `SpecError` `call` throws; fails the test when it does not throw one. */
-function specError(call: () => unknown): SpecError {
-  try {
-    call();
-  } catch (error) {
-    if (error instanceof SpecError) return error;
-    throw error;
-  }
-  throw new Error('expected a SpecError');
-}
+import { specError } from './helpers.js';
 
 describe('elementSegment', () => {
   it('writes "@" and the key: a text, or a safe integer in decimal', () => {
@@ -141,6 +130,33 @@ describe('subjectContains', () => {
     expect(specError(() => subjectContains('/x/@1', '/x/!other')).message).toBe(
       'invalid subject "/x/!other": not a subject',
     );
+  });
+});
+
+describe('revoked proxies never escape as raw errors', () => {
+  it('give INVALID_PATH, or false from isSubject', () => {
+    const { proxy, revoke } = Proxy.revocable({}, {});
+    revoke();
+    // A JavaScript caller can pass anything; the signatures say string (and number).
+    const hostile = proxy as unknown as string;
+    const cases: [() => unknown, string][] = [
+      [
+        () => elementSegment(hostile),
+        'an element key must be a string or a safe integer, got unreadable value',
+      ],
+      [
+        () => groupSegment(hostile),
+        'a group value must be a string or a safe integer, got unreadable value',
+      ],
+      [() => subjectContains(hostile, '/x/@1'), 'invalid subject unreadable value: not a subject'],
+      [() => subjectContains('/x/@1', hostile), 'invalid subject unreadable value: not a subject'],
+    ];
+    for (const [call, message] of cases) {
+      const error = specError(call);
+      expect(error.code).toBe('INVALID_PATH');
+      expect(error.message).toBe(message);
+    }
+    expect(isSubject(proxy)).toBe(false);
   });
 });
 

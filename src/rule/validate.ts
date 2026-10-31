@@ -1,8 +1,8 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { SpecError, unreadableMessage } from '../errors.js';
+import { quoteText, SpecError, unreadableMessage } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
-import { isPlainObject } from '../values.js';
+import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { parseRuleDate } from './date.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
@@ -30,7 +30,10 @@ class Issues {
  * `effectiveFrom`. It checks the closed `exceptions` format and the constraints of the
  * reserved model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses
  * output names starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit`
- * output and in selector `outputs`. Like
+ * output and in selector `outputs`. Every text (a string field, a tag, a dimension key or
+ * value, an extension key, any string inside `params`, `condition.value`, `exceptions` or an
+ * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
+ * valid rule always has a checksum. JSON Schema cannot express this check. Like
  * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
  * Set, class instances, functions, `NaN`, `Infinity`...).
  *
@@ -104,7 +107,8 @@ function definitionIssues(value: unknown): {
 
   for (const key of Object.keys(value)) {
     if (RESERVED.has(key) || value[key] == null) continue;
-    checkJson(value[key], key, errors);
+    if (hasLoneSurrogate(key)) errors.add('', extensionKeyMessage(key));
+    else checkJson(value[key], key, errors);
   }
 
   return result(errors);
@@ -125,7 +129,17 @@ function result(issues: Issues): {
 function checkNonEmptyString(value: unknown, field: string, errors: Issues): void {
   if (typeof value !== 'string' || value === '') {
     errors.add(field, `${field} must be a non-empty string`);
-  }
+  } else if (hasLoneSurrogate(value)) errors.add(field, loneSurrogateMessage(field));
+}
+
+/** Internal: the message refusing an extension key that holds a lone UTF-16 surrogate. */
+export function extensionKeyMessage(key: string): string {
+  return `rule definition has an extension key with a lone UTF-16 surrogate: ${quoteText(key)}`;
+}
+
+/** Internal: the message refusing a dimension key that holds a lone UTF-16 surrogate. */
+export function dimensionKeyMessage(key: string): string {
+  return `dimensions has a key with a lone UTF-16 surrogate: ${quoteText(key)}`;
 }
 
 function checkJson(value: unknown, field: string, errors: Issues): void {
@@ -179,19 +193,27 @@ function checkDimensions(value: unknown, errors: Issues): void {
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
-    if (v != null && typeof v !== 'string') {
+    if (v == null) continue; // the dimension is unset: normalize drops the key
+    if (hasLoneSurrogate(key)) errors.add('dimensions', dimensionKeyMessage(key));
+    else if (typeof v !== 'string') {
       errors.add(`dimensions.${key}`, `dimensions.${key} must be a string`);
+    } else if (hasLoneSurrogate(v)) {
+      errors.add(`dimensions.${key}`, loneSurrogateMessage(`dimensions.${key}`));
     }
   }
 }
 
 function checkTags(value: unknown, errors: Issues): void {
-  if (
-    !Array.isArray(value) ||
-    !Array.from(value as unknown[]).every((t) => typeof t === 'string')
-  ) {
+  const tags: unknown[] | undefined = Array.isArray(value) ? Array.from(value) : undefined;
+  if (!tags || !tags.every((t) => typeof t === 'string')) {
     errors.add('tags', 'tags must be an array of strings');
+    return;
   }
+  tags.forEach((tag, i) => {
+    if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
+      errors.add(`tags[${i}]`, loneSurrogateMessage(`tags[${i}]`));
+    }
+  });
 }
 
 /**

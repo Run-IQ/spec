@@ -1,5 +1,5 @@
 import { SpecError, quoteText, unreadableMessage } from '../errors.js';
-import { hasLoneSurrogate } from '../values.js';
+import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 
 /**
  * A JSON Pointer (RFC 6901): `""` is the root, every other pointer is `/` followed by segments
@@ -46,15 +46,7 @@ export function parsePointer(pointer: string): string[] {
  * throwing getter), or a segment holds a lone UTF-16 surrogate.
  */
 export function formatPointer(segments: readonly string[]): JsonPointer {
-  if (!Array.isArray(segments)) {
-    throw new SpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
-  }
-  let items: unknown[];
-  try {
-    items = Array.from(segments as readonly unknown[]);
-  } catch (error) {
-    throw new SpecError('INVALID_PATH', unreadableMessage('JSON pointer segments', error));
-  }
+  const items = readSegments(segments);
   let out = '';
   items.forEach((segment, i) => {
     if (typeof segment !== 'string') {
@@ -64,14 +56,34 @@ export function formatPointer(segments: readonly string[]): JsonPointer {
       );
     }
     if (hasLoneSurrogate(segment)) {
-      throw new SpecError(
-        'INVALID_PATH',
-        `segment ${i} of a JSON pointer contains a lone UTF-16 surrogate`,
-      );
+      throw new SpecError('INVALID_PATH', loneSurrogateMessage(`segment ${i} of a JSON pointer`));
     }
     out += `/${segment.replace(/~/g, '~0').replace(/\//g, '~1')}`;
   });
   return out;
+}
+
+/**
+ * A plain copy of `segments`, read by index up to a `length` read once (never through an
+ * iterator a caller could override). Throws `SpecError` (`INVALID_PATH`) for anything but an
+ * array, and for an array that cannot be read (a Proxy trap or a getter that throws, a revoked
+ * Proxy).
+ */
+function readSegments(segments: readonly string[]): unknown[] {
+  let items: unknown[];
+  try {
+    if (!Array.isArray(segments)) {
+      throw new SpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
+    }
+    const list: readonly unknown[] = segments;
+    const length = list.length;
+    items = [];
+    for (let i = 0; i < length; i++) items.push(list[i]);
+  } catch (error) {
+    if (error instanceof SpecError) throw error;
+    throw new SpecError('INVALID_PATH', unreadableMessage('JSON pointer segments', error));
+  }
+  return items;
 }
 
 /**
@@ -113,13 +125,6 @@ export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undef
   if (!head.startsWith('$')) return formatPointer(['data', ...segments]);
   const field = Object.hasOwn(INPUT_VARIABLES, head) ? INPUT_VARIABLES[head] : undefined;
   return field === undefined ? undefined : formatPointer(['meta', field, ...rest]);
-}
-
-/** Internal: the type of `value` as a message writes it (`array` and `null` apart). */
-export function typeName(value: unknown): string {
-  if (value === null) return 'null';
-  if (Array.isArray(value)) return 'array';
-  return typeof value;
 }
 
 function invalidPointer(pointer: string, why: string): never {

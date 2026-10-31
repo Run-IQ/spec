@@ -40,7 +40,10 @@ function isForeignObjectPrototype(proto: unknown): boolean {
   );
 }
 
-/** A lone UTF-16 surrogate: a high one not followed by a low one, or a low one not preceded by a high one. */
+/**
+ * A lone UTF-16 surrogate: a high one not followed by a low one, or a low one not preceded by a
+ * high one.
+ */
 const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
 
 /**
@@ -49,4 +52,24 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
  */
 export function hasLoneSurrogate(text: string): boolean {
   return LONE_SURROGATE.test(text);
+}
+
+/** Internal: the message refusing `subject` (a field path, or a description) for a lone surrogate. */
+export function loneSurrogateMessage(subject: string): string {
+  return `${subject} contains a lone UTF-16 surrogate`;
+}
+
+/**
+ * The type of `value` as a message writes it: `null`, `array`, or its `typeof`. Never throws: a
+ * value that cannot be inspected (a revoked Proxy, on which `Array.isArray` throws) gives
+ * `unreadable value`.
+ */
+export function typeName(value: unknown): string {
+  if (value === null) return 'null';
+  try {
+    if (Array.isArray(value)) return 'array';
+  } catch {
+    return 'unreadable value';
+  }
+  return typeof value;
 }

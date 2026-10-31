@@ -1,4 +1,4 @@
-import { SpecError } from '../errors.js';
+import { quoteText, SpecError } from '../errors.js';
 import { dateTimeOf } from '../values.js';
 
 const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
@@ -39,7 +39,7 @@ export function parseRuleDate(value: unknown, field: string): Date {
       zone ?? 'Z',
     );
   }
-  return invalid(field, JSON.stringify(value));
+  return invalid(field, quoteText(value));
 }
 
 function build(
@@ -52,23 +52,23 @@ function build(
   const [year, month, day] = date.map(Number) as [number, number, number];
   const [hour = 0, minute = 0, second = 0, ms = 0] = time.map(Number);
   if (month < 1 || month > 12 || day < 1 || day > daysInMonth(year, month)) {
-    invalid(field, JSON.stringify(raw));
+    invalid(field, quoteText(raw));
   }
-  if (hour > 23 || minute > 59 || second > 59) invalid(field, JSON.stringify(raw));
+  if (hour > 23 || minute > 59 || second > 59) invalid(field, quoteText(raw));
 
   let offsetMinutes = 0;
   if (zone !== 'Z') {
     const sign = zone.startsWith('-') ? -1 : 1;
     const oh = Number(zone.slice(1, 3));
     const om = Number(zone.slice(4, 6));
-    if (oh > 23 || om > 59) invalid(field, JSON.stringify(raw));
+    if (oh > 23 || om > 59) invalid(field, quoteText(raw));
     offsetMinutes = sign * (oh * 60 + om);
   }
 
   const result = new Date(0);
   result.setUTCFullYear(year, month - 1, day);
   result.setUTCHours(hour, minute - offsetMinutes, second, ms);
-  if (Number.isNaN(result.getTime())) invalid(field, JSON.stringify(raw));
+  if (Number.isNaN(result.getTime())) invalid(field, quoteText(raw));
   return result;
 }
 

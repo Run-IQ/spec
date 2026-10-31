@@ -7,7 +7,14 @@ import {
   OUTPUT_TYPES,
   roundingNotApplicable,
 } from '../decision/output.js';
-import { describeError, excerpt, SpecError, specErrorPath, unreadableMessage } from '../errors.js';
+import {
+  describeError,
+  escapeText,
+  quoteText,
+  SpecError,
+  specErrorPath,
+  unreadableMessage,
+} from '../errors.js';
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
@@ -90,7 +97,7 @@ const proofFormat: Check = (value, path, add) => {
 function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue | undefined {
   const format = members.get('format');
   if (typeof format !== 'string' || isProofFormat(format)) return undefined;
-  return { path: 'format', message: `unknown format: ${excerpt(format)}` };
+  return { path: 'format', message: `unknown format: ${escapeText(format)}` };
 }
 
 function constant(expected: string): Check {
@@ -179,7 +186,7 @@ function checkObject(
   const at = (key: string): string => (path ? `${path}.${key}` : key);
   for (const key of members.keys()) {
     if (ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
-    add(at(key), `${path || 'proof'} has an unknown key "${key}"`);
+    add(at(key), `${path || 'proof'} has an unknown key ${quoteText(key)}`);
   }
   for (const [key, check] of Object.entries(shape.fields)) {
     const field = members.get(key);

@@ -20,10 +20,10 @@ interface Finding {
  * gives `invalid`. Issues are short, stable English strings.
  *
  * 1. The shape (`validateProof`). A malformed proof is `invalid` with the validation messages,
- *    and nothing else is checked. A `format` outside `PROOF_FORMATS` gives the single issue
- *    `unknown format: <format>`: this version cannot read a later format. The proof is then read once into a plain-JSON snapshot
- *    (each property read exactly once), validated again, and every later check runs on that
- *    snapshot only.
+ *    and nothing else is checked. A `format` outside `PROOF_FORMATS` gives the single
+ *    issue `unknown format: <format>`: this version cannot read a later format. The proof is
+ *    then read once into a plain-JSON snapshot (each property read exactly once), validated
+ *    again, and every later check runs on that snapshot only.
  * 2. The digest, recomputed from the content: `digest mismatch` makes it `invalid`.
  * 3. Internal consistency: every rule the proof cites (in `applied`, `skipped`, `exceptions`,
  *    output `contributors` and exception `affected`) must be listed in `rules`, otherwise

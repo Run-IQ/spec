@@ -12,7 +12,6 @@ import {
   sealProof,
   sha256Hex,
   signProof,
-  SpecError,
   validateProof,
   verifyProof,
 } from '../src/index.js';
@@ -23,6 +22,7 @@ import type {
   UnsignedProof,
 } from '../src/index.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-cases.js';
+import { specError } from './helpers.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -97,17 +97,6 @@ function unsigned(): UnsignedProof {
 const sealed = (): DecisionProof => sealProof(unsigned());
 const signed = (): DecisionProof => signProof(sealed(), RFC_SECRET, 'executor-1');
 
-/** The `SpecError` `call` throws; fails the test when it does not throw one. */
-function specError(call: () => unknown): SpecError {
-  try {
-    call();
-  } catch (error) {
-    if (error instanceof SpecError) return error;
-    throw error;
-  }
-  throw new Error('expected a SpecError');
-}
-
 describe('PROOF_FORMAT', () => {
   it('names version 1 of the format', () => {
     expect(PROOF_FORMAT).toBe('run-iq.proof/1');
@@ -144,6 +133,20 @@ describe('PROOF_FORMATS', () => {
       status: 'invalid',
       issues: [`unknown format: x${'y'.repeat(99)}…`],
     });
+  });
+
+  it('escapes control characters and lone surrogates of an unknown format', () => {
+    const format = `run-iq.proof/2\n${String.fromCharCode(0xd800)}`;
+    expect(verifyProof({ ...signed(), format })).toEqual({
+      status: 'invalid',
+      issues: ['unknown format: run-iq.proof/2\\n\\ud800'],
+    });
+  });
+
+  it('quotes an unknown key with its control characters escaped', () => {
+    expect(validateProof({ ...signed(), 'a\tb': 1 }).issues).toEqual([
+      { path: 'a\tb', message: 'proof has an unknown key "a\\tb"' },
+    ]);
   });
 
   it('reads format once: an accessor cannot pass one value and show another', () => {

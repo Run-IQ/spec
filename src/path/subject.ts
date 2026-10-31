@@ -1,7 +1,7 @@
 import { quoteText, SpecError } from '../errors.js';
 import { daysInMonth } from '../rule/date.js';
-import { hasLoneSurrogate } from '../values.js';
-import { parsePointer, typeName } from './pointer.js';
+import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
+import { parsePointer } from './pointer.js';
 import type { JsonPointer } from './pointer.js';
 
 /**
@@ -98,7 +98,7 @@ function isRealDate(text: string): boolean {
 function keyText(value: unknown, what: string): string {
   if (typeof value === 'string') {
     if (hasLoneSurrogate(value)) {
-      throw new SpecError('INVALID_PATH', `${what} contains a lone UTF-16 surrogate`);
+      throw new SpecError('INVALID_PATH', loneSurrogateMessage(what));
     }
     return value;
   }

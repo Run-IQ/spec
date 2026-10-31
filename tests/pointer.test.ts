@@ -5,20 +5,9 @@ import {
   contextToInputPointer,
   formatPointer,
   parsePointer,
-  SpecError,
 } from '../src/index.js';
 import type { JsonPointer } from '../src/index.js';
-
-/** The `SpecError` `call` throws; fails the test when it does not throw one. */
-function specError(call: () => unknown): SpecError {
-  try {
-    call();
-  } catch (error) {
-    if (error instanceof SpecError) return error;
-    throw error;
-  }
-  throw new Error('expected a SpecError');
-}
+import { specError } from './helpers.js';
 
 describe('parsePointer', () => {
   it('reads RFC 6901 pointers', () => {
@@ -52,6 +41,19 @@ describe('parsePointer', () => {
     );
   });
 
+  it('cuts a cited text between code points, never inside a surrogate pair', () => {
+    const pointer = `x${'a'.repeat(98)}${String.fromCodePoint(0x1f600)}b`;
+    expect(specError(() => parsePointer(pointer)).message).toBe(
+      `invalid JSON pointer "x${'a'.repeat(98)}…": must be empty or start with "/"`,
+    );
+  });
+
+  it('escapes control characters in a cited text', () => {
+    expect(specError(() => parsePointer('a\n')).message).toBe(
+      'invalid JSON pointer "a\\n": must be empty or start with "/"',
+    );
+  });
+
   it('reads a huge pointer', () => {
     expect(parsePointer('/a'.repeat(200_000))).toHaveLength(200_000);
   });
@@ -65,7 +67,60 @@ describe('parsePointer', () => {
   });
 });
 
+/** A revoked Proxy: any operation on it, `Array.isArray` included, throws a TypeError. */
+function revoked(): string[] {
+  const { proxy, revoke } = Proxy.revocable<string[]>([], {});
+  revoke();
+  return proxy;
+}
+
+describe('revoked proxies never escape as raw errors', () => {
+  it('parsePointer, comparePointers, contextToInputPointer', () => {
+    // A JavaScript caller can pass anything; the signatures say string.
+    const pointer = revoked() as unknown as string;
+    for (const call of [
+      () => parsePointer(pointer),
+      () => comparePointers(pointer, '/a'),
+      () => contextToInputPointer(pointer),
+    ]) {
+      const error = specError(call);
+      expect(error.code).toBe('INVALID_PATH');
+      expect(error.message).toBe('a JSON pointer must be a string, got unreadable value');
+    }
+  });
+
+  it('formatPointer, as the list or as a segment', () => {
+    const list = specError(() => formatPointer(revoked()));
+    expect(list.code).toBe('INVALID_PATH');
+    expect(list.message).toMatch(/^JSON pointer segments could not be read: /);
+    const segment = revoked() as unknown as string; // a JavaScript caller can pass anything
+    expect(specError(() => formatPointer(['a', segment])).message).toBe(
+      'segment 1 of a JSON pointer must be a string, got unreadable value',
+    );
+  });
+});
+
 describe('formatPointer', () => {
+  it('reads segments by index up to a length read once, never through the iterator', () => {
+    const segments = ['a', 'b'];
+    Object.defineProperty(segments, Symbol.iterator, {
+      value: function* () {
+        yield 'evil';
+      },
+    });
+    expect(formatPointer(segments)).toBe('/a/b');
+
+    let lengthReads = 0;
+    const counted = new Proxy(['a', 'b'], {
+      get(target, key, receiver) {
+        if (key === 'length') lengthReads += 1;
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    expect(formatPointer(counted)).toBe('/a/b');
+    expect(lengthReads).toBe(1);
+  });
+
   it('writes segments back, escaping "~" then "/"', () => {
     expect(formatPointer([])).toBe('');
     expect(formatPointer(['a/b', '~c'])).toBe('/a~1b/~0c');

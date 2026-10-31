@@ -1,4 +1,4 @@
-import { SpecError } from './errors.js';
+import { quoteText, SpecError } from './errors.js';
 import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
@@ -103,7 +103,7 @@ function constructorName(value: object): string {
 function fail(path: string, what: string): never {
   throw new SpecError(
     'NON_SERIALIZABLE',
-    `Value at "${path || '(root)'}" cannot be serialized to canonical JSON: ${what}`,
+    `Value at ${quoteText(path || '(root)')} cannot be serialized to canonical JSON: ${what}`,
     path,
   );
 }
