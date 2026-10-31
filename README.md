@@ -79,6 +79,7 @@ Every other top-level key is a plugin extension. Extensions enter the checksum a
 - Missing `effectiveUntil`, `dimensions` and `tags` become `null`, `{}` and `[]`. Tags are sorted and deduplicated.
 - At the top level, `null`, `undefined` and an absent key mean the same thing. Inside `params`, `condition.value`, `exceptions` and extension values, `null` is data.
 - `checksum` is dropped.
+- `exceptions: []` is data, not a default: it seals differently from an absent `exceptions` (`null` counts as absent). Which empty form is canonical will be decided with the exceptions format in phase 2.
 
 `canonicalize` writes JSON with keys sorted at every depth. `NaN`, `Infinity`, `bigint`, `Map`, `Set`, class instances and cycles throw `NON_SERIALIZABLE` instead of being written as `null` or `{}`. Convert values such as `Decimal` to JSON first. Strings are not Unicode-normalized.
 

@@ -33,6 +33,7 @@ The packages of the `next` line depend on each other with `^1.0.0-next.0`, `^0.2
 - `version` must be a positive integer.
 - `schemaVersion` is no longer a named field of `Rule`. If you set it, it is an extension and enters the checksum.
 - Extension fields stay at the top level of the rule and enter the checksum.
+- `exceptions: []` and an absent `exceptions` give different checksums and fingerprints (`null` counts as absent). The canonical empty form is decided with the exceptions format in phase 2; until then, pick one form and keep it.
 
 ## Validity window
 
@@ -46,6 +47,19 @@ The packages of the `next` line depend on each other with `^1.0.0-next.0`, `^0.2
 - `hydrateRule` and `hydrateRules` throw `ValidationError` on an invalid definition, with every problem in `reasons`. They keep the stored `checksum`, so a row changed after sealing is still caught as `CHECKSUM_MISMATCH`.
 - `Rule` now has an extension index signature. Object literals typed as `Rule` no longer get excess-property errors, and `Omit<Rule, ...>` loses the named fields: use `Pick` on the named keys instead.
 - `cli` and `server` use `hydrateRules`, so they accept and refuse the same rules.
+- `canonicalStringify` and `hashParams` now go through spec's `canonicalize`, the same code as the checksum. A key containing a quote now gives valid JSON (it used to be written unescaped). `NaN`, `Infinity`, `Map`, `Set`, class instances and cycles throw `SpecError` instead of being written as `null` or `{}`, and `hashParams(undefined)` throws instead of hashing `"null"`. Hashes of plain JSON params with ordinary keys do not change.
+- `VERSION` is exported.
+
+## Migrating rules stored before phase 1
+
+A record saved by an earlier store has a raw payload and a `sha256(payload)` checksum. `fromStoredRecord`, `RuleStoreResolver` and `RuleSandbox` refuse it (`payload is not canonical` or `checksum mismatch`). Re-seal each record once, in one of two ways:
+
+1. **In place**: build the full definition from the record (payload fields plus the record's `id`, `version`, `model`, dates, `priority`, `tags`, and `country` as `dimensions.country`; `ruleDefinitionOf(input, id, version)` of context-engine does this), check it with `validateRuleDefinition`, then write back `payload` and `checksum` from `toStoredPayload(definition)`. The id and version stay the same. Verify the old checksum against the old payload first, so a tampered row is not re-sealed.
+2. **As a new version**: call `saveRule` with the same id and the old payload. The store writes a canonical draft with the next version, which then goes through review and publication like any change.
+
+Records whose payload has no `params` must get one first: `saveRule` and `validateRuleDefinition` require it.
+
+`VERSION` is also exported by context-engine.
 
 ## context-engine
 
@@ -63,7 +77,7 @@ The packages of the `next` line depend on each other with `^1.0.0-next.0`, `^0.2
 - A tampered or unreadable record throws an error naming the rule (`Stored rule <id>@<version>: <reason>`). The node then follows its `onError` policy. It is never dropped silently from the list.
 - `node.skipped` and `node.fallback` events caused by an error carry a new optional `error` field.
 - `RetryRuleResolver` does not retry a `SpecError`: an invalid record fails on the first attempt.
-- `result.versions` and `compiled.compiled` report this package's version from its `package.json`, and the lowest `core` and `context-engine` versions it supports. They used to report hard-coded `0.1.0`, `0.2.6` and `0.2.0`.
+- `result.versions` reports the dg, `core` and `context-engine` versions that ran the execution, read from the loaded packages' `VERSION` exports. `compiled.compiled` keeps the versions loaded at compile time. Both used to report hard-coded `0.1.0`, `0.2.6` and `0.2.0`. `SUPPORTED_PEERS` lists the peer ranges.
 
 ## rule-registry
 
@@ -98,6 +112,8 @@ The tools report a rule spec refuses instead of failing the whole call:
 | `validate_rules` | That rule's entry lists `Invalid rule: <reason>`; the other rules are reported normally |
 | `inspect_rule` | `checksumMatch: false`, `valid: false`, and a new `ruleErrors` array with the reason |
 | `create_checksum`, `create_rule` | `isError: true` with the JSON body `{ "error": "Invalid rule: <reason>" }`, the shape `evaluate` already used. They used to return the SDK's raw error text |
+
+`create_checksum` with `params` that have no canonical JSON form (`NaN`, for example) returns `isError: true` with `{ "error": "Invalid params: <reason>" }`.
 
 Checksums produced by `create_checksum` and `create_rule` are the new spec values.
 
