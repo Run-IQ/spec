@@ -429,7 +429,7 @@ describe('canonicalize keeps no call stack: any depth is accepted', () => {
     let value: unknown = Number.NaN;
     for (let i = 0; i < 100_000; i++) value = [value];
     const error = specError(() => canonicalize(value));
-    expect(error.path).toBe('[0]'.repeat(100_000));
+    expect(error.path).toBe(`${'[0]'.repeat(100_000).slice(0, 1024)}…`);
     expect(error.message).toBe(
       `Value at "${'[0]'.repeat(85)}[…" cannot be serialized to canonical JSON: NaN`,
     );
@@ -499,5 +499,26 @@ describe('every exported function: hostile arguments give an own SpecError or a 
       }
     }
     expect(refused).toEqual([]);
+  });
+});
+
+describe('every SpecError.path this package creates is bounded like an issue path', () => {
+  it("canonicalizeAt's caller root of 2,000,000 characters", () => {
+    const root = 'r'.repeat(2_000_000);
+    const error = specError(() => canonicalizeAt({ a: Number.NaN }, root));
+    expect(error.path).toBe(`${'r'.repeat(1024)}…`);
+    expect(error.message).toBe(
+      `Value at "${'r'.repeat(256)}…" cannot be serialized to canonical JSON: NaN`,
+    );
+  });
+
+  it('never cuts inside a surrogate pair', () => {
+    const root = `${'r'.repeat(1023)}\u{1F600}${'r'.repeat(10)}`;
+    const error = specError(() => canonicalizeAt({ a: Number.NaN }, root));
+    expect(error.path).toBe(`${'r'.repeat(1023)}…`);
+  });
+
+  it('a short path is kept as it is', () => {
+    expect(specError(() => canonicalizeAt({ a: Number.NaN }, 'r')).path).toBe('r.a');
   });
 });

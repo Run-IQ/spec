@@ -1,3 +1,4 @@
+import { boundIssueText } from './issues.js';
 export type SpecErrorCode =
   | 'NON_SERIALIZABLE'
   | 'INVALID_DATE'
@@ -34,7 +35,8 @@ export class SpecError extends Error {
   /**
    * Path of the value `canonicalize` (or `canonicalizeAt`) could not serialize
    * (`params.rates[1]`), set only on those `NON_SERIALIZABLE` errors, whichever function
-   * called it. Absent on every other error.
+   * called it. Absent on every other error. Cut like an issue path: at most 1024 code units
+   * (never inside a surrogate pair), then `…`.
    */
   readonly path?: string;
 
@@ -65,9 +67,14 @@ export class SpecError extends Error {
  */
 const OWN_ERRORS = new WeakSet<object>();
 
-/** Internal: a `SpecError` created by this package, remembered as its own (`isOwnError`). */
+/**
+ * Internal: a `SpecError` created by this package, remembered as its own (`isOwnError`); its
+ * `path` cut by `boundIssueText`.
+ */
 export function newSpecError(code: SpecErrorCode, message: string, path?: string): SpecError {
-  const error = new SpecError(code, message, path);
+  // Every path cut as issue paths are (1024 code units, never inside a surrogate pair, then
+  // `…`), so no site can pass on unbounded caller text (a root path, deep keys).
+  const error = new SpecError(code, message, path === undefined ? undefined : boundIssueText(path));
   OWN_ERRORS.add(error);
   return error;
 }
