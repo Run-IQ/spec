@@ -8,7 +8,7 @@ import {
 } from '../src/index.js';
 import type { JsonValue, RuleDefinitionInput } from '../src/index.js';
 import { MAX_JSON_DEPTH } from '../src/values.js';
-import { nested, specError } from './helpers.js';
+import { nested, specError, tooDeepIssue } from './helpers.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
 function without(obj: object, key: string): RuleDefinitionInput {
@@ -654,16 +654,18 @@ describe('unreadable rule definitions', () => {
       const accepted = at(nested(MAX_JSON_DEPTH));
       expect(validateRuleDefinition(accepted)).toEqual({ valid: true, errors: [], issues: [] });
       expect(normalizeRuleDefinition(accepted)).toBeDefined();
-      const message = `${field} is nested deeper than 1000 levels`;
+      // The first container past the limit: level 1001, `field` being level 1.
+      const issue = tooDeepIssue(`${field}${'.a'.repeat(MAX_JSON_DEPTH)}`);
       const refused = at(nested(MAX_JSON_DEPTH + 1));
       expect(validateRuleDefinition(refused)).toEqual({
         valid: false,
-        errors: [message],
-        issues: [{ path: field, message }],
+        errors: [issue.message],
+        issues: [issue],
       });
       expect(specError(() => normalizeRuleDefinition(refused))).toMatchObject({
         code: 'NON_SERIALIZABLE',
-        message,
+        message: issue.message,
+        path: issue.path,
       });
     }
   });
@@ -674,16 +676,19 @@ describe('unreadable rule definitions', () => {
     const rule = { ...base, params };
     expect(validateRuleDefinition(rule).valid).toBe(true);
     expect(canonicalize(normalizeRuleDefinition(rule).params)).toBe(canonicalize(params));
-    expect(validateRuleDefinition({ ...base, params: [params] }).errors).toEqual([
-      'params is nested deeper than 1000 levels',
+    // Wrapped once more, the innermost `{ a: [] }` (built first, an object) is level 1001.
+    let path = 'params[0]';
+    for (let i = MAX_JSON_DEPTH - 1; i > 0; i--) path += i % 2 === 0 ? '.a' : '[0]';
+    expect(validateRuleDefinition({ ...base, params: [params] }).issues).toEqual([
+      tooDeepIssue(path),
     ]);
   });
 
   it('refuses a free-form value 200,000 levels deep without overflowing the stack', () => {
     let params: Record<string, unknown> = {};
     for (let i = 0; i < 200_000; i++) params = { a: params };
-    expect(validateRuleDefinition({ ...base, params }).errors).toEqual([
-      'params is nested deeper than 1000 levels',
+    expect(validateRuleDefinition({ ...base, params }).issues).toEqual([
+      tooDeepIssue(`params${'.a'.repeat(MAX_JSON_DEPTH)}`),
     ]);
   });
 

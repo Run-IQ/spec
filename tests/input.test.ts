@@ -418,7 +418,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     expect(validateProofInput(proofInput({}, { a: nested(MAX_JSON_DEPTH) as never }))).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
-        message: `${path.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
   });
@@ -430,7 +430,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     expect(validateProofInput(proofInput({ context: { l: list as never } }))).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
-        message: `${path.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
   });
@@ -456,13 +456,13 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     let cursor = deep;
     for (let i = 0; i < MAX_JSON_DEPTH - 6; i++) cursor = cursor.a as Record<string, unknown>;
     cursor.a = shared;
-    const path = `/data/deep${'/a'.repeat(MAX_JSON_DEPTH - 5)}`;
+    const path = `/data/deep${'/a'.repeat(MAX_JSON_DEPTH)}`;
     expect(
       validateProofInput(proofInput({}, { first: shared as never, deep: deep as never })),
     ).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
-        message: `${path.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
   });
@@ -476,7 +476,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     const list = `/data/x${'/a'.repeat(998)}`;
     expect(issues[0]).toEqual({
       path: `${`${list}/0`.slice(0, 1024)}…`,
-      message: `${list.slice(0, 256)}… nests values more than 1000 levels deep`,
+      message: `${list.slice(0, 256)}… is nested deeper than 1000 levels`,
     });
   });
 
@@ -516,7 +516,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     const expected = [
       {
         path: `${deep.slice(0, 1024)}…`,
-        message: `${deep.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${deep.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
       { path: '/data/b/n', message: 'number beyond 2^53 at /data/b/n' },
       { path: '/data/b/s', message: '/data/b/s contains a lone UTF-16 surrogate' },
@@ -537,7 +537,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     const expected = [
       {
         path: `${deep.slice(0, 1024)}…`,
-        message: `${deep.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${deep.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
       { path: short, message: `number beyond 2^53 at ${short}` },
     ];

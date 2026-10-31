@@ -47,7 +47,7 @@
     "build": "tsup",
     "test": "vitest run",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "lint": "eslint src/ tests/ && prettier --check src/ tests/",
+    "lint": "eslint src/ tests/ && prettier --check src/ tests/ schema/",
     "lint:fix": "eslint src/ tests/ --fix && prettier --write src/ tests/"
   },
   "keywords": [

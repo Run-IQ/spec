@@ -207,3 +207,19 @@ export function nested(levels: number): JsonValue {
   for (let i = 0; i < levels; i++) value = { a: value };
   return value;
 }
+
+/** `text` as an issue cuts it: at most `length` code units, then `…` (ASCII text only). */
+function cutAt(text: string, length: number): string {
+  return text.length > length ? `${text.slice(0, length)}…` : text;
+}
+
+/**
+ * The issue of a value nested deeper than 1000 levels whose first container past the limit sits
+ * at `path` (ASCII): the path cut at 1024 code units, the message citing it cut at 256.
+ */
+export function tooDeepIssue(path: string): { path: string; message: string } {
+  return {
+    path: cutAt(path, 1024),
+    message: `${cutAt(path, 256)} is nested deeper than 1000 levels`,
+  };
+}

@@ -4,14 +4,7 @@
   "title": "Run-IQ rule definition",
   "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output (the default output value, or <own rule set>:value, means absent). The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Some rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: params, condition.value and every extension value nest at most 1000 levels of non-empty arrays or objects (MAX_JSON_DEPTH; {\"a\": 1} is 1 level); effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value; a forEach.key list holds one name per level (one more than the '*' segments of forEach.path); each forEach.orderBy path appears once; forEach.segments.from and forEach.segments.until differ; a selector's ids name rules of the rule sets it targets (its ruleSets, else the rule's own rule set): an id of a rule set the selector does not target is refused; a selector output of local is refused unless the selector targets local (only local rules feed it: a pack never imports local), and a selector output of another rule set S is refused unless the selector targets S or a pack (only rules of S or of a pack that imports S feed it); on a rule of the reserved model @run-iq/exception, an output value qualified by another rule set than the rule's own is refused (only the default output, value or <own rule set>:value, means absent).",
   "type": "object",
-  "required": [
-    "id",
-    "version",
-    "model",
-    "params",
-    "priority",
-    "effectiveFrom"
-  ],
+  "required": ["id", "version", "model", "params", "priority", "effectiveFrom"],
   "properties": {
     "id": {
       "description": "A rule id: non-empty, without ':' (which separates a rule set from a name, D-4).",
@@ -36,10 +29,7 @@
         },
         {
           "type": "object",
-          "required": [
-            "dsl",
-            "value"
-          ],
+          "required": ["dsl", "value"],
           "properties": {
             "dsl": {
               "$ref": "#/$defs/nonEmptyString"
@@ -206,9 +196,7 @@
     {
       "description": "The reserved model @run-iq/exception only carries exceptions: at least one, and no output. The default output (value, or <own rule set>:value) means absent.",
       "if": {
-        "required": [
-          "model"
-        ],
+        "required": ["model"],
         "properties": {
           "model": {
             "const": "@run-iq/exception"
@@ -216,9 +204,7 @@
         }
       },
       "then": {
-        "required": [
-          "exceptions"
-        ],
+        "required": ["exceptions"],
         "properties": {
           "exceptions": {
             "type": "array",
@@ -244,9 +230,7 @@
     {
       "description": "Both bounds have the same form: a civil effectiveFrom goes with a civil effectiveUntil (D-13).",
       "if": {
-        "required": [
-          "effectiveFrom"
-        ],
+        "required": ["effectiveFrom"],
         "properties": {
           "effectiveFrom": {
             "$ref": "#/$defs/civilDate"
@@ -271,9 +255,7 @@
     {
       "description": "Both bounds have the same form: an instant effectiveFrom goes with an instant effectiveUntil (D-13).",
       "if": {
-        "required": [
-          "effectiveFrom"
-        ],
+        "required": ["effectiveFrom"],
         "properties": {
           "effectiveFrom": {
             "$ref": "#/$defs/instant"
@@ -298,9 +280,7 @@
     {
       "description": "effectiveOn on /$item/ needs a forEach with path and without groupBy: a segment and a group have no single item.",
       "if": {
-        "required": [
-          "effectiveOn"
-        ],
+        "required": ["effectiveOn"],
         "properties": {
           "effectiveOn": {
             "type": "string",
@@ -309,22 +289,16 @@
         }
       },
       "then": {
-        "required": [
-          "forEach"
-        ],
+        "required": ["forEach"],
         "properties": {
           "forEach": {
             "type": "object",
-            "required": [
-              "path"
-            ],
+            "required": ["path"],
             "properties": {
               "path": {}
             },
             "not": {
-              "required": [
-                "groupBy"
-              ],
+              "required": ["groupBy"],
               "properties": {
                 "groupBy": {}
               }
@@ -336,9 +310,7 @@
     {
       "description": "effectiveOn on /$segment/ needs forEach.segments.",
       "if": {
-        "required": [
-          "effectiveOn"
-        ],
+        "required": ["effectiveOn"],
         "properties": {
           "effectiveOn": {
             "type": "string",
@@ -347,15 +319,11 @@
         }
       },
       "then": {
-        "required": [
-          "forEach"
-        ],
+        "required": ["forEach"],
         "properties": {
           "forEach": {
             "type": "object",
-            "required": [
-              "segments"
-            ],
+            "required": ["segments"],
             "properties": {
               "segments": {}
             }
@@ -410,10 +378,7 @@
       "oneOf": [
         {
           "type": "object",
-          "required": [
-            "kind",
-            "targets"
-          ],
+          "required": ["kind", "targets"],
           "properties": {
             "kind": {
               "const": "inhibit"
@@ -426,11 +391,7 @@
         },
         {
           "type": "object",
-          "required": [
-            "kind",
-            "targets",
-            "params"
-          ],
+          "required": ["kind", "targets", "params"],
           "properties": {
             "kind": {
               "const": "substitute"
@@ -447,11 +408,7 @@
         },
         {
           "type": "object",
-          "required": [
-            "kind",
-            "output",
-            "value"
-          ],
+          "required": ["kind", "output", "value"],
           "properties": {
             "kind": {
               "const": "shortCircuit"
@@ -519,9 +476,7 @@
       "additionalProperties": false,
       "anyOf": [
         {
-          "required": [
-            "ids"
-          ],
+          "required": ["ids"],
           "properties": {
             "ids": {
               "type": "array",
@@ -530,9 +485,7 @@
           }
         },
         {
-          "required": [
-            "tags"
-          ],
+          "required": ["tags"],
           "properties": {
             "tags": {
               "type": "array",
@@ -541,9 +494,7 @@
           }
         },
         {
-          "required": [
-            "dimensions"
-          ],
+          "required": ["dimensions"],
           "properties": {
             "dimensions": {
               "type": "object",
@@ -552,9 +503,7 @@
           }
         },
         {
-          "required": [
-            "outputs"
-          ],
+          "required": ["outputs"],
           "properties": {
             "outputs": {
               "type": "array",
@@ -563,9 +512,7 @@
           }
         },
         {
-          "required": [
-            "models"
-          ],
+          "required": ["models"],
           "properties": {
             "models": {
               "type": "array",
@@ -588,9 +535,7 @@
         },
         {
           "type": "object",
-          "required": [
-            "anyOf"
-          ],
+          "required": ["anyOf"],
           "properties": {
             "ref": {
               "$ref": "#/$defs/nonEmptyString"
@@ -609,19 +554,14 @@
               }
             },
             "match": {
-              "enum": [
-                "any",
-                "all"
-              ]
+              "enum": ["any", "all"]
             }
           },
           "additionalProperties": false,
           "allOf": [
             {
               "if": {
-                "required": [
-                  "except"
-                ],
+                "required": ["except"],
                 "properties": {
                   "except": {
                     "type": "array",
@@ -630,9 +570,7 @@
                 }
               },
               "then": {
-                "required": [
-                  "ref"
-                ],
+                "required": ["ref"],
                 "properties": {
                   "ref": {
                     "$ref": "#/$defs/nonEmptyString"
@@ -642,9 +580,7 @@
             },
             {
               "if": {
-                "required": [
-                  "ref"
-                ]
+                "required": ["ref"]
               },
               "then": {
                 "properties": {
@@ -684,10 +620,7 @@
       "anyOf": [
         {
           "type": "object",
-          "required": [
-            "path",
-            "key"
-          ],
+          "required": ["path", "key"],
           "properties": {
             "path": {
               "description": "A JSON pointer into the input data; each '*' segment steps into the elements of a list (one level per list). It starts and ends with a member name, never has two '*' in a row, and does not start with $ (an engine variable).",
@@ -740,10 +673,7 @@
             {
               "description": "recurse and groupBy cannot be combined.",
               "not": {
-                "required": [
-                  "recurse",
-                  "groupBy"
-                ],
+                "required": ["recurse", "groupBy"],
                 "properties": {
                   "recurse": {},
                   "groupBy": {}
@@ -753,10 +683,7 @@
             {
               "description": "A group has no single element: groupBy excludes non-empty dimensions ({} means absent).",
               "not": {
-                "required": [
-                  "dimensions",
-                  "groupBy"
-                ],
+                "required": ["dimensions", "groupBy"],
                 "properties": {
                   "dimensions": {
                     "type": "object",
@@ -769,10 +696,7 @@
             {
               "description": "groupBy excludes a non-empty orderBy for now: the order of groups is not defined yet ([] means absent).",
               "not": {
-                "required": [
-                  "orderBy",
-                  "groupBy"
-                ],
+                "required": ["orderBy", "groupBy"],
                 "properties": {
                   "orderBy": {
                     "type": "array",
@@ -786,17 +710,11 @@
         },
         {
           "type": "object",
-          "required": [
-            "segments"
-          ],
+          "required": ["segments"],
           "properties": {
             "segments": {
               "type": "object",
-              "required": [
-                "from",
-                "until",
-                "facts"
-              ],
+              "required": ["from", "until", "facts"],
               "properties": {
                 "from": {
                   "$ref": "#/$defs/namedDate"
@@ -822,29 +740,16 @@
     },
     "orderKey": {
       "type": "object",
-      "required": [
-        "path",
-        "type",
-        "dir"
-      ],
+      "required": ["path", "type", "dir"],
       "properties": {
         "path": {
           "$ref": "#/$defs/elementPointer"
         },
         "type": {
-          "enum": [
-            "number",
-            "decimal",
-            "date",
-            "dateTime",
-            "string"
-          ]
+          "enum": ["number", "decimal", "date", "dateTime", "string"]
         },
         "dir": {
-          "enum": [
-            "asc",
-            "desc"
-          ]
+          "enum": ["asc", "desc"]
         }
       },
       "additionalProperties": false

@@ -44,7 +44,7 @@ const PLAIN_OBJECT = 'a plain object';
  * express: `meta.tags` and each list of dimension values sorted by UTF-16 code unit
  * (`tags must be sorted without duplicates`); no text or key with a lone UTF-16 surrogate;
  * values at most `MAX_JSON_DEPTH` (1000) levels below `data` or `meta.context`
- * (`<pointer> nests values more than 1000 levels deep`); at most `MAX_INPUT_VALUES`
+ * (`<pointer> is nested deeper than 1000 levels`, at the first container past the limit); at most `MAX_INPUT_VALUES`
  * (10 000 000) property values in all, counted before they are read (`input too large: more
  * than 10000000 values`, which stops the check); the reserved segments of a `source.subject`
  * well formed (`isSubject`).

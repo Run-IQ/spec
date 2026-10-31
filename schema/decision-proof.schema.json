@@ -53,12 +53,7 @@
     "ruleSet": {
       "description": "The published pack the rules come from.",
       "type": "object",
-      "required": [
-        "kind",
-        "id",
-        "version",
-        "digest"
-      ],
+      "required": ["kind", "id", "version", "digest"],
       "properties": {
         "kind": {
           "const": "pack"
@@ -77,11 +72,7 @@
     },
     "versions": {
       "type": "object",
-      "required": [
-        "engine",
-        "plugins",
-        "dsls"
-      ],
+      "required": ["engine", "plugins", "dsls"],
       "properties": {
         "engine": {
           "$ref": "#/$defs/nonEmptyString"
@@ -137,11 +128,7 @@
     },
     "signature": {
       "type": "object",
-      "required": [
-        "alg",
-        "keyId",
-        "value"
-      ],
+      "required": ["alg", "keyId", "value"],
       "properties": {
         "alg": {
           "const": "ed25519"
@@ -195,11 +182,7 @@
     },
     "ruleRef": {
       "type": "object",
-      "required": [
-        "id",
-        "version",
-        "checksum"
-      ],
+      "required": ["id", "version", "checksum"],
       "properties": {
         "id": {
           "$ref": "#/$defs/nonEmptyString"
@@ -219,34 +202,13 @@
     "output": {
       "description": "An output. rounding, when present, applies to a number or decimal output only.",
       "type": "object",
-      "required": [
-        "type",
-        "combine",
-        "value",
-        "contributors"
-      ],
+      "required": ["type", "combine", "value", "contributors"],
       "properties": {
         "type": {
-          "enum": [
-            "number",
-            "boolean",
-            "string",
-            "enum",
-            "list",
-            "object",
-            "decimal"
-          ]
+          "enum": ["number", "boolean", "string", "enum", "list", "object", "decimal"]
         },
         "combine": {
-          "enum": [
-            "sum",
-            "max",
-            "min",
-            "highestPriority",
-            "union",
-            "all",
-            "any"
-          ]
+          "enum": ["sum", "max", "min", "highestPriority", "union", "all", "any"]
         },
         "value": {
           "description": "Any JSON value, null included."
@@ -264,18 +226,10 @@
       "additionalProperties": false,
       "if": {
         "type": "object",
-        "required": [
-          "type"
-        ],
+        "required": ["type"],
         "properties": {
           "type": {
-            "enum": [
-              "boolean",
-              "string",
-              "enum",
-              "list",
-              "object"
-            ]
+            "enum": ["boolean", "string", "enum", "list", "object"]
           }
         }
       },
@@ -287,14 +241,7 @@
     },
     "step": {
       "type": "object",
-      "required": [
-        "ruleId",
-        "version",
-        "model",
-        "output",
-        "contribution",
-        "stratum"
-      ],
+      "required": ["ruleId", "version", "model", "output", "contribution", "stratum"],
       "properties": {
         "ruleId": {
           "$ref": "#/$defs/nonEmptyString"
@@ -325,12 +272,7 @@
     },
     "skip": {
       "type": "object",
-      "required": [
-        "ruleId",
-        "version",
-        "reason",
-        "stratum"
-      ],
+      "required": ["ruleId", "version", "reason", "stratum"],
       "properties": {
         "ruleId": {
           "$ref": "#/$defs/nonEmptyString"
@@ -352,13 +294,7 @@
     },
     "exception": {
       "type": "object",
-      "required": [
-        "ruleId",
-        "version",
-        "kind",
-        "affected",
-        "stratum"
-      ],
+      "required": ["ruleId", "version", "kind", "affected", "stratum"],
       "properties": {
         "ruleId": {
           "$ref": "#/$defs/nonEmptyString"
@@ -367,11 +303,7 @@
           "$ref": "#/$defs/positiveInteger"
         },
         "kind": {
-          "enum": [
-            "inhibit",
-            "substitute",
-            "shortCircuit"
-          ]
+          "enum": ["inhibit", "substitute", "shortCircuit"]
         },
         "affected": {
           "type": "array",
@@ -388,10 +320,7 @@
     "rounding": {
       "description": "A declared rounding: scale decimal places (0 to 20) in mode; at is output (the default) or contribution.",
       "type": "object",
-      "required": [
-        "scale",
-        "mode"
-      ],
+      "required": ["scale", "mode"],
       "properties": {
         "scale": {
           "type": "integer",
@@ -399,21 +328,10 @@
           "maximum": 20
         },
         "mode": {
-          "enum": [
-            "halfUp",
-            "halfDown",
-            "halfEven",
-            "up",
-            "down",
-            "ceiling",
-            "floor"
-          ]
+          "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]
         },
         "at": {
-          "enum": [
-            "output",
-            "contribution"
-          ]
+          "enum": ["output", "contribution"]
         }
       },
       "additionalProperties": false

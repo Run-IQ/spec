@@ -286,9 +286,11 @@ interface Closed {
  *
  * Iterative (an explicit stack), so no nesting overflows the call stack. Each object is read
  * once, even when several paths lead to it: its height is kept, and a later path only checks
- * that the height still fits under `MAX_JSON_DEPTH` there. A value too deep is reported once
- * at its path and its members are not read; an object holding it is not kept, so a shorter
- * path reads it again and every problem is found whatever the order of keys. Every member read
+ * that the height still fits under `MAX_JSON_DEPTH` there (when it does not, it is walked again
+ * from there). A value too deep is reported once, at its first container past the limit
+ * (`<path> is nested deeper than 1000 levels`), and that container's members are not read; an
+ * object holding it is not kept, so a shorter path reads it again and every problem is found
+ * whatever the order of keys. Every member read
  * is counted (`announce`) before it happens.
  *
  * With `reader.encodings`, returns the encoding of `root` (`containerEncoding`) when no problem
@@ -451,10 +453,9 @@ function openValue(
   }
   const seen = reader.heights.get(node);
   if (seen === 'open') return notJson('a circular reference');
-  if (seen !== undefined) {
-    if (depth + seen > reader.maxDepth) reportTooDeep(path, reader);
-    return { height: seen, cut: false };
-  }
+  // A walked object that still fits here is not read again. One that does not fit is walked
+  // again from here, so the problem is named at its first container past the limit.
+  if (seen !== undefined && depth + seen <= reader.maxDepth) return { height: seen, cut: false };
   let keys: string[] | undefined;
   let length: number;
   try {
@@ -516,5 +517,5 @@ function checkKeys(
 /** Reports that the value at `path` sits too deep (a problem of the path, not of the value). */
 function reportTooDeep(path: string, reader: Reader): void {
   reader.depthIssues += 1;
-  reader.add(path, `${citeName(path)} nests values more than ${reader.maxDepth} levels deep`);
+  reader.add(path, `${citeName(path)} is nested deeper than ${reader.maxDepth} levels`);
 }

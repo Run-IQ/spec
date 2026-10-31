@@ -4,10 +4,7 @@
   "title": "Run-IQ proof input",
   "description": "The input of a decision in its canonical form (ProofInput), as accepted by validateProofInput from @run-iq/spec: what the input digest of a decision proof covers. The format is closed and every field is required; the reference date is meta.dates.effective (the former meta.effectiveDate is refused). Checks NOT expressible in JSON Schema, made only by validateProofInput: tags sorted by UTF-16 code unit without duplicates; lists of dimension values sorted by UTF-16 code unit without duplicates; no text or key holding a lone UTF-16 surrogate; no value nested more than 1000 levels below data or meta.context; no more than 10000000 values in all; a source subject with well-formed reserved segments (!group=<value>, !segment=<from>..<until> with real civil dates, from before until).",
   "type": "object",
-  "required": [
-    "data",
-    "meta"
-  ],
+  "required": ["data", "meta"],
   "properties": {
     "data": {
       "description": "The facts, plain JSON. A root key starting with $ is reserved for the engine (D-3); deeper keys are free.",
@@ -21,14 +18,7 @@
     },
     "meta": {
       "type": "object",
-      "required": [
-        "tenantId",
-        "dates",
-        "tags",
-        "dimensions",
-        "context",
-        "assertions"
-      ],
+      "required": ["tenantId", "dates", "tags", "dimensions", "context", "assertions"],
       "properties": {
         "tenantId": {
           "type": "string",
@@ -167,12 +157,7 @@
     "assertion": {
       "description": "Who established a fact, how, when and how firmly. source is required with method decision and refused with any other method.",
       "type": "object",
-      "required": [
-        "by",
-        "method",
-        "at",
-        "status"
-      ],
+      "required": ["by", "method", "at", "status"],
       "properties": {
         "by": {
           "$ref": "#/$defs/nonEmptyString"
@@ -194,11 +179,7 @@
           "$ref": "#/$defs/date"
         },
         "status": {
-          "enum": [
-            "proposed",
-            "validated",
-            "contested"
-          ]
+          "enum": ["proposed", "validated", "contested"]
         },
         "basis": {
           "$ref": "#/$defs/nonEmptyString"
@@ -218,10 +199,7 @@
         "source": {
           "description": "The decision the fact comes from: its proof digest, the output it gave (qualified by its rule set unless local) and, for an output per element, the subject.",
           "type": "object",
-          "required": [
-            "proofDigest",
-            "output"
-          ],
+          "required": ["proofDigest", "output"],
           "properties": {
             "proofDigest": {
               "$ref": "#/$defs/sha256"
@@ -245,17 +223,13 @@
             "const": "decision"
           }
         },
-        "required": [
-          "method"
-        ]
+        "required": ["method"]
       },
       "then": {
         "properties": {
           "source": true
         },
-        "required": [
-          "source"
-        ]
+        "required": ["source"]
       },
       "else": {
         "properties": {

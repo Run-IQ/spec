@@ -22,7 +22,7 @@ import type {
   UnsignedProof,
 } from '../src/index.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-cases.js';
-import { nested, specError } from './helpers.js';
+import { nested, specError, tooDeepIssue } from './helpers.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -1085,7 +1085,7 @@ describe('verifyProof: hostile input', () => {
     const tampered = { ...proof, outputs: { value: { ...proof.outputs.value!, value: deep } } };
     expect(verifyProof(tampered)).toEqual({
       status: 'invalid',
-      issues: ['outputs.value.value is nested deeper than 1000 levels'],
+      issues: [tooDeepIssue(`outputs.value.value${'[0]'.repeat(1000)}`).message],
     });
   });
 
@@ -1097,10 +1097,7 @@ describe('verifyProof: hostile input', () => {
     });
     expect(verifyProof(withValue(nested(1000))).issues).toEqual(['digest mismatch', 'unsigned']);
     expect(validateProof(withValue(nested(1001))).issues).toEqual([
-      {
-        path: 'outputs.value.value',
-        message: 'outputs.value.value is nested deeper than 1000 levels',
-      },
+      tooDeepIssue(`outputs.value.value${'.a'.repeat(1000)}`),
     ]);
   });
 
@@ -1108,14 +1105,8 @@ describe('verifyProof: hostile input', () => {
     const proof = sealed();
     const applied = { ...proof.applied[0]!, contribution: nested(1001), unrounded: nested(1001) };
     expect(validateProof({ ...proof, applied: [applied] }).issues).toEqual([
-      {
-        path: 'applied[0].contribution',
-        message: 'applied[0].contribution is nested deeper than 1000 levels',
-      },
-      {
-        path: 'applied[0].unrounded',
-        message: 'applied[0].unrounded is nested deeper than 1000 levels',
-      },
+      tooDeepIssue(`applied[0].contribution${'.a'.repeat(1000)}`),
+      tooDeepIssue(`applied[0].unrounded${'.a'.repeat(1000)}`),
     ]);
   });
 

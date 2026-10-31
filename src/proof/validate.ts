@@ -341,7 +341,8 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * - a value that cannot be read (a getter or a Proxy trap that throws) gives the single issue
  *   `proof could not be read: <reason>` at path `''`; an output value, contribution or
  *   `unrounded` value that cannot be read is reported at its path, and one nested more than
- *   `MAX_JSON_DEPTH` (1000) levels deep gives `<path> is nested deeper than 1000 levels`;
+ *   `MAX_JSON_DEPTH` (1000) levels deep gives `<path> is nested deeper than 1000 levels`, at
+ *   its first container past the limit;
  * - `format` is one of `PROOF_FORMATS`; a string that is not gives the single issue
  *   `unknown format: <format>` at path `format` (the rest follows rules of another format);
  *   `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings

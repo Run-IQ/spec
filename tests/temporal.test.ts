@@ -265,7 +265,7 @@ describe('validateTemporalFact', () => {
     expect(deep).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
-        message: `${path.slice(0, 256)}… nests values more than 1000 levels deep`,
+        message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
   });

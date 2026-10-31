@@ -4,13 +4,7 @@
   "title": "Run-IQ referential",
   "description": "A referential (format run-iq.referential/1) as accepted by validateReferential from @run-iq/spec: dated groups of the values of one dimension. sourceRef, optional on the referential, a group, a member and a code period, cites the legal source. Checks NOT expressible in JSON Schema, made only by validateReferential: at most 100 000 nodes (code periods, groups and members) by default; a period's until must be after from; the periods of one code, and of one value listed twice in a group, must not overlap (an identical repetition counts once); a value is never both a code and a group; with codes, every member is a group or a code; no cycle of groups at any date; nesting at most 64 groups deep at any date (the limit maxDepth is configurable up to 1 024); the cycle and depth check spends at most 100 steps per node (maxSteps overrides), beyond which the referential is refused as too complex; no text may hold a lone UTF-16 surrogate. In the normal form (normalizeReferential, which computeReferentialDigest hashes) members and periods are sorted, until: null is written absent, identical entries are kept once, and two periods of one value or code that meet with the same sourceRef are merged into one (a different sourceRef keeps the boundary).",
   "type": "object",
-  "required": [
-    "format",
-    "id",
-    "version",
-    "dimension",
-    "groups"
-  ],
+  "required": ["format", "id", "version", "dimension", "groups"],
   "properties": {
     "format": {
       "const": "run-iq.referential/1"
@@ -72,9 +66,7 @@
     },
     "period": {
       "type": "object",
-      "required": [
-        "from"
-      ],
+      "required": ["from"],
       "properties": {
         "from": {
           "$ref": "#/$defs/civilDate"
@@ -98,9 +90,7 @@
     },
     "member": {
       "type": "object",
-      "required": [
-        "value"
-      ],
+      "required": ["value"],
       "properties": {
         "value": {
           "$ref": "#/$defs/name"
@@ -127,10 +117,7 @@
     },
     "group": {
       "type": "object",
-      "required": [
-        "exhaustive",
-        "members"
-      ],
+      "required": ["exhaustive", "members"],
       "properties": {
         "exhaustive": {
           "type": "boolean"
