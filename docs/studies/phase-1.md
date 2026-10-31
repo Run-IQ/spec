@@ -1,6 +1,8 @@
 # Étude de l'existant — Phase 1
 
-Date : 2026-10-30. Lecture seule : aucun dépôt modifié. TaxeFacile lu pour les formes seulement, sans reprise de données. Les comportements marqués *(exécuté)* ont été reproduits avec `core/dist` dans un script hors dépôt ; le reste est lu dans le code.
+> Édition publique : l'application cliente étudiée n'est pas nommée et ses détails internes sont décrits de façon générique.
+
+Date : 2026-10-30. Lecture seule : aucun dépôt modifié. Une application cliente lue pour les formes seulement, sans reprise de données. Les comportements marqués *(exécuté)* ont été reproduits avec `core/dist` dans un script hors dépôt ; le reste est lu dans le code.
 
 ## 1. Inventaire des formes d'une règle
 
@@ -20,7 +22,7 @@ Date : 2026-10-30. Lecture seule : aucun dépôt modifié. TaxeFacile lu pour le
 
 ## 2. Champs de contenu (entrent dans le checksum)
 
-Légende des formes : C = `Rule` core, S = `RuleInput`/`SerializedRule`, P = payload store, F = `FiscalRule`, B = policy-bridge, D = `toRule`, M = mcp, W = web, T = TaxeFacile.
+Légende des formes : C = `Rule` core, S = `RuleInput`/`SerializedRule`, P = payload store, F = `FiscalRule`, B = policy-bridge, D = `toRule`, M = mcp, W = web, T = application cliente.
 
 | Champ | Formes | Verdict | Raison |
 |---|---|---|---|
@@ -28,15 +30,15 @@ Légende des formes : C = `Rule` core, S = `RuleInput`/`SerializedRule`, P = pay
 | `version` | C S D M W T | garder | attribuée par le store au `saveRule` (max+1) ; le payload doit être réécrit avec elle (prévu Task 12). |
 | `model` | C S P B D M W T | garder | contrôle `payload.model == input.model` déjà fait par `rule-registry`. |
 | `params` | C P B D M W T | garder | voir É3 : beaucoup de payloads de test n'ont pas de clé `params`. Type exécutable à laisser `unknown` (É9). |
-| `condition` | C P B D M | garder | perdue par TaxeFacile (pas de colonne), ce qui fausse ses calculs. |
+| `condition` | C P B D M | garder | perdue par l'application cliente (pas de colonne), ce qui fausse ses calculs. |
 | `priority` | C S D M W T | garder | défauts divergents : store 0, mcp 1000, fiscal calcule depuis la juridiction *seulement si absente* — jamais le cas puisque toutes les entrées la fixent (code mort de fait, phase 3). |
 | `effectiveFrom` / `effectiveUntil` | partout | garder, normaliser | formats et sémantiques divergents, voir §4. |
-| `tags` | C S D M W T | garder | filtrés par `core` (`input.meta.tags`) et par le store. TaxeFacile y code des paires `country:TG`, `category:…`, `scope:…`, `jurisdiction:…` : c'est le besoin réel de `dimensions`. |
-| `dominanceGroup` | C T (et F, calculé) | garder | `plugin-fiscal` l'écrase par `category`, donc par `undefined` quand `category` manque : le groupe posé par TaxeFacile est perdu (rupture n°8, phase 3). Absent de `toRule`. |
+| `tags` | C S D M W T | garder | filtrés par `core` (`input.meta.tags`) et par le store. L'application cliente y code des paires `country:…`, `category:…`, `scope:…`, `jurisdiction:…` : c'est le besoin réel de `dimensions`. |
+| `dominanceGroup` | C T (et F, calculé) | garder | `plugin-fiscal` l'écrase par `category`, donc par `undefined` quand `category` manque : le groupe posé par l'application cliente est perdu (rupture n°8, phase 3). Absent de `toRule`. |
 | `dimensions` | aucune | ajouter | n'existe nulle part ; `country` (S, F) et les tags `clé:valeur` (T) en tiennent lieu. |
 | `output` | aucune (B a `node.action.output`) | ajouter | policy-bridge connaît déjà la sortie (`action.output`) mais ne la transmet qu'au graphe. |
 | `exceptions` | aucune (PolicyNode a `exceptions?: string[]`) | ajouter, optionnel | les exceptions fiscales sont aujourd'hui des *règles* méta (`META_INHIBITION`, …), pas un champ. Format arrêté en phase 2. |
-| `sourceRef` | B (`node.sourceRef`, dans `tags` et `metadata`) | ajouter | ne pas confondre avec `source` du store (provenance `policy-graph:g:n` ; TaxeFacile y met la référence légale). |
+| `sourceRef` | B (`node.sourceRef`, dans `tags` et `metadata`) | ajouter | ne pas confondre avec `source` du store (provenance `policy-graph:g:n` ; l'application cliente y met la référence légale). |
 | `schemaVersion` | C, schéma `server`, docs web | retirer du type | déclaré dès `45abf80` (types initiaux), jamais lu. S'il est fourni, il passe comme extension. |
 | `checksum` | C S M W T | garder hors contenu | exclu du hachage (déjà le cas dans `core`). |
 
@@ -45,9 +47,9 @@ Légende des formes : C = `Rule` core, S = `RuleInput`/`SerializedRule`, P = pay
 | Champ | Formes | Verdict | Raison |
 |---|---|---|---|
 | `jurisdiction` | F M W T (payload et tags) | extension au premier niveau | sert à calculer une priorité par défaut (`JurisdictionResolver`), jamais atteinte (voir `priority`). Déclaré par `ruleExtensions` du plugin. |
-| `scope` fiscal (`GLOBAL/ORGANIZATION/USER`) | F M W T | extension, **renommage à prévoir** | même nom que `scope` du store (`tenant-specific/shared`), sens différent. TaxeFacile confond les deux (`tenant-specific` ↔ `CABINET`). Renommage en phase 3 (migration de `plugin-fiscal`). |
+| `scope` fiscal (`GLOBAL/ORGANIZATION/USER`) | F M W T | extension, **renommage à prévoir** | même nom que `scope` du store (`tenant-specific/shared`), sens différent. L'application cliente confond les deux. Renommage en phase 3 (migration de `plugin-fiscal`). |
 | `country` | F S M W T | `dimensions.country` | filtre `COUNTRY_MISMATCH` dans le plugin (via `input.meta.context.country`) et dans le store. Phase 1 : voir É7. |
-| `category` | F M W T (`categoryId`) | extension, puis `dimensions.category` | regroupe le détail fiscal et alimente `dominanceGroup`. Cible : convention de `dimensions` documentée par `plugin-fiscal` (phase 3). |
+| `category` | F M W T | extension, puis `dimensions.category` | regroupe le détail fiscal et alimente `dominanceGroup`. Cible : convention de `dimensions` documentée par `plugin-fiscal` (phase 3). |
 | autres clés de payload (`rate`, `minThreshold`, `entityType`… chez T ; `v`, `shared`… dans les tests) | P | extension | conservées et hachées par la normalisation prévue ; rien n'est perdu. |
 
 Les extensions restent **au premier niveau** (signature d'index du brief) plutôt que sous `extensions` : `plugin-fiscal`, `create_rule` et les exemples web les lisent à plat. Les déplacer casserait ces lecteurs sans gain en phase 1. Noms réservés à documenter dans `spec` (les 14 champs de contenu + `checksum`).
@@ -56,10 +58,10 @@ Les extensions restent **au premier niveau** (signature d'index du brief) plutô
 
 | Champ | Formes | Verdict | Raison |
 |---|---|---|---|
-| `tenantId` | S | garder hors checksum | clé d'accès ; TaxeFacile utilise `__global__`. |
+| `tenantId` | S | garder hors checksum | clé d'accès ; une application cliente y met une valeur globale conventionnelle. |
 | `scope` (store) | S | garder | partage `tenant-specific` / `shared`. |
 | `region` | S | garder en phase 1 | sert au partage (`listSharedRules`, `RegionRegistry`, exigé si `shared`) ; passage à `dimensions` en phase 5. |
-| `status` | S | garder hors checksum | `draft → review → published → deprecated → archived` (+ `review → draft`), transitions contrôlées. TaxeFacile n'a que 3 états (`review`→`DRAFT`, `archived`→`DEPRECATED`). |
+| `status` | S | garder hors checksum | `draft → review → published → deprecated → archived` (+ `review → draft`), transitions contrôlées. L'application cliente n'en a que 3. |
 | `createdBy/At`, `updatedAt`, `publishedAt/By`, `deprecatedAt/By` | S | garder hors checksum | audit ; `updatedAt` sert de verrou optimiste (`ensureNotStale`). |
 | `description` | S (B : `node.label`) | garder hors checksum | libellé ; ne change pas le calcul. |
 | `source` | S B T | garder hors checksum | provenance. |
@@ -72,13 +74,13 @@ Les extensions restent **au premier niveau** (signature d'index du brief) plutô
 | `core` (`RuleFilter`) | `Date` ; `now = meta.effectiveDate ?? new Date()` | active si `now <= effectiveUntil` (instant) |
 | `InMemoryRuleStore` | chaînes comparées **lexicalement** à `YYYY-MM-DD` (`today()`), sentinelle `9999-12-31` | **inclusive** (jour entier) ; conforme à `ArchitectureV2.md` (`from <= date <= until`) |
 | `rule-registry` `validatePeriod` | **exige** `YYYY-MM-DD` | `until > from` strict |
-| TaxeFacile (Prisma) | colonnes `Date`, renvoyées en ISO complet | **exclusive** (`effectiveUntil > date`) |
+| application cliente (ORM) | colonnes `Date`, renvoyées en ISO complet | **exclusive** (`effectiveUntil > date`) |
 | policy-bridge | défaut `YYYY-MM-DD` du jour | — |
 | mcp / web | chaîne libre / `'2025-01-01'` | — |
 | decision-graph | `meta.effectiveDate ?? meta.timestamp` (ISO complet possible) | — |
 
 Constats *(exécuté)* :
-- `new Date('2025-12-31')` = minuit UTC : une règle « jusqu'au 31/12 » est donc inactive le 31/12 à 10 h dans `core`, active toute la journée dans le store, inactive dès minuit chez TaxeFacile. Trois sémantiques.
+- `new Date('2025-12-31')` = minuit UTC : une règle « jusqu'au 31/12 » est donc inactive le 31/12 à 10 h dans `core`, active toute la journée dans le store, inactive dès minuit dans l'application cliente. Trois sémantiques.
 - `new Date('2025-01-01T00:00:00')` (sans fuseau) dépend du fuseau de la machine (`2024-12-31T23:00:00.000Z` à Paris). Une normalisation par `new Date(x)` rendrait le checksum dépendant de la machine.
 - `'2025-01-01T00:00:00.000Z' <= '2025-01-01'` est faux : si les colonnes du store passent en ISO complet, une règle cesse d'être résolue le jour de son entrée en vigueur.
 
@@ -104,10 +106,10 @@ Constats *(exécuté)* :
 - Scellée avec `Date`, aller-retour JSON puis `hydrateRule` : identique (cas couvert aujourd'hui).
 - `effectiveUntil` absent ≠ `effectiveUntil: null` dans `core` ; `condition: undefined` = absent.
 
-## 6. Usages TaxeFacile (lecture seule, formes)
+## 6. Usages d'une application cliente (lecture seule, formes)
 
-- **Adaptateur Prisma** (`prisma-rule-store.adapter.ts`) : `checksum = sha256(input.payload)` à l'écriture, mais le payload relu est **reconstruit** depuis les colonnes (`id, model, params`, colonnes de taux héritées, `categoryId, entityType, jurisdiction`) : il ne correspond jamais au checksum stocké et n'a pas de `condition`. `country` par défaut `TG`. Dates en ISO complet ; fin de période exclusive ; `duplicate_checksum` par égalité de checksum de payload brut. Statuts réduits à 3.
-- **`RuleMapper`** : construit des `Rule` avec `dominanceGroup = categoryId`, tags `clé:valeur`, puis **recalcule** le checksum. `engine.service.ts` recalcule aussi le checksum au rejeu d'un snapshot (règles transformées par le plugin). Ce sont les contournements que `spec` doit rendre inutiles.
+- **Adaptateur de store** : `checksum = sha256(input.payload)` à l'écriture, mais le payload relu est **reconstruit** depuis les colonnes (identité, modèle, paramètres, champs métier) : il ne correspond jamais au checksum stocké et n'a pas de `condition`. `country` a une valeur par défaut. Dates en ISO complet ; fin de période exclusive ; `duplicate_checksum` par égalité de checksum de payload brut. Statuts réduits à 3.
+- **Convertisseur de règles** : construit des `Rule` avec un `dominanceGroup` tiré d'une catégorie, tags `clé:valeur`, puis **recalcule** le checksum. Le service d'évaluation recalcule aussi le checksum au rejeu d'un snapshot (règles transformées par le plugin). Ce sont les contournements que `spec` doit rendre inutiles.
 - Utilise `RuleStoreResolver` de `decision-graph` avec cet adaptateur : il bénéficiera de `fromStoredRecord` seulement si son payload devient la définition canonique (hors refonte, phase 10).
 
 ## 7. Fonctions et exports : verdicts
@@ -120,7 +122,7 @@ Constats *(exécuté)* :
 | `core` `hydrateRule(s)` | adapter (Task 11) | même signature ; ajoute les défauts et valide les dates. |
 | `core` `Rule`, `Expression` | adapter avec réserves | voir É9. |
 | `context-engine` `sha256` | garder | utilisé par dg (fingerprints, hash de graphe) et rule-registry (audit). |
-| `decision-graph` `toRule` | remplacer par `fromStoredRecord` | non exporté ; seul consommateur `RuleStoreResolver` (exporté, utilisé par TaxeFacile). |
+| `decision-graph` `toRule` | remplacer par `fromStoredRecord` | non exporté ; seul consommateur `RuleStoreResolver` (exporté, utilisé par une application cliente). |
 | `rule-registry` audit chain | garder (É1) | ce n'est pas un checksum de règle. |
 | `rule-registry` `defaultRuleSchemaValidator` (no-op) | adapter | `validateRuleDefinition` de `spec` est un meilleur défaut que « tout passe » (rupture n°14), en attendant les descripteurs (phase 5). |
 | `rule-registry` `RuleSandbox` | adapter | renvoie `JSON.parse(payload) as Rule` (dates chaînes, sans checksum) ; `fromStoredRecord` donne une vraie `Rule`. |
@@ -148,7 +150,7 @@ Plan : `new Date(x).toISOString()` pour toute date.
 Code : §4. Proposition :
 - `normalize` n'accepte que `Date`, `YYYY-MM-DD` (minuit UTC) et une date-heure ISO **avec** `Z` ou décalage ; sinon `INVALID_DATE`. Ajouter ce cas aux tests de la Task 9.
 - Task 12 : seules les dates du **payload** passent en ISO complet ; `SerializedRule.effectiveFrom/Until` restent telles que reçues (`YYYY-MM-DD`, exigé par `rule-registry`), sinon la résolution lexicale casse.
-- Sémantique de fin : décider maintenant et l'écrire dans `spec` ; recommandation : période semi-ouverte `[from, until)`, celle de TaxeFacile, qui permet « la nouvelle version commence quand l'ancienne finit » (phase 5). L'alignement de `core` (`now >= until`) et du store se fait en phase 2 et 5 ; la phase 1 ne change que le hachage.
+- Sémantique de fin : décider maintenant et l'écrire dans `spec` ; recommandation : période semi-ouverte `[from, until)`, celle de l'application cliente étudiée, qui permet « la nouvelle version commence quand l'ancienne finit » (phase 5). L'alignement de `core` (`now >= until`) et du store se fait en phase 2 et 5 ; la phase 1 ne change que le hachage.
 
 **É5 — `core.computeRuleChecksum(rule: object)` devient plus strict.**
 Aujourd'hui il hache n'importe quel objet (test `handles rules without optional fields` : `{id, model, params, version}` ; outil MCP `create_checksum` sur entrée LLM). Après délégation, il lève sans `effectiveFrom` valide ou `priority`, et sur `NaN`. Proposition : l'accepter, mettre à jour ce test (Task 11 le permet si validé ici) ; le MCP (peer `^0.2.8`, non touché en phase 1) devra attraper l'erreur en phase 9.
@@ -166,13 +168,13 @@ Le test existant est `decision-graph/tests/unit/resolver/RuleStoreResolver.test.
 
 **É9 — Types : `ExecutableRule` tel qu'écrit ne compile pas comme prévu** *(vérifié avec `tsc --strict`)*.
 - `Omit<RuleDefinition, …>` sur un type à signature d'index efface tous les champs nommés : `rule.priority` devient `unknown`. Il faut une interface de base sans signature d'index, et la signature ajoutée à part.
-- `params: JsonValue` : une interface comme `FlatRateParams` (sans signature d'index, champs `readonly`) n'est pas assignable à `JsonValue`, donc `FiscalRule extends Rule` casse si `Rule = ExecutableRule`. Idem pour `RuleMapper` de TaxeFacile (`params: unknown`).
+- `params: JsonValue` : une interface comme `FlatRateParams` (sans signature d'index, champs `readonly`) n'est pas assignable à `JsonValue`, donc `FiscalRule extends Rule` casse si `Rule = ExecutableRule`. Idem pour le convertisseur de l'application cliente (`params: unknown`).
 - `dimensions` requis dans `ExecutableRule` casse chaque littéral `Rule` existant (tests de core, dg, plugin-fiscal, `makeRule`).
 - `tags: string[]` : un `readonly string[]` (core, store) n'y est pas assignable.
 Proposition : `RuleDefinition` (JSON, `JsonValue`) pour le stockage et le schéma ; `ExecutableRule` côté `core` avec `params: unknown`, `condition.value: unknown`, `tags: readonly string[]`, `dimensions?` optionnel en entrée (les fonctions de `spec` acceptent `readonly`).
 
 **É10 — Où est vérifié le checksum dans `fromStoredRecord`.**
-Plan : `fromStoredRecord` lève si le checksum recalculé diffère. Conséquence : un store dont le payload n'est pas canonique (TaxeFacile, anciens enregistrements) lève au lieu d'ignorer la règle avec une raison. C'est voulu (pas d'échec silencieux), mais `RuleStoreResolver` doit laisser l'erreur remonter au nœud avec l'identifiant de la règle, pas renvoyer une liste vide. À préciser dans la Task 13.
+Plan : `fromStoredRecord` lève si le checksum recalculé diffère. Conséquence : un store dont le payload n'est pas canonique (application cliente, anciens enregistrements) lève au lieu d'ignorer la règle avec une raison. C'est voulu (pas d'échec silencieux), mais `RuleStoreResolver` doit laisser l'erreur remonter au nœud avec l'identifiant de la règle, pas renvoyer une liste vide. À préciser dans la Task 13.
 
 ## 9. Changements à valider
 

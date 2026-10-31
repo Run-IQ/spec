@@ -1,8 +1,10 @@
 # Run-IQ : proposition de refonte
 
+> Édition publique : l'application cliente étudiée n'est pas nommée et ses détails internes sont décrits de façon générique.
+
 *30 octobre 2026. Statut : validé.*
 
-Ce document propose une refonte complète de l'écosystème Run-IQ. Il part de ce que le code fait réellement aujourd'hui (vérifié dépôt par dépôt, exemples exécutés, intégration TaxeFacile analysée), de la vision discutée, et définit un ordre de chantiers avec, pour chacun, un critère de fin vérifiable.
+Ce document propose une refonte complète de l'écosystème Run-IQ. Il part de ce que le code fait réellement aujourd'hui (vérifié dépôt par dépôt, exemples exécutés, intégration d'une application cliente analysée), de la vision discutée, et définit un ordre de chantiers avec, pour chacun, un critère de fin vérifiable.
 
 ---
 
@@ -14,7 +16,7 @@ Un texte (code des impôts, AI Act, règlement environnemental, politique intern
 
 Les utilisateurs visés :
 
-- **Des applications métier** qui intègrent Run-IQ comme bibliothèque, comme TaxeFacile.
+- **Des applications métier** qui intègrent Run-IQ comme bibliothèque, comme le fait déjà une application cliente.
 - **Des équipes conformité et des régulateurs** (AI Act, Cyber Resilience Act, environnement) qui ont besoin de qualifications et d'obligations traçables.
 - **Des chercheurs** qui veulent des encodages reproductibles, des formats ouverts et des mesures de qualité.
 - **Des entreprises** qui veulent une application complète déployée chez elles.
@@ -30,7 +32,7 @@ Catala, OpenFisca et DMN sont des façons d'*écrire* des règles. Aucun ne couv
 Ces principes tranchent les cas où deux choix techniques semblent équivalents.
 
 1. **Agnostique.** `core`, `decision-graph`, les stores et la couche IA ne contiennent aucune notion de domaine. Le test : encoder le code des impôts togolais et l'AI Act sans modifier une ligne de ces packages.
-2. **Le plugin est le moule, le texte est la matière.** Un plugin définit des types de règles et leur comportement (taux, barème, qualification, obligation). Les chiffres et les conditions viennent du texte et vivent dans la base de l'utilisateur. `plugin-fiscal` ne connaît pas 18 % ; c'est la règle de TaxeFacile qui le dit.
+2. **Le plugin est le moule, le texte est la matière.** Un plugin définit des types de règles et leur comportement (taux, barème, qualification, obligation). Les chiffres et les conditions viennent du texte et vivent dans la base de l'utilisateur. `plugin-fiscal` ne connaît pas 18 % ; c'est la règle de l'application cliente qui le dit.
 3. **Le complexe se compose.** Un cas simple est un ensemble de règles évaluées par `core`. Un cas complexe est un graphe de décision dont les nœuds appellent `core` ou d'autres graphes.
 4. **On ajoute, on n'écrase pas.** Une mise à jour crée une nouvelle version datée. Un calcul passé reste rejouable avec les règles de son époque.
 5. **Tout calcul est prouvable.** Chaque résultat sauvegardé contient une copie des règles utilisées et leur empreinte.
@@ -57,9 +59,9 @@ Tout ce qui suit a été vérifié dans le code ou reproduit par exécution, sau
 
 Par ordre de gravité :
 
-1. **Le checksum n'a pas de définition commune.** Les stores calculent `sha256(payload)`, `core` vérifie `computeRuleChecksum(règle)`. Toute règle passée par un store est ignorée par `core` avec `CHECKSUM_MISMATCH`. Conséquence vérifiée : chaque nœud de calcul d'un graphe renvoie 0. TaxeFacile contourne en recalculant le checksum juste avant l'évaluation, ce qui annule la vérification d'intégrité.
+1. **Le checksum n'a pas de définition commune.** Les stores calculent `sha256(payload)`, `core` vérifie `computeRuleChecksum(règle)`. Toute règle passée par un store est ignorée par `core` avec `CHECKSUM_MISMATCH`. Conséquence vérifiée : chaque nœud de calcul d'un graphe renvoie 0. Une application cliente contourne en recalculant le checksum juste avant l'évaluation, ce qui annule la vérification d'intégrité.
 2. **Un graphe compilé ne se sauvegarde pas.** Il contient des `Map` JavaScript que `JSON.stringify` perd. Après un aller-retour en base, l'exécution plante (`compiled.failures.get is not a function`).
-3. **Le format d'une règle stockée n'existe nulle part.** Chaque package suppose une forme différente du `payload` : `decision-graph` attend `{params, condition}`, `policy-bridge` produit `{id, model, params, condition}`, TaxeFacile écrit ses propres champs et perd la condition.
+3. **Le format d'une règle stockée n'existe nulle part.** Chaque package suppose une forme différente du `payload` : `decision-graph` attend `{params, condition}`, `policy-bridge` produit `{id, model, params, condition}`, une application cliente écrit ses propres champs et perd la condition.
 4. **La dominance ne domine pas.** Deux règles du même groupe avec des priorités différentes s'appliquent toutes les deux (`core/src/engine/DominanceResolver.ts` groupe par priorité *et* groupe). Seule l'égalité de priorité est traitée.
 5. **Un snapshot ne se rejoue pas.** Il contient les règles transformées par les plugins, dont les checksums ne correspondent plus.
 6. **Un `requestId` déjà vu renvoie un faux résultat** : `value: 0`, sans erreur (`PPEEngine.buildCachedResult`). Dans un graphe relancé, tous les nœuds renvoient 0.
@@ -70,7 +72,7 @@ Par ordre de gravité :
 11. **Les sous-graphes ne sont pas versionnés** (appel par identifiant seul) et **les cycles entre graphes ne sont pas détectés** (A appelle B qui appelle A).
 12. **`policy-bridge` génère des opérateurs `date_before` / `date_after`** que `dsl-jsonlogic` ne connaît pas.
 13. **Trois points d'accès ne chargent pas les plugins de la même façon.** `server` (Docker, `PLUGINS=fiscal`) et `mcp-server` (`--plugin @run-iq/plugin-fiscal`) échouent avec `plugin-fiscal` 0.4.0. Le CLI exige un fichier de réexport.
-14. **Les modèles sont décrits plusieurs fois, à la main.** TaxeFacile a recopié la liste des modèles pour `policy-bridge`, avec des erreurs (`THRESHOLD` au lieu de `THRESHOLD_BASED`, `children` au lieu de `steps`). Le validateur de `rule-registry` ne fait rien par défaut.
+14. **Les modèles sont décrits plusieurs fois, à la main.** Une application cliente a recopié la liste des modèles pour `policy-bridge`, avec des erreurs (`THRESHOLD` au lieu de `THRESHOLD_BASED`, `children` au lieu de `steps`). Le validateur de `rule-registry` ne fait rien par défaut.
 15. **Le graphe généré par `policy-bridge` ne peut pas recevoir les données métier** *(trouvé par les scénarios de la phase 0)* : chaque nœud exige un port d'entrée nommé `input` qu'aucune donnée ne remplit, et sa politique d'erreur `fallback` masque l'échec (exécution « réussie » avec une sortie nulle).
 16. **Les outils de graphe du serveur MCP ne résolvent aucune règle** *(trouvé en fusionnant la branche en phase 0)* : leur résolveur est vide, donc chaque nœud de calcul rend 0, et aucun exécuteur de sous-graphe n'est branché, donc tout nœud `subgraph` échoue. À brancher sur le service de graphes (phase 4) et le stockage (phase 5), en phase 9.
 
@@ -88,7 +90,7 @@ Par ordre de gravité :
 - Packages publiés sur GitHub Packages, mais des versions plus anciennes traînent sur npm public et certains lockfiles mélangent les deux. Le déploiement du site est probablement cassé pour cette raison.
 - `mcp-server` 0.3.0 a été publié depuis une branche non fusionnée, avec des dépendances `file:../`.
 - Quatre licences différentes ; `web-platform` et les quatre dépôts `policy-*` n'ont pas de fichier LICENSE.
-- **Aucun test n'exécute plusieurs packages ensemble**, ni dans Run-IQ ni dans TaxeFacile (tout y est mocké). C'est la cause première de tous les points précédents.
+- **Aucun test n'exécute plusieurs packages ensemble**, ni dans Run-IQ ni dans l'application cliente étudiée (tout y est mocké). C'est la cause première de tous les points précédents.
 
 ---
 
@@ -135,7 +137,7 @@ Les dépôts restent séparés (décision prise). Un nouveau dépôt porte le co
 
 - **La règle a une seule définition.** Son contenu identifiant : `id`, `version`, `model`, `params`, `condition`, `priority`, `effectiveFrom`, `effectiveUntil`, `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`, `sourceRef`.
 - **Le checksum est calculé sur ce contenu**, sérialisé de façon canonique (clés triées, dates en ISO 8601 complet). Une seule fonction, utilisée partout. Ce qui n'est pas du contenu (statut, auteur, dates de création) n'y entre pas.
-- **Un seul convertisseur** règle stockée ↔ règle exécutable. Il remplace `toRule` de `decision-graph`, le `RuleMapper` et le `buildPayload` de TaxeFacile.
+- **Un seul convertisseur** règle stockée ↔ règle exécutable. Il remplace `toRule` de `decision-graph`, et les convertisseurs écrits à la main par l'application cliente.
 - **`dimensions` est un dictionnaire libre** (`{ country: "TG", category: "TVA", role: "provider" }`). Il remplace `country` et `region` des contrats actuels. Les filtres de portée deviennent génériques. Le nom `dimensions` évite la confusion avec le champ `scope` existant de `context-engine` (`tenant-specific` / `shared`), qui garde son sens.
 - **Le descripteur de moule** (nom, version, JSON Schema des paramètres, type de sortie, stratégie de combinaison, description) est la source unique pour la validation, `policy-bridge`, le MCP et les formulaires de l'interface.
 
@@ -145,7 +147,7 @@ Les dépôts restent séparés (décision prise). Un nouveau dépôt porte le co
 - **Dominance corrigée** : dans un même groupe, seule la priorité la plus haute s'applique, les autres sont ignorées avec la raison `DOMINATED`. L'égalité reste un conflit.
 - **Exceptions natives**, remontées de `plugin-fiscal` : une règle peut en inhiber d'autres, en substituer les paramètres ou court-circuiter une sortie. Le mécanisme ne connaît plus la fiscalité.
 - **Diagnostics complets** : chaque règle ignorée porte sa raison et son détail (erreurs de paramètres, message du DSL). Les erreurs des hooks apparaissent dans la décision au lieu d'être avalées.
-- **Preuve et rejeu** : la preuve contient les règles source (avant plugins), les entrées et les versions du moteur et des plugins. `engine.replay(preuve)` refait le calcul avec le moteur courant, compare au résultat enregistré et signale tout écart, y compris un écart de version. On ne charge pas d'anciennes versions du moteur côte à côte. Le rejeu commence avec la nouvelle version majeure : les résultats antérieurs à la refonte ne sont pas migrés, puisque TaxeFacile n'est pas en production. *(Mon choix.)*
+- **Preuve et rejeu** : la preuve contient les règles source (avant plugins), les entrées et les versions du moteur et des plugins. `engine.replay(preuve)` refait le calcul avec le moteur courant, compare au résultat enregistré et signale tout écart, y compris un écart de version. On ne charge pas d'anciennes versions du moteur côte à côte. Le rejeu commence avec la nouvelle version majeure : les résultats antérieurs à la refonte ne sont pas migrés. *(Mon choix.)*
 - **Idempotence honnête** : un `requestId` déjà vu renvoie la décision sauvegardée, ou lève une erreur explicite. Plus jamais de 0 de remplacement.
 - **Les plugins ont un espace d'état dédié** dans le contexte d'évaluation, au lieu d'écrire dans `input.data`.
 - **Pas de dépendances entre règles à l'intérieur de `core`.** Une évaluation reçoit des faits et produit des sorties. L'enchaînement (une règle qui lit la sortie d'une autre) est le travail du graphe : les sorties d'un nœud deviennent les faits du suivant. `policy-bridge` place donc deux règles dépendantes dans deux nœuds différents. *(Mon choix, conforme au principe 3.)*
@@ -160,14 +162,14 @@ Les dépôts restent séparés (décision prise). Un nouveau dépôt porte le co
 - **Sous-graphes versionnés** (identifiant + version, ou empreinte), **détection des cycles entre graphes** à l'enregistrement, profondeur d'imbrication maximale.
 - **Identifiants de requête par exécution**, pour qu'une relance ne tombe pas sur l'idempotence de `core`.
 - **`NodePolicy.timeout` appliqué**, politique par défaut au lieu d'un plantage si elle manque.
-- **Un service de graphes** (charger par identifiant, compiler, mettre en cache, exécuter, historiser), qui remplace le `GraphService` écrit par TaxeFacile.
+- **Un service de graphes** (charger par identifiant, compiler, mettre en cache, exécuter, historiser), qui remplace le service de graphes écrit par l'application cliente.
 - **Les entrées d'une exécution sont enregistrées**, pour pouvoir la rejouer.
 
 ### `context-engine` et `rule-registry`
 
 - Les contrats utilisent les types de `spec`.
 - **Versions sans écrasement** : publier une nouvelle version d'une règle ferme la période de l'ancienne. La version publiée reste immuable.
-- **Suite de conformité exportée** : tout adaptateur (Prisma, SQL, autre) l'exécute et sait s'il respecte le contrat. Les adaptateurs de l'application (Postgres) devront la passer.
+- **Suite de conformité exportée** : tout adaptateur (ORM, SQL, autre) l'exécute et sait s'il respecte le contrat. Les adaptateurs de l'application (Postgres) devront la passer.
 - **Le validateur de `rule-registry` est construit à partir des descripteurs de moules** des plugins chargés. Plus de liste recopiée à la main.
 - **La simulation (`sandbox`) évalue réellement** avec `core` au lieu de seulement valider.
 - Les régions et pays sortent du registre générique ; s'ils restent utiles, ils deviennent une convention de `dimensions` documentée par `plugin-fiscal`.
@@ -216,7 +218,7 @@ Chaque phase se termine par un critère vérifiable, presque toujours un scénar
 
 1. **Inventaire** : chaque fonctionnalité, option et export public, avec les tests qui la couvrent.
 2. **Origine** : l'historique git, les messages de commit et les commentaires qui expliquent pourquoi elle existe.
-3. **Usages** : qui s'en sert, dans les autres dépôts Run-IQ et dans TaxeFacile (en lecture seule).
+3. **Usages** : qui s'en sert, dans les autres dépôts Run-IQ et dans l'application cliente étudiée (en lecture seule).
 4. **Verdict** pour chaque élément : garder, adapter ou retirer, avec la raison.
 
 Le résultat est une note courte par phase. La liste de ce qui est retiré ou dont le comportement change t'est présentée avant d'écrire le code. Si l'étude contredit une décision de ce document, on revient d'abord sur la décision. Exemple : la suppression des nœuds `branch` et `guard` n'est confirmée qu'après avoir vérifié pourquoi ils ont été créés et si quelqu'un compte sur eux.
@@ -243,11 +245,11 @@ Uniquement GitHub Packages (décision prise). Les versions publiées sur npm pub
 
 Les nouveaux contrats justifient une version majeure coordonnée de tous les packages, publiée dans l'ordre des dépendances : `spec`, `core`, `context-engine`, `dsl-jsonlogic`, `plugin-sdk`, `decision-graph`, `rule-registry`, plugins, `policy-*`, accès. Pendant la refonte, chaque phase terminée est marquée par un tag git et une release GitHub sur les dépôts touchés, avec des préversions (`x.0.0-next.N`) publiées sur GitHub Packages. La version stable sort à la fin de la phase 7. *(Mon choix ; tu m'as laissé juger des tags et releases.)*
 
-`mcp-server` : la version 0.3.0 installée par TaxeFacile vient de la branche non fusionnée `feat/decision-graph-integration` (outils de graphe, environ 2 000 lignes). Cette branche est relue, fusionnée dans `master`, puis publiée normalement. On ne jette pas ce travail et on ne republie pas `master` tel quel. *(Mon choix.)*
+`mcp-server` : la version 0.3.0 publiée vient de la branche non fusionnée `feat/decision-graph-integration` (outils de graphe, environ 2 000 lignes). Cette branche est relue, fusionnée dans `master`, puis publiée normalement. On ne jette pas ce travail et on ne republie pas `master` tel quel. *(Mon choix.)*
 
-### TaxeFacile
+### Application cliente
 
-TaxeFacile reste en dehors de la refonte (décision prise). Il a servi d'audit : ses contournements listés en section 3 guident les corrections. Une fois l'application (phase 10) en place, on décidera comment le faire passer sur les nouvelles versions. D'ici là, on ne le modifie pas et on ne réutilise pas ses données ; le CGI togolais sera ingéré directement depuis le texte.
+L'application cliente étudiée reste en dehors de la refonte (décision prise). Elle a servi d'audit : ses contournements listés en section 3 guident les corrections. Une fois l'application (phase 10) en place, on décidera comment la faire passer sur les nouvelles versions. D'ici là, on ne la modifie pas et on ne réutilise pas ses données ; les textes seront ingérés directement.
 
 ---
 
@@ -277,7 +279,7 @@ TaxeFacile reste en dehors de la refonte (décision prise). Il a servi d'audit :
 - Les dépôts restent séparés, avec un dépôt de contrats partagé.
 - Publication sur GitHub Packages uniquement.
 - Une application complète à la fin (accueil, `/manage`, image Docker), après que les briques sont solides.
-- TaxeFacile reste en dehors de la refonte ; on y reviendra une fois l'application en place.
+- L'application cliente étudiée reste en dehors de la refonte ; on y reviendra une fois l'application en place.
 - Viser la solution la plus robuste possible à chaque brique, même si elle est plus longue à faire.
 - Tags et releases laissés à mon jugement.
 - Pas de gestion fine des droits dans l'application : l'administrateur peut tout faire.

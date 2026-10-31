@@ -1,5 +1,7 @@
 # Étude de l'existant — Phase 0
 
+> Édition publique : l'application cliente étudiée n'est pas nommée et ses détails internes sont décrits de façon générique.
+
 Date : 2026-10-30. Lecture seule : aucun dépôt modifié. Dossiers locaux : `spec` et `integration-tests` n'existent pas (ni dossier, ni dépôt `Run-IQ/*` sur GitHub) ; ils sont à créer en phase 1.
 
 ## 1. Publication
@@ -30,7 +32,7 @@ Constats :
 - npm public contient d'anciennes versions de core, plugin-sdk, dsl-jsonlogic, plugin-fiscal (code source-disponible/propriétaire pour ce dernier), mcp-server, cli, server, policy-bridge. La décision « GitHub Packages seulement » est déjà prise ; le retrait de npm n'est pas faisable (dépublier) au-delà de 72 h : la voie réaliste est `npm deprecate`, action distante soumise à confirmation.
 - `cli` et `server` ont `prepublishOnly` mais ne sont sur aucun registre à jour : à décider (publier sur GHP ou rester non publiés). Verdict : **garder** les scripts, **question ouverte**.
 - Seul `web-platform` a un workflow CI ; aucun dépôt de bibliothèque n'a de CI (c'est l'objet de la phase 0).
-- `mcp-server` : la 0.3.0 est sur GHP alors que `master` local est en 0.2.8 : elle vient de la branche non fusionnée (§2). TaxeFacile en dépend déjà (`^0.3.0`).
+- `mcp-server` : la 0.3.0 est sur GHP alors que `master` local est en 0.2.8 : elle vient de la branche non fusionnée (§2). Une application cliente en dépend déjà.
 - Fragilité : `mcp-server/vitest.config.ts` aliase `@run-iq/core` et `@run-iq/plugin-sdk` vers `../core/src` et `../plugin-sdk/src`. Les tests ne passent que si les dépôts sont frères sur disque ; en CI cela cassera. Verdict : **adapter** (retirer l'alias ou checkout des frères).
 
 ## 2. Branche `origin/feat/decision-graph-integration` de mcp-server
@@ -40,10 +42,10 @@ Constats :
 **Outils ajoutés (8)** : `compile_graph`, `execute_graph`, `simulate_graph`, `inspect_graph`, `inspect_context`, `explain_graph_result`, `design_graph`, `validate_graph` (total 16 avec les 8 existants).
 **Ressources (+2)** : `schema://graph` (`graph-schema.ts`), `graph://examples` (`graph-examples.ts`). **Prompt (+1)** : `orchestration-architect`. Prompts `analyze-text` et `domain-expert` modifiés (section Orchestration, liste des outils graphe).
 **`src/engine.ts`** (+119) : crée en plus compiler, orchestrator, graphStore, executionStore (via `@run-iq/dg`, `@run-iq/context-engine`). **`src/index.ts`** : enregistre le tout.
-**Dépendances** : `peerDependencies` passent de `^0.2.8`/`^0.2.7` à `file:../context-engine`, `file:../core`, `file:../decision-graph` (nom `@run-iq/dg`), `file:../plugin-sdk`. Le `package-lock.json` référence `../core` etc. **Problème** : des `file:` en peerDependencies sont inutilisables pour un consommateur ; si la 0.3.0 GHP a été publiée telle quelle, ses peers sont invalides (non vérifié : l'API de métadonnées GHP n'a pas été lue avec succès). TaxeFacile l'utilise pourtant avec `^0.3.0` — à vérifier à la Task 4. Verdict : **adapter** (peers redevenus semver : `^0.2.8`, `^0.1.2`, `^0.2.1`, `^0.2.7`).
+**Dépendances** : `peerDependencies` passent de `^0.2.8`/`^0.2.7` à `file:../context-engine`, `file:../core`, `file:../decision-graph` (nom `@run-iq/dg`), `file:../plugin-sdk`. Le `package-lock.json` référence `../core` etc. **Problème** : des `file:` en peerDependencies sont inutilisables pour un consommateur ; si la 0.3.0 GHP a été publiée telle quelle, ses peers sont invalides (non vérifié : l'API de métadonnées GHP n'a pas été lue avec succès). Une application cliente l'utilise pourtant — à vérifier à la Task 4. Verdict : **adapter** (peers redevenus semver : `^0.2.8`, `^0.1.2`, `^0.2.1`, `^0.2.7`).
 **Licence** : `LICENSE` MIT remplacé par un texte BSL 1.1 « MCP Server » (Change Date 2030-01-01, Apache 2.0, grant identique en esprit) ; `package.json` `license` → `SEE LICENSE IN LICENSE`. **Écart avec la cible** (mcp-server doit être MIT). Verdict : **retirer** ce changement de licence lors du merge (garder MIT) — changement de comportement légal, à valider.
 **Tests sur la branche** (worktree temporaire, supprimé) : `npm ci` OK (les `file:../` se résolvent par liens symboliques ; à noter que l'alias vitest suppose aussi des frères). `npm test` : **18 fichiers, 82 tests passent** — même nombre que `master` : **aucun test pour les 8 nouveaux outils, 2 ressources, ni le prompt**. `npm run build` OK ; `tsc --noEmit` OK ; `eslint src` : **2 erreurs** (`_removed` inutilisé dans `design-graph.ts:141`, `CompiledGraph` inutilisé dans `inspect-graph.ts:3`). Verdict : fusionner après correction lint, peers et licence ; ajouter des tests (phase 1).
-**Usage TaxeFacile** (`src/modules/mcp/`, lecture seule) : `mcp-client.ts` lance `node_modules/@run-iq/mcp-server/dist/index.js` en sidecar stdio ; `mcp-tool-bridge.ts` expose **dynamiquement** tous les outils (`listTools`, préfixe `mcp_`), sans nom d'outil codé en dur. Aucune référence à `compile_graph` & co dans `src`. Donc TaxeFacile utilise la 0.3.0 (qui contient les outils graphe) mais n'en dépend pas nominativement : fusionner ne casse rien ; retirer les outils graphe changerait la liste exposée à son LLM. `package.json` de TaxeFacile dépend aussi de dg, context-engine, policy-*, rule-registry.
+**Usage par une application cliente** (lecture seule) : elle lance `mcp-server` en sidecar stdio et expose **dynamiquement** tous ses outils (`listTools`), sans nom d'outil codé en dur, ni référence à `compile_graph` & co. Elle utilise donc les outils graphe sans en dépendre nominativement : fusionner ne casse rien ; retirer les outils graphe changerait la liste exposée à son LLM. Elle dépend aussi de dg, context-engine, policy-*, rule-registry.
 
 ## 3. web-platform
 
