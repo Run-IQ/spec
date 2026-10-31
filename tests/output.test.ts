@@ -143,7 +143,7 @@ describe('validateOutputDeclaration: enum values', () => {
 
   it('requires an array', () => {
     expect(validateOutputDeclaration(enumOf('low'))).toEqual([
-      { path: 'output.values', message: 'output.values must be an array of strings' },
+      { path: 'output.values', message: 'output.values must be an array of non-empty strings' },
     ]);
   });
 
@@ -156,10 +156,16 @@ describe('validateOutputDeclaration: enum values', () => {
     ]);
   });
 
+  it('refuses an empty string, at its index', () => {
+    expect(validateOutputDeclaration(enumOf(['low', '']))).toEqual([
+      { path: 'output.values[1]', message: 'output.values[1] must be a non-empty string' },
+    ]);
+  });
+
   it('refuses a non-string value, at its index', () => {
     expect(validateOutputDeclaration(enumOf(['low', 2, null]))).toEqual([
-      { path: 'output.values[1]', message: 'output.values[1] must be a string' },
-      { path: 'output.values[2]', message: 'output.values[2] must be a string' },
+      { path: 'output.values[1]', message: 'output.values[1] must be a non-empty string' },
+      { path: 'output.values[2]', message: 'output.values[2] must be a non-empty string' },
     ]);
   });
 
@@ -213,6 +219,7 @@ describe('valueMatchesOutputType', () => {
     expect(valueMatchesOutputType('high', levels)).toBe(true);
     expect(valueMatchesOutputType('medium', levels)).toBe(false);
     expect(valueMatchesOutputType('LOW', levels)).toBe(false);
+    expect(valueMatchesOutputType('', levels)).toBe(false);
     expect(valueMatchesOutputType(0, levels)).toBe(false);
   });
 

@@ -72,6 +72,9 @@ const SELECTOR_LISTS = ['ids', 'tags', 'outputs', 'models'] as const;
 const SELECTOR_KEYS: readonly string[] = ['ids', 'tags', 'dimensions', 'outputs', 'models'];
 
 /**
+ * Internal to `@run-iq/spec` (not exported from the package): shared by
+ * `normalizeRuleDefinition` and `validateRuleDefinition` so that they cannot disagree.
+ *
  * Reads the `exceptions` field of a rule, already converted to JSON, without throwing.
  * Returns every problem found, each with its path under `path`, and, when there is none, the
  * normalized list: each selector's `ids`, `tags`, `outputs` and `models` sorted and
@@ -100,6 +103,9 @@ export function readRuleExceptions(
 }
 
 /**
+ * Internal to `@run-iq/spec` (not exported from the package): shared by
+ * `normalizeRuleDefinition` and `validateRuleDefinition` so that they cannot disagree.
+ *
  * The constraints of `EXCEPTION_MODEL` on a rule, checked on its raw fields: no `output`
  * (`null` counts as absent) and a non-empty `exceptions` list (`null` and `[]` count as
  * absent). Any other model gives no issue.

@@ -71,6 +71,18 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'exceptions[0].targets.tags[1] must be a string',
   ],
   [
+    'tags that are not an array',
+    [{ kind: 'inhibit', targets: { tags: 'vat' } }],
+    'exceptions[0].targets.tags',
+    'exceptions[0].targets.tags must be an array of strings',
+  ],
+  [
+    'a null selector field',
+    [{ kind: 'inhibit', targets: { ids: null, tags: ['vat'] } }],
+    'exceptions[0].targets.ids',
+    'exceptions[0].targets.ids must be an array of non-empty strings',
+  ],
+  [
     'an empty model',
     [{ kind: 'inhibit', targets: { models: [''] } }],
     'exceptions[0].targets.models[0]',
@@ -133,6 +145,12 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
   [
     'shortCircuit with an empty reason',
     [{ kind: 'shortCircuit', output: 'vat', value: 0, reason: '' }],
+    'exceptions[0].reason',
+    'exceptions[0].reason must be a non-empty string',
+  ],
+  [
+    'shortCircuit with a non-string reason',
+    [{ kind: 'shortCircuit', output: 'vat', value: 0, reason: 1 }],
     'exceptions[0].reason',
     'exceptions[0].reason must be a non-empty string',
   ],

@@ -103,21 +103,22 @@ function checkNonEmptyString(value: unknown, field: string, errors: Issues): voi
 }
 
 function checkJson(value: unknown, field: string, errors: Issues): void {
+  toJsonOrIssue(value, field, errors);
+}
+
+/** The JSON copy of `value`, or `undefined` after recording why it is not JSON. */
+function toJsonOrIssue(value: unknown, field: string, errors: Issues): JsonValue | undefined {
   try {
-    toJsonValue(value, field);
+    return toJsonValue(value, field);
   } catch (error) {
-    errors.add(pathOf(error, field), (error as Error).message);
+    addError(error, field, errors);
+    return undefined;
   }
 }
 
 function checkExceptions(value: unknown, errors: Issues): void {
-  let json: JsonValue;
-  try {
-    json = toJsonValue(value, 'exceptions');
-  } catch (error) {
-    errors.add(pathOf(error, 'exceptions'), (error as Error).message);
-    return;
-  }
+  const json = toJsonOrIssue(value, 'exceptions', errors);
+  if (json === undefined) return;
   for (const issue of readRuleExceptions(json).issues) errors.add(issue.path, issue.message);
 }
 
@@ -125,7 +126,7 @@ function checkDate(value: unknown, field: string, errors: Issues): Date | undefi
   try {
     return parseRuleDate(value, field);
   } catch (error) {
-    errors.add(pathOf(error, field), (error as Error).message);
+    addError(error, field, errors);
     return undefined;
   }
 }
@@ -165,6 +166,15 @@ function checkTags(value: unknown, errors: Issues): void {
   ) {
     errors.add('tags', 'tags must be an array of strings');
   }
+}
+
+/**
+ * Records a thrown error as an issue on `field`. Only `Error`s are data problems here: anything
+ * else thrown is a bug and goes on up.
+ */
+function addError(error: unknown, field: string, errors: Issues): void {
+  if (!(error instanceof Error)) throw error;
+  errors.add(pathOf(error, field), error.message);
 }
 
 /** Path of a `SpecError` about one value, else the checked field. */

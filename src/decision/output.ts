@@ -18,7 +18,7 @@ export type CombineStrategy = 'sum' | 'max' | 'min' | 'highestPriority' | 'union
 export interface OutputDeclaration {
   type: OutputType;
   combine: CombineStrategy;
-  /** Required for an `enum` output, absent otherwise: distinct strings, at least one. */
+  /** Required for an `enum` output, absent otherwise: distinct non-empty strings, at least one. */
   values?: string[];
 }
 
@@ -26,7 +26,7 @@ export interface OutputDeclaration {
 export const DEFAULT_OUTPUT = 'value';
 
 /** The declaration of an output nobody declares: a number, summed. Frozen. */
-export const DEFAULT_OUTPUT_DECLARATION: OutputDeclaration = Object.freeze({
+export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = Object.freeze({
   type: 'number',
   combine: 'sum',
 });
@@ -68,7 +68,8 @@ const KEYS = new Set(['type', 'combine', 'values']);
  * - `type` and `combine` must be known, and `combine` must apply to `type` (`sum`, `max` and
  *   `min` to `number`; `all` and `any` to `boolean`; `union` to `list`; `highestPriority` to
  *   every type);
- * - `values` is required for an `enum` (a non-empty array of distinct strings) and refused
+ * - `values` is required for an `enum` (a non-empty array of distinct non-empty strings) and
+ *   refused
  *   for any other type;
  * - no other key is allowed.
  */
@@ -120,7 +121,7 @@ function checkEnumValues(
     return;
   }
   if (!Array.isArray(values)) {
-    add(path, `${path} must be an array of strings`);
+    add(path, `${path} must be an array of non-empty strings`);
     return;
   }
   const items: unknown[] = Array.from(values);
@@ -130,8 +131,9 @@ function checkEnumValues(
   }
   const seen = new Set<string>();
   items.forEach((item, i) => {
-    if (typeof item !== 'string') add(`${path}[${i}]`, `${path}[${i}] must be a string`);
-    else if (seen.has(item)) add(`${path}[${i}]`, `${path}[${i}] repeats "${item}"`);
+    if (typeof item !== 'string' || item === '') {
+      add(`${path}[${i}]`, `${path}[${i}] must be a non-empty string`);
+    } else if (seen.has(item)) add(`${path}[${i}]`, `${path}[${i}] repeats "${item}"`);
     else seen.add(item);
   });
 }
