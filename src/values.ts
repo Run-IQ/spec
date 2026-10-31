@@ -27,6 +27,17 @@ export const MAX_JSON_DEPTH = 1000;
  */
 export const MAX_JSON_VALUES = 10_000_000;
 
+/**
+ * The most UTF-16 code units the leaf pointers of one decision input hold in all (D-15), 2^28.
+ * Each leaf of the input tree hashes its full pointer twice (its salt and its content), so the
+ * work of a digest follows the total length of the pointers, which can grow far faster than
+ * the input: a long key above many values is repeated in each of their pointers, and a value
+ * shared by many paths has leaves on each. Past it, `validateProofInput` reports the input and
+ * every digest of it refuses it, before anything is hashed. An input of `MAX_JSON_VALUES`
+ * leaves fits when its pointers average 26 code units.
+ */
+export const MAX_INPUT_POINTER_TEXT = 268_435_456;
+
 /** The values the current call may still read; `undefined` outside `withValueBudget`. */
 let budget: { remaining: number } | undefined;
 /** How many `ownCopy` calls are running: while one is, nothing is spent. */
@@ -214,4 +225,36 @@ export function typeName(value: unknown): string {
     return 'unreadable value';
   }
   return typeof value;
+}
+
+/** `%TypedArray%.prototype`: its getters read a typed array's internal slots, never caller code. */
+const TYPED_ARRAY_PROTOTYPE: object = Object.getPrototypeOf(Uint8Array.prototype) as object;
+const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
+  TYPED_ARRAY_PROTOTYPE,
+  Symbol.toStringTag,
+)?.get;
+const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
+
+/**
+ * Internal: a copy of the bytes of `value` when it is a real `Uint8Array` of any realm (a Node
+ * `Buffer` included), else `undefined`. Runs no caller code: the type and the length come from
+ * the internal slots (a Proxy, which has none, is refused), and the bytes are copied by
+ * `Uint8Array.prototype.set` from those slots. The copy is the caller's bytes at that moment:
+ * later changes to `value` do not reach it.
+ */
+export function bytesOf(value: unknown): Uint8Array | undefined {
+  if (typeof value !== 'object' || value === null) return undefined;
+  if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return undefined;
+  try {
+    const tag: unknown = TYPED_ARRAY_TAG.call(value);
+    if (tag !== 'Uint8Array') return undefined;
+    const length: unknown = TYPED_ARRAY_LENGTH.call(value);
+    if (typeof length !== 'number') return undefined;
+    const copy = new Uint8Array(length);
+    // The tag above proves `value` holds the internal slots of a Uint8Array.
+    copy.set(value as Uint8Array);
+    return copy;
+  } catch {
+    return undefined;
+  }
 }

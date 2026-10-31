@@ -177,8 +177,12 @@ A proof records one decision without its input: the digest of the input, the rul
 
 ```js
 import {
-  computeInputDigest, computeRuleChecksum, createSigningKeyPair, sealProof, signProof, verifyProof,
+  computeInputDigest, computeRuleChecksum, createSigningKeyPair, deriveInputSeed, sealProof,
+  signProof, verifyProof,
 } from '@run-iq/spec';
+
+// The secret stays with the producer (32 bytes or more); never put it or the seed in a proof.
+const seed = deriveInputSeed(secret, 'order-42');
 
 const proof = sealProof({
   format: 'run-iq.proof/1',
@@ -191,7 +195,7 @@ const proof = sealProof({
       tenantId: 'shop', dates: { effective: '2025-06-01' }, tags: [], dimensions: {},
       context: {}, assertions: {},
     },
-  }),
+  }, seed),
   rules: [{ id: 'shipping-fee', version: 1, checksum: computeRuleChecksum(rule) }],
   versions: { engine: '1.0.0-next.1', plugins: {}, dsls: {} },
   strata: [['value']],
@@ -212,6 +216,7 @@ signed.outputs.value.value = 0;
 verifyProof(signed, { trustedKeys });                // { status: 'invalid', issues: ['digest mismatch'] }
 ```
 
+- `computeInputDigest(input, seed)` is the root of a Merkle tree (RFC 6962) with one salted leaf per value of the input: a scalar, a list or an empty object, at its JSON pointer. `deriveInputSeed(secret, requestId)` gives each request its own seed; with `UNSALTED_SEED` (32 zero bytes) the salts are public and anyone holding the input can recompute the digest. `inputLeaves` and `inputLeafHash` expose the leaves; `merkleRoot`, `inclusionPath` and `verifyInclusion` build and check the tree. `computeIdempotencyDigest({ input, options })` is the unsalted digest a decision store keeps to recognise a retry; it is never published.
 - `sealProof` sets `digest`, the sha256 of the canonical proof without `digest` and `signature`. It hashes lists in the order given: the producer sorts them.
 - `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
 - `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.

@@ -12,6 +12,7 @@ import {
   sealProof,
   sha256Hex,
   signProof,
+  UNSALTED_SEED,
   validateProof,
   validateProofInput,
   verifyProof,
@@ -72,7 +73,7 @@ function unsigned(): UnsignedProof {
     requestId: 'req-1',
     evaluatedAt: '2025-06-01T00:00:00.000Z',
     sealedAt: '2025-06-01T10:00:00.000Z',
-    inputDigest: computeInputDigest(input),
+    inputDigest: computeInputDigest(input, UNSALTED_SEED),
     rules: [
       { id: 'r1', version: 1, checksum: computeRuleChecksum(ruleA), sourceRef: 'art. 1' },
       { id: 'r2', version: 2, checksum: computeRuleChecksum(ruleB) },
@@ -169,15 +170,11 @@ describe('PROOF_FORMATS', () => {
 });
 
 describe('computeInputDigest', () => {
-  it('is the sha256 of the canonical input', () => {
-    expect(computeInputDigest(input)).toBe(nodeSha256(canonicalize(input)));
-    expect(computeInputDigest(input)).toBe(
-      nodeSha256(
-        '{"data":{"income":1000},"meta":{"assertions":{},"context":{},' +
-          '"dates":{"effective":"2025-06-01T00:00:00.000Z"},"dimensions":{},"tags":[],' +
-          '"tenantId":"t1"}}',
-      ),
-    );
+  // The tree, its encoding and its vectors are tested in input-tree.test.ts and
+  // input-vectors.test.ts; here, what a proof's input digest keeps from before.
+  it('is the 64 hex characters of the root of the input tree', () => {
+    expect(computeInputDigest(input, UNSALTED_SEED)).toMatch(/^[0-9a-f]{64}$/);
+    expect(computeInputDigest(input, UNSALTED_SEED)).not.toBe(nodeSha256(canonicalize(input)));
   });
 
   it('depends neither on key order nor on undefined members of the format', () => {
@@ -196,12 +193,14 @@ describe('computeInputDigest', () => {
       extra: undefined,
       data: { income: 1000 },
     } as unknown as ProofInput;
-    expect(computeInputDigest(reordered)).toBe(computeInputDigest(input));
+    expect(computeInputDigest(reordered, UNSALTED_SEED)).toBe(
+      computeInputDigest(input, UNSALTED_SEED),
+    );
   });
 
   it('changes with any fact', () => {
-    expect(computeInputDigest({ ...input, data: { income: 1001 } })).not.toBe(
-      computeInputDigest(input),
+    expect(computeInputDigest({ ...input, data: { income: 1001 } }, UNSALTED_SEED)).not.toBe(
+      computeInputDigest(input, UNSALTED_SEED),
     );
   });
 
@@ -220,14 +219,14 @@ describe('computeInputDigest', () => {
     for (const value of cases) {
       const [first] = validateProofInput(value);
       expect(first).toBeDefined();
-      const error = specError(() => computeInputDigest(value as ProofInput));
+      const error = specError(() => computeInputDigest(value as ProofInput, UNSALTED_SEED));
       expect(error.code).toBe('INVALID_INPUT');
       expect(error.message).toBe(`invalid input: ${first?.message ?? ''}`);
       expect(error.path).toBe(first?.path);
     }
     // A JavaScript caller can pass an `undefined` member, which the types do not allow.
     const skipped = { ...input, data: { skipped: undefined } } as unknown as ProofInput;
-    expect(specError(() => computeInputDigest(skipped))).toMatchObject({
+    expect(specError(() => computeInputDigest(skipped, UNSALTED_SEED))).toMatchObject({
       path: '/data/skipped',
       message: 'invalid input: /data/skipped is not JSON: undefined',
     });
@@ -1296,7 +1295,9 @@ describe('both entries', () => {
       'executor-1',
     );
     expect(proof).toEqual(signed());
-    expect(canonicalEntry.computeInputDigest(input)).toBe(computeInputDigest(input));
+    expect(canonicalEntry.computeInputDigest(input, canonicalEntry.UNSALTED_SEED)).toBe(
+      computeInputDigest(input, UNSALTED_SEED),
+    );
     expect(canonicalEntry.validateProof(proof)).toEqual({ errors: [], issues: [] });
     expect(typeof canonicalEntry.createSigningKeyPair().publicKey).toBe('string');
   });

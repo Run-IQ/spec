@@ -2,16 +2,19 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalRulePayload,
   computeAssertionDigest,
+  computeIdempotencyDigest,
   computeInputDigest,
   computeRuleChecksum,
   computeRuleFingerprint,
   createSigningKeyPair,
+  inputLeaves,
   normalizeRuleDefinition,
   PROOF_FORMAT,
   sealProof,
   signProof,
   toExecutableRule,
   toStoredPayload,
+  UNSALTED_SEED,
   validateProof,
   validateProofInput,
   validateRuleDefinition,
@@ -74,7 +77,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     requestId: 'req-1',
     evaluatedAt: '2025-06-01T00:00:00.000Z',
     sealedAt: '2025-06-01T10:00:00.000Z',
-    inputDigest: computeInputDigest(INPUT),
+    inputDigest: computeInputDigest(INPUT, UNSALTED_SEED),
     rules: [{ id: 'r1', version: 1, checksum: computeRuleChecksum(rule) }],
     versions: { engine: '1', plugins: {}, dsls: {} },
     strata: [['value']],
@@ -150,8 +153,13 @@ describe('a value is counted once: the spend counter', () => {
     expect(expected).toBeGreaterThan(2 ** 10 * 3);
     expect(validateProofInput(input)).toEqual([]);
     expect(lastValuesSpent()).toBe(expected);
-    computeInputDigest(input);
+    computeInputDigest(input, UNSALTED_SEED);
     expect(lastValuesSpent()).toBe(expected);
+    inputLeaves(input, UNSALTED_SEED);
+    expect(lastValuesSpent()).toBe(expected);
+    const request = { input, options: { requested: ['a'] } };
+    computeIdempotencyDigest(request);
+    expect(lastValuesSpent()).toBe(countValues(request));
     computeAssertionDigest(HUMAN_ASSERTION);
     expect(lastValuesSpent()).toBe(countValues(HUMAN_ASSERTION));
   });

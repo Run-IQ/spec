@@ -1,5 +1,5 @@
 import type { JsonValue } from '../canonical.js';
-import { citeName, unreadableMessage } from '../errors.js';
+import { citeName, newSpecError, unreadableMessage } from '../errors.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { reservedDateNameMessage } from '../reserved.js';
 import {
@@ -11,7 +11,14 @@ import {
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
-import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import {
+  hasLoneSurrogate,
+  isPlainObject,
+  loneSurrogateMessage,
+  MAX_INPUT_POINTER_TEXT,
+  ownCopy,
+} from '../values.js';
+import { leafPointerText } from './leaves.js';
 import { assertionKeyProblem, DATE_FORMS, readAssertion } from './assertions.js';
 import {
   announce,
@@ -53,7 +60,11 @@ const PLAIN_OBJECT = 'a plain object';
  * lists without holes (`<pointer> has a hole at index <i>: arrays must be dense`); at most
  * `MAX_JSON_VALUES` (10 000 000) property values in all, counted before they are read
  * (`<pointer> is too large: more than 10000000 values`, which stops the check); the reserved
- * segments of a `source.subject` well formed (`isSubject`).
+ * segments of a `source.subject` well formed (`isSubject`); once no other problem is found, at
+ * most `MAX_INPUT_POINTER_TEXT` (2^28) UTF-16 code units in the pointers of its leaves, all
+ * added up, each leaf on each path counted (the leaves of the input tree, D-15; at `''`: `the
+ * leaf pointers of the input hold more than 268435456 code units`): the work of a digest
+ * follows them.
  *
  * The canonical form is closed: `data` and `meta` with exactly `tenantId`, `dates`, `tags`,
  * `dimensions`, `context` and `assertions` (the former `effectiveDate` is
@@ -81,7 +92,7 @@ const PLAIN_OBJECT = 'a plain object';
  * message longer than `MAX_ISSUE_TEXT` (1024) code units is cut there and followed by `…`.
  */
 export function validateProofInput(value: unknown): RuleValidationIssue[] {
-  return check(value, false).issues;
+  return check(value, true).issues;
 }
 
 /**
@@ -105,6 +116,28 @@ export function readProofInput(value: unknown): {
   return { issues, snapshot: issues.length === 0 ? snapshot : undefined };
 }
 
+/**
+ * Internal: the plain copy of `value` when `validateProofInput` finds no problem in it (each
+ * value read and counted once); otherwise throws `SpecError` (`INVALID_INPUT`, `invalid input:
+ * <first problem>`, the problem's path as `path`). What every digest of an input hashes.
+ */
+export function readValidInput(value: unknown): ProofInput {
+  const { issues, snapshot } = readProofInput(value);
+  const [first] = issues;
+  if (first !== undefined || snapshot === undefined) {
+    throw newSpecError(
+      'INVALID_INPUT',
+      `invalid input: ${first?.message ?? 'unreadable'}`,
+      first?.path,
+    );
+  }
+  return snapshot;
+}
+
+/** The problem of an input whose leaf pointers pass `MAX_INPUT_POINTER_TEXT`. */
+const POINTER_TEXT_MESSAGE =
+  'the leaf pointers of the input hold more than ' + `${MAX_INPUT_POINTER_TEXT} code units`;
+
 function check(
   value: unknown,
   copy: boolean,
@@ -117,6 +150,12 @@ function check(
     (error) => ({ path: '', message: unreadableMessage('proof input', error) }),
     { copy },
   );
+  // Only a valid input has a copy; its leaves are those the input tree hashes (D-15).
+  if (issues.length === 0 && snapshot !== undefined) {
+    const copied = snapshot;
+    const text = ownCopy(() => leafPointerText(copied, MAX_INPUT_POINTER_TEXT));
+    if (text > MAX_INPUT_POINTER_TEXT) issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
+  }
   return { issues, reads, snapshot };
 }
 

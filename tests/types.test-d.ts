@@ -1,5 +1,15 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
+  computeIdempotencyDigest,
+  computeInputDigest,
+  deriveInputSeed,
+  inclusionPath,
+  INPUT_TREE_TAG,
+  inputLeafHash,
+  inputLeaves,
+  merkleRoot,
+  UNSALTED_SEED,
+  verifyInclusion,
   isPackId,
   isRuleSetId,
   LOCAL_RULE_SET,
@@ -22,6 +32,8 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type {
+  InputLeaf,
+  ProofInput,
   ForEach,
   OrderKey,
   CivilCalendar,
@@ -269,5 +281,37 @@ describe('collections and rule sets (Task 9F)', () => {
       }
     };
     check({ path: '/enfants', key: 'id' });
+  });
+});
+
+describe('the input tree (Task 9H1)', () => {
+  it('types the Merkle functions, the seed, the leaves and the digests', () => {
+    expectTypeOf(merkleRoot).toEqualTypeOf<(leafHashes: readonly Uint8Array[]) => Uint8Array>();
+    expectTypeOf(inclusionPath).toEqualTypeOf<
+      (leafHashes: readonly Uint8Array[], index: number) => Uint8Array[]
+    >();
+    expectTypeOf(verifyInclusion).toEqualTypeOf<
+      (
+        leafHash: Uint8Array,
+        index: number,
+        size: number,
+        path: readonly Uint8Array[],
+        root: Uint8Array,
+      ) => boolean
+    >();
+    expectTypeOf(deriveInputSeed).toEqualTypeOf<
+      (secret: Uint8Array, requestId: string) => Uint8Array
+    >();
+    expectTypeOf(UNSALTED_SEED).toEqualTypeOf<Uint8Array>();
+    expectTypeOf<typeof INPUT_TREE_TAG>().toEqualTypeOf<'run-iq.input/1'>();
+    expectTypeOf<InputLeaf['kind']>().toEqualTypeOf<'value' | 'array' | 'object'>();
+    expectTypeOf(inputLeaves).toEqualTypeOf<(input: ProofInput, seed: Uint8Array) => InputLeaf[]>();
+    expectTypeOf(inputLeafHash).toEqualTypeOf<(leaf: InputLeaf) => Uint8Array>();
+    expectTypeOf(computeInputDigest).toEqualTypeOf<
+      (input: ProofInput, seed: Uint8Array) => string
+    >();
+    expectTypeOf(computeIdempotencyDigest).toEqualTypeOf<
+      (request: { input: ProofInput; options: { [k: string]: JsonValue } }) => string
+    >();
   });
 });

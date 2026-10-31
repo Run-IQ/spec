@@ -1,5 +1,12 @@
+import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import { expect } from 'vitest';
-import { normalizeRuleDefinition, SpecError, validateRuleDefinition } from '../src/index.js';
+import {
+  inputLeaves,
+  normalizeRuleDefinition,
+  SpecError,
+  UNSALTED_SEED,
+  validateRuleDefinition,
+} from '../src/index.js';
 import type {
   CivilCalendar,
   JsonValue,
@@ -241,4 +248,93 @@ export function countValues(value: unknown): number {
     for (const member of members) stack.push(member);
   }
   return count;
+}
+
+/** The bytes of `text` in UTF-8, or the bytes given. */
+function bytesOf(part: Uint8Array | string): Uint8Array {
+  return typeof part === 'string' ? Buffer.from(part, 'utf8') : part;
+}
+
+/** sha256 by `node:crypto` of the parts given, one after the other (texts in UTF-8). */
+export function nodeSha256(...parts: (Uint8Array | string)[]): Uint8Array {
+  const hash = createHash('sha256');
+  for (const part of parts) hash.update(bytesOf(part));
+  return new Uint8Array(hash.digest());
+}
+
+/** HMAC-SHA256 by `node:crypto` of the UTF-8 text `message` under `key`. */
+export function nodeHmac(key: Uint8Array, message: string): Uint8Array {
+  return new Uint8Array(createHmac('sha256', key).update(message, 'utf8').digest());
+}
+
+/** The input seed by `node:crypto`: HKDF-SHA256, salt `run-iq.input-seed/1`, 32 bytes. */
+export function nodeInputSeed(secret: Uint8Array, requestId: string): Uint8Array {
+  return new Uint8Array(hkdfSync('sha256', secret, 'run-iq.input-seed/1', requestId, 32));
+}
+
+/** Lowercase hex of `bytes`. */
+export function hex(bytes: Uint8Array): string {
+  return Buffer.from(bytes).toString('hex');
+}
+
+/** The bytes of a hex text. */
+export function fromHex(text: string): Uint8Array {
+  return new Uint8Array(Buffer.from(text, 'hex'));
+}
+
+/** `n` distinct leaf hashes: the sha256 of `leaf 0`, `leaf 1`, … */
+export function leafHashes(n: number): Uint8Array[] {
+  return Array.from({ length: n }, (_, i) => nodeSha256(`leaf ${i}`));
+}
+
+/** The largest power of two strictly below `n` (n ≥ 2), as RFC 6962 splits a tree. */
+function split(n: number): number {
+  let k = 1;
+  while (k * 2 < n) k *= 2;
+  return k;
+}
+
+/**
+ * The Merkle tree hash of RFC 6962 (section 2.1), written as the RFC writes it, recursively:
+ * a reference for test sizes only. `[]` gives the sha256 of nothing, one leaf gives itself.
+ */
+export function referenceRoot(leaves: readonly Uint8Array[]): Uint8Array {
+  if (leaves.length === 0) return nodeSha256();
+  const [only] = leaves;
+  if (leaves.length === 1 && only !== undefined) return only;
+  const k = split(leaves.length);
+  const left = referenceRoot(leaves.slice(0, k));
+  const right = referenceRoot(leaves.slice(k));
+  return nodeSha256(Uint8Array.of(1), left, right);
+}
+
+/** The audit path of RFC 6962 (section 2.1.1), recursive: a reference for test sizes only. */
+export function referencePath(leaves: readonly Uint8Array[], index: number): Uint8Array[] {
+  if (leaves.length <= 1) return [];
+  const k = split(leaves.length);
+  return index < k
+    ? [...referencePath(leaves.slice(0, k), index), referenceRoot(leaves.slice(k))]
+    : [...referencePath(leaves.slice(k), index - k), referenceRoot(leaves.slice(0, k))];
+}
+
+/** The UTF-16 code units of the leaf pointers of `input`, all added up (`inputLeaves`). */
+export function pointerText(input: ProofInput): number {
+  return inputLeaves(input, UNSALTED_SEED).reduce((total, leaf) => total + leaf.pointer.length, 0);
+}
+
+/**
+ * A valid input whose leaf pointers hold exactly `units` code units (at least 200): a list of
+ * 9 zeros under one long key, one more value under a second key for the remainder, and the
+ * fixed leaves of `meta` (`proofInput`).
+ */
+export function withPointerText(units: number): ProofInput {
+  const fixed = pointerText(proofInput({}, { k: [] })) - '/data/k'.length;
+  // The list `/data/<key>` and its 9 elements `/data/<key>/<i>`: 10 * (6 + key) + 2 * 9 units;
+  // the second key `/data/<z…>` takes the rest, at least 7 units.
+  const key = Math.floor((units - fixed - 18 - 7) / 10) - 6;
+  const rest = units - fixed - 18 - 10 * (6 + key);
+  return proofInput(
+    {},
+    { ['k'.repeat(key)]: new Array<number>(9).fill(0), ['z'.repeat(rest - 6)]: 0 },
+  );
 }

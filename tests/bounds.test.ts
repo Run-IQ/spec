@@ -4,13 +4,18 @@ import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
+  computeIdempotencyDigest,
+  computeInputDigest,
   findOverlappingVersions,
   formatPointer,
   governingAssertion,
+  inclusionPath,
   matchDimension,
   matchesSelector,
+  merkleRoot,
   normalizeRuleDefinition,
   sealProof,
+  UNSALTED_SEED,
   validateOutputDeclaration,
   validateProof,
   validateProofInput,
@@ -29,6 +34,8 @@ import type {
 } from '../src/index.js';
 import { MAX_JSON_VALUES } from '../src/values.js';
 import { BASE_RULE, fixedCalendar, HUMAN_ASSERTION, proofInput, specError } from './helpers.js';
+
+const SEED = UNSALTED_SEED;
 
 /** The elements a hostile list gave out: every read of an index, and every `in` test. */
 let elementReads = 0;
@@ -88,6 +95,30 @@ const referential = (members: unknown, periods: unknown = [{ from: '2020-01-01' 
  */
 const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ['canonicalize', (list) => specError(() => canonicalize({ a: list })).message, 'a'],
+  [
+    'merkleRoot',
+    (list) => specError(() => merkleRoot(list as Uint8Array[])).message,
+    'leaf hashes',
+  ],
+  [
+    'inclusionPath',
+    (list) => specError(() => inclusionPath(list as Uint8Array[], 0)).message,
+    'leaf hashes',
+  ],
+  [
+    'computeInputDigest data',
+    (list) =>
+      specError(() => computeInputDigest(proofInput({}, { l: list as never }), SEED)).message,
+    'invalid input: /data/l',
+  ],
+  [
+    'computeIdempotencyDigest options',
+    (list) =>
+      specError(() =>
+        computeIdempotencyDigest({ input: proofInput(), options: { l: list as never } }),
+      ).message,
+    'invalid options: /l',
+  ],
   [
     'normalizeRuleDefinition params',
     (list) =>
@@ -351,6 +382,8 @@ describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
         message(() => s.formatPointer(sp())),
         message(() => s.findOverlappingVersions(sp(), 'UTC', {})),
         message(() => s.canonicalize(sp())),
+        message(() => s.merkleRoot(sp())),
+        s.verifyInclusion(new Uint8Array(32), 0, 2, sp(), new Uint8Array(32)),
       ]));`;
     const out = execFileSync(
       process.execPath,
@@ -364,6 +397,8 @@ describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
       'JSON pointer segments is too large: more than 10000000 values',
       'rules is too large: more than 10000000 values',
       '(root) is too large: more than 10000000 values',
+      'leaf hashes is too large: more than 10000000 values',
+      false,
     ]);
   });
 });

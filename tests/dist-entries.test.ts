@@ -6,6 +6,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CivilCalendar } from '../src/index.js';
 import { fixedCalendar, ueReferential, overlapReport } from './helpers.js';
+import vector from './vectors/input-v1.json';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
@@ -88,6 +89,22 @@ type Entry = {
   ) => { pointer: string; assertion: unknown } | undefined;
   isProvisionalAssertion: (assertion: object) => boolean;
   computeAssertionDigest: (assertion: object) => string;
+  merkleRoot: (leaves: readonly Uint8Array[]) => Uint8Array;
+  inclusionPath: (leaves: readonly Uint8Array[], index: number) => Uint8Array[];
+  verifyInclusion: (
+    leaf: Uint8Array,
+    index: number,
+    size: number,
+    path: readonly Uint8Array[],
+    root: Uint8Array,
+  ) => boolean;
+  deriveInputSeed: (secret: Uint8Array, requestId: string) => Uint8Array;
+  UNSALTED_SEED: Uint8Array;
+  INPUT_TREE_TAG: string;
+  inputLeaves: (input: object, seed: Uint8Array) => { pointer: string; salt: string }[];
+  inputLeafHash: (leaf: object) => Uint8Array;
+  computeInputDigest: (input: object, seed: Uint8Array) => string;
+  computeIdempotencyDigest: (request: object) => string;
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -323,6 +340,44 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(entry.isProvisionalAssertion(assertion)).toBe(true);
       expect(entry.computeAssertionDigest(assertion)).toBe(
         entry.sha256Hex('{"at":"2026-01-01","by":"a","method":"presumed","status":"validated"}'),
+      );
+    }
+  });
+
+  it('every built entry exports the input tree and gives the frozen vector', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const secret = new Uint8Array(Buffer.from(vector.secret, 'hex'));
+    const leaves = ['a', 'b', 'c'].map(
+      (text) => new Uint8Array(createHash('sha256').update(text).digest()),
+    );
+    for (const entry of entries) {
+      const seed = entry.deriveInputSeed(secret, vector.requestId);
+      expect(Buffer.from(seed).toString('hex')).toBe(vector.salted.seed);
+      expect(entry.computeInputDigest(vector.input, seed)).toBe(vector.salted.inputDigest);
+      expect(entry.computeInputDigest(vector.input, entry.UNSALTED_SEED)).toBe(
+        vector.unsalted.inputDigest,
+      );
+      expect(entry.INPUT_TREE_TAG).toBe('run-iq.input/1');
+      const [first] = entry.inputLeaves(vector.input, seed);
+      expect(first?.salt).toBe(vector.salted.firstLeaf.salt);
+      expect(Buffer.from(entry.inputLeafHash(first ?? {})).toString('hex')).toBe(
+        vector.salted.firstLeaf.hash,
+      );
+      const root = entry.merkleRoot(leaves);
+      expect(Buffer.from(root).toString('hex')).toBe(vector.merkle.root);
+      const path = entry.inclusionPath(leaves, 2);
+      expect(entry.verifyInclusion(leaves[2] ?? root, 2, 3, path, root)).toBe(true);
+      const request = { input: vector.input, options: {} };
+      expect(entry.computeIdempotencyDigest(request)).toBe(
+        entry.sha256Hex(
+          '{"input":{"data":{"a":1,"b":[],"c":{},"d":{"e":null}},"meta":{"assertions":{},' +
+            '"context":{},"dates":{},"dimensions":{},"tags":[],"tenantId":"t"}},"options":{}}',
+        ),
       );
     }
   });

@@ -101,7 +101,11 @@ export type {
   ProofVerification,
   UnsignedProof,
 } from './proof/types.js';
-export { computeInputDigest, sealProof } from './proof/digest.js';
+export { computeIdempotencyDigest, computeInputDigest, sealProof } from './proof/digest.js';
+export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
+export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
+export { INPUT_TREE_TAG, inputLeafHash, inputLeaves } from './input/tree.js';
+export type { InputLeaf } from './input/tree.js';
 export type {
   AssertionMethod,
   AssertionStatus,

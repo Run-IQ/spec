@@ -8,6 +8,7 @@ import {
   normalizeRuleDefinition,
   PROOF_FORMAT,
   sealProof,
+  UNSALTED_SEED,
   validateProof,
   validateProofInput,
   validateReferential,
@@ -231,7 +232,7 @@ describe('inputs', () => {
   /** Asserts that validateProofInput and computeInputDigest refuse `input` at `path`. */
   function expectInputRefused(input: unknown, path: string): void {
     expect(validateProofInput(input)).toEqual([{ path, message: notJson(path) }]);
-    expect(specError(() => computeInputDigest(input as ProofInput))).toMatchObject({
+    expect(specError(() => computeInputDigest(input as ProofInput, UNSALTED_SEED))).toMatchObject({
       code: 'INVALID_INPUT',
       path,
       message: `invalid input: ${notJson(path)}`,
@@ -265,8 +266,8 @@ describe('inputs', () => {
       },
     };
     expect(validateProofInput(withUndefined)).toEqual([]);
-    expect(computeInputDigest(fromJavaScript<ProofInput>(withUndefined))).toBe(
-      computeInputDigest(plain),
+    expect(computeInputDigest(fromJavaScript<ProofInput>(withUndefined), UNSALTED_SEED)).toBe(
+      computeInputDigest(plain, UNSALTED_SEED),
     );
     const withBasis = fromJavaScript<FactAssertion>({ ...HUMAN_ASSERTION, basis: undefined });
     expect(computeAssertionDigest(withBasis)).toBe(computeAssertionDigest(HUMAN_ASSERTION));

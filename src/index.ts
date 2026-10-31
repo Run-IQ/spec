@@ -16,7 +16,11 @@
  * `isRuleSetId`, `isPackId`, `packIdProblem`); the decision input (`ProofInput`,
  * `validateProofInput`, which agrees with `schema/proof-input.schema.json`), the provenance of
  * its facts (`FactAssertion`, `governingAssertion`, `isProvisionalAssertion`,
- * `computeAssertionDigest`) and temporal facts (`TemporalValue`, `validateTemporalFact`).
+ * `computeAssertionDigest`) and temporal facts (`TemporalValue`, `validateTemporalFact`); the
+ * input tree (`computeInputDigest`, a salted RFC 6962 Merkle root: `deriveInputSeed`,
+ * `UNSALTED_SEED`, `inputLeaves`, `inputLeafHash`), the Merkle trees it rests on
+ * (`merkleRoot`, `inclusionPath`, `verifyInclusion`) and the idempotency digest of a request
+ * (`computeIdempotencyDigest`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -121,7 +125,11 @@ export type {
   ProofVerification,
   UnsignedProof,
 } from './proof/types.js';
-export { computeInputDigest, sealProof } from './proof/digest.js';
+export { computeIdempotencyDigest, computeInputDigest, sealProof } from './proof/digest.js';
+export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
+export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
+export { INPUT_TREE_TAG, inputLeafHash, inputLeaves } from './input/tree.js';
+export type { InputLeaf } from './input/tree.js';
 export type {
   AssertionMethod,
   AssertionStatus,
