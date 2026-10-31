@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { findOverlappingVersions, windowContains } from '../src/index.js';
 import type { CivilCalendar } from '../src/index.js';
-import { fixedCalendar, specError } from './helpers.js';
+import { fixedCalendar, overlapReport, specError } from './helpers.js';
 
 interface TestRule {
   id: string;
@@ -32,17 +32,21 @@ const overlap = (versions: [number, number], ruleSet = 'local', id = 'R1') => ({
 describe('findOverlappingVersions', () => {
   it('a successor starting when its predecessor ends does not overlap', () => {
     const rules = [rule(1, '2025-01-01', '2026-01-01'), rule(2, '2026-01-01', null)];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it('reports two versions whose windows overlap', () => {
     const rules = [rule(1, '2025-01-01', '2026-01-01'), rule(2, '2025-06-01', null)];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
   });
 
   it('two open windows overlap', () => {
     const rules = [rule(1, '2025-01-01', null), rule(2, '2030-01-01', null)];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
   });
 
   it('the same id in two rule sets is two rules', () => {
@@ -51,12 +55,14 @@ describe('findOverlappingVersions', () => {
       rule(1, '2025-01-01', null, { ruleSet: 'pack-a' }),
       rule(2, '2025-01-01', null, { ruleSet: 'pack-b' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it("an absent rule set is 'local'", () => {
     const rules = [rule(1, '2025-01-01', null), rule(2, '2025-06-01', null, { ruleSet: 'local' })];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
   });
 
   it('compares an instant bound and a civil bound in instants, by startOfDay (I7a, D-13)', () => {
@@ -65,11 +71,11 @@ describe('findOverlappingVersions', () => {
       rule(2, '2026-01-01', null),
     ];
     // In Paris, v2 starts at 2025-12-31T23:00:00.000Z, before v1 ends.
-    expect(findOverlappingVersions(rules, 'Europe/Paris', fixedCalendar)).toEqual([
-      overlap([1, 2]),
-    ]);
+    expect(findOverlappingVersions(rules, 'Europe/Paris', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     // In UTC, v2 starts at midnight UTC, after v1 ends.
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it("uses each version's own time zone", () => {
@@ -78,12 +84,14 @@ describe('findOverlappingVersions', () => {
       rule(2, '2026-01-01', null, { timeZone: 'Europe/Paris' }),
     ];
     // v1 ends at 2026-01-01T00:00Z, v2 starts at 2025-12-31T23:00Z: an hour where both apply.
-    expect(findOverlappingVersions(utcThenParis, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(utcThenParis, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     const parisThenUtc = [
       rule(1, '2025-01-01', '2026-01-01', { timeZone: 'Europe/Paris' }),
       rule(2, '2026-01-01', null, { timeZone: 'UTC' }),
     ];
-    expect(findOverlappingVersions(parisThenUtc, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(parisThenUtc, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it('civil windows in distant zones overlap on a civil day, even apart in instants', () => {
@@ -93,7 +101,9 @@ describe('findOverlappingVersions', () => {
       rule(1, '2025-01-01', '2026-01-02', { timeZone: '+23:00' }),
       rule(2, '2026-01-01', null, { timeZone: '-02:00' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
   });
 
   it('reports versions that read different reference dates (I17, D-31)', () => {
@@ -101,9 +111,9 @@ describe('findOverlappingVersions', () => {
       rule(1, '2020-01-01', '2024-01-01', { effectiveOn: '/$dates/contrat' }),
       rule(2, '2024-01-01', null, { effectiveOn: '/$dates/effective' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([
-      { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'effectiveOn' },
-    ]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([{ ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'effectiveOn' }]),
+    );
   });
 
   it("an absent effectiveOn is the default '/$dates/effective'", () => {
@@ -111,11 +121,11 @@ describe('findOverlappingVersions', () => {
       rule(1, '2020-01-01', '2024-01-01'),
       rule(2, '2024-01-01', null, { effectiveOn: '/$dates/effective' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
     const other = [rule(1, '2020-01-01', '2024-01-01'), { ...rules[1]!, effectiveOn: '/$dates/x' }];
-    expect(findOverlappingVersions(other, 'UTC', fixedCalendar)).toEqual([
-      { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'effectiveOn' },
-    ]);
+    expect(findOverlappingVersions(other, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([{ ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'effectiveOn' }]),
+    );
   });
 
   it('reports versions true on one civil day in far zones, apart in instants', () => {
@@ -125,19 +135,23 @@ describe('findOverlappingVersions', () => {
       rule(1, '2026-01-01', '2026-01-02', { timeZone: '+14:00' }),
       rule(2, '2026-01-01T10:00:00.000Z', null, { timeZone: '-12:00' }),
     ];
-    expect(findOverlappingVersions(civilAndInstant, 'UTC', fixedCalendar)).toEqual([
-      overlap([1, 2]),
-    ]);
+    expect(findOverlappingVersions(civilAndInstant, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     const instants = [
       rule(1, '2025-01-01T00:00:00.000Z', '2026-01-01T11:00:00.000Z', { timeZone: '+14:00' }),
       rule(2, '2026-01-01T11:00:00.000Z', null, { timeZone: '-12:00' }),
     ];
-    expect(findOverlappingVersions(instants, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(instants, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     const named = [
       rule(1, '2025-01-01', '2026-01-01', { timeZone: 'Pacific/Kiritimati' }),
       rule(2, '2025-12-31T10:00:00.000Z', null, { timeZone: 'Pacific/Niue' }),
     ];
-    expect(findOverlappingVersions(named, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(named, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
   });
 
   it('agrees with a brute force "both true on some reference date"', () => {
@@ -175,7 +189,7 @@ describe('findOverlappingVersions', () => {
       );
       if (both) overlaps++;
       const found = findOverlappingVersions(pair, 'UTC', fixedCalendar);
-      expect(found, JSON.stringify(pair)).toEqual(both ? [overlap([1, 2])] : []);
+      expect(found, JSON.stringify(pair)).toEqual(overlapReport(both ? [overlap([1, 2])] : []));
     }
     // Both answers are well represented.
     expect(overlaps).toBeGreaterThan(60);
@@ -188,13 +202,15 @@ describe('findOverlappingVersions', () => {
       rule(2, '0000-01-01', null, { timeZone: '+01:00' }),
     ];
     // v2 starts at -0001-12-31T23:00Z, before every instant: it covers all of v1.
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([overlap([1, 2])]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     const late = [
       rule(1, '9999-12-31T22:00:00.000Z', null, { timeZone: '+05:00' }),
       rule(2, '2026-01-01', '9999-12-31', { timeZone: '+05:00' }),
     ];
     // v2 ends at 9999-12-30T19:00Z, before v1 starts; v1 is true on no day of 0000-9999.
-    expect(findOverlappingVersions(late, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(late, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it('sorts by rule set, id, then versions, smaller version first', () => {
@@ -207,13 +223,15 @@ describe('findOverlappingVersions', () => {
       rule(2, '2025-01-01', null, { id: 'R10' }),
       rule(1, '2025-01-01', null, { id: 'R10' }),
     ];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([
-      overlap([1, 2], 'local', 'R10'),
-      overlap([1, 2], 'local', 'R2'),
-      overlap([1, 3], 'local', 'R2'),
-      overlap([2, 3], 'local', 'R2'),
-      overlap([4, 9], 'pack', 'R1'),
-    ]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([
+        overlap([1, 2], 'local', 'R10'),
+        overlap([1, 2], 'local', 'R2'),
+        overlap([1, 3], 'local', 'R2'),
+        overlap([2, 3], 'local', 'R2'),
+        overlap([4, 9], 'pack', 'R1'),
+      ]),
+    );
   });
 
   it('compares instants without the calendar, and civil dates of one zone too', () => {
@@ -229,22 +247,22 @@ describe('findOverlappingVersions', () => {
       rule(1, '2025-01-01T00:00:00.000Z', '2025-06-01T00:00:00.000Z'),
       rule(2, '2025-05-31T23:59:59.999Z', null),
     ];
-    expect(findOverlappingVersions(instants, 'Europe/Paris', noCalendar)).toEqual([
-      overlap([1, 2]),
-    ]);
+    expect(findOverlappingVersions(instants, 'Europe/Paris', noCalendar)).toEqual(
+      overlapReport([overlap([1, 2])]),
+    );
     const civil = [rule(1, '2025-01-01', '2025-06-01'), rule(2, '2025-06-01', null)];
-    expect(findOverlappingVersions(civil, 'Europe/Paris', noCalendar)).toEqual([]);
+    expect(findOverlappingVersions(civil, 'Europe/Paris', noCalendar)).toEqual(overlapReport([]));
   });
 
   it('checks 20 000 distinct ids in linear time', () => {
     const rules = Array.from({ length: 20_000 }, (_, i) =>
       rule(1, '2025-01-01', null, { id: `R${i}` }),
     );
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 
   it('returns [] for no rule', () => {
-    expect(findOverlappingVersions([], 'UTC', fixedCalendar)).toEqual([]);
+    expect(findOverlappingVersions([], 'UTC', fixedCalendar)).toEqual(overlapReport([]));
   });
 });
 

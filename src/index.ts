@@ -78,7 +78,7 @@ export { isEffectiveAt } from './rule/effective.js';
 export { windowContains } from './rule/window.js';
 export type { RuleWindow } from './rule/window.js';
 export { findOverlappingVersions } from './rule/versions.js';
-export type { VersionedRuleWindow, VersionOverlap } from './rule/versions.js';
+export type { VersionedRuleWindow, VersionOverlap, VersionOverlapReport } from './rule/versions.js';
 export {
   isCivilDate,
   isInstant,

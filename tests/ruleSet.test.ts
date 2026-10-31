@@ -14,7 +14,13 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type { RuleDefinitionInput, RuleSelector, VersionedRuleWindow } from '../src/index.js';
-import { BASE_RULE, expectRuleRefused, fixedCalendar, specError } from './helpers.js';
+import {
+  BASE_RULE,
+  expectRuleRefused,
+  fixedCalendar,
+  specError,
+  overlapReport,
+} from './helpers.js';
 
 const RULE_SET_ID = 'ruleSet must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$';
 
@@ -533,16 +539,16 @@ describe('findOverlappingVersions never mixes local rules with a pack', () => {
 
   it('keeps the same id of a pack and of local rules apart', () => {
     const rules = [version(1), version(1, 'rgpd'), version(2, 'rgpd')];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([
-      { ruleSet: 'rgpd', id: 'R1', versions: [1, 2], kind: 'overlap' },
-    ]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([{ ruleSet: 'rgpd', id: 'R1', versions: [1, 2], kind: 'overlap' }]),
+    );
   });
 
   it("groups an explicit 'local' with the rules without a rule set", () => {
     const rules = [version(1), version(2, 'local')];
-    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual([
-      { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' },
-    ]);
+    expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(
+      overlapReport([{ ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' }]),
+    );
     expect(
       specError(() =>
         findOverlappingVersions([version(1), version(1, 'local')], 'UTC', fixedCalendar),

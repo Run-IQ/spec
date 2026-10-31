@@ -30,6 +30,7 @@ import type {
   ExecutableRule,
   Instant,
   VersionOverlap,
+  VersionOverlapReport,
   JsonValue,
   OutputDeclaration,
   OutputRounding,
@@ -225,7 +226,9 @@ describe('civil time types (Task 9D)', () => {
   it('types the reference dates, the window answer and the overlaps', () => {
     expectTypeOf(toReferenceDate).returns.toEqualTypeOf<CivilDate | Instant>();
     expectTypeOf(windowContains).returns.toEqualTypeOf<boolean | 'unknown'>();
-    expectTypeOf(findOverlappingVersions).returns.toEqualTypeOf<VersionOverlap[]>();
+    expectTypeOf(findOverlappingVersions).returns.toEqualTypeOf<VersionOverlapReport>();
+    expectTypeOf<VersionOverlapReport['overlaps']>().toEqualTypeOf<VersionOverlap[]>();
+    expectTypeOf<VersionOverlapReport['truncated']>().toEqualTypeOf<boolean>();
     expectTypeOf<VersionOverlap['versions']>().toEqualTypeOf<[number, number]>();
     expectTypeOf<VersionOverlap['kind']>().toEqualTypeOf<'overlap' | 'effectiveOn'>();
     expectTypeOf<CivilCalendar['startOfDay']>().returns.toEqualTypeOf<Instant>();

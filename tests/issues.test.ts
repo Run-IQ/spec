@@ -47,6 +47,39 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
     ]);
   });
 
+  it.each([
+    ['a 5000-character dimension name starting with $', { dimensions: { [`$${LONG}`]: 'FR' } }],
+    ['a 5000-character dimension name with an empty value', { dimensions: { [LONG]: '' } }],
+    ['an over-long tag with a lone surrogate', { tags: [`${LONG}\uD800`] }],
+    ['an over-long extension key with a lone surrogate', { [`${LONG}\uD800`]: 1 }],
+    ['an over-long id holding ":"', { id: `${LONG}:` }],
+    ['an over-long rule set', { ruleSet: `A${LONG}` }],
+    ['an over-long output name', { output: `a.${LONG}` }],
+    ['an over-long output name starting with $', { output: `$${LONG}` }],
+    ['an over-long effectiveOn', { effectiveOn: `/$dates/$${LONG}` }],
+    ['an over-long params key with a lone surrogate', { params: { [`${LONG}\uD800`]: 1 } }],
+    ['an over-long params value with a lone surrogate', { params: { a: `${LONG}\uD800` } }],
+    [
+      'an over-long forEach dimension name',
+      { forEach: { path: '/xs', key: 'id', dimensions: { [`$${LONG}`]: '/p' } } },
+    ],
+    [
+      'an over-long selector dimension name',
+      {
+        model: '@run-iq/exception',
+        params: {},
+        exceptions: [{ kind: 'inhibit', targets: { dimensions: { [`$${LONG}`]: 'FR' } } }],
+      },
+    ],
+    ['an over-long dimension spec value', { dimensions: { pays: { anyOf: [`${LONG}\uD800`] } } }],
+  ])('normalize throws the first issue of the validator, cut alike: %s', (_, patch) => {
+    const rule = { ...BASE_RULE, ...patch };
+    const [first] = validateRuleDefinition(rule).errors;
+    expect(first).toBeDefined();
+    expect(first?.length).toBeLessThanOrEqual(1025);
+    expect(specError(() => normalizeRuleDefinition(rule)).message).toBe(first);
+  });
+
   it('normalizeRuleDefinition still throws the first problem of a long list', () => {
     const exceptions = Array.from({ length: 500 }, () => ({ kind: 'nope' }));
     const first = validateRuleDefinition({ ...BASE_RULE, exceptions }).errors[0];

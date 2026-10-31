@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CivilCalendar } from '../src/index.js';
-import { fixedCalendar, ueReferential } from './helpers.js';
+import { fixedCalendar, ueReferential, overlapReport } from './helpers.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
@@ -73,7 +73,7 @@ type Entry = {
     rules: readonly { id: string; version: number; effectiveFrom: string; effectiveUntil: null }[],
     timeZone: string,
     calendar: CivilCalendar,
-  ) => unknown[];
+  ) => unknown;
   LOCAL_RULE_SET: string;
   qualifyName: (ruleSet: string, name: string) => string;
   isRuleSetId: (value: unknown) => boolean;
@@ -238,9 +238,9 @@ describeBuilt('built entries: one SpecError identity', () => {
         entry.windowContains(rule, '2025-12-31T23:30:00.000Z', 'Europe/Paris', fixedCalendar),
       ).toBe(true);
       const versions = [1, 2].map((version) => ({ id: 'R1', version, ...rule }));
-      expect(entry.findOverlappingVersions(versions, 'UTC', fixedCalendar)).toEqual([
-        { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' },
-      ]);
+      expect(entry.findOverlappingVersions(versions, 'UTC', fixedCalendar)).toEqual(
+        overlapReport([{ ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' }]),
+      );
     }
   });
 

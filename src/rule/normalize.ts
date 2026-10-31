@@ -25,7 +25,7 @@ import {
   shortestFrom,
 } from './ruleSet.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
-import { IssueList } from '../issues.js';
+import { boundIssueText, IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import {
   DEFAULT_EFFECTIVE_ON,
@@ -85,13 +85,21 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * (`params`, `condition.value`, `forEach`, `exceptions`, an extension: a getter or a Proxy trap
  * that throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, or `<field> is too
  * deeply nested` when it overflows the call stack, as in `validateRuleDefinition`; anything
- * else that cannot be read gives `rule definition could not be read: <reason>`.
+ * else that cannot be read gives `rule definition could not be read: <reason>`. A message (and
+ * a `NON_SERIALIZABLE` path) longer than 1024 code units is cut there and followed by `…`,
+ * exactly as `validateRuleDefinition` cuts its issues: both give the same first message.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   try {
     return normalize(input);
   } catch (error) {
-    if (error instanceof SpecError) throw error;
+    // Cut as `validateRuleDefinition` cuts its issues, so both give the same first message.
+    if (error instanceof SpecError) {
+      const message = boundIssueText(error.message);
+      const path = error.path === undefined ? undefined : boundIssueText(error.path);
+      if (message === error.message && path === error.path) throw error;
+      throw new SpecError(error.code, message, path);
+    }
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
     invalidRule(unreadableMessage('rule definition', error));
   }

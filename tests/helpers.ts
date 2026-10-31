@@ -172,6 +172,11 @@ export function proofInput(
   };
 }
 
+/** What `findOverlappingVersions` returns below its limit: every pair, not truncated. */
+export function overlapReport<T>(overlaps: T[]): { overlaps: T[]; truncated: false } {
+  return { overlaps, truncated: false };
+}
+
 /**
  * Asserts a list of issues that reached the shared bound: 100 problems, then the last issue
  * `further problems not listed (limit 100)`; every path at most 1024 code units plus `…`, every

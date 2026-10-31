@@ -28,8 +28,13 @@ export const MAX_ISSUE_TEXT = 1024;
 /** The message of the last issue of a list that reached `MAX_ISSUES`. */
 export const ISSUE_LIMIT_MESSAGE = `further problems not listed (limit ${MAX_ISSUES})`;
 
-/** `text` cut to `MAX_ISSUE_TEXT` code units, never inside a surrogate pair, then `…`. */
-function bounded(text: string): string {
+/**
+ * Internal: `text` cut to `MAX_ISSUE_TEXT` code units, never inside a surrogate pair, then `…`.
+ * The one cut of every issue text: `IssueList` applies it to each path and message, and a
+ * function that throws the first problem a validator lists (`normalizeRuleDefinition`) applies
+ * it to the message it throws, so both give the same text.
+ */
+export function boundIssueText(text: string): string {
   if (text.length <= MAX_ISSUE_TEXT) return text;
   const last = text.charCodeAt(MAX_ISSUE_TEXT - 1);
   const splitsPair = last >= 0xd800 && last <= 0xdbff;
@@ -51,7 +56,7 @@ export class IssueList {
       this.dropped = true;
       return false;
     }
-    this.entries.push({ path: bounded(path), message: bounded(message) });
+    this.entries.push({ path: boundIssueText(path), message: boundIssueText(message) });
     return true;
   }
 
