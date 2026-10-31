@@ -1,6 +1,12 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { COMBINE_STRATEGIES, OUTPUT_TYPES } from '../decision/output.js';
+import {
+  checkRounding,
+  COMBINE_STRATEGIES,
+  isRoundable,
+  OUTPUT_TYPES,
+  roundingNotApplicable,
+} from '../decision/output.js';
 import { describeError, SpecError, specErrorPath } from '../errors.js';
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
@@ -36,6 +42,13 @@ const anyString: Check = (value, path, add) => {
 
 const version: Check = (value, path, add) => {
   if (!isRuleVersion(value)) add(path, `${path} must be a positive integer`);
+};
+
+/** A stratum index: a safe integer, 0 or more. Whether `strata` has it is checked later. */
+const stratum: Check = (value, path, add) => {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+    add(path, `${path} must be a non-negative integer`);
+  }
 };
 
 const sha256: Check = (value, path, add) => {
@@ -166,37 +179,62 @@ const VERSIONS: Shape = {
 };
 
 const OUTPUT: Shape = {
-  summary: '{ type, combine, value, contributors }',
+  summary: '{ type, combine, value, contributors, rounding? }',
   fields: {
     type: oneOf(OUTPUT_TYPES),
     combine: oneOf(COMBINE_STRATEGIES),
     value: json,
     contributors: listOf(nonEmptyString),
+    // Checked by `output`, which also knows the type.
+    rounding: () => undefined,
   },
+  optional: ['rounding'],
+};
+
+/**
+ * An output. Its `rounding` is checked as in an output declaration: on a known type that
+ * cannot be rounded, only that is reported; otherwise its shape is checked.
+ */
+const output: Check = (value, path, add) => {
+  const members = checkObject(value, path, OUTPUT, add, new Set());
+  const rounding = members?.get('rounding');
+  if (rounding === undefined) return;
+  const type = members?.get('type');
+  if (OUTPUT_TYPES.some((t) => t === type) && !isRoundable(type)) {
+    roundingNotApplicable(`${path}.rounding`, add);
+  } else checkRounding(rounding, `${path}.rounding`, add);
 };
 
 const STEP: Shape = {
-  summary: '{ ruleId, version, model, output, contribution, sourceRef? }',
+  summary: '{ ruleId, version, model, output, contribution, stratum, unrounded?, sourceRef? }',
   fields: {
     ruleId: nonEmptyString,
     version,
     model: nonEmptyString,
     output: nonEmptyString,
     contribution: json,
+    stratum,
+    unrounded: json,
     sourceRef: nonEmptyString,
   },
-  optional: ['sourceRef'],
+  optional: ['unrounded', 'sourceRef'],
 };
 
 const SKIP: Shape = {
-  summary: '{ ruleId, version, reason, detail? }',
-  fields: { ruleId: nonEmptyString, version, reason: nonEmptyString, detail: anyString },
+  summary: '{ ruleId, version, reason, detail?, stratum }',
+  fields: { ruleId: nonEmptyString, version, reason: nonEmptyString, detail: anyString, stratum },
   optional: ['detail'],
 };
 
 const EXCEPTION: Shape = {
-  summary: '{ ruleId, version, kind, affected }',
-  fields: { ruleId: nonEmptyString, version, kind: oneOf(KINDS), affected: listOf(nonEmptyString) },
+  summary: '{ ruleId, version, kind, affected, stratum }',
+  fields: {
+    ruleId: nonEmptyString,
+    version,
+    kind: oneOf(KINDS),
+    affected: listOf(nonEmptyString),
+    stratum,
+  },
 };
 
 const SIGNATURE: Shape = {
@@ -221,7 +259,8 @@ const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
   rules: listOf(objectOf(RULE_REF)),
   ruleSet: objectOf(RULE_SET),
   versions: objectOf(VERSIONS),
-  outputs: mapOf(objectOf(OUTPUT), 'outputs'),
+  strata: listOf(listOf(nonEmptyString)),
+  outputs: mapOf(output, 'outputs'),
   applied: listOf(objectOf(STEP)),
   skipped: listOf(objectOf(SKIP)),
   exceptions: listOf(objectOf(EXCEPTION)),
@@ -248,7 +287,14 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * - `format` is `PROOF_FORMAT`; `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
  *   in the grammar of rule dates; `inputDigest`, `digest`, rule checksums and `ruleSet.digest`
  *   are lowercase sha256 hex; `signature.value` is 64 bytes in unpadded base64url;
- * - output values and contributions are JSON.
+ * - output values, contributions and `unrounded` values are JSON;
+ * - `strata` is a list of lists of non-empty output names; every `stratum` of `applied`,
+ *   `skipped` and `exceptions` is a safe integer, 0 or more;
+ * - an output's `rounding` is checked as in an output declaration (`validateOutputDeclaration`),
+ *   on a `number` or `decimal` output only.
+ *
+ * Whether `strata` covers `outputs` and holds each `stratum` is a consistency check, made by
+ * `verifyProof`, `sealProof` and `signProof`, not by this function.
  *
  * It agrees with `schema/decision-proof.schema.json` on JSON documents, plus one check JSON
  * Schema cannot express: no two entries of `rules` have the same id and version.

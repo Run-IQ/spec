@@ -34,6 +34,9 @@ type Entry = {
     proof: unknown,
     options?: { trustedKeys?: Record<string, string> },
   ) => { status: string; issues: string[] };
+  OUTPUTS_VARIABLE: string;
+  isCanonicalDecimal: (text: string) => boolean;
+  toCanonicalDecimal: (text: string) => string;
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -105,6 +108,7 @@ describeBuilt('built entries: one SpecError identity', () => {
       inputDigest: '0'.repeat(64),
       rules: [],
       versions: { engine: '1.0.0', plugins: {}, dsls: {} },
+      strata: [],
       outputs: {},
       applied: [],
       skipped: [],
@@ -119,6 +123,24 @@ describeBuilt('built entries: one SpecError identity', () => {
           issues: [],
         });
       }
+    }
+  });
+
+  it('every built entry exports the decimal functions and the reserved variable', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    for (const entry of entries) {
+      expect(entry.OUTPUTS_VARIABLE).toBe('$outputs');
+      expect(entry.isCanonicalDecimal('12.5')).toBe(true);
+      expect(entry.isCanonicalDecimal('-0')).toBe(false);
+      expect(entry.toCanonicalDecimal('0012.50')).toBe('12.5');
+      expect(() => entry.toCanonicalDecimal('1e3')).toThrow(
+        expect.objectContaining({ code: 'INVALID_DECIMAL' }),
+      );
     }
   });
 

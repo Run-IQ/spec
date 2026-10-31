@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/decision-proof.schema.json",
   "title": "Run-IQ decision proof",
-  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the sha256 of the canonical proof without digest and signature; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. This schema checks the shape only; verifyProof checks the digest and the signature. One rule is NOT expressible in JSON Schema and is checked only by validateProof: no two entries of rules have the same id and version.",
+  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the sha256 of the canonical proof without digest and signature; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. This schema checks the shape only; verifyProof checks the digest, the signature and the internal consistency (every cited rule listed in rules; every output in exactly one stratum of strata; every stratum index within strata; every applied rule's output in its stratum). One rule is NOT expressible in JSON Schema and is checked only by validateProof: no two entries of rules have the same id and version.",
   "type": "object",
   "required": [
     "format",
@@ -12,6 +12,7 @@
     "inputDigest",
     "rules",
     "versions",
+    "strata",
     "outputs",
     "applied",
     "skipped",
@@ -94,6 +95,16 @@
       },
       "additionalProperties": false
     },
+    "strata": {
+      "description": "The output names of each evaluation stratum, in evaluation order. A stratum may be empty.",
+      "type": "array",
+      "items": {
+        "type": "array",
+        "items": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      }
+    },
     "outputs": {
       "type": "object",
       "propertyNames": {
@@ -157,6 +168,12 @@
       "type": "integer",
       "minimum": 1
     },
+    "stratumIndex": {
+      "description": "The index of a stratum in strata: a safe integer, 0 or more.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 9007199254740991
+    },
     "sha256Hex": {
       "description": "Lowercase sha256 hex.",
       "type": "string",
@@ -200,6 +217,7 @@
       "additionalProperties": false
     },
     "output": {
+      "description": "An output. rounding, when present, applies to a number or decimal output only.",
       "type": "object",
       "required": [
         "type",
@@ -215,7 +233,8 @@
             "string",
             "enum",
             "list",
-            "object"
+            "object",
+            "decimal"
           ]
         },
         "combine": {
@@ -237,9 +256,34 @@
           "items": {
             "$ref": "#/$defs/nonEmptyString"
           }
+        },
+        "rounding": {
+          "$ref": "#/$defs/rounding"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "if": {
+        "type": "object",
+        "required": [
+          "type"
+        ],
+        "properties": {
+          "type": {
+            "enum": [
+              "boolean",
+              "string",
+              "enum",
+              "list",
+              "object"
+            ]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rounding": false
+        }
+      }
     },
     "step": {
       "type": "object",
@@ -248,7 +292,8 @@
         "version",
         "model",
         "output",
-        "contribution"
+        "contribution",
+        "stratum"
       ],
       "properties": {
         "ruleId": {
@@ -266,6 +311,12 @@
         "contribution": {
           "description": "Any JSON value, null included."
         },
+        "stratum": {
+          "$ref": "#/$defs/stratumIndex"
+        },
+        "unrounded": {
+          "description": "The contribution before rounding, when it was rounded: any JSON value, null included."
+        },
         "sourceRef": {
           "$ref": "#/$defs/nonEmptyString"
         }
@@ -277,7 +328,8 @@
       "required": [
         "ruleId",
         "version",
-        "reason"
+        "reason",
+        "stratum"
       ],
       "properties": {
         "ruleId": {
@@ -291,6 +343,9 @@
         },
         "detail": {
           "type": "string"
+        },
+        "stratum": {
+          "$ref": "#/$defs/stratumIndex"
         }
       },
       "additionalProperties": false
@@ -301,7 +356,8 @@
         "ruleId",
         "version",
         "kind",
-        "affected"
+        "affected",
+        "stratum"
       ],
       "properties": {
         "ruleId": {
@@ -322,6 +378,42 @@
           "items": {
             "$ref": "#/$defs/nonEmptyString"
           }
+        },
+        "stratum": {
+          "$ref": "#/$defs/stratumIndex"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rounding": {
+      "description": "A declared rounding: scale decimal places (0 to 20) in mode; at is output (the default) or contribution.",
+      "type": "object",
+      "required": [
+        "scale",
+        "mode"
+      ],
+      "properties": {
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "mode": {
+          "enum": [
+            "halfUp",
+            "halfDown",
+            "halfEven",
+            "up",
+            "down",
+            "ceiling",
+            "floor"
+          ]
+        },
+        "at": {
+          "enum": [
+            "output",
+            "contribution"
+          ]
         }
       },
       "additionalProperties": false

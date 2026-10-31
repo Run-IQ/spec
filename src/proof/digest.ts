@@ -24,13 +24,15 @@ export function computeInputDigest(input: ProofInput): string {
  *
  * Throws `SpecError` (`INVALID_PROOF`), naming the first problem, when the content is not a
  * valid unsigned proof (see `validateProof`) or is not internally consistent (see
- * `unlistedCitations`: `cited rule not listed: ...`).
+ * `inconsistencies`: `cited rule not listed: ...`, `step stratum mismatch: ...`).
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
   const { proof, errors } = readUnsignedProof(p);
   if (!proof) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
-  const [uncited] = unlistedCitations(proof);
-  if (uncited) throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${uncited}`);
+  const [inconsistency] = inconsistencies(proof);
+  if (inconsistency) {
+    throw new SpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
+  }
   return { ...proof, digest: contentDigest(proof) };
 }
 
@@ -40,6 +42,15 @@ export function sealProof(p: UnsignedProof): DecisionProof {
  */
 export function contentDigest(p: UnsignedProof): string {
   return sha256Hex(canonicalize(proofContent(p)));
+}
+
+/**
+ * Internal: every way `p` contradicts itself, each reported once: first its unlisted citations
+ * (`unlistedCitations`), then its strata problems (`strataProblems`). `p` must be a plain-JSON
+ * snapshot that `validateProof` accepts.
+ */
+export function inconsistencies(p: UnsignedProof): string[] {
+  return [...unlistedCitations(p), ...strataProblems(p)];
 }
 
 /**
@@ -75,4 +86,39 @@ function proofContent(p: UnsignedProof): Record<string, unknown> {
   delete content.digest;
   delete content.signature;
   return content;
+}
+
+/**
+ * Internal: where `p.strata` contradicts the rest of the proof, each problem reported once, in
+ * this order:
+ * - each name of `strata`, in order: `stratum output unknown: name` (not a key of `outputs`),
+ *   `stratum output repeated: name` (in more than one place);
+ * - each key of `outputs`, sorted, in no stratum: `output not in strata: name`;
+ * - each entry of `applied`, then `skipped`, then `exceptions`, in order: `stratum out of
+ *   range: id@version` when its `stratum` is not an index of `strata`, otherwise, for an
+ *   applied rule whose `output` is not in `strata[stratum]`, `step stratum mismatch:
+ *   id@version`.
+ */
+export function strataProblems(p: UnsignedProof): string[] {
+  const issues = new Set<string>();
+  const placed = new Set<string>();
+  for (const name of p.strata.flat()) {
+    if (!Object.hasOwn(p.outputs, name)) issues.add(`stratum output unknown: ${name}`);
+    if (placed.has(name)) issues.add(`stratum output repeated: ${name}`);
+    placed.add(name);
+  }
+  for (const name of Object.keys(p.outputs).sort()) {
+    if (!placed.has(name)) issues.add(`output not in strata: ${name}`);
+  }
+  const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
+    const key = `${entry.ruleId}@${entry.version}`;
+    const names = p.strata[entry.stratum];
+    if (!names) issues.add(`stratum out of range: ${key}`);
+    else if (output !== undefined && !names.includes(output)) {
+      issues.add(`step stratum mismatch: ${key}`);
+    }
+  };
+  for (const step of p.applied) place(step, step.output);
+  for (const entry of [...p.skipped, ...p.exceptions]) place(entry);
+  return [...issues];
 }

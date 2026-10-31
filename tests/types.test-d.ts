@@ -1,6 +1,9 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
   computeRuleChecksum,
+  isCanonicalDecimal,
+  OUTPUTS_VARIABLE,
+  toCanonicalDecimal,
   computeRuleFingerprint,
   fromStoredRecord,
   matchesSelector,
@@ -12,6 +15,16 @@ import {
 import type {
   ExecutableRule,
   JsonValue,
+  OutputDeclaration,
+  OutputRounding,
+  OutputType,
+  ProofException,
+  ProofOutput,
+  ProofSkip,
+  ProofStep,
+  RoundingMode,
+  SpecErrorCode,
+  UnsignedProof,
   RuleDefinition,
   RuleDefinitionBase,
   RuleDefinitionInput,
@@ -156,5 +169,36 @@ describe('ExecutableRule types (A6)', () => {
       errors: string[];
       issues: { path: string; message: string }[];
     }>();
+  });
+});
+
+describe('decimal outputs, rounding and strata (9A)', () => {
+  it('adds the decimal type and declared rounding', () => {
+    expectTypeOf<'decimal'>().toMatchTypeOf<OutputType>();
+    expectTypeOf<RoundingMode>().toEqualTypeOf<
+      'halfUp' | 'halfDown' | 'halfEven' | 'up' | 'down' | 'ceiling' | 'floor'
+    >();
+    expectTypeOf<OutputRounding>().toEqualTypeOf<{
+      scale: number;
+      mode: RoundingMode;
+      at?: 'output' | 'contribution';
+    }>();
+    expectTypeOf<OutputDeclaration['rounding']>().toEqualTypeOf<OutputRounding | undefined>();
+    expectTypeOf<'INVALID_DECIMAL'>().toMatchTypeOf<SpecErrorCode>();
+  });
+
+  it('types the decimal functions and the reserved variable', () => {
+    expectTypeOf(isCanonicalDecimal).toEqualTypeOf<(text: string) => boolean>();
+    expectTypeOf(toCanonicalDecimal).toEqualTypeOf<(text: string) => string>();
+    expectTypeOf<typeof OUTPUTS_VARIABLE>().toEqualTypeOf<'$outputs'>();
+  });
+
+  it('adds strata, stratum numbers, rounding and unrounded values to the proof', () => {
+    expectTypeOf<UnsignedProof['strata']>().toEqualTypeOf<string[][]>();
+    expectTypeOf<ProofOutput['rounding']>().toEqualTypeOf<OutputRounding | undefined>();
+    expectTypeOf<ProofStep['stratum']>().toEqualTypeOf<number>();
+    expectTypeOf<ProofStep['unrounded']>().toEqualTypeOf<JsonValue | undefined>();
+    expectTypeOf<ProofSkip['stratum']>().toEqualTypeOf<number>();
+    expectTypeOf<ProofException['stratum']>().toEqualTypeOf<number>();
   });
 });

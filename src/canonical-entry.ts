@@ -34,10 +34,18 @@ export type { RuleValidationIssue } from './rule/validate.js';
 export {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
+  OUTPUTS_VARIABLE,
   validateOutputDeclaration,
   valueMatchesOutputType,
 } from './decision/output.js';
-export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export type {
+  CombineStrategy,
+  OutputDeclaration,
+  OutputRounding,
+  OutputType,
+  RoundingMode,
+} from './decision/output.js';
+export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
 export type {
   DecisionProof,

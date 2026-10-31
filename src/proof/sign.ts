@@ -1,7 +1,7 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { SpecError } from '../errors.js';
-import { contentDigest, unlistedCitations } from './digest.js';
+import { contentDigest, inconsistencies } from './digest.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
 
@@ -28,8 +28,9 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  *
  * Throws `SpecError`:
  * - `INVALID_PROOF` when `p` is malformed (see `validateProof`), its `digest` does not match
- *   its content, or it cites a rule its `rules` does not list (see `sealProof`): a proof is
- *   never signed for content it does not hold;
+ *   its content, or it is not internally consistent (an unlisted rule, or strata that do not
+ *   match its outputs and trace; see `sealProof`): a proof is never signed for content it does
+ *   not hold;
  * - `INVALID_KEY` when `privateKeyHex` is not 64 hex characters or `keyId` is empty.
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
@@ -41,8 +42,10 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
       'Cannot sign the proof: its digest does not match its content; seal it again',
     );
   }
-  const [uncited] = unlistedCitations(proof);
-  if (uncited) throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${uncited}`);
+  const [inconsistency] = inconsistencies(proof);
+  if (inconsistency) {
+    throw new SpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
+  }
   if (typeof keyId !== 'string' || keyId === '') {
     throw new SpecError('INVALID_KEY', 'keyId must be a non-empty string');
   }

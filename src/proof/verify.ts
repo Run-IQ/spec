@@ -4,7 +4,7 @@ import { sha256Hex } from '../hash.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
 import { canonicalRulePayload } from '../rule/payload.js';
 import { isPlainObject } from '../values.js';
-import { contentDigest, unlistedCitations } from './digest.js';
+import { contentDigest, inconsistencies } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
 import { readDecisionProof } from './validate.js';
@@ -27,6 +27,11 @@ interface Finding {
  * 3. Internal consistency: every rule the proof cites (in `applied`, `skipped`, `exceptions`,
  *    output `contributors` and exception `affected`) must be listed in `rules`, otherwise
  *    `cited rule not listed: id@version` (or `: id` for the lists of ids) makes it `invalid`.
+ *    So does every contradiction between `strata` and the rest of the proof:
+ *    `stratum output unknown: name`, `stratum output repeated: name`,
+ *    `output not in strata: name`, `stratum out of range: id@version` (an entry of `applied`,
+ *    `skipped` or `exceptions` whose stratum `strata` does not have), and
+ *    `step stratum mismatch: id@version` (an applied rule whose output is not in its stratum).
  * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
  *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters, not a curve point, or
  *    a small-order point), leave it at best `consistent`: nothing proves who produced it.
@@ -68,7 +73,7 @@ function verify(p: unknown, options: unknown): ProofVerification {
   const findings: Finding[] = [];
   if (contentDigest(proof) !== proof.digest)
     findings.push({ message: 'digest mismatch', invalid: true });
-  for (const message of unlistedCitations(proof)) findings.push({ message, invalid: true });
+  for (const message of inconsistencies(proof)) findings.push({ message, invalid: true });
   if (options !== undefined && !isPlainObject(options)) {
     findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });
   }

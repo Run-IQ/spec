@@ -24,6 +24,7 @@ export const BASE_PROOF = {
     plugins: { '@run-iq/plugin-test': '1.0.0' },
     dsls: { jsonlogic: '0.2.0' },
   },
+  strata: [['value']],
   outputs: { value: { type: 'number', combine: 'sum', value: 150, contributors: ['r1'] } },
   applied: [
     {
@@ -32,10 +33,11 @@ export const BASE_PROOF = {
       model: 'FLAT',
       output: 'value',
       contribution: 150,
+      stratum: 0,
       sourceRef: 'art. 1',
     },
   ],
-  skipped: [{ ruleId: 'r2', version: 2, reason: 'CONDITION_FALSE' }],
+  skipped: [{ ruleId: 'r2', version: 2, reason: 'CONDITION_FALSE', stratum: 0 }],
   exceptions: [],
   digest: hex('d'),
 };
@@ -56,7 +58,8 @@ const rule = BASE_PROOF.rules[1];
 const step = BASE_PROOF.applied[0];
 const skip = BASE_PROOF.skipped[0];
 const output = BASE_PROOF.outputs.value;
-const exception = { ruleId: 'x', version: 1, kind: 'inhibit', affected: ['r2'] };
+const exception = { ruleId: 'x', version: 1, kind: 'inhibit', affected: ['r2'], stratum: 0 };
+const rounding = { scale: 2, mode: 'halfEven', at: 'contribution' };
 const signature = { alg: 'ed25519', keyId: 'k1', value: SIGNATURE_VALUE };
 
 export const VALID_PROOFS: [string, unknown][] = [
@@ -107,6 +110,32 @@ export const VALID_PROOFS: [string, unknown][] = [
     }),
   ],
   ['a contribution that is an object', proofWith({ applied: [{ ...step, contribution: {} }] })],
+  [
+    'a rounded decimal output and the contribution before rounding',
+    proofWith({
+      outputs: {
+        value: { type: 'decimal', combine: 'sum', value: '150.13', contributors: ['r1'], rounding },
+      },
+      applied: [{ ...step, contribution: '150.13', unrounded: '150.125' }],
+    }),
+  ],
+  [
+    'a rounded number output, without at, and a null unrounded',
+    proofWith({
+      outputs: { value: { ...output, rounding: { scale: 0, mode: 'floor' } } },
+      applied: [{ ...step, unrounded: null }],
+    }),
+  ],
+  [
+    'several strata, an empty one included, and large stratum numbers',
+    proofWith({
+      strata: [['value'], [], ['fine', 'risk']],
+      applied: [{ ...step, stratum: 2 }],
+      skipped: [{ ...skip, stratum: Number.MAX_SAFE_INTEGER }],
+      exceptions: [{ ...exception, stratum: 1 }],
+    }),
+  ],
+  ['no stratum at all', proofWith({ strata: [] })],
   [
     'a signature value ending in Q',
     proofWith({ signature: { ...signature, value: `${'_'.repeat(85)}Q` } }),
@@ -253,13 +282,13 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'an output that is not an object',
     proofWith({ outputs: { value: 150 } }),
     'outputs.value',
-    'outputs.value must be an object { type, combine, value, contributors }',
+    'outputs.value must be an object { type, combine, value, contributors, rounding? }',
   ],
   [
     'an output of an unknown type',
     proofWith({ outputs: { value: { ...output, type: 'money' } } }),
     'outputs.value.type',
-    'outputs.value.type must be one of number, boolean, string, enum, list, object',
+    'outputs.value.type must be one of number, boolean, string, enum, list, object, decimal',
   ],
   [
     'an output with an unknown strategy',
@@ -293,7 +322,9 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
   ],
   [
     'a step without contribution',
-    proofWith({ applied: [{ ruleId: 'r1', version: 1, model: 'FLAT', output: 'value' }] }),
+    proofWith({
+      applied: [{ ruleId: 'r1', version: 1, model: 'FLAT', output: 'value', stratum: 0 }],
+    }),
     'applied[0].contribution',
     'applied[0].contribution is required',
   ],
@@ -307,7 +338,8 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'a step that is not an object',
     proofWith({ applied: [null] }),
     'applied[0]',
-    'applied[0] must be an object { ruleId, version, model, output, contribution, sourceRef? }',
+    'applied[0] must be an object ' +
+      '{ ruleId, version, model, output, contribution, stratum, unrounded?, sourceRef? }',
   ],
   [
     'a skip with a numeric detail',
@@ -335,9 +367,141 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
   ],
   [
     'an exception without affected',
-    proofWith({ exceptions: [{ ruleId: 'x', version: 1, kind: 'inhibit' }] }),
+    proofWith({ exceptions: [{ ruleId: 'x', version: 1, kind: 'inhibit', stratum: 0 }] }),
     'exceptions[0].affected',
     'exceptions[0].affected is required',
+  ],
+  ['a missing strata', proofWithout('strata'), 'strata', 'strata is required'],
+  ['strata as an object', proofWith({ strata: {} }), 'strata', 'strata must be an array'],
+  [
+    'a stratum that is not a list',
+    proofWith({ strata: ['value'] }),
+    'strata[0]',
+    'strata[0] must be an array',
+  ],
+  [
+    'an empty output name in a stratum',
+    proofWith({ strata: [['value', '']] }),
+    'strata[0][1]',
+    'strata[0][1] must be a non-empty string',
+  ],
+  [
+    'a step without stratum',
+    proofWith({
+      applied: [{ ruleId: 'r1', version: 1, model: 'FLAT', output: 'value', contribution: 150 }],
+    }),
+    'applied[0].stratum',
+    'applied[0].stratum is required',
+  ],
+  [
+    'a skip without stratum',
+    proofWith({ skipped: [{ ruleId: 'r2', version: 2, reason: 'CONDITION_FALSE' }] }),
+    'skipped[0].stratum',
+    'skipped[0].stratum is required',
+  ],
+  [
+    'an exception without stratum',
+    proofWith({ exceptions: [{ ruleId: 'x', version: 1, kind: 'inhibit', affected: [] }] }),
+    'exceptions[0].stratum',
+    'exceptions[0].stratum is required',
+  ],
+  [
+    'a negative stratum',
+    proofWith({ applied: [{ ...step, stratum: -1 }] }),
+    'applied[0].stratum',
+    'applied[0].stratum must be a non-negative integer',
+  ],
+  [
+    'a fractional stratum',
+    proofWith({ skipped: [{ ...skip, stratum: 0.5 }] }),
+    'skipped[0].stratum',
+    'skipped[0].stratum must be a non-negative integer',
+  ],
+  [
+    'a stratum beyond the safe integers',
+    proofWith({ exceptions: [{ ...exception, stratum: 1e300 }] }),
+    'exceptions[0].stratum',
+    'exceptions[0].stratum must be a non-negative integer',
+  ],
+  [
+    'a stratum written as a string',
+    proofWith({ applied: [{ ...step, stratum: '0' }] }),
+    'applied[0].stratum',
+    'applied[0].stratum must be a non-negative integer',
+  ],
+  [
+    'a rounding scale above 20',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, scale: 21 } } } }),
+    'outputs.value.rounding.scale',
+    'outputs.value.rounding.scale must be an integer from 0 to 20',
+  ],
+  [
+    'a negative rounding scale',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, scale: -1 } } } }),
+    'outputs.value.rounding.scale',
+    'outputs.value.rounding.scale must be an integer from 0 to 20',
+  ],
+  [
+    'a fractional rounding scale',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, scale: 1.5 } } } }),
+    'outputs.value.rounding.scale',
+    'outputs.value.rounding.scale must be an integer from 0 to 20',
+  ],
+  [
+    'a rounding scale written as a string',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, scale: '2' } } } }),
+    'outputs.value.rounding.scale',
+    'outputs.value.rounding.scale must be an integer from 0 to 20',
+  ],
+  [
+    'an unknown rounding mode',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, mode: 'bankers' } } } }),
+    'outputs.value.rounding.mode',
+    'outputs.value.rounding.mode must be one of halfUp, halfDown, halfEven, up, down, ceiling, floor',
+  ],
+  [
+    'an unknown rounding at',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, at: 'line' } } } }),
+    'outputs.value.rounding.at',
+    'outputs.value.rounding.at must be one of output, contribution',
+  ],
+  [
+    'a rounding without mode',
+    proofWith({ outputs: { value: { ...output, rounding: { scale: 2 } } } }),
+    'outputs.value.rounding.mode',
+    'outputs.value.rounding.mode is required',
+  ],
+  [
+    'a rounding with an unknown key',
+    proofWith({ outputs: { value: { ...output, rounding: { ...rounding, precision: 4 } } } }),
+    'outputs.value.rounding.precision',
+    'outputs.value.rounding has an unknown key "precision"',
+  ],
+  [
+    'a rounding that is not an object',
+    proofWith({ outputs: { value: { ...output, rounding: 2 } } }),
+    'outputs.value.rounding',
+    'outputs.value.rounding must be an object { scale, mode, at? }',
+  ],
+  [
+    'a rounding on a boolean output',
+    proofWith({
+      outputs: {
+        value: { type: 'boolean', combine: 'all', value: true, contributors: [], rounding },
+      },
+    }),
+    'outputs.value.rounding',
+    'outputs.value.rounding applies only to a number or decimal output',
+  ],
+  [
+    'a malformed rounding on a list output, reported only as misplaced',
+    proofWith({
+      outputs: {
+        value: { type: 'list', combine: 'union', value: [], contributors: [], rounding: 'x' },
+      },
+    }),
+    'outputs.value.rounding',
+    'outputs.value.rounding applies only to a number or decimal output',
   ],
   [
     'a signature of another algorithm',

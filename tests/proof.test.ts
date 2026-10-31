@@ -75,6 +75,7 @@ function unsigned(): UnsignedProof {
       { id: 'r2', version: 2, checksum: computeRuleChecksum(ruleB) },
     ],
     versions: { engine: '1.0.0-next.1', plugins: {}, dsls: { jsonlogic: '0.2.0' } },
+    strata: [['value']],
     outputs: { value: { type: 'number', combine: 'sum', value: 150, contributors: ['r1'] } },
     applied: [
       {
@@ -84,9 +85,10 @@ function unsigned(): UnsignedProof {
         output: 'value',
         contribution: 150,
         sourceRef: 'art. 1',
+        stratum: 0,
       },
     ],
-    skipped: [{ ruleId: 'r2', version: 2, reason: 'CONDITION_FALSE' }],
+    skipped: [{ ruleId: 'r2', version: 2, reason: 'CONDITION_FALSE', stratum: 0 }],
     exceptions: [],
   };
 }
@@ -426,13 +428,20 @@ describe('verifyProof: invalid, with a readable issue', () => {
     ['applied', (p: UnsignedProof) => p.applied.push({ ...p.applied[0]!, version: 2 }), 'r1@2'],
     [
       'skipped',
-      (p: UnsignedProof) => p.skipped.push({ ruleId: 'r3', version: 1, reason: 'INACTIVE_DATE' }),
+      (p: UnsignedProof) =>
+        p.skipped.push({ ruleId: 'r3', version: 1, reason: 'INACTIVE_DATE', stratum: 0 }),
       'r3@1',
     ],
     [
       'exceptions',
       (p: UnsignedProof) =>
-        p.exceptions.push({ ruleId: 'r4', version: 1, kind: 'inhibit', affected: ['r1'] }),
+        p.exceptions.push({
+          ruleId: 'r4',
+          version: 1,
+          kind: 'inhibit',
+          affected: ['r1'],
+          stratum: 0,
+        }),
       'r4@1',
     ],
   ])('a rule cited in %s but not listed in rules', (_name, cite, key) => {
@@ -459,7 +468,13 @@ describe('verifyProof: invalid, with a readable issue', () => {
     [
       'exceptions affected',
       (p: UnsignedProof) =>
-        p.exceptions.push({ ruleId: 'r1', version: 1, kind: 'inhibit', affected: ['r8'] }),
+        p.exceptions.push({
+          ruleId: 'r1',
+          version: 1,
+          kind: 'inhibit',
+          affected: ['r8'],
+          stratum: 0,
+        }),
       'r8',
     ],
   ])('a rule id in %s that rules does not list', (_name, cite, id) => {
@@ -481,7 +496,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it('reports a rule cited several times once', () => {
     const content = unsigned();
     content.applied.push({ ...content.applied[0]!, ruleId: 'r5' });
-    content.skipped.push({ ruleId: 'r5', version: 1, reason: 'DOMINATED' });
+    content.skipped.push({ ruleId: 'r5', version: 1, reason: 'DOMINATED', stratum: 0 });
     const proof: DecisionProof = { ...content, digest: sha256Hex(canonicalize(content)) };
     expect(verifyProof(proof).issues).toEqual(['cited rule not listed: r5@1', 'unsigned']);
   });
@@ -637,6 +652,178 @@ describe('verifyProof: invalid, with a readable issue', () => {
       status: 'invalid',
       issues: ['proof could not be read: boom'],
     });
+  });
+});
+
+describe('strata, decimals and rounding in a proof', () => {
+  /** r1 feeds `risk` in stratum 0; r2 reads it and feeds `fine` in stratum 1. */
+  function staged(): UnsignedProof {
+    return {
+      ...unsigned(),
+      strata: [['risk'], ['fine']],
+      outputs: {
+        fine: {
+          type: 'decimal',
+          combine: 'sum',
+          value: '100.13',
+          contributors: ['r2'],
+          rounding: { scale: 2, mode: 'halfEven', at: 'contribution' },
+        },
+        risk: { type: 'number', combine: 'sum', value: 150, contributors: ['r1'] },
+      },
+      applied: [
+        { ...unsigned().applied[0]!, output: 'risk', stratum: 0 },
+        {
+          ruleId: 'r2',
+          version: 2,
+          model: 'PERCENTAGE',
+          output: 'fine',
+          contribution: '100.13',
+          unrounded: '100.125',
+          stratum: 1,
+        },
+      ],
+      skipped: [],
+    };
+  }
+
+  /** `content` sealed by hand, as a faulty producer would: sealProof refuses it. */
+  const handSealed = (content: UnsignedProof): DecisionProof => ({
+    ...content,
+    digest: sha256Hex(canonicalize(content)),
+  });
+
+  it('seals, signs and verifies a proof of several strata', () => {
+    const proof = signProof(sealProof(staged()), RFC_SECRET, 'executor-1');
+    expect(proof.strata).toEqual([['risk'], ['fine']]);
+    expect(proof.applied[1]).toMatchObject({ stratum: 1, unrounded: '100.125' });
+    expect(proof.outputs.fine!.rounding).toEqual({
+      scale: 2,
+      mode: 'halfEven',
+      at: 'contribution',
+    });
+    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
+      status: 'authentic',
+      issues: [],
+    });
+  });
+
+  it('accepts an empty stratum', () => {
+    const content = { ...staged(), strata: [['risk'], [], ['fine']] };
+    content.applied[1]!.stratum = 2;
+    expect(verifyProof(sealProof(content))).toEqual({ status: 'consistent', issues: ['unsigned'] });
+  });
+
+  it('the strata and the stratum numbers are covered by the digest', () => {
+    const moved = signProof(sealProof(staged()), RFC_SECRET, 'executor-1');
+    moved.strata = [['risk', 'fine']];
+    moved.applied[1]!.stratum = 0;
+    expect(verifyProof(moved, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch'],
+    });
+  });
+
+  it.each([
+    [
+      'an output in no stratum',
+      (p: UnsignedProof) =>
+        (p.outputs.extra = { type: 'boolean', combine: 'any', value: false, contributors: [] }),
+      'output not in strata: extra',
+    ],
+    [
+      'an output in two strata',
+      (p: UnsignedProof) => (p.strata = [['risk'], ['fine', 'risk']]),
+      'stratum output repeated: risk',
+    ],
+    [
+      'an output twice in one stratum',
+      (p: UnsignedProof) => (p.strata = [['risk', 'risk'], ['fine']]),
+      'stratum output repeated: risk',
+    ],
+    [
+      'a stratum naming an unknown output',
+      (p: UnsignedProof) => (p.strata = [['risk', 'tax'], ['fine']]),
+      'stratum output unknown: tax',
+    ],
+    [
+      'an applied step beyond the strata',
+      (p: UnsignedProof) => (p.applied[1]!.stratum = 2),
+      'stratum out of range: r2@2',
+    ],
+    [
+      'a skip beyond the strata',
+      (p: UnsignedProof) =>
+        p.skipped.push({ ruleId: 'r2', version: 2, reason: 'DOMINATED', stratum: 5 }),
+      'stratum out of range: r2@2',
+    ],
+    [
+      'an exception beyond the strata',
+      (p: UnsignedProof) =>
+        p.exceptions.push({
+          ruleId: 'r1',
+          version: 1,
+          kind: 'inhibit',
+          affected: ['r2'],
+          stratum: 2,
+        }),
+      'stratum out of range: r1@1',
+    ],
+    [
+      'an applied step whose output is in another stratum',
+      (p: UnsignedProof) => (p.applied[1]!.stratum = 0),
+      'step stratum mismatch: r2@2',
+    ],
+  ])('refuses %s', (_name, change, issue) => {
+    const content = staged();
+    change(content);
+    const proof = handSealed(content);
+    expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [issue, 'unsigned'] });
+    const resigned = {
+      ...proof,
+      signature: signProof(handSealed(staged()), RFC_SECRET, 'k').signature,
+    };
+    expect(verifyProof(resigned, { trustedKeys: { k: RFC_PUBLIC } }).status).toBe('invalid');
+
+    const sealError = specError(() => sealProof(content));
+    expect(sealError.code).toBe('INVALID_PROOF');
+    expect(sealError.message).toBe(`Cannot seal the proof: ${issue}`);
+    const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
+    expect(signError.code).toBe('INVALID_PROOF');
+    expect(signError.message).toBe(`Cannot sign the proof: ${issue}`);
+  });
+
+  it('a proof without any stratum is consistent only without outputs and trace', () => {
+    const empty: UnsignedProof = {
+      ...unsigned(),
+      strata: [],
+      outputs: {},
+      applied: [],
+      skipped: [],
+    };
+    expect(verifyProof(sealProof(empty)).issues).toEqual(['unsigned']);
+    expect(verifyProof(handSealed({ ...unsigned(), strata: [] })).issues).toEqual([
+      'output not in strata: value',
+      'stratum out of range: r1@1',
+      'stratum out of range: r2@2',
+      'unsigned',
+    ]);
+  });
+
+  it('reports every inconsistency once, citations first, in a fixed order', () => {
+    const content = staged();
+    content.strata = [['risk', 'tax', 'tax'], []];
+    content.applied[1]!.stratum = 1;
+    content.skipped.push({ ruleId: 'r3', version: 1, reason: 'DOMINATED', stratum: 9 });
+    expect(verifyProof(handSealed(content)).issues).toEqual([
+      'cited rule not listed: r3@1',
+      'stratum output unknown: tax',
+      'stratum output repeated: tax',
+      'output not in strata: fine',
+      'step stratum mismatch: r2@2',
+      'stratum out of range: r3@1',
+      'unsigned',
+    ]);
   });
 });
 

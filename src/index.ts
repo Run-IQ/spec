@@ -2,8 +2,8 @@
  * @run-iq/spec: the canonical form of a Run-IQ rule, its checksum and its fingerprint, the
  * stored and executable forms of a rule, and its validator (`validateRuleDefinition`, which
  * agrees with `schema/rule-definition.schema.json`); the rule exception format
- * (`RuleException`, `matchesSelector`) and the output declarations (`OutputDeclaration`); the
- * decision proof format (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which
+ * (`RuleException`, `matchesSelector`), the output declarations (`OutputDeclaration`) and
+ * exact decimals (`isCanonicalDecimal`, `toCanonicalDecimal`); the decision proof format (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which
  * agrees with `schema/decision-proof.schema.json`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
@@ -41,10 +41,18 @@ export type { RuleValidationIssue } from './rule/validate.js';
 export {
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
+  OUTPUTS_VARIABLE,
   validateOutputDeclaration,
   valueMatchesOutputType,
 } from './decision/output.js';
-export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export type {
+  CombineStrategy,
+  OutputDeclaration,
+  OutputRounding,
+  OutputType,
+  RoundingMode,
+} from './decision/output.js';
+export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
 export type {
   DecisionProof,

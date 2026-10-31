@@ -1,5 +1,10 @@
 export type SpecErrorCode =
-  'NON_SERIALIZABLE' | 'INVALID_DATE' | 'INVALID_RULE' | 'INVALID_PROOF' | 'INVALID_KEY';
+  | 'NON_SERIALIZABLE'
+  | 'INVALID_DATE'
+  | 'INVALID_RULE'
+  | 'INVALID_PROOF'
+  | 'INVALID_KEY'
+  | 'INVALID_DECIMAL';
 
 /**
  * Brand set on every `SpecError`. `Symbol.for` gives the same symbol to every copy of this

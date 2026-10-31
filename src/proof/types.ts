@@ -1,5 +1,5 @@
 import type { JsonValue } from '../canonical.js';
-import type { CombineStrategy, OutputType } from '../decision/output.js';
+import type { CombineStrategy, OutputRounding, OutputType } from '../decision/output.js';
 import type { RuleException } from '../rule/exceptions.js';
 
 /** The format a decision proof declares in `format`. */
@@ -28,45 +28,66 @@ export interface ProofRuleRef {
   sourceRef?: string;
 }
 
-/** The final value of one output, and the ids of the rules that contributed to it. */
+/**
+ * The final value of one output, the ids of the rules that contributed to it, and the
+ * rounding its declaration applied, if any (`number` and `decimal` outputs only).
+ */
 export interface ProofOutput {
   type: OutputType;
   combine: CombineStrategy;
   value: JsonValue;
   contributors: string[];
+  rounding?: OutputRounding;
 }
 
-/** One rule that applied, and what it contributed to its output. */
+/**
+ * One rule that applied, in stratum `stratum`, and what it contributed to its output. When the
+ * contribution was rounded (`rounding.at: 'contribution'`), `unrounded` keeps its value before
+ * rounding.
+ */
 export interface ProofStep {
   ruleId: string;
   version: number;
   model: string;
   output: string;
   contribution: JsonValue;
+  /** The index in `strata` of the stratum the rule was evaluated in. */
+  stratum: number;
+  unrounded?: JsonValue;
   sourceRef?: string;
 }
 
-/** One rule that did not apply, and why. */
+/** One rule that did not apply in stratum `stratum`, and why. */
 export interface ProofSkip {
   ruleId: string;
   version: number;
   reason: string;
   detail?: string;
+  /** The index in `strata` of the stratum the rule was considered in. */
+  stratum: number;
 }
 
-/** One exception that took effect, and the ids of the rules it affected. */
+/** One exception that took effect, the stratum it was evaluated in, and the rules it affected. */
 export interface ProofException {
   ruleId: string;
   version: number;
   kind: RuleException['kind'];
   affected: string[];
+  /** The index in `strata` of the stratum its carrier rule was evaluated in. */
+  stratum: number;
 }
 
 /**
  * The content of a decision proof, before sealing. The format is closed: no other key is
  * allowed. Every rule the proof cites is listed in `rules`: the `ruleId` and `version` of
  * `applied`, `skipped` and `exceptions`, and the rule ids of output `contributors` and
- * exception `affected`. Lists are hashed in the order given, so the producer sorts them
+ * exception `affected`.
+ *
+ * `strata` lists the outputs of each evaluation stratum, in evaluation order: every key of
+ * `outputs` appears in exactly one stratum, and a stratum may be empty. Every entry of
+ * `applied`, `skipped` and `exceptions` carries the index of its stratum in `strata`, and an
+ * applied rule's `output` belongs to that stratum. A rule set where no rule reads an output
+ * has a single stratum. Lists are hashed in the order given, so the producer sorts them
  * (`rules` and `applied` by id then version, `skipped` by id) for two evaluations of the same
  * decision to give the same digest.
  *
@@ -84,6 +105,8 @@ export interface UnsignedProof {
   /** The published pack the rules come from, when they come from one. */
   ruleSet?: { kind: 'pack'; id: string; version: string; digest: string };
   versions: { engine: string; plugins: Record<string, string>; dsls: Record<string, string> };
+  /** The output names of each stratum, in evaluation order. */
+  strata: string[][];
   outputs: Record<string, ProofOutput>;
   applied: ProofStep[];
   skipped: ProofSkip[];
