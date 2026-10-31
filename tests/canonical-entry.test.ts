@@ -8,6 +8,7 @@ import {
   canonicalize,
   isEffectiveAt,
   normalizeRuleDefinition,
+  sha256Hex,
   SpecError,
   validateRuleDefinition,
 } from '../src/canonical-entry.js';
@@ -65,7 +66,12 @@ describe('@run-iq/spec/canonical', () => {
   it('sha256 of canonicalRulePayload is the checksum', () => {
     for (const rule of rules) {
       expect(sha256(canonicalRulePayload(rule))).toBe(computeRuleChecksum(rule));
+      expect(sha256Hex(canonicalRulePayload(rule))).toBe(computeRuleChecksum(rule));
     }
+  });
+
+  it('exports sha256Hex', () => {
+    expect(sha256Hex('')).toBe('e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855');
   });
 
   it('throws SpecError on an invalid rule, like the checksum', () => {
@@ -79,7 +85,7 @@ describe('@run-iq/spec/canonical', () => {
     expect(isEffectiveAt(normalizeRuleDefinition(rules[0]!), new Date('2025-02-01'))).toBe(true);
   });
 
-  it('imports no node: module anywhere in its module graph', () => {
+  it('imports no node: module anywhere in its module graph, only @noble/hashes', () => {
     const src = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
     const seen = new Set<string>();
     const nodeImports: string[] = [];
@@ -90,7 +96,7 @@ describe('@run-iq/spec/canonical', () => {
       for (const match of code.matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)) {
         const spec = match[1]!;
         if (spec.startsWith('.')) visit(resolve(dirname(file), spec.replace(/\.js$/, '.ts')));
-        else nodeImports.push(`${file}: ${spec}`);
+        else if (!spec.startsWith('@noble/hashes/')) nodeImports.push(`${file}: ${spec}`);
       }
     };
     visit(resolve(src, 'canonical-entry.ts'));

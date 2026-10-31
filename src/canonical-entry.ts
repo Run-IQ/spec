@@ -2,8 +2,8 @@
  * `@run-iq/spec/canonical`: the browser-safe part of `@run-iq/spec`. Its module graph imports
  * no `node:` module, so it runs in a browser or any other JavaScript runtime.
  *
- * It does not hash: `computeRuleChecksum(x)` is the lowercase sha256 hex of
- * `canonicalRulePayload(x)`, which the caller hashes with any sha256 implementation.
+ * It hashes with a portable sha256 (`sha256Hex`, from `@noble/hashes`):
+ * `computeRuleChecksum(x)` is `sha256Hex(canonicalRulePayload(x))`.
  *
  * @packageDocumentation
  */
@@ -11,6 +11,7 @@ export { canonicalize, canonicalizeAt } from './canonical.js';
 export type { JsonValue } from './canonical.js';
 export { SpecError } from './errors.js';
 export type { SpecErrorCode } from './errors.js';
+export { sha256Hex } from './hash.js';
 export { RESERVED_RULE_FIELDS } from './rule/definition.js';
 export type {
   RuleCondition,

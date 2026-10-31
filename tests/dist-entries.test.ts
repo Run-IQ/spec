@@ -1,3 +1,4 @@
+import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, resolve } from 'node:path';
@@ -22,7 +23,7 @@ type SpecErrorClass = new (
   code: string;
   path?: string;
 };
-type Entry = { SpecError: SpecErrorClass };
+type Entry = { SpecError: SpecErrorClass; sha256Hex: (text: string) => string };
 
 async function esm(file: string): Promise<Entry> {
   return (await import(/* @vite-ignore */ pathToFileURL(resolve(dist, file)).href)) as Entry;
@@ -62,6 +63,28 @@ describeBuilt('built entries: one SpecError identity', () => {
     expect(new Error('x')).not.toBeInstanceOf(main);
     expect(impostor).not.toBeInstanceOf(main);
     expect({ code: 'INVALID_RULE' }).not.toBeInstanceOf(main);
+  });
+
+  it('every built entry exports a working sha256Hex', async () => {
+    const empty = 'e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855';
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    for (const entry of entries) {
+      expect(entry.sha256Hex('')).toBe(empty);
+      expect(entry.sha256Hex('é')).toBe(createHash('sha256').update('é', 'utf8').digest('hex'));
+    }
+  });
+
+  it('no built entry imports a node: module or crypto', () => {
+    for (const file of ['index.js', 'index.cjs', 'canonical.js', 'canonical.cjs']) {
+      const code = readFileSync(resolve(dist, file), 'utf8');
+      expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']node:/);
+      expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']crypto["']/);
+    }
   });
 
   it('the canonical entry imports no node: module and no crypto', () => {

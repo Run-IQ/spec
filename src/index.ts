@@ -15,6 +15,7 @@ export { canonicalize, canonicalizeAt } from './canonical.js';
 export type { JsonValue } from './canonical.js';
 export { SpecError } from './errors.js';
 export type { SpecErrorCode } from './errors.js';
+export { sha256Hex } from './hash.js';
 export { RESERVED_RULE_FIELDS } from './rule/definition.js';
 export type {
   RuleCondition,
