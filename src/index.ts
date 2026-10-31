@@ -9,7 +9,9 @@
  * `comparePointers`), subjects (`isSubject`, `subjectContains`) and the reserved `$` names
  * (`ENGINE_VARIABLES`, `isReservedName`); civil time (`CivilDate`, `Instant`,
  * `toReferenceDate`, `isTimeZone`, `CivilCalendar`), rule windows (`windowContains`) and
- * coexisting versions (`findOverlappingVersions`).
+ * coexisting versions (`findOverlappingVersions`); structured dimensions (`DimensionSpec`,
+ * `matchDimension`) and dated referentials (`Referential`, `validateReferential`, which agrees
+ * with `schema/referential.schema.json`, `resolveMembership`, `computeReferentialDigest`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -44,6 +46,12 @@ export type {
 } from './rule/definition.js';
 export { EXCEPTION_MODEL, matchesSelector } from './rule/exceptions.js';
 export type { RuleException, RuleSelector } from './rule/exceptions.js';
+export { matchDimension, resolveMembership } from './referential/membership.js';
+export type { DimensionMatch } from './referential/membership.js';
+export { REFERENTIAL_FORMAT } from './referential/types.js';
+export type { Membership, Period, Referential, ReferentialMember } from './referential/types.js';
+export { computeReferentialDigest, validateReferential } from './referential/validate.js';
+export type { DimensionSpec, DimensionSpecInput } from './rule/dimensions.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
 export { canonicalRulePayload } from './rule/payload.js';
 export { computeRuleChecksum, verifyRuleChecksum } from './rule/checksum.js';

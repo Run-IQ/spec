@@ -1,6 +1,7 @@
 import type { JsonValue } from '../canonical.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { CivilDate, Instant } from '../time/civil.js';
+import type { DimensionSpec, DimensionSpecInput } from './dimensions.js';
 import type { RuleException } from './exceptions.js';
 
 export interface RuleCondition {
@@ -43,7 +44,11 @@ export interface RuleDefinitionBase {
    */
   effectiveOn?: JsonPointer;
   output?: string;
-  dimensions: Record<string, string>;
+  /**
+   * What the rule asks of each dimension of the input, in normal form (`DimensionSpec`): a value
+   * compared by equality, or `{ ref?, anyOf, except?, match? }`.
+   */
+  dimensions: Record<string, DimensionSpec>;
   /** Sorted, without duplicates. */
   tags: string[];
   dominanceGroup?: string;
@@ -102,8 +107,12 @@ export interface RuleDefinitionInputBase {
   /** `/$dates/<name>`, `/$item/<path>` (with `forEach`) or `/$segment/from`. */
   readonly effectiveOn?: string | null | undefined;
   readonly output?: string | null | undefined;
-  /** A `null` or `undefined` value means the dimension is unset: the key is dropped. */
-  readonly dimensions?: Readonly<Record<string, string | null | undefined>> | null | undefined;
+  /**
+   * A `DimensionSpec` per dimension, in any written order; a `null` or `undefined` value means
+   * the dimension is unset: the key is dropped.
+   */
+  readonly dimensions?:
+    Readonly<Record<string, DimensionSpecInput | null | undefined>> | null | undefined;
   readonly tags?: readonly string[] | null | undefined;
   readonly dominanceGroup?: string | null | undefined;
   /** A list of `RuleException`; `[]` means absent. Checked by normalization. */

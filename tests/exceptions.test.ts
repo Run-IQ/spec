@@ -125,7 +125,7 @@ describe('exceptions: accepted forms', () => {
     const targets: RuleSelector = {
       ids: ['a'],
       tags: ['vat', ''],
-      dimensions: { country: 'TG', regime: '' },
+      dimensions: { country: 'TG', regime: { ref: 'regimes', anyOf: ['normal'] } },
       outputs: ['value'],
       models: ['PERCENTAGE'],
     };
@@ -238,6 +238,29 @@ describe('exceptions: normalization', () => {
     ]);
   });
 
+  it('writes selector dimension specs in their normal form', () => {
+    const value = {
+      ...base,
+      exceptions: [
+        {
+          kind: 'inhibit',
+          targets: {
+            dimensions: {
+              pays: { ref: 'ue', anyOf: ['UE', 'NO', 'UE'], except: [], match: 'any' },
+              regime: { anyOf: ['normal'] },
+            },
+          },
+        },
+      ],
+    };
+    expect(normalizeRuleDefinition(value).exceptions).toEqual([
+      {
+        kind: 'inhibit',
+        targets: { dimensions: { pays: { ref: 'ue', anyOf: ['NO', 'UE'] }, regime: 'normal' } },
+      },
+    ]);
+  });
+
   it('the checksum does not depend on the order of ids in a selector', () => {
     const ab = { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: ['a', 'b'] } }] };
     const ba = { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: ['b', 'a', 'b'] } }] };
@@ -316,6 +339,54 @@ describe('matchesSelector', () => {
       false,
     );
     expect(matchesSelector(rule, { dimensions: { country: 'TG', sector: 'mining' } })).toBe(false);
+  });
+
+  it('compares the written dimension, never the membership (X-10)', () => {
+    const fr = { ...rule, dimensions: { pays: 'FR' } };
+    expect(matchesSelector(fr, { dimensions: { pays: 'UE' } })).toBe(false);
+    expect(matchesSelector(fr, { dimensions: { pays: { ref: 'ue', anyOf: ['UE'] } } })).toBe(false);
+    expect(matchesSelector(fr, { dimensions: { pays: 'FR' } })).toBe(true);
+  });
+
+  it('compares structured dimensions in their normal form (X-10)', () => {
+    const written = { ...rule, dimensions: { pays: { ref: 'ue', anyOf: ['NO', 'UE'] } } };
+    const selector = { dimensions: { pays: { ref: 'ue', anyOf: ['UE', 'NO'] } } };
+    expect(matchesSelector(written, selector)).toBe(true);
+    expect(matchesSelector(written, { dimensions: { pays: { ref: 'ue', anyOf: ['UE'] } } })).toBe(
+      false,
+    );
+    expect(
+      matchesSelector(written, { dimensions: { pays: { ref: 'eu', anyOf: ['NO', 'UE'] } } }),
+    ).toBe(false);
+    expect(
+      matchesSelector(written, {
+        dimensions: { pays: { ref: 'ue', anyOf: ['NO', 'UE'], match: 'all' } },
+      }),
+    ).toBe(false);
+    expect(
+      matchesSelector(written, {
+        dimensions: { pays: { ref: 'ue', anyOf: ['NO', 'UE'], except: ['DK'] } },
+      }),
+    ).toBe(false);
+  });
+
+  it('a lone anyOf value is the value itself, on either side', () => {
+    const fr = { ...rule, dimensions: { pays: { anyOf: ['FR'] } } };
+    expect(matchesSelector(fr, { dimensions: { pays: 'FR' } })).toBe(true);
+    expect(
+      matchesSelector(
+        { ...rule, dimensions: { pays: 'FR' } },
+        {
+          dimensions: { pays: { anyOf: ['FR'] } },
+        },
+      ),
+    ).toBe(true);
+  });
+
+  it('refuses an invalid dimension spec with a SpecError', () => {
+    expect(() => matchesSelector(rule, { dimensions: { country: { anyOf: [] } } })).toThrow(
+      expect.objectContaining({ code: 'INVALID_RULE' }),
+    );
   });
 
   it('a dimension key the rule only inherits does not match', () => {

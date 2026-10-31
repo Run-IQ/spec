@@ -1,0 +1,152 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Run-IQ/spec/schema/referential.schema.json",
+  "title": "Run-IQ referential",
+  "description": "A referential (format run-iq.referential/1) as accepted by validateReferential from @run-iq/spec: dated groups of the values of one dimension. sourceRef, optional on the referential, a group, a member and a code period, cites the legal source. Checks NOT expressible in JSON Schema, made only by validateReferential: at most 100 000 nodes (code periods, groups and members) by default; a period's until must be after from; the periods of one code, and of one value listed twice in a group, must not overlap; a value is never both a code and a group; with codes, every member is a group or a code; no cycle of groups at any date; nesting at most 64 groups deep at any date; no text may hold a lone UTF-16 surrogate.",
+  "type": "object",
+  "required": [
+    "format",
+    "id",
+    "version",
+    "dimension",
+    "groups"
+  ],
+  "properties": {
+    "format": {
+      "const": "run-iq.referential/1"
+    },
+    "id": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "version": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "dimension": {
+      "$ref": "#/$defs/nonEmptyString"
+    },
+    "codeSystem": {
+      "description": "The system of the codes (nace-2.1), without ':'.",
+      "$ref": "#/$defs/name"
+    },
+    "codes": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "type": "array",
+        "minItems": 1,
+        "items": {
+          "$ref": "#/$defs/period"
+        }
+      }
+    },
+    "groups": {
+      "type": "object",
+      "propertyNames": {
+        "$ref": "#/$defs/name"
+      },
+      "additionalProperties": {
+        "$ref": "#/$defs/group"
+      }
+    },
+    "sourceRef": {
+      "$ref": "#/$defs/nonEmptyString"
+    }
+  },
+  "additionalProperties": false,
+  "$defs": {
+    "nonEmptyString": {
+      "type": "string",
+      "minLength": 1
+    },
+    "name": {
+      "description": "A code or group name: non-empty, without ':' (which separates a code system from a code).",
+      "type": "string",
+      "pattern": "^[^:]+$"
+    },
+    "civilDate": {
+      "description": "A civil date YYYY-MM-DD that exists (proleptic Gregorian, years 0000 to 9999).",
+      "type": "string",
+      "pattern": "^(?:\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|02-(?:0[1-9]|1\\d|2[0-8]))|(?:\\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)$"
+    },
+    "period": {
+      "type": "object",
+      "required": [
+        "from",
+        "until"
+      ],
+      "properties": {
+        "from": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/civilDate"
+            }
+          ]
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A half-open validity period [from, until); until null has no end. until must be after from (validator only)."
+    },
+    "member": {
+      "type": "object",
+      "required": [
+        "value"
+      ],
+      "properties": {
+        "value": {
+          "$ref": "#/$defs/name"
+        },
+        "from": {
+          "$ref": "#/$defs/civilDate"
+        },
+        "until": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "$ref": "#/$defs/civilDate"
+            }
+          ]
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false,
+      "description": "A code or a nested group, member during [from, until): from absent means since always, until absent or null means no end."
+    },
+    "group": {
+      "type": "object",
+      "required": [
+        "exhaustive",
+        "members"
+      ],
+      "properties": {
+        "exhaustive": {
+          "type": "boolean"
+        },
+        "members": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/member"
+          }
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/nonEmptyString"
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}

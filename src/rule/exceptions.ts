@@ -4,19 +4,23 @@ import {
   isReservedOutputName,
   reservedOutputNameMessage,
 } from '../decision/output.js';
+import { readDimensionSpec, sameDimensionSpec } from './dimensions.js';
+import type { DimensionSpec } from './dimensions.js';
 import type { RuleValidationIssue } from './validate.js';
 
 /**
  * Which rules an exception targets. Fields combine by AND; the values of one field by OR
  * (`{ tags: ['a', 'b'], models: ['M'] }`: model `M` and tag `a` or `b`). `dimensions` requires
- * every listed key to be equal on the rule; `outputs` compares the rule's output, the default
- * output (`value`) when it names none. An empty field puts no constraint, like an absent one;
- * a selector must constrain at least one field.
+ * every listed key to be WRITTEN the same on the rule, both specs in normal form (X-10): the
+ * selector `{ pays: 'UE' }` does not target a rule `{ pays: 'FR' }`, whatever the referential
+ * says, so the set of targeted rules stays static. `outputs` compares the rule's output, the
+ * default output (`value`) when it names none. An empty field puts no constraint, like an absent
+ * one; a selector must constrain at least one field.
  */
 export interface RuleSelector {
   ids?: string[];
   tags?: string[];
-  dimensions?: Record<string, string>;
+  dimensions?: Record<string, DimensionSpec>;
   outputs?: string[];
   models?: string[];
 }
@@ -40,13 +44,15 @@ export const EXCEPTION_MODEL = '@run-iq/exception';
 
 /**
  * True when the rule is one `selector` targets (see `RuleSelector`). A selector that
- * constrains no field matches nothing; validation refuses it anyway.
+ * constrains no field matches nothing; validation refuses it anyway. Dimension specs are
+ * compared in normal form, so `{ anyOf: ['FR'] }` and `'FR'` are the same; throws `SpecError`
+ * (`INVALID_RULE`) when a compared dimension spec is invalid.
  */
 export function matchesSelector(
   rule: {
     id: string;
     tags: readonly string[];
-    dimensions: Readonly<Record<string, string>>;
+    dimensions: Readonly<Record<string, DimensionSpec>>;
     output?: string;
     model: string;
   },
@@ -60,7 +66,8 @@ export function matchesSelector(
   if (models?.length && !models.includes(rule.model)) return false;
   if (dimensions) {
     for (const [key, value] of Object.entries(dimensions)) {
-      if (!Object.hasOwn(rule.dimensions, key) || rule.dimensions[key] !== value) return false;
+      if (!Object.hasOwn(rule.dimensions, key)) return false;
+      if (!sameDimensionSpec(rule.dimensions[key], value)) return false;
     }
   }
   return true;
@@ -83,7 +90,7 @@ const SELECTOR_KEYS: readonly string[] = ['ids', 'tags', 'dimensions', 'outputs'
  * Reads the `exceptions` field of a rule, already converted to JSON, without throwing.
  * Returns every problem found, each with its path under `path`, and, when there is none, the
  * normalized list: each selector's `ids`, `tags`, `outputs` and `models` sorted and
- * deduplicated, empty selector fields dropped. The order of the list itself is kept: it has a
+ * deduplicated, its dimension specs in normal form, empty selector fields dropped. The order of the list itself is kept: it has a
  * meaning. `null` gives an empty list (absent).
  */
 export function readRuleExceptions(
@@ -262,17 +269,16 @@ function readDimensions(
   value: JsonValue | undefined,
   path: string,
   fail: Add,
-): Record<string, string> | undefined {
+): Record<string, DimensionSpec> | undefined {
   if (value === undefined) return undefined;
   if (!isJsonObject(value)) {
-    fail(path, `${path} must be an object of strings`);
+    fail(path, `${path} must be an object of dimension specs`);
     return undefined;
   }
-  const entries: [string, string][] = [];
+  const entries: [string, DimensionSpec][] = [];
   for (const key of Object.keys(value).sort()) {
-    const v = value[key];
-    if (typeof v === 'string') entries.push([key, v]);
-    else fail(`${path}.${key}`, `${path}.${key} must be a string`);
+    const spec = readDimensionSpec(value[key], `${path}.${key}`, fail);
+    if (spec !== undefined) entries.push([key, spec]);
   }
   // `Object.fromEntries` defines own properties: a `__proto__` key stays data.
   return Object.fromEntries(entries);

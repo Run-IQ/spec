@@ -20,6 +20,7 @@ import {
 import type {
   CivilCalendar,
   CivilDate,
+  DimensionSpec,
   ExecutableRule,
   Instant,
   VersionOverlap,
@@ -61,7 +62,7 @@ describe('RuleDefinition types (A5)', () => {
     expectTypeOf(def.effectiveFrom).toEqualTypeOf<string>();
     expectTypeOf(def.effectiveUntil).toEqualTypeOf<string | null>();
     expectTypeOf(def.tags).toEqualTypeOf<string[]>();
-    expectTypeOf(def.dimensions).toEqualTypeOf<Record<string, string>>();
+    expectTypeOf(def.dimensions).toEqualTypeOf<Record<string, DimensionSpec>>();
     expectTypeOf(def.condition).toEqualTypeOf<{ dsl: string; value: JsonValue } | undefined>();
     expectTypeOf(def.exceptions).toEqualTypeOf<RuleException[] | undefined>();
   });
@@ -143,7 +144,7 @@ describe('ExecutableRule types (A6)', () => {
     expectTypeOf(rule.effectiveOn).toEqualTypeOf<string | undefined>();
     expectTypeOf(rule.checksum).toEqualTypeOf<string>();
     expectTypeOf(rule.tags).toEqualTypeOf<readonly string[]>();
-    expectTypeOf(rule.dimensions).toEqualTypeOf<Readonly<Record<string, string>>>();
+    expectTypeOf(rule.dimensions).toEqualTypeOf<Readonly<Record<string, DimensionSpec>>>();
     expectTypeOf(rule.condition).toEqualTypeOf<
       { readonly dsl: string; readonly value: unknown } | undefined
     >();

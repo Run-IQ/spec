@@ -113,13 +113,37 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'dimensions that are not an object',
     [{ kind: 'inhibit', targets: { dimensions: ['TG'] } }],
     'exceptions[0].targets.dimensions',
-    'exceptions[0].targets.dimensions must be an object of strings',
+    'exceptions[0].targets.dimensions must be an object of dimension specs',
   ],
   [
     'a null dimension value',
     [{ kind: 'inhibit', targets: { dimensions: { country: null } } }],
     'exceptions[0].targets.dimensions.country',
-    'exceptions[0].targets.dimensions.country must be a string',
+    'exceptions[0].targets.dimensions.country must be ' +
+      'a value or an object { ref?, anyOf, except?, match? }',
+  ],
+  [
+    'an empty dimension value',
+    [{ kind: 'inhibit', targets: { dimensions: { country: '' } } }],
+    'exceptions[0].targets.dimensions.country',
+    'exceptions[0].targets.dimensions.country must not be empty',
+  ],
+  [
+    'a dimension spec with an empty anyOf',
+    [{ kind: 'inhibit', targets: { dimensions: { pays: { ref: 'ue', anyOf: [] } } } }],
+    'exceptions[0].targets.dimensions.pays.anyOf',
+    'exceptions[0].targets.dimensions.pays.anyOf must list at least one value',
+  ],
+  [
+    'a dimension spec whose except repeats anyOf',
+    [
+      {
+        kind: 'inhibit',
+        targets: { dimensions: { pays: { ref: 'ue', anyOf: ['UE', 'DK'], except: ['DK'] } } },
+      },
+    ],
+    'exceptions[0].targets.dimensions.pays.except',
+    'exceptions[0].targets.dimensions.pays.except repeats anyOf value "DK"',
   ],
   [
     'substitute without params',

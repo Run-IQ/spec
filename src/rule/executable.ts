@@ -1,5 +1,6 @@
 import type { CivilDate } from '../time/civil.js';
 import type { RuleDefinitionBase } from './definition.js';
+import type { DimensionSpec } from './dimensions.js';
 
 /**
  * The named fields of a rule ready for evaluation, without the extension index signature, so
@@ -21,8 +22,8 @@ export interface ExecutableRuleBase extends Readonly<
   readonly effectiveFrom: CivilDate | Date;
   /** Exclusive end, of the same form as `effectiveFrom`; `null` for no end. */
   readonly effectiveUntil: CivilDate | Date | null;
-  /** Always present, `{}` when the rule has no dimension. */
-  readonly dimensions: Readonly<Record<string, string>>;
+  /** Always present, `{}` when the rule has no dimension; each spec in normal form. */
+  readonly dimensions: Readonly<Record<string, DimensionSpec>>;
   /** Sorted, without duplicates. */
   readonly tags: readonly string[];
   readonly checksum: string;

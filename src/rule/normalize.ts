@@ -5,6 +5,8 @@ import { isReservedOutputName, reservedOutputNameMessage } from '../decision/out
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { readDimensionSpec } from './dimensions.js';
+import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
@@ -26,9 +28,12 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - `timeZone` is written by `normalizeTimeZone` (`+00:00` and `-00:00` become `UTC`);
  * - `effectiveOn: '/$dates/effective'`, the default reference date, is dropped, as absent;
  * - defaults are made explicit: `effectiveUntil: null`, `dimensions: {}`, `tags: []`;
+ * - each dimension spec takes its normal form (`DimensionSpec`): `anyOf` and `except` sorted
+ *   and deduplicated, an empty `except` and `match: 'any'` dropped, `{ anyOf: [v] }` written `v`;
  * - `tags` are sorted and deduplicated;
  * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs` and `models` are
- *   sorted and deduplicated, and its empty fields dropped; an empty list is dropped, as absent;
+ *   sorted and deduplicated, its dimension specs in normal form, and its empty fields dropped;
+ *   an empty list is dropped, as absent;
  * - `checksum` is removed, and so is every top-level optional or extension field that is
  *   `null` or `undefined` (see `RuleDefinition`); nested `undefined` properties are dropped;
  * - nested values become plain JSON (`Date` to ISO string, `undefined` dropped);
@@ -42,7 +47,9 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * `effectiveUntil <= effectiveFrom` (an empty window), for bounds of two forms (one civil, one
  * instant: `effectiveFrom and effectiveUntil must both be civil dates or both instants`), for an
  * invalid `timeZone` (`isTimeZone`) or `effectiveOn` (`/$dates/<name>`, `/$item/<path>` with a
- * `forEach`, `/$segment/from` with `forEach.segments`), for a lone UTF-16 surrogate in a string
+ * `forEach`, `/$segment/from` with `forEach.segments`), for an invalid dimension spec (an empty
+ * value, an empty `anyOf`, an `except` value repeated in `anyOf`, an `except` without `ref`...:
+ * see `DimensionSpec`), for a lone UTF-16 surrogate in a string
  * field, a tag, a dimension key or value or an extension key, `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
@@ -147,17 +154,20 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   };
 }
 
-function normalizeDimensions(value: unknown): Record<string, string> {
+function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   if (value == null) return {};
-  if (!isPlainObject(value)) invalidRule('dimensions must be an object of strings');
-  const out: Record<string, string> = {};
+  if (!isPlainObject(value)) invalidRule('dimensions must be an object of dimension specs');
+  const out: Record<string, DimensionSpec> = {};
   for (const key of Object.keys(value).sort()) {
     const v = value[key];
     if (v == null) continue; // null or undefined: the dimension is unset
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
-    if (typeof v !== 'string') invalidRule(`dimensions.${key} must be a string`);
-    if (hasLoneSurrogate(v)) invalidRule(loneSurrogateMessage(`dimensions.${key}`));
-    defineField(out, key, v);
+    const problems: RuleValidationIssue[] = [];
+    const spec = readDimensionSpec(v, `dimensions.${key}`, (path, message) => {
+      problems.push({ path, message });
+    });
+    throwFirst(problems);
+    if (spec !== undefined) defineField(out, key, spec);
   }
   return out;
 }

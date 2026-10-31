@@ -1,9 +1,15 @@
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
-import { normalizeRuleDefinition, validateRuleDefinition } from '../src/index.js';
+import {
+  normalizeRuleDefinition,
+  validateReferential,
+  validateRuleDefinition,
+} from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { REFUSED_DIMENSIONS } from './dimension-cases.js';
 import { REFUSED_EXCEPTIONS } from './exception-cases.js';
+import { nestedReferential, ueReferential } from './helpers.js';
 
 const schema = JSON.parse(
   readFileSync(new URL('../schema/rule-definition.schema.json', import.meta.url), 'utf8'),
@@ -73,9 +79,18 @@ const VALID: [string, unknown][] = [
       jurisdiction: null,
     },
   ],
+  ['a null dimension value (unset)', { ...base, dimensions: { a: 'TG', b: null } }],
   [
-    'a null dimension value (unset) and an empty one',
-    { ...base, dimensions: { a: 'TG', b: null, c: '' } },
+    'structured dimensions',
+    {
+      ...base,
+      dimensions: {
+        pays: { ref: 'ue', anyOf: ['UE', 'NO', 'UE'], except: ['DK'], match: 'all' },
+        regime: { anyOf: ['normal'] },
+        activite: 'nace-2.1:62.10',
+        empty: { ref: 'ue', anyOf: ['UE'], except: [] },
+      },
+    },
   ],
   [
     'null as data in params and condition.value',
@@ -132,6 +147,12 @@ const INVALID: [string, unknown][] = [
   ['a fractional version', { ...base, version: 1.5 }],
   ['a zero version', { ...base, version: 0 }],
   ['a non-string dimension value', { ...base, dimensions: { country: 1 } }],
+  ...REFUSED_DIMENSIONS.filter(([label]) => label !== 'an except value also in anyOf').map(
+    ([label, spec]): [string, unknown] => [
+      `dimensions: ${label}`,
+      { ...base, dimensions: { pays: spec } },
+    ],
+  ),
   ['a non-string tag', { ...base, tags: ['a', 1] }],
   ['an impossible date', { ...base, effectiveFrom: '2025-02-30' }],
   ['a non-leap February 29', { ...base, effectiveFrom: '2023-02-29' }],
@@ -187,6 +208,10 @@ const VALIDATOR_ONLY: [string, unknown][] = [
     { ...base, effectiveFrom: '0000-01-01T00:00:00+00:01' },
   ],
   ['a lone surrogate in an effectiveOn date name', { ...base, effectiveOn: '/$dates/\uD800' }],
+  [
+    'an except value also in anyOf',
+    { ...base, dimensions: { pays: { ref: 'ue', anyOf: ['UE', 'DK'], except: ['DK'] } } },
+  ],
 ];
 
 describe('validateRuleDefinition, JSON schema and normalize agree', () => {
@@ -219,6 +244,7 @@ describe('validateRuleDefinition, JSON schema and normalize agree', () => {
     expect(JSON.stringify(schema)).toMatch(/effectiveUntil.*after.*effectiveFrom/);
     expect(JSON.stringify(schema)).toMatch(/years 0000 to 9999/);
     expect(JSON.stringify(schema)).toMatch(/lone UTF-16 surrogate/);
+    expect(JSON.stringify(schema)).toMatch(/except.*repeat.*anyOf/);
   });
 });
 
@@ -249,18 +275,31 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
     ],
     [
       'an empty field next to a non-empty one',
-      { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: [], dimensions: { c: '' } } }] },
+      { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: [], dimensions: { c: 'x' } } }] },
+    ],
+    [
+      'a structured selector dimension',
+      {
+        ...base,
+        exceptions: [
+          {
+            kind: 'inhibit',
+            targets: { dimensions: { pays: { ref: 'ue', anyOf: ['NO', 'UE'] } } },
+          },
+        ],
+      },
     ],
     ['a rule of the exception model', carrier],
     ['a rule of the exception model with a null output', { ...carrier, output: null }],
     ['an output on another model', { ...base, output: 'tax', exceptions: carrier.exceptions }],
   ];
 
+  /** JSON Schema cannot compare except with anyOf: only the validator refuses it. */
+  const validatorOnly = 'a dimension spec whose except repeats anyOf';
   const refused: [string, unknown][] = [
-    ...REFUSED_EXCEPTIONS.map(([label, exceptions]): [string, unknown] => [
-      label,
-      { ...base, exceptions },
-    ]),
+    ...REFUSED_EXCEPTIONS.filter(([label]) => label !== validatorOnly).map(
+      ([label, exceptions]): [string, unknown] => [label, { ...base, exceptions }],
+    ),
     ['the exception model without exceptions', { ...carrier, exceptions: undefined }],
     ['the exception model with null exceptions', { ...carrier, exceptions: null }],
     ['the exception model with an empty list', { ...carrier, exceptions: [] }],
@@ -277,6 +316,15 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
     expect(validateRuleDefinition(value).valid).toBe(false);
     expect(schemaAccepts(value)).toBe(false);
     expect(normalizeAccepts(value)).toBe(false);
+  });
+
+  it('validator-only: rejects a selector whose except repeats anyOf (the schema cannot)', () => {
+    const [, exceptions] = REFUSED_EXCEPTIONS.find(([label]) => label === validatorOnly) ?? [];
+    const value = { ...base, exceptions };
+    expect(exceptions).toBeDefined();
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
+    expect(schemaAccepts(value)).toBe(true);
   });
 });
 
@@ -469,5 +517,115 @@ describe('validateRuleDefinition beyond JSON', () => {
     for (const value of [undefined, null, 1, 'x', [], new Map()]) {
       expect(validateRuleDefinition(value).valid).toBe(false);
     }
+  });
+});
+
+describe('validateReferential and the referential JSON schema agree', () => {
+  const referentialSchema = JSON.parse(
+    readFileSync(new URL('../schema/referential.schema.json', import.meta.url), 'utf8'),
+  ) as object;
+  const referentialAccepts = ajv.compile(referentialSchema);
+  const ue = ueReferential();
+  const coded = {
+    ...ue,
+    codeSystem: 'iso-3166',
+    codes: { FR: [{ from: '1958-01-01', until: null }], NO: [{ from: '1958-01-01', until: null }] },
+    groups: { UE: { exhaustive: true, members: [{ value: 'FR', until: null }] } },
+  };
+  const group = (members: unknown): unknown => ({
+    ...ue,
+    groups: { A: { exhaustive: true, members } },
+  });
+
+  const accepted: [string, unknown][] = [
+    ['the ue referential', ue],
+    ['codes, a code system and a member with until null', coded],
+    ['an empty group', { ...ue, groups: { A: { exhaustive: false, members: [] } } }],
+    ['a qualified-looking dimension name', { ...ue, dimension: 'pays:naissance' }],
+    [
+      'sourceRef at every level',
+      {
+        ...coded,
+        sourceRef: 'Traité de Rome',
+        codes: { ...coded.codes, FR: [{ from: '1958-01-01', until: null, sourceRef: 'a' }] },
+        groups: {
+          UE: { exhaustive: true, sourceRef: 'b', members: [{ value: 'FR', sourceRef: 'c' }] },
+        },
+      },
+    ],
+  ];
+
+  const refused: [string, unknown][] = [
+    ['an unknown format', { ...ue, format: 'run-iq.referential/2' }],
+    ['an unknown key', { ...ue, name: 'Union' }],
+    ['a missing id', { ...ue, id: undefined }],
+    ['an empty version', { ...ue, version: '' }],
+    ['missing groups', { ...ue, groups: undefined }],
+    ['a group without exhaustive', { ...ue, groups: { A: { members: [] } } }],
+    [
+      'a group with an unknown key',
+      { ...ue, groups: { A: { exhaustive: true, members: [], x: 1 } } },
+    ],
+    ['members that are not an array', { ...ue, groups: { A: { exhaustive: true, members: {} } } }],
+    ['a member with an unknown key', group([{ value: 'x', since: '2000-01-01' }])],
+    ['a member without value', group([{ from: '2000-01-01' }])],
+    ['an empty member value', group([{ value: '' }])],
+    ['a qualified member value', group([{ value: 'iso:FR' }])],
+    ['an impossible member date', group([{ value: 'x', from: '2023-02-29' }])],
+    ['a null member from', group([{ value: 'x', from: null }])],
+    ['a qualified group name', { ...ue, groups: { 'iso:A': { exhaustive: true, members: [] } } }],
+    ['an empty group name', { ...ue, groups: { '': { exhaustive: true, members: [] } } }],
+    ['a qualified code', { ...coded, codes: { 'iso:FR': [{ from: '1958-01-01', until: null }] } }],
+    ['a code without period', { ...coded, codes: { FR: [] } }],
+    ['a code period without until', { ...coded, codes: { FR: [{ from: '1958-01-01' }] } }],
+    ['a code system with ":"', { ...ue, codeSystem: 'iso:3166' }],
+    ['an empty code system', { ...ue, codeSystem: '' }],
+    ['an empty sourceRef', { ...ue, sourceRef: '' }],
+    ['a numeric member sourceRef', group([{ value: 'x', sourceRef: 1 }])],
+    [
+      'a null group sourceRef',
+      { ...ue, groups: { A: { exhaustive: true, members: [], sourceRef: null } } },
+    ],
+    ['an array', [ue]],
+  ];
+
+  /** JSON Schema cannot follow references, compare dates or count: the validator alone can. */
+  const validatorOnly: [string, unknown][] = [
+    ['a cycle', { ...ue, groups: { A: { exhaustive: true, members: [{ value: 'A' }] } } }],
+    ['an empty period', group([{ value: 'x', from: '2020-01-01', until: '2019-01-01' }])],
+    ['a member twice on overlapping periods', group([{ value: 'x' }, { value: 'x' }])],
+    [
+      'a code that is also a group',
+      { ...coded, groups: { FR: { exhaustive: true, members: [] } } },
+    ],
+    [
+      'a member neither group nor code',
+      { ...coded, groups: { UE: { exhaustive: true, members: [{ value: 'DE' }] } } },
+    ],
+    ['nesting deeper than 64', nestedReferential(65)],
+    ['a lone surrogate', group([{ value: 'x\uD800' }])],
+  ];
+
+  it.each(accepted)('accepts %s', (_name, value) => {
+    expect(validateReferential(value)).toEqual([]);
+    expect(referentialAccepts(value)).toBe(true);
+  });
+
+  it.each(refused)('rejects %s', (_name, value) => {
+    expect(validateReferential(value)).not.toEqual([]);
+    expect(referentialAccepts(value)).toBe(false);
+  });
+
+  it.each(validatorOnly)('validator-only: rejects %s (the schema cannot)', (_name, value) => {
+    expect(validateReferential(value)).not.toEqual([]);
+    expect(referentialAccepts(value)).toBe(true);
+  });
+
+  it('the schema documents the validator-only checks', () => {
+    const text = JSON.stringify(referentialSchema);
+    expect(text).toMatch(/cycle/);
+    expect(text).toMatch(/until.*after.*from/);
+    expect(text).toMatch(/64/);
+    expect(text).toMatch(/100 ?000/);
   });
 });

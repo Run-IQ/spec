@@ -5,7 +5,7 @@ import { dirname, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CivilCalendar } from '../src/index.js';
-import { fixedCalendar } from './helpers.js';
+import { fixedCalendar, ueReferential } from './helpers.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
@@ -61,6 +61,14 @@ type Entry = {
     timeZone: string,
     calendar: CivilCalendar,
   ) => boolean | 'unknown';
+  validateReferential: (value: unknown) => { path: string; message: string }[];
+  matchDimension: (
+    spec: unknown,
+    input: string,
+    at: string,
+    referentials: ReadonlyMap<string, unknown>,
+  ) => unknown;
+  computeReferentialDigest: (referential: unknown) => string;
   findOverlappingVersions: (
     rules: readonly { id: string; version: number; effectiveFrom: string; effectiveUntil: null }[],
     timeZone: string,
@@ -219,6 +227,24 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(entry.findOverlappingVersions(versions, 'UTC', fixedCalendar)).toEqual([
         { ruleSet: 'local', id: 'R1', versions: [1, 2], kind: 'overlap' },
       ]);
+    }
+  });
+
+  it('every built entry exports dimensions and referentials', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const referential = ueReferential();
+    for (const entry of entries) {
+      expect(entry.validateReferential(referential)).toEqual([]);
+      expect(entry.computeReferentialDigest(referential)).toMatch(/^[0-9a-f]{64}$/);
+      const tables = new Map([['ue', referential]]);
+      expect(
+        entry.matchDimension({ ref: 'ue', anyOf: ['EEE'] }, 'FR', '2026-01-01', tables),
+      ).toEqual({ result: true, values: ['FR'], via: ['EEE', 'UE'] });
     }
   });
 

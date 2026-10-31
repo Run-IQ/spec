@@ -34,6 +34,12 @@ export type {
 } from './rule/definition.js';
 export { EXCEPTION_MODEL, matchesSelector } from './rule/exceptions.js';
 export type { RuleException, RuleSelector } from './rule/exceptions.js';
+export { matchDimension, resolveMembership } from './referential/membership.js';
+export type { DimensionMatch } from './referential/membership.js';
+export { REFERENTIAL_FORMAT } from './referential/types.js';
+export type { Membership, Period, Referential, ReferentialMember } from './referential/types.js';
+export { computeReferentialDigest, validateReferential } from './referential/validate.js';
+export type { DimensionSpec, DimensionSpecInput } from './rule/dimensions.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
 export { canonicalRulePayload } from './rule/payload.js';
 export { isEffectiveAt } from './rule/effective.js';

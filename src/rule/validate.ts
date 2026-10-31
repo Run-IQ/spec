@@ -6,6 +6,7 @@ import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { readDimensionSpec } from './dimensions.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
 import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
 
@@ -36,7 +37,8 @@ class Issues {
  * `forEach.segments`). It checks the closed `exceptions` format and the constraints of the reserved
  * model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses output names
  * starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit` output and in selector
- * `outputs`. Every text (a string field, a tag, a dimension key or
+ * `outputs`. Each dimension must be a `DimensionSpec`; JSON Schema cannot refuse an `except` value
+ * repeated in `anyOf`. Every text (a string field, a tag, a dimension key or
  * value, an extension key, any string inside `params`, `condition.value`, `exceptions` or an
  * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
  * valid rule always has a checksum. JSON Schema cannot express this check. Like
@@ -221,18 +223,14 @@ function checkCondition(value: unknown, errors: Issues): void {
 
 function checkDimensions(value: unknown, errors: Issues): void {
   if (!isPlainObject(value)) {
-    errors.add('dimensions', 'dimensions must be an object of strings');
+    errors.add('dimensions', 'dimensions must be an object of dimension specs');
     return;
   }
   for (const key of Object.keys(value)) {
     const v = value[key];
     if (v == null) continue; // the dimension is unset: normalize drops the key
     if (hasLoneSurrogate(key)) errors.add('dimensions', dimensionKeyMessage(key));
-    else if (typeof v !== 'string') {
-      errors.add(`dimensions.${key}`, `dimensions.${key} must be a string`);
-    } else if (hasLoneSurrogate(v)) {
-      errors.add(`dimensions.${key}`, loneSurrogateMessage(`dimensions.${key}`));
-    }
+    else readDimensionSpec(v, `dimensions.${key}`, (path, message) => errors.add(path, message));
   }
 }
 

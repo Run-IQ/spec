@@ -1,5 +1,5 @@
 import { SpecError } from '../src/index.js';
-import type { CivilCalendar } from '../src/index.js';
+import type { CivilCalendar, Referential } from '../src/index.js';
 
 /** The `SpecError` `call` throws; fails the test when it throws anything else, or nothing. */
 export function specError(call: () => unknown): SpecError {
@@ -75,3 +75,40 @@ export const transitionCalendar: CivilCalendar = {
     return new Date(summer >= SPRING_FORWARD ? summer : SPRING_FORWARD).toISOString();
   },
 };
+
+/**
+ * The test referential `ue` of Task 9E, a fresh copy at each call: `UE` exhaustive (FR since
+ * 1958-01-01, GB during [1973-01-01, 2020-02-01), HR since 2013-07-01, DK since 1973-01-01);
+ * `EEE` exhaustive (members `UE` and `NO`); `MONDE` not exhaustive (member `EEE`).
+ */
+export function ueReferential(): Referential {
+  return {
+    format: 'run-iq.referential/1',
+    id: 'ue',
+    version: '2026.1',
+    dimension: 'pays',
+    groups: {
+      UE: {
+        exhaustive: true,
+        members: [
+          { value: 'FR', from: '1958-01-01' },
+          { value: 'GB', from: '1973-01-01', until: '2020-02-01' },
+          { value: 'HR', from: '2013-07-01' },
+          { value: 'DK', from: '1973-01-01' },
+        ],
+      },
+      EEE: { exhaustive: true, members: [{ value: 'UE' }, { value: 'NO' }] },
+      MONDE: { exhaustive: false, members: [{ value: 'EEE' }] },
+    },
+  };
+}
+
+/** A chain of `depth` groups, `G1 ∋ G2 ∋ … ∋ G<depth>`, the last one holding the code `x`. */
+export function nestedReferential(depth: number): Referential {
+  const groups: Referential['groups'] = {};
+  for (let i = 1; i <= depth; i++) {
+    const member = i === depth ? 'x' : `G${i + 1}`;
+    groups[`G${i}`] = { exhaustive: true, members: [{ value: member }] };
+  }
+  return { format: 'run-iq.referential/1', id: 'deep', version: '1', dimension: 'd', groups };
+}

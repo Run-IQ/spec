@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/rule-definition.schema.json",
   "title": "Run-IQ rule definition",
-  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output. The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Three rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate.",
+  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output. The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Three rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value.",
   "type": "object",
   "required": [
     "id",
@@ -101,7 +101,7 @@
       ]
     },
     "dimensions": {
-      "description": "String values; a null value means the dimension is unset.",
+      "description": "One dimension spec per dimension; a null value means the dimension is unset.",
       "anyOf": [
         {
           "type": "null"
@@ -111,7 +111,7 @@
           "additionalProperties": {
             "anyOf": [
               {
-                "type": "string"
+                "$ref": "#/$defs/dimensionSpec"
               },
               {
                 "type": "null"
@@ -423,7 +423,7 @@
       ]
     },
     "ruleSelector": {
-      "description": "Fields combine by AND, the values of one field by OR; dimensions require every key to be equal. An empty field puts no constraint; at least one field must be non-empty.",
+      "description": "Fields combine by AND, the values of one field by OR; dimensions require every key to be written the same (normal form), never a membership. An empty field puts no constraint; at least one field must be non-empty.",
       "type": "object",
       "properties": {
         "ids": {
@@ -441,7 +441,7 @@
         "dimensions": {
           "type": "object",
           "additionalProperties": {
-            "type": "string"
+            "$ref": "#/$defs/dimensionSpec"
           }
         },
         "outputs": {
@@ -511,6 +511,71 @@
             "models": {
               "type": "array",
               "minItems": 1
+            }
+          }
+        }
+      ]
+    },
+    "dimensionValue": {
+      "description": "A dimension value: a non-empty code, or <system>:<code> (the first ':' separates; both parts non-empty).",
+      "type": "string",
+      "pattern": "^[^:]+(?::[\\s\\S]+)?$"
+    },
+    "dimensionSpec": {
+      "description": "What a rule asks of one dimension: a value (equality), or { ref?, anyOf, except?, match? }. except needs ref. NOT expressible in JSON Schema, checked only by validateRuleDefinition and normalizeRuleDefinition: an except value must not repeat an anyOf value.",
+      "anyOf": [
+        {
+          "$ref": "#/$defs/dimensionValue"
+        },
+        {
+          "type": "object",
+          "required": [
+            "anyOf"
+          ],
+          "properties": {
+            "ref": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "anyOf": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "$ref": "#/$defs/dimensionValue"
+              }
+            },
+            "except": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/dimensionValue"
+              }
+            },
+            "match": {
+              "enum": [
+                "any",
+                "all"
+              ]
+            }
+          },
+          "additionalProperties": false,
+          "if": {
+            "required": [
+              "except"
+            ],
+            "properties": {
+              "except": {
+                "type": "array",
+                "minItems": 1
+              }
+            }
+          },
+          "then": {
+            "required": [
+              "ref"
+            ],
+            "properties": {
+              "ref": {
+                "$ref": "#/$defs/nonEmptyString"
+              }
             }
           }
         }
