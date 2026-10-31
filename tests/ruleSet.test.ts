@@ -385,6 +385,20 @@ describe('selectors with ruleSets', () => {
     });
   });
 
+  it.each([
+    [3, 'number'],
+    [null, 'null'],
+    [['rgpd'], 'array'],
+  ])('refuses the non-string carrier %j by its type', (carrier: unknown, type) => {
+    const local = { id: 'R1', tags: ['t'], dimensions: {}, model: 'M' };
+    // Hostile input on purpose: a JavaScript caller can pass any carrier.
+    const call = (): boolean => matchesSelector(local, { ids: ['R1'] }, carrier as string);
+    expect(specError(call)).toMatchObject({
+      code: 'INVALID_RULE',
+      message: `carrier ruleSet must be a string, got ${type}`,
+    });
+  });
+
   it('sorts and deduplicates ruleSets, and drops the carrier set alone', () => {
     expect(targetsOf(inhibit({ ruleSets: ['rgpd', 'local', 'rgpd'], tags: ['t'] }))).toEqual({
       ruleSets: ['local', 'rgpd'],
@@ -466,12 +480,14 @@ describe('selectors with ruleSets', () => {
     [{ ruleSets: ['rgpd'], outputs: ['t'] }, undefined, 'local'],
     [{ ruleSets: ['local'], outputs: ['autre:z'] }, undefined, 'autre'],
   ])('refuses a selector output that can never match: %j in %s (review M1)', (t, set, named) => {
-    expectRuleRefused(
-      inhibit(t, set),
-      'exceptions[0].targets.outputs[0]',
-      `exceptions[0].targets.outputs[0] names an output of "${named}", a rule set the ` +
-        'selector does not target',
-    );
+    const at = 'exceptions[0].targets.outputs[0]';
+    const why =
+      named === 'local'
+        ? 'only local rules feed it (a pack never imports local), and the selector does not ' +
+          'target local'
+        : `only rules of ${named} or of a pack that imports it feed it, and the selector ` +
+          `targets neither ${named} nor any pack`;
+    expectRuleRefused(inhibit(t, set), at, `${at} names an output of "${named}": ${why}`);
   });
 
   it.each([

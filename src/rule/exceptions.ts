@@ -80,7 +80,8 @@ export const EXCEPTION_MODEL = '@run-iq/exception';
  * - `rule could not be read: …` / `selector could not be read: …` when reading the rule or the
  *   selector throws (a throwing getter, a Proxy trap, a revoked Proxy); both are copied once,
  *   before any comparison;
- * - `rule ruleSet "X" is not a rule set id (…)` / `carrier ruleSet "X" is not a rule set id
+ * - `rule ruleSet must be a string, got …` / `carrier ruleSet must be a string, got …`, then
+ *   `rule ruleSet "X" is not a rule set id (…)` / `carrier ruleSet "X" is not a rule set id
  *   (…)` for a rule set that is not a rule set id;
  * - `rule.id must be a non-empty string`, `rule.model must be a non-empty string`,
  *   `rule.tags must be an array of strings`, `rule.output must be a string when present`,
@@ -115,7 +116,10 @@ export function matchesSelector(
     const id = qualifyName(ruleSet, target.id);
     if (!ids.some((name) => qualifiedFrom(carrier, name) === id)) return false;
   }
-  if (tags?.length && !tags.some((tag) => target.tags.includes(tag))) return false;
+  if (tags?.length) {
+    const own = new Set(target.tags);
+    if (!tags.some((tag) => own.has(tag))) return false;
+  }
   if (outputs?.length) {
     const output = qualifiedFrom(ruleSet, target.output ?? DEFAULT_OUTPUT);
     if (!outputs.some((name) => qualifiedFrom(carrier, name) === output)) return false;
@@ -141,12 +145,11 @@ function readOnce<T>(subject: string, read: () => T): T {
 }
 
 function requireRuleSet(value: unknown, what: string): asserts value is string {
+  if (typeof value !== 'string') {
+    selectorError(`${what} must be a string, got ${typeName(value)}`);
+  }
   if (!isRuleSetId(value)) {
-    const text = typeof value === 'string' ? quoteText(value) : 'value';
-    throw new SpecError(
-      'INVALID_RULE',
-      `${what} ${text} is not a rule set id (${RULE_SET_GRAMMAR})`,
-    );
+    selectorError(`${what} ${quoteText(value)} is not a rule set id (${RULE_SET_GRAMMAR})`);
   }
 }
 
@@ -357,8 +360,12 @@ function checkReach(
     if (!targeted.has(set) && (set === LOCAL_RULE_SET || !packTargeted)) {
       fail(
         `${path}.outputs[${i}]`,
-        `${path}.outputs[${i}] names an output of ${quoteText(set)}, a rule set the ` +
-          'selector does not target',
+        `${path}.outputs[${i}] names an output of ${quoteText(set)}: ` +
+          (set === LOCAL_RULE_SET
+            ? 'only local rules feed it (a pack never imports local), and the selector does ' +
+              'not target local'
+            : `only rules of ${set} or of a pack that imports it feed it, and the selector ` +
+              `targets neither ${set} nor any pack`),
       );
     }
   });
