@@ -181,6 +181,46 @@ describe('windowContains: the edges of the years 0000 and 9999', () => {
     expect(isEffectiveAt(late, new Date('9999-12-31T23:30:00.000Z'))).toBe(false);
   });
 
+  it.each([
+    ['a month 13 and a day 45', '+010000-13-45'],
+    ['a February 30', '-000001-02-30'],
+    ['a day 00', '+010000-01-00'],
+  ])('refuses an expanded civil date with %s', (_label, day) => {
+    const lying: CivilCalendar = { ...fixedCalendar, toCivilDate: () => day };
+    const error = specError(() =>
+      windowContains(open('2026-01-01'), '2026-01-01T00:00:00.000Z', 'UTC', lying),
+    );
+    expect(error).toMatchObject({
+      code: 'INVALID_DATE',
+      message:
+        `calendar.toCivilDate returned "${day}" for 2026-01-01T00:00:00.000Z in UTC: ` +
+        'not a civil date YYYY-MM-DD',
+    });
+  });
+
+  it.each([
+    ['hour 24', '-000001-12-31T24:00:00.000Z'],
+    ['minute 60', '+010000-01-01T00:60:00.000Z'],
+    ['second 60', '+010000-01-01T00:00:60.000Z'],
+    ['a month 13', '+010000-13-01T00:00:00.000Z'],
+  ])('refuses an expanded instant with %s', (_label, start) => {
+    const lying: CivilCalendar = { ...fixedCalendar, startOfDay: () => start };
+    const error = specError(() =>
+      windowContains(open('2026-01-01T00:00:00.000Z'), '2026-01-01', 'UTC', lying),
+    );
+    expect(error).toMatchObject({
+      code: 'INVALID_DATE',
+      message:
+        `calendar.startOfDay returned "${start}" for 2026-01-01 in UTC: ` +
+        'not a canonical instant YYYY-MM-DDTHH:MM:SS.sssZ',
+    });
+  });
+
+  it('accepts well-formed expanded answers, leap days of negative years included', () => {
+    const leap: CivilCalendar = { ...fixedCalendar, toCivilDate: () => '-000004-02-29' };
+    expect(windowContains(open('2026-01-01'), '2026-01-01T00:00:00.000Z', 'UTC', leap)).toBe(false);
+  });
+
   it('refuses an expanded calendar answer that is in fact in range', () => {
     const lying: CivilCalendar = { ...fixedCalendar, toCivilDate: () => '+002026-01-01' };
     expect(

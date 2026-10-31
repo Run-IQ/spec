@@ -452,18 +452,13 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
       },
     };
     const rule = { ...base, effectiveOn: '/$segment/from', forEach };
-    const outcome = (() => {
-      try {
-        return normalizeRuleDefinition(rule);
-      } catch (error) {
-        return error;
-      }
-    })();
-    if (outcome instanceof SpecError) {
-      expect(outcome.message).toBe('effectiveOn reads $segment without segments');
-    } else {
-      expect(validateRuleDefinition(outcome).valid).toBe(true);
-    }
+    // `segments` is read once, into the copy; the context is checked on that copy.
+    const out = normalizeRuleDefinition(rule);
+    expect(reads).toBe(1);
+    expect(out.forEach).toEqual({ segments: { from: '/a' } });
+    expect(out.effectiveOn).toBe('/$segment/from');
+    expect(normalizeRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition(out).valid).toBe(true);
   });
 
   it('timeZone and effectiveOn enter the checksum', () => {

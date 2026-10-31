@@ -220,13 +220,22 @@ export type Beyond = typeof BEFORE_ALL | typeof AFTER_ALL;
 const EXPANDED_DATE = /^([+-])(\d{6})-(\d{2})-(\d{2})$/;
 const EXPANDED_INSTANT = /^([+-])(\d{6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})\.\d{3}Z$/;
 
-/** `''` or `'~'` for an expanded ISO text whose year really is outside 0000 to 9999. */
+/**
+ * `''` or `'~'` for a well-formed expanded ISO text (a day that exists, a time of day with
+ * hour at most 23, minute and second at most 59) whose year really is outside 0000 to 9999.
+ */
 function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
   if (typeof value !== 'string') return undefined;
   const match = form.exec(value);
   if (match === null) return undefined;
-  const year = Number(`${match[1] ?? ''}${match[2] ?? ''}`);
-  return year < 0 ? BEFORE_ALL : year > 9999 ? AFTER_ALL : undefined;
+  const [, sign = '', digits = '', month = '', day = '', hour, minute, second] = match;
+  const year = `${sign}${digits}`;
+  if (!isRealDay(year, month, day)) return undefined;
+  if (Number(hour ?? 0) > 23 || Number(minute ?? 0) > 59 || Number(second ?? 0) > 59) {
+    return undefined;
+  }
+  const yearNumber = Number(year);
+  return yearNumber < 0 ? BEFORE_ALL : yearNumber > 9999 ? AFTER_ALL : undefined;
 }
 
 /**
