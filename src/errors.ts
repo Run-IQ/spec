@@ -4,7 +4,12 @@ export type SpecErrorCode =
   | 'INVALID_RULE'
   | 'INVALID_PROOF'
   | 'INVALID_KEY'
-  | 'INVALID_DECIMAL';
+  | 'INVALID_DECIMAL'
+  | 'INVALID_PATH'
+  | 'INVALID_INPUT'
+  | 'INVALID_REFERENTIAL'
+  | 'INVALID_DISCLOSURE'
+  | 'INVALID_ATTESTATION';
 
 /**
  * Brand set on every `SpecError`. `Symbol.for` gives the same symbol to every copy of this
@@ -102,4 +107,23 @@ function isStackOverflow(error: unknown): boolean {
   } catch {
     return false;
   }
+}
+
+/** Longest text a message cites before cutting it. */
+const EXCERPT_LENGTH = 100;
+
+/**
+ * Internal: `text` as a message cites it: its first 100 UTF-16 code units, followed by `…` when
+ * it is longer, so a huge value never makes a huge message.
+ */
+export function excerpt(text: string): string {
+  return text.length > EXCERPT_LENGTH ? `${text.slice(0, EXCERPT_LENGTH)}…` : text;
+}
+
+/**
+ * Internal: `text` quoted for a message, as a JSON string (a lone surrogate or a control
+ * character is escaped), cut like `excerpt`.
+ */
+export function quoteText(text: string): string {
+  return JSON.stringify(excerpt(text));
 }

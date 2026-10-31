@@ -7,13 +7,13 @@ import {
   OUTPUT_TYPES,
   roundingNotApplicable,
 } from '../decision/output.js';
-import { describeError, SpecError, specErrorPath, unreadableMessage } from '../errors.js';
+import { describeError, excerpt, SpecError, specErrorPath, unreadableMessage } from '../errors.js';
 import { parseRuleDate } from '../rule/date.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { KINDS } from '../rule/exceptions.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isPlainObject } from '../values.js';
-import { PROOF_FORMAT } from './types.js';
+import { isProofFormat, PROOF_FORMATS } from './formats.js';
 import type { DecisionProof, UnsignedProof } from './types.js';
 
 type Add = (path: string, message: string) => void;
@@ -25,6 +25,11 @@ interface Shape {
   readonly summary: string;
   readonly fields: Readonly<Record<string, Check>>;
   readonly optional?: readonly string[];
+  /**
+   * Checked before anything else, on the members read: when it reports a problem, that problem
+   * is the only one (an unknown format makes the rest of the object unreadable).
+   */
+  readonly gate?: (members: ReadonlyMap<string, unknown>) => RuleValidationIssue | undefined;
 }
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
@@ -71,6 +76,21 @@ function isoDate(nullable: boolean): Check {
     }
     add(path, `${path} must be ${nullable ? 'null or ' : ''}an ISO date: ${DATE_FORMS}`);
   };
+}
+
+/** A format listed in `PROOF_FORMATS`; an unknown one is reported by `formatGate`. */
+const proofFormat: Check = (value, path, add) => {
+  if (!isProofFormat(value)) add(path, `${path} must be one of ${PROOF_FORMATS.join(', ')}`);
+};
+
+/**
+ * A proof in a format this package does not know (a later `run-iq.proof/2`) is refused with that
+ * single issue: its other fields follow rules this version cannot check.
+ */
+function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue | undefined {
+  const format = members.get('format');
+  if (typeof format !== 'string' || isProofFormat(format)) return undefined;
+  return { path: 'format', message: `unknown format: ${excerpt(format)}` };
 }
 
 function constant(expected: string): Check {
@@ -137,7 +157,7 @@ function objectOf(shape: Shape): Check {
  * included), then each field in order. A known field whose value is `undefined` counts as
  * absent, as in the canonical form; keys in `ignored` are skipped.
  * Each own property is read once, so an accessor cannot answer two checks differently. Returns
- * the members read, or `undefined` when `value` is not an object.
+ * the members read, or `undefined` when `value` is not an object or the shape's gate stopped.
  */
 function checkObject(
   value: unknown,
@@ -151,6 +171,11 @@ function checkObject(
     return undefined;
   }
   const members = new Map<string, unknown>(Object.entries(value));
+  const stop = shape.gate?.(members);
+  if (stop) {
+    add(stop.path, stop.message);
+    return undefined;
+  }
   const at = (key: string): string => (path ? `${path}.${key}` : key);
   for (const key of members.keys()) {
     if (ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
@@ -257,7 +282,7 @@ const SIGNATURE: Shape = {
 };
 
 const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
-  format: constant(PROOF_FORMAT),
+  format: proofFormat,
   requestId: nonEmptyString,
   evaluatedAt: isoDate(true),
   sealedAt: isoDate(false),
@@ -272,12 +297,18 @@ const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
   exceptions: listOf(objectOf(EXCEPTION)),
 };
 
-const UNSIGNED_PROOF: Shape = { summary: '', fields: CONTENT_FIELDS, optional: ['ruleSet'] };
+const UNSIGNED_PROOF: Shape = {
+  summary: '',
+  fields: CONTENT_FIELDS,
+  optional: ['ruleSet'],
+  gate: formatGate,
+};
 
 const DECISION_PROOF: Shape = {
   summary: '',
   fields: { ...CONTENT_FIELDS, digest: sha256, signature: objectOf(SIGNATURE) },
   optional: ['ruleSet', 'signature'],
+  gate: formatGate,
 };
 
 const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
@@ -294,7 +325,9 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  *   `proof could not be read: <reason>` at path `''`; an output value, contribution or
  *   `unrounded` value that cannot be read is reported at its path, and one that overflows the
  *   call stack gives `<path> is too deeply nested`;
- * - `format` is `PROOF_FORMAT`; `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
+ * - `format` is one of `PROOF_FORMATS`; a string that is not gives the single issue
+ *   `unknown format: <format>` at path `format` (the rest follows rules of another format);
+ *   `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
  *   in the grammar of rule dates; `inputDigest`, `digest`, rule checksums and `ruleSet.digest`
  *   are lowercase sha256 hex; `signature.value` is 64 bytes in unpadded base64url;
  * - output values, contributions and `unrounded` values are JSON;

@@ -39,3 +39,14 @@ function isForeignObjectPrototype(proto: unknown): boolean {
     (ctor as { prototype?: unknown }).prototype === proto
   );
 }
+
+/** A lone UTF-16 surrogate: a high one not followed by a low one, or a low one not preceded by a high one. */
+const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[\uDC00-\uDFFF]/;
+
+/**
+ * True when `text` holds a lone UTF-16 surrogate, which no UTF-8 text can carry: I-JSON
+ * (RFC 7493) and JCS (RFC 8785) refuse it.
+ */
+export function hasLoneSurrogate(text: string): boolean {
+  return LONE_SURROGATE.test(text);
+}

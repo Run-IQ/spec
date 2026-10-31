@@ -13,6 +13,16 @@ export { canonicalize, canonicalizeAt } from './canonical.js';
 export type { JsonValue } from './canonical.js';
 export { SpecError } from './errors.js';
 export type { SpecErrorCode } from './errors.js';
+export {
+  comparePointers,
+  contextToInputPointer,
+  formatPointer,
+  parsePointer,
+} from './path/pointer.js';
+export type { JsonPointer } from './path/pointer.js';
+export { elementSegment, groupSegment, isSubject, subjectContains } from './path/subject.js';
+export type { Subject } from './path/subject.js';
+export { ENGINE_VARIABLES, isReservedName } from './reserved.js';
 export { sha256Hex } from './hash.js';
 export { RESERVED_RULE_FIELDS } from './rule/definition.js';
 export type {
@@ -47,6 +57,7 @@ export type {
 } from './decision/output.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
+export { PROOF_FORMATS } from './proof/formats.js';
 export type {
   DecisionProof,
   ProofException,

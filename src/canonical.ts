@@ -1,17 +1,21 @@
 import { SpecError } from './errors.js';
-import { dateTimeOf, isPlainObject } from './values.js';
+import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
 
 /**
- * Canonical JSON: object keys sorted by UTF-16 code unit at every depth, no whitespace.
+ * Canonical JSON, as the JSON Canonicalization Scheme (JCS, RFC 8785) defines it: object keys
+ * sorted by UTF-16 code unit at every depth, no whitespace, numbers written as ECMAScript writes
+ * them (`1e+30`, `0.002`, `333333333.3333333`), strings escaped as `JSON.stringify` escapes them.
  * - a `Date` (from any realm) becomes its ISO string;
  * - an `undefined` property is omitted, an `undefined` (or hole) in an array becomes `null`;
  * - `-0` is written `0`.
  *
  * Throws `SpecError` (`NON_SERIALIZABLE`) for `NaN`, `±Infinity`, bigints, functions, symbols,
- * an invalid `Date`, a circular reference, `undefined` at the top level, and any object that
- * is not a plain object, an array or a `Date` (Map, Set, class instances...). `toJSON` is ignored.
+ * an invalid `Date`, a circular reference, `undefined` at the top level, a string or a key that
+ * holds a lone UTF-16 surrogate (I-JSON, RFC 7493: such a text has no UTF-8 form), and any
+ * object that is not a plain object, an array or a `Date` (Map, Set, class instances...).
+ * `toJSON` is ignored. A key with a lone surrogate is reported at the path of its object.
  *
  * Strings are data, as in JCS (RFC 8785): no Unicode normalization is applied, so `"é"`
  * written precomposed (U+00E9) and decomposed (U+0065 U+0301) give different output.
@@ -40,6 +44,7 @@ export function toJsonValue(value: unknown, path: string): JsonValue {
 function write(value: unknown, path: string, ancestors: Set<object>): string {
   switch (typeof value) {
     case 'string':
+      if (hasLoneSurrogate(value)) fail(path, 'a string with a lone UTF-16 surrogate');
       return JSON.stringify(value);
     case 'boolean':
       return value ? 'true' : 'false';
@@ -79,6 +84,7 @@ function writeObject(value: object, path: string, ancestors: Set<object>): strin
     for (const key of Object.keys(record).sort()) {
       const member = record[key];
       if (member === undefined) continue;
+      if (hasLoneSurrogate(key)) fail(path, 'a key with a lone UTF-16 surrogate');
       members.push(
         `${JSON.stringify(key)}:${write(member, path ? `${path}.${key}` : key, ancestors)}`,
       );

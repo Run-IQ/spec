@@ -8,6 +8,7 @@ import {
   computeRuleChecksum,
   createSigningKeyPair,
   PROOF_FORMAT,
+  PROOF_FORMATS,
   sealProof,
   sha256Hex,
   signProof,
@@ -110,6 +111,55 @@ function specError(call: () => unknown): SpecError {
 describe('PROOF_FORMAT', () => {
   it('names version 1 of the format', () => {
     expect(PROOF_FORMAT).toBe('run-iq.proof/1');
+  });
+});
+
+describe('PROOF_FORMATS', () => {
+  it('lists the formats accepted for ever, frozen', () => {
+    expect(PROOF_FORMATS).toEqual(['run-iq.proof/1']);
+    expect(PROOF_FORMATS).toContain(PROOF_FORMAT);
+    expect(Object.isFrozen(PROOF_FORMATS)).toBe(true);
+  });
+
+  it('an unknown format is the only issue: the rest cannot be read in that format', () => {
+    const future = { ...signed(), format: 'run-iq.proof/2', outputs: [], extra: 1 };
+    expect(verifyProof(future)).toEqual({
+      status: 'invalid',
+      issues: ['unknown format: run-iq.proof/2'],
+    });
+    expect(validateProof(future)).toEqual({
+      errors: ['unknown format: run-iq.proof/2'],
+      issues: [{ path: 'format', message: 'unknown format: run-iq.proof/2' }],
+    });
+    // The type allows only PROOF_FORMAT; a JavaScript caller can pass any other format.
+    const later = { ...unsigned(), format: 'run-iq.proof/2' } as unknown as UnsignedProof;
+    expect(specError(() => sealProof(later)).message).toBe(
+      'Cannot seal the proof: unknown format: run-iq.proof/2',
+    );
+  });
+
+  it('cites at most 100 characters of an unknown format', () => {
+    const format = `x${'y'.repeat(1_000_000)}`;
+    expect(verifyProof({ ...signed(), format })).toEqual({
+      status: 'invalid',
+      issues: [`unknown format: x${'y'.repeat(99)}…`],
+    });
+  });
+
+  it('reads format once: an accessor cannot pass one value and show another', () => {
+    let reads = 0;
+    const proof: Record<string, unknown> = { ...signed() };
+    Object.defineProperty(proof, 'format', {
+      enumerable: true,
+      get() {
+        reads += 1;
+        return reads === 1 ? 'run-iq.proof/2' : PROOF_FORMAT;
+      },
+    });
+    expect(verifyProof(proof)).toEqual({
+      status: 'invalid',
+      issues: ['unknown format: run-iq.proof/2'],
+    });
   });
 });
 
@@ -603,7 +653,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it('an unknown format or a missing field', () => {
     expect(verifyProof({ ...signed(), format: 'run-iq.proof/2' })).toEqual({
       status: 'invalid',
-      issues: ['format must be "run-iq.proof/1"'],
+      issues: ['unknown format: run-iq.proof/2'],
     });
     const withoutOutputs: Record<string, unknown> = { ...signed() };
     delete withoutOutputs.outputs;
@@ -1192,6 +1242,7 @@ describe('validateProof', () => {
 describe('both entries', () => {
   it('export the whole proof API', () => {
     expect(canonicalEntry.PROOF_FORMAT).toBe(PROOF_FORMAT);
+    expect(canonicalEntry.PROOF_FORMATS).toBe(PROOF_FORMATS);
     expect(canonicalEntry.verifyProof(signed(), { trustedKeys: TRUSTED }).status).toBe('authentic');
     const proof = canonicalEntry.signProof(
       canonicalEntry.sealProof(unsigned()),

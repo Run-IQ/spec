@@ -36,6 +36,17 @@ type Entry = {
   ) => { status: string; issues: string[] };
   OUTPUTS_VARIABLE: string;
   isCanonicalDecimal: (text: string) => boolean;
+  PROOF_FORMATS: readonly string[];
+  ENGINE_VARIABLES: readonly string[];
+  isReservedName: (name: string) => boolean;
+  parsePointer: (pointer: string) => string[];
+  formatPointer: (segments: readonly string[]) => string;
+  comparePointers: (a: string, b: string) => number;
+  contextToInputPointer: (pointer: string) => string | undefined;
+  elementSegment: (key: string | number) => string;
+  groupSegment: (value: string | number) => string;
+  isSubject: (value: unknown) => boolean;
+  subjectContains: (scope: string, subject: string) => boolean;
   toCanonicalDecimal: (text: string) => string;
 };
 
@@ -140,6 +151,31 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(entry.toCanonicalDecimal('0012.50')).toBe('12.5');
       expect(() => entry.toCanonicalDecimal('1e3')).toThrow(
         expect.objectContaining({ code: 'INVALID_DECIMAL' }),
+      );
+    }
+  });
+
+  it('every built entry exports pointers, subjects, reserved names and proof formats', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    for (const entry of entries) {
+      expect(entry.PROOF_FORMATS).toEqual(['run-iq.proof/1']);
+      expect(entry.ENGINE_VARIABLES).toHaveLength(14);
+      expect(entry.isReservedName('$x')).toBe(true);
+      expect(entry.parsePointer('/a~1b/~0c')).toEqual(['a/b', '~c']);
+      expect(entry.formatPointer(['a/b', '~c'])).toBe('/a~1b/~0c');
+      expect(entry.comparePointers('/a', '/a/b')).toBe(-1);
+      expect(entry.contextToInputPointer('/$dates/effective')).toBe('/meta/dates/effective');
+      expect(entry.elementSegment(7)).toBe('@7');
+      expect(entry.groupSegment('42')).toBe('!group=42');
+      expect(entry.isSubject('/foyers/@f1')).toBe(true);
+      expect(entry.subjectContains('/foyers/@f1', '/foyers/@f10')).toBe(false);
+      expect(() => entry.parsePointer('a')).toThrow(
+        expect.objectContaining({ code: 'INVALID_PATH' }),
       );
     }
   });

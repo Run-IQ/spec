@@ -1,5 +1,6 @@
 import type { JsonValue } from '../canonical.js';
 import { unreadableMessage } from '../errors.js';
+import { isReservedName } from '../reserved.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isPlainObject } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
@@ -65,10 +66,10 @@ export const OUTPUTS_VARIABLE = '$outputs';
 
 /**
  * Internal: true for an output name that starts with `$`. Such names are reserved (ruling
- * R36): `$outputs` and any future variable cannot collide with an output.
+ * R36, `isReservedName`): `$outputs` and any future variable cannot collide with an output.
  */
 export function isReservedOutputName(name: string): boolean {
-  return name.startsWith('$');
+  return isReservedName(name);
 }
 
 /** Internal: the message refusing the reserved output name at `path`. */

@@ -5,12 +5,15 @@
  * (`RuleException`, `matchesSelector`), the output declarations (`OutputDeclaration`) and
  * exact decimals (`isCanonicalDecimal`, `toCanonicalDecimal`); the decision proof format
  * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
- * `schema/decision-proof.schema.json`).
+ * `schema/decision-proof.schema.json`; `PROOF_FORMATS`); JSON pointers (`parsePointer`,
+ * `comparePointers`), subjects (`isSubject`, `subjectContains`) and the reserved `$` names
+ * (`ENGINE_VARIABLES`, `isReservedName`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
  * `DateTime`, Map or Set are refused with `SpecError` (`NON_SERIALIZABLE`): convert them to
- * JSON (for example a decimal string) before calling. Strings are not Unicode-normalized.
+ * JSON (for example a decimal string) before calling. Strings are not Unicode-normalized, and a
+ * string or key holding a lone UTF-16 surrogate is refused. `canonicalize` is JCS (RFC 8785).
  *
  * @packageDocumentation
  */
@@ -18,6 +21,16 @@ export { canonicalize, canonicalizeAt } from './canonical.js';
 export type { JsonValue } from './canonical.js';
 export { SpecError } from './errors.js';
 export type { SpecErrorCode } from './errors.js';
+export {
+  comparePointers,
+  contextToInputPointer,
+  formatPointer,
+  parsePointer,
+} from './path/pointer.js';
+export type { JsonPointer } from './path/pointer.js';
+export { elementSegment, groupSegment, isSubject, subjectContains } from './path/subject.js';
+export type { Subject } from './path/subject.js';
+export { ENGINE_VARIABLES, isReservedName } from './reserved.js';
 export { sha256Hex } from './hash.js';
 export { RESERVED_RULE_FIELDS } from './rule/definition.js';
 export type {
@@ -55,6 +68,7 @@ export type {
 } from './decision/output.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
+export { PROOF_FORMATS } from './proof/formats.js';
 export type {
   DecisionProof,
   ProofException,

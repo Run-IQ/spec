@@ -72,7 +72,8 @@ function build(
   return result;
 }
 
-function daysInMonth(year: number, month: number): number {
+/** Internal: the number of days of `month` (1 to 12) in `year`, proleptic Gregorian calendar. */
+export function daysInMonth(year: number, month: number): number {
   if (month === 2) {
     const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
     return leap ? 29 : 28;
