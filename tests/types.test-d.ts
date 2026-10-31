@@ -1,5 +1,9 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
+  isPackId,
+  isRuleSetId,
+  LOCAL_RULE_SET,
+  qualifyName,
   computeRuleChecksum,
   findOverlappingVersions,
   isCanonicalDecimal,
@@ -18,6 +22,8 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type {
+  ForEach,
+  OrderKey,
   CivilCalendar,
   CivilDate,
   DimensionSpec,
@@ -229,5 +235,36 @@ describe('civil time types (Task 9D)', () => {
     const value: unknown = '2026-01-01';
     if (isCivilDate(value)) expectTypeOf(value).toEqualTypeOf<string>();
     if (isInstant(value)) expectTypeOf(value).toEqualTypeOf<string>();
+  });
+});
+
+describe('collections and rule sets (Task 9F)', () => {
+  it('types forEach, the order keys, the rule set and the selector rule sets', () => {
+    expectTypeOf<RuleDefinitionBase['forEach']>().toEqualTypeOf<ForEach | undefined>();
+    expectTypeOf<RuleDefinitionBase['ruleSet']>().toEqualTypeOf<string | undefined>();
+    expectTypeOf<RuleSelector['ruleSets']>().toEqualTypeOf<string[] | undefined>();
+    expectTypeOf<OrderKey['type']>().toEqualTypeOf<
+      'number' | 'decimal' | 'date' | 'dateTime' | 'string'
+    >();
+    expectTypeOf<OrderKey['dir']>().toEqualTypeOf<'asc' | 'desc'>();
+    expectTypeOf(qualifyName).toEqualTypeOf<(ruleSet: string, name: string) => string>();
+    expectTypeOf<typeof LOCAL_RULE_SET>().toEqualTypeOf<'local'>();
+  });
+
+  it('isRuleSetId and isPackId narrow unknown values to strings', () => {
+    const value: unknown = 'rgpd';
+    if (isRuleSetId(value)) expectTypeOf(value).toEqualTypeOf<string>();
+    if (isPackId(value)) expectTypeOf(value).toEqualTypeOf<string>();
+  });
+
+  it('tells the two forms of forEach apart by segments', () => {
+    const check = (forEach: ForEach): void => {
+      if ('segments' in forEach) {
+        expectTypeOf(forEach.segments.facts).toEqualTypeOf<string[]>();
+      } else {
+        expectTypeOf(forEach.key).toEqualTypeOf<string | string[]>();
+      }
+    };
+    check({ path: '/enfants', key: 'id' });
   });
 });

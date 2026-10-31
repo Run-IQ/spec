@@ -95,6 +95,48 @@ describe('computeRuleChecksum', () => {
     expect(computeRuleChecksum({ ...base, effectiveUntil: '2026-01-01' })).not.toBe(h);
   });
 
+  it('forEach and ruleSet enter the checksum (Task 9F)', () => {
+    const h = computeRuleChecksum(base);
+    const forEach = { path: '/enfants', key: 'id' };
+    expect(computeRuleChecksum({ ...base, forEach })).not.toBe(h);
+    expect(computeRuleChecksum({ ...base, ruleSet: 'rgpd' })).not.toBe(h);
+    expect(computeRuleChecksum({ ...base, forEach: null, ruleSet: 'local' })).toBe(h);
+  });
+
+  it('valeur de référence figée avec forEach et ruleSet (Task 9F)', () => {
+    // sha256 of the JCS text, computed outside the library:
+    // {"dimensions":{},"effectiveFrom":"2025-01-01","effectiveUntil":null,"forEach":{"key":"id",
+    // "orderBy":[{"dir":"asc","path":"/naissance","type":"date"}],"path":"/foyers/*/personnes"},
+    // "id":"r1","model":"PERCENTAGE","params":{"base":"orderTotal","rate":0.05},"priority":1,
+    // "ruleSet":"rgpd","tags":[],"version":1}
+    const rule = {
+      ...base,
+      ruleSet: 'rgpd',
+      forEach: {
+        path: '/foyers/*/personnes',
+        key: ['id', 'id'],
+        orderBy: [{ path: '/naissance', type: 'date', dir: 'asc' }],
+        dimensions: {},
+      },
+    };
+    expect(computeRuleChecksum(rule)).toBe(
+      '984d250df0ba2f16a2a89b0ca5f7681de259bee370a58bf179163718909c6da1',
+    );
+  });
+
+  it('forEach, ruleSet, timeZone and effectiveOn are no longer extensions', () => {
+    for (const [field, value] of [
+      ['forEach', 'any extension value'],
+      ['ruleSet', { any: 'extension value' }],
+      ['timeZone', 'any extension value'],
+      ['effectiveOn', 'any extension value'],
+    ] as const) {
+      expect(() => computeRuleChecksum({ ...base, [field]: value })).toThrow(
+        expect.objectContaining({ code: 'INVALID_RULE' }),
+      );
+    }
+  });
+
   it('is a 64-character lowercase sha256 hex string', () => {
     expect(computeRuleChecksum(base)).toMatch(/^[0-9a-f]{64}$/);
   });

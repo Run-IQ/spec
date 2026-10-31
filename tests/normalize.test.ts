@@ -354,7 +354,10 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     ['/$dates/a~1b', {}],
     ['/$item/emission', { forEach: { path: '/factures', key: 'id' } }],
     ['/$item/dates/0/at', { forEach: { path: '/factures', key: 'id' } }],
-    ['/$segment/from', { forEach: { segments: { from: '/a', until: '/b', facts: [] } } }],
+    [
+      '/$segment/from',
+      { forEach: { segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } } },
+    ],
   ])('accepts effectiveOn %j', (effectiveOn, extra) => {
     const rule = { ...base, ...extra, effectiveOn };
     expect(normalizeRuleDefinition(rule).effectiveOn).toBe(effectiveOn);
@@ -368,9 +371,17 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     ['/$dates', {}, 'effectiveOn must name one date: /$dates/<name>'],
     ['/$dates/', {}, 'effectiveOn must name one date: /$dates/<name>'],
     ['/$dates/a/b', {}, 'effectiveOn must name one date: /$dates/<name>'],
-    ['/$item', { forEach: {} }, 'effectiveOn must name a field of the item: /$item/<path>'],
+    [
+      '/$item',
+      { forEach: { path: '/a', key: 'id' } },
+      'effectiveOn must name a field of the item: /$item/<path>',
+    ],
     ['/$dates/-', {}, "effectiveOn must not hold a '-' segment: '-' is not an index"],
-    ['/$item/x/-', { forEach: {} }, "effectiveOn must not hold a '-' segment: '-' is not an index"],
+    [
+      '/$item/x/-',
+      { forEach: { path: '/a', key: 'id' } },
+      "effectiveOn must not hold a '-' segment: '-' is not an index",
+    ],
     ['/$segment/until', {}, 'effectiveOn must be /$segment/from to read a segment'],
     ['/$item/emission', {}, 'effectiveOn reads $item without forEach'],
     ['/$item/emission', { forEach: null }, 'effectiveOn reads $item without forEach'],
@@ -433,11 +444,12 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
       ...base,
       effectiveOn: '/$item/x',
       get forEach(): unknown {
-        return reads++ === 0 ? { path: '/x' } : null;
+        return reads++ === 0 ? { path: '/x', key: 'id' } : null;
       },
     };
     const out = normalizeRuleDefinition(rule);
-    expect(out.forEach).toEqual({ path: '/x' });
+    expect(reads).toBe(1);
+    expect(out.forEach).toEqual({ path: '/x', key: 'id' });
     expect(normalizeRuleDefinition(out)).toEqual(out);
     expect(validateRuleDefinition(out).valid).toBe(true);
     reads = 0;
@@ -448,14 +460,14 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     let reads = 0;
     const forEach = {
       get segments(): unknown {
-        return reads++ === 0 ? { from: '/a' } : null;
+        return reads++ === 0 ? { from: '/$dates/a', until: '/$dates/b', facts: [] } : null;
       },
     };
     const rule = { ...base, effectiveOn: '/$segment/from', forEach };
     // `segments` is read once, into the copy; the context is checked on that copy.
     const out = normalizeRuleDefinition(rule);
     expect(reads).toBe(1);
-    expect(out.forEach).toEqual({ segments: { from: '/a' } });
+    expect(out.forEach).toEqual({ segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } });
     expect(out.effectiveOn).toBe('/$segment/from');
     expect(normalizeRuleDefinition(out)).toEqual(out);
     expect(validateRuleDefinition(out).valid).toBe(true);

@@ -20,7 +20,8 @@ const NON_CONTENT_FIELDS = [
  * Content fingerprint of a rule: sha256 hex of the canonical NORMALIZED definition without
  * `id`, `version`, `effectiveFrom`, `effectiveUntil`, `timeZone`, `effectiveOn` and `checksum`.
  * Two rules with the same content under another id, version or window (time zone and reference
- * date included) share it; it goes through the same
+ * date included) share it. `ruleSet` and `forEach` stay in it: a bare name means another output
+ * in another rule set (D-37), and iterating changes what a rule computes. It goes through the same
  * normalization as the checksum, so it does not depend on how the data is written.
  */
 export function computeRuleFingerprint(input: RuleDefinitionInput): string {

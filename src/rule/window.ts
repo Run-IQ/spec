@@ -8,7 +8,8 @@ import {
   startOfDayIn,
 } from '../time/civil.js';
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
-import { isPlainObject, typeName } from '../values.js';
+import { typeName } from '../values.js';
+import type { ForEach } from './forEach.js';
 
 /**
  * The validity window of a rule, as `windowContains` reads it: the bounds in any form
@@ -210,15 +211,25 @@ export function effectiveOnProblem(value: string): string | undefined {
 }
 
 /**
- * Internal: what is wrong with a valid `effectiveOn` given the rule's `forEach`, or `undefined`:
- * `$item` needs a `forEach`, `$segment` a `forEach.segments` (`null` and absence alike).
+ * Internal: what is wrong with a valid `effectiveOn` given the rule's valid `forEach` (absent:
+ * `undefined`), or `undefined`: `$item` needs a collection that gives one item per instance (a
+ * `forEach` with `path` and without `groupBy`), `$segment` needs `forEach.segments`.
  */
-export function effectiveOnContextProblem(pointer: string, forEach: unknown): string | undefined {
+export function effectiveOnContextProblem(
+  pointer: string,
+  forEach: ForEach | undefined,
+): string | undefined {
   if (pointer.startsWith('/$item/')) {
-    return forEach == null ? 'effectiveOn reads $item without forEach' : undefined;
+    if (forEach === undefined) return 'effectiveOn reads $item without forEach';
+    if ('segments' in forEach) {
+      return 'effectiveOn reads $item without forEach.path: a segment has no item';
+    }
+    return forEach.groupBy === undefined
+      ? undefined
+      : 'effectiveOn reads $item with forEach.groupBy: a group has no single item';
   }
   if (pointer.startsWith('/$segment/')) {
-    return isPlainObject(forEach) && forEach.segments != null
+    return forEach !== undefined && 'segments' in forEach
       ? undefined
       : 'effectiveOn reads $segment without segments';
   }

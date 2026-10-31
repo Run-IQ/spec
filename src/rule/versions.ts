@@ -9,6 +9,7 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 import { isRuleVersion } from './definition.js';
+import { isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { DEFAULT_EFFECTIVE_ON, readEffectiveOn, resolveWindow } from './window.js';
 import type { ResolvedWindow, RuleWindow } from './window.js';
 
@@ -16,7 +17,10 @@ import type { ResolvedWindow, RuleWindow } from './window.js';
 export interface VersionedRuleWindow extends RuleWindow {
   readonly id: string;
   readonly version: number;
-  /** The rule set; absent or `null` is `'local'`. */
+  /**
+   * The rule set, a rule set id (`isRuleSetId`); absent, `null` and `'local'` are the local rules,
+   * one group: no pack can be named `local` (`isPackId`), so a pack never mixes with them.
+   */
   readonly ruleSet?: string | null | undefined;
   readonly effectiveOn?: string | null | undefined;
 }
@@ -56,7 +60,8 @@ interface Version {
  *
  * Throws `SpecError`: `INVALID_DATE` for an invalid `timeZone`, a bound `toReferenceDate`
  * refuses or a calendar that fails; `INVALID_RULE` for a list that is not an array or cannot be
- * read, a rule with an invalid `id`, `version`, `ruleSet`, `timeZone` or `effectiveOn`, bounds
+ * read, a rule with an invalid `id`, `version`, `ruleSet` (not a rule set id), `timeZone` or
+ * `effectiveOn`, bounds
  * of two forms, an empty window, or the same (`ruleSet`, `id`, `version`) twice
  * (`duplicate rule R1@1`). Messages about one rule start with `rule <id>@<version>: `.
  */
@@ -175,7 +180,8 @@ function readRule(
   if (!isRuleVersion(version)) {
     throw new SpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
   }
-  const set = ruleSet == null ? 'local' : requireText(ruleSet, 'ruleSet');
+  const set = ruleSet == null ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
+  if (!isRuleSetId(set)) throw new SpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet'));
   const window = resolveWindow(fields, zone, prefix);
   const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
   // The default reference date is the absent one, as normalization writes it.

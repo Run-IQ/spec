@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/rule-definition.schema.json",
   "title": "Run-IQ rule definition",
-  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output. The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Three rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value.",
+  "description": "A rule definition as accepted by normalizeRuleDefinition from @run-iq/spec. At the top level, null means absent for every optional field and every extension field. Top-level keys other than the named fields are plugin extensions: any JSON value. A rule of the reserved model @run-iq/exception has a non-empty exceptions list and no output. The bounds effectiveFrom and effectiveUntil are both civil dates (YYYY-MM-DD) or both instants (D-13). Some rules are NOT expressible in JSON Schema and are checked only by validateRuleDefinition and normalizeRuleDefinition: effectiveUntil, when set, must be strictly after effectiveFrom (the half-open window [effectiveFrom, effectiveUntil) must not be empty); an instant must stay within the years 0000 to 9999 once its offset is applied; no text (effectiveOn included) may hold a lone UTF-16 surrogate; in a dimension spec, an except value must not repeat an anyOf value; a forEach.key list holds one name per level (one more than the '*' segments of forEach.path); each forEach.orderBy path appears once; forEach.segments.from and forEach.segments.until differ; a selector's ids name rules of the rule sets it targets (its ruleSets, else the rule's own rule set): an id of a rule set the selector does not target is refused.",
   "type": "object",
   "required": [
     "id",
@@ -14,7 +14,9 @@
   ],
   "properties": {
     "id": {
-      "$ref": "#/$defs/nonEmptyString"
+      "description": "A rule id: non-empty, without ':' (which separates a rule set from a name, D-4).",
+      "type": "string",
+      "pattern": "^[^:]+$"
     },
     "version": {
       "description": "Positive integer.",
@@ -87,6 +89,28 @@
         },
         {
           "$ref": "#/$defs/effectiveOn"
+        }
+      ]
+    },
+    "forEach": {
+      "description": "What the rule iterates over: a collection { path, key, orderBy?, dimensions?, recurse?, groupBy? } or time segments { segments }. null means absent.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/forEach"
+        }
+      ]
+    },
+    "ruleSet": {
+      "description": "The rule set (pack) of the rule; null, absent and 'local' are a local rule.",
+      "anyOf": [
+        {
+          "type": "null"
+        },
+        {
+          "$ref": "#/$defs/ruleSetId"
         }
       ]
     },
@@ -256,7 +280,7 @@
       }
     },
     {
-      "description": "effectiveOn on /$item/ needs a forEach.",
+      "description": "effectiveOn on /$item/ needs a forEach with path and without groupBy: a segment and a group have no single item.",
       "if": {
         "required": [
           "effectiveOn"
@@ -274,8 +298,20 @@
         ],
         "properties": {
           "forEach": {
+            "type": "object",
+            "required": [
+              "path"
+            ],
+            "properties": {
+              "path": {}
+            },
             "not": {
-              "type": "null"
+              "required": [
+                "groupBy"
+              ],
+              "properties": {
+                "groupBy": {}
+              }
             }
           }
         }
@@ -305,11 +341,7 @@
               "segments"
             ],
             "properties": {
-              "segments": {
-                "not": {
-                  "type": "null"
-                }
-              }
+              "segments": {}
             }
           }
         }
@@ -322,9 +354,9 @@
       "minLength": 1
     },
     "outputName": {
-      "description": "An output name: a non-empty string not starting with $ (names starting with $ are reserved).",
+      "description": "An output name (D-4): name or <rule set>:<name>, with at most one ':'. No '.' anywhere (a JSONLogic var would read it as a path); neither part starts with $ (reserved); the rule set part is a rule set id other than local (a local name is written bare); the name part is non-empty.",
       "type": "string",
-      "pattern": "^[^$]"
+      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9_-]*:)?[^$.:][^.:]*$"
     },
     "ruleDate": {
       "description": "A civil date or an instant.",
@@ -423,13 +455,13 @@
       ]
     },
     "ruleSelector": {
-      "description": "Fields combine by AND, the values of one field by OR; dimensions require every key to be written the same (normal form), never a membership. An empty field puts no constraint; at least one field must be non-empty.",
+      "description": "Fields combine by AND, the values of one field by OR; dimensions require every key to be written the same (normal form), never a membership. An empty field puts no constraint; at least one field must be non-empty. ruleSets lists the rule sets targeted (local for the rules without a rule set); absent, only the rule set of the rule that carries the exception. ruleSets alone does not constrain a selector. Bare ids and outputs designate the carrier's rule set, qualified ones the named rule set.",
       "type": "object",
       "properties": {
         "ids": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/nonEmptyString"
+            "$ref": "#/$defs/ruleRef"
           }
         },
         "tags": {
@@ -454,6 +486,12 @@
           "type": "array",
           "items": {
             "$ref": "#/$defs/nonEmptyString"
+          }
+        },
+        "ruleSets": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/ruleSetId"
           }
         }
       },
@@ -609,6 +647,177 @@
           ]
         }
       ]
+    },
+    "ruleRef": {
+      "description": "A rule cited by a selector: id or <rule set>:<id>, with at most one ':'; the rule set part is a rule set id other than local (a local id is written bare).",
+      "type": "string",
+      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9._-]*:)?[^:]+$"
+    },
+    "ruleSetId": {
+      "description": "A rule set id (D-4); local names the rules without a rule set.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+    },
+    "forEach": {
+      "description": "A collection or time segments. Literal segments of a path never start with @ or ! (they mark subjects, D-2); pointers into an element name one value (no '*' segment) and hold no '-' segment. NOT expressible in JSON Schema, checked only by validateRuleDefinition and normalizeRuleDefinition: a key list holds one name per level; each orderBy path appears once; segments.from and segments.until differ.",
+      "anyOf": [
+        {
+          "type": "object",
+          "required": [
+            "path",
+            "key"
+          ],
+          "properties": {
+            "path": {
+              "description": "A JSON pointer into the input data; each '*' segment steps into the elements of a list (one level per list). It starts and ends with a member name, never has two '*' in a row, and does not start with $ (an engine variable).",
+              "type": "string",
+              "pattern": "^/(?!\\$)(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*(?:/\\*/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*)*$"
+            },
+            "key": {
+              "description": "The member that identifies the elements: one name for every level, or a list of one name per level.",
+              "anyOf": [
+                {
+                  "$ref": "#/$defs/nonEmptyString"
+                },
+                {
+                  "type": "array",
+                  "minItems": 1,
+                  "items": {
+                    "$ref": "#/$defs/nonEmptyString"
+                  }
+                }
+              ]
+            },
+            "orderBy": {
+              "description": "The rank of the elements: keys compared in order; elements equal on every key are tied (AMBIGUOUS_ORDER for an instance that reads its rank). [] means absent.",
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/orderKey"
+              }
+            },
+            "dimensions": {
+              "description": "Dimensions read per element: a name (not starting with $) to a pointer into the element. {} means absent.",
+              "type": "object",
+              "propertyNames": {
+                "pattern": "^[^$]"
+              },
+              "additionalProperties": {
+                "$ref": "#/$defs/elementPointer"
+              }
+            },
+            "recurse": {
+              "description": "A pointer into the element to its child list; no segment starting with @ or !.",
+              "type": "string",
+              "pattern": "^(?:/(?!(?:-|\\*)(?:/|$))(?:(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)+$"
+            },
+            "groupBy": {
+              "$ref": "#/$defs/elementPointer"
+            }
+          },
+          "additionalProperties": false,
+          "allOf": [
+            {
+              "description": "recurse and groupBy cannot be combined.",
+              "not": {
+                "required": [
+                  "recurse",
+                  "groupBy"
+                ],
+                "properties": {
+                  "recurse": {},
+                  "groupBy": {}
+                }
+              }
+            },
+            {
+              "description": "A group has no single element: groupBy excludes dimensions.",
+              "not": {
+                "required": [
+                  "dimensions",
+                  "groupBy"
+                ],
+                "properties": {
+                  "dimensions": {},
+                  "groupBy": {}
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "object",
+          "required": [
+            "segments"
+          ],
+          "properties": {
+            "segments": {
+              "type": "object",
+              "required": [
+                "from",
+                "until",
+                "facts"
+              ],
+              "properties": {
+                "from": {
+                  "$ref": "#/$defs/namedDate"
+                },
+                "until": {
+                  "$ref": "#/$defs/namedDate"
+                },
+                "facts": {
+                  "description": "Facts whose changes cut the period: pointers into the input data, not to an engine variable ($), naming one value.",
+                  "type": "array",
+                  "items": {
+                    "type": "string",
+                    "pattern": "^(?!/\\$)(?:/(?!(?:-|\\*)(?:/|$))(?:[^/~]|~[01])*)+$"
+                  }
+                }
+              },
+              "additionalProperties": false
+            }
+          },
+          "additionalProperties": false
+        }
+      ]
+    },
+    "orderKey": {
+      "type": "object",
+      "required": [
+        "path",
+        "type",
+        "dir"
+      ],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/elementPointer"
+        },
+        "type": {
+          "enum": [
+            "number",
+            "decimal",
+            "date",
+            "dateTime",
+            "string"
+          ]
+        },
+        "dir": {
+          "enum": [
+            "asc",
+            "desc"
+          ]
+        }
+      },
+      "additionalProperties": false
+    },
+    "elementPointer": {
+      "description": "A JSON pointer into the element: not empty, no '*' (it names one value) and no '-' segment.",
+      "type": "string",
+      "pattern": "^(?:/(?!(?:-|\\*)(?:/|$))(?:[^/~]|~[01])*)+$"
+    },
+    "namedDate": {
+      "description": "A named date of the input: /$dates/<name>.",
+      "type": "string",
+      "pattern": "^/\\$dates/(?!-$)(?:[^/~]|~[01])+$"
     }
   }
 }

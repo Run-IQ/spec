@@ -3,6 +3,7 @@ import type { JsonPointer } from '../path/pointer.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import type { DimensionSpec, DimensionSpecInput } from './dimensions.js';
 import type { RuleException } from './exceptions.js';
+import type { ForEach } from './forEach.js';
 
 export interface RuleCondition {
   dsl: string;
@@ -21,6 +22,7 @@ export interface RuleCondition {
  * ends. `windowContains` implements it, crossing civil dates and instants in a time zone.
  */
 export interface RuleDefinitionBase {
+  /** Never holds `:`, which separates a rule set from a name (D-4). */
   id: string;
   /** Positive integer. */
   version: number;
@@ -43,6 +45,22 @@ export interface RuleDefinitionBase {
    * `/$segment/from` (needs `forEach.segments`). Absent: the decision's reference date.
    */
   effectiveOn?: JsonPointer;
+  /**
+   * What the rule iterates over (`ForEach`): it applies once per element of a collection, per
+   * group or per time segment, each instance with its subject. Absent: the rule applies once.
+   */
+  forEach?: ForEach;
+  /**
+   * The rule set (pack) of the rule, `^[a-z0-9][a-z0-9._-]*$` (D-4). Absent for a local rule:
+   * `ruleSet: 'local'` (`LOCAL_RULE_SET`) is normalized away. The names a rule cites bare
+   * (`output`, selector `ids` and `outputs`) designate its own rule set (D-37).
+   */
+  ruleSet?: string;
+  /**
+   * The output the rule feeds: `name` or `<rule set>:<name>` (one `:`, D-4), never starting with
+   * `$` (reserved) nor holding `.`. A bare name designates the rule's own rule set; a name
+   * qualified by it is written bare. Absent: the default output (`value`).
+   */
   output?: string;
   /**
    * What the rule asks of each dimension of the input, in normal form (`DimensionSpec`): a value
@@ -65,16 +83,16 @@ export interface RuleDefinitionBase {
  * level. Extensions enter the checksum and the fingerprint. `checksum` is never part of it.
  *
  * Null at the top level: for every optional named field (`condition`, `effectiveUntil`,
- * `timeZone`, `effectiveOn`, `output`, `dimensions`, `tags`, `dominanceGroup`, `exceptions`,
- * `sourceRef`) and every
+ * `timeZone`, `effectiveOn`, `forEach`, `ruleSet`, `output`, `dimensions`, `tags`,
+ * `dominanceGroup`, `exceptions`, `sourceRef`) and every
  * extension field, `null`, `undefined` and absence are the same input, so the checksum and
  * fingerprint do not depend on how a database writes empty columns. Normalization drops them,
  * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). An empty
- * `exceptions` list is absent too. A `null`
- * value inside `dimensions` likewise means the dimension is unset and its key is dropped
- * (other non-string values throw). Below the top
- * level (inside `params`, `condition.value`, `exceptions` and extension values), and for the
- * required `params` itself, `null` is data and is kept.
+ * `exceptions` list is absent too, and so is `ruleSet: 'local'`. A `null` value inside
+ * `dimensions` likewise means the dimension is unset and its key is dropped (other non-string
+ * values throw). Below the top level (inside `params`, `condition.value`, `forEach`,
+ * `exceptions` and extension values), and for the required `params` itself, `null` is data and
+ * is kept (and refused where the format has no place for it, as in `forEach`).
  */
 export interface RuleDefinition extends RuleDefinitionBase {
   [extension: string]: unknown;
@@ -106,6 +124,10 @@ export interface RuleDefinitionInputBase {
   readonly timeZone?: string | null | undefined;
   /** `/$dates/<name>`, `/$item/<path>` (with `forEach`) or `/$segment/from`. */
   readonly effectiveOn?: string | null | undefined;
+  /** A `ForEach`; a one-level `key` list may be written as a list. Checked by normalization. */
+  readonly forEach?: unknown;
+  /** A rule set id; `'local'` means absent. */
+  readonly ruleSet?: string | null | undefined;
   readonly output?: string | null | undefined;
   /**
    * A `DimensionSpec` per dimension, in any written order; a `null` or `undefined` value means
@@ -138,6 +160,8 @@ export const RESERVED_RULE_FIELDS: readonly string[] = [
   'effectiveUntil',
   'timeZone',
   'effectiveOn',
+  'forEach',
+  'ruleSet',
   'output',
   'dimensions',
   'tags',

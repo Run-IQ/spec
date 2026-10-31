@@ -1,5 +1,6 @@
-import { SpecError } from '../src/index.js';
-import type { CivilCalendar, Referential } from '../src/index.js';
+import { expect } from 'vitest';
+import { normalizeRuleDefinition, SpecError, validateRuleDefinition } from '../src/index.js';
+import type { CivilCalendar, Referential, RuleDefinitionInput } from '../src/index.js';
 
 /** The `SpecError` `call` throws; fails the test when it throws anything else, or nothing. */
 export function specError(call: () => unknown): SpecError {
@@ -111,4 +112,26 @@ export function nestedReferential(depth: number): Referential {
     groups[`G${i}`] = { exhaustive: true, members: [{ value: member }] };
   }
   return { format: 'run-iq.referential/1', id: 'deep', version: '1', dimension: 'd', groups };
+}
+
+/** A minimal valid rule definition; spread it to build test rules. */
+export const BASE_RULE = Object.freeze({
+  id: 'r1',
+  version: 1,
+  model: 'PERCENTAGE',
+  params: Object.freeze({ rate: 0.05 }),
+  priority: 1,
+  effectiveFrom: '2025-01-01',
+});
+
+/**
+ * Asserts that normalize throws `INVALID_RULE` with `message` and that the validator reports
+ * exactly that one issue at `path`.
+ */
+export function expectRuleRefused(rule: object, path: string, message: string): void {
+  expect(specError(() => normalizeRuleDefinition(rule as RuleDefinitionInput))).toMatchObject({
+    code: 'INVALID_RULE',
+    message,
+  });
+  expect(validateRuleDefinition(rule).issues).toEqual([{ path, message }]);
 }

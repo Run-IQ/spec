@@ -9,6 +9,7 @@ import {
 import type { RuleDefinitionInput } from '../src/index.js';
 import { REFUSED_DIMENSIONS } from './dimension-cases.js';
 import { REFUSED_EXCEPTIONS } from './exception-cases.js';
+import { ACCEPTED_FOR_EACH, REFUSED_FOR_EACH, VALIDATOR_ONLY_FOR_EACH } from './forEach-cases.js';
 import { nestedReferential, ueReferential } from './helpers.js';
 
 const schema = JSON.parse(
@@ -120,7 +121,7 @@ const VALID: [string, unknown][] = [
     {
       ...base,
       effectiveOn: '/$segment/from',
-      forEach: { segments: { from: '/a', until: '/b', facts: [] } },
+      forEach: { segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } },
     },
   ],
   [
@@ -437,15 +438,202 @@ describe('time zone and effectiveOn pattern parity', () => {
     '/$dates/a~',
   ];
 
-  it.each(pointers)('schema, validator and normalize agree on effectiveOn %j', (effectiveOn) => {
-    const value = {
-      ...base,
-      effectiveOn,
-      forEach: { path: '/x', key: 'id', segments: { from: '/a', until: '/b', facts: [] } },
-    };
+  const forms: [string, unknown][] = [
+    ['a collection', { path: '/x', key: 'id' }],
+    ['segments', { segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } }],
+    ['a grouping', { path: '/x', key: 'id', groupBy: '/g' }],
+  ];
+  const cases = pointers.flatMap((pointer) =>
+    forms.map(([form, forEach]): [string, string, unknown] => [pointer, form, forEach]),
+  );
+
+  it.each(cases)(
+    'schema, validator and normalize agree on effectiveOn %j with %s',
+    (effectiveOn, _form, forEach) => {
+      const value = { ...base, effectiveOn, forEach };
+      const expected = normalizeAccepts(value);
+      expect(validateRuleDefinition(value).valid).toBe(expected);
+      expect(schemaAccepts(value)).toBe(expected);
+    },
+  );
+
+  it('accepts $item only with an ungrouped collection, $segment only with segments', () => {
+    const accepted = cases
+      .filter(([pointer, , forEach]) => {
+        const value = { ...base, effectiveOn: pointer, forEach };
+        return pointer.startsWith('/$item/') && normalizeAccepts(value);
+      })
+      .map(([, form]) => form);
+    expect(new Set(accepted)).toEqual(new Set(['a collection']));
+    const segment = { ...base, effectiveOn: '/$segment/from' };
+    expect(forms.filter(([, forEach]) => normalizeAccepts({ ...segment, forEach }))).toEqual([
+      forms[1],
+    ]);
+  });
+});
+
+describe('forEach: validator, JSON schema and normalize agree', () => {
+  it.each(ACCEPTED_FOR_EACH)('accepts %s', (_label, forEach) => {
+    const value = { ...base, forEach };
+    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(schemaAccepts(value)).toBe(true);
+    expect(normalizeAccepts(value)).toBe(true);
+  });
+
+  it.each(REFUSED_FOR_EACH)('rejects %s', (_label, forEach) => {
+    const value = { ...base, forEach };
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(schemaAccepts(value)).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
+  });
+
+  it.each(VALIDATOR_ONLY_FOR_EACH)('validator-only: rejects %s (the schema cannot)', (_l, fe) => {
+    const value = { ...base, forEach: fe };
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
+    expect(schemaAccepts(value)).toBe(true);
+  });
+
+  it('the schema documents the validator-only forEach checks', () => {
+    const text = JSON.stringify(schema);
+    expect(text).toMatch(/one name per level/);
+    expect(text).toMatch(/orderBy.*path.*once/);
+    expect(text).toMatch(/segments\.from and segments\.until.*differ/);
+  });
+
+  const paths = [
+    '/a',
+    '/a/*/b',
+    '/a/*/b/*/c',
+    '/a/b/*/c/d',
+    '/*',
+    '/a/*',
+    '/*/a',
+    '/a/*/*/b',
+    '/a//b',
+    '/',
+    '/a/-',
+    '/-',
+    '/a/--',
+    '/a/@b',
+    '/a/!b',
+    '/a/b@',
+    '/a/~1@b',
+    '/@a',
+    '/$a',
+    '/a/$b',
+    '/~0$a',
+    '/a/*/~1',
+    '/a~',
+    '',
+    'a',
+    '/a/**',
+    '/a/*x',
+  ];
+  it.each(paths)('schema, validator and normalize agree on the path %j', (path) => {
+    const levels = path.split('/*/').length;
+    const value = { ...base, forEach: { path, key: Array(levels).fill('id') } };
     const expected = normalizeAccepts(value);
     expect(validateRuleDefinition(value).valid).toBe(expected);
     expect(schemaAccepts(value)).toBe(expected);
+  });
+
+  const members = ['/a', '/a/b', '', '/', '/*', '/a/*/b', '/-', '/a/-', '/@a', '/!a', '/$a', 'a'];
+  it.each(members)('schema, validator and normalize agree on the member %j', (member) => {
+    const forEaches = [
+      { path: '/x', key: 'id', orderBy: [{ path: member, type: 'string', dir: 'asc' }] },
+      { path: '/x', key: 'id', dimensions: { d: member } },
+      { path: '/x', key: 'id', recurse: member },
+      { path: '/x', key: 'id', groupBy: member },
+      { segments: { from: '/$dates/a', until: '/$dates/b', facts: [member] } },
+      { segments: { from: member, until: '/$dates/b', facts: [] } },
+    ];
+    for (const forEach of forEaches) {
+      const value = { ...base, forEach };
+      const expected = normalizeAccepts(value);
+      expect(validateRuleDefinition(value).valid).toBe(expected);
+      expect(schemaAccepts(value)).toBe(expected);
+    }
+  });
+});
+
+describe('rule sets and qualified names: validator, JSON schema and normalize agree', () => {
+  const accepted: [string, unknown][] = [
+    ['a pack rule', { ...base, ruleSet: 'rgpd' }],
+    ['an explicit local rule', { ...base, ruleSet: 'local' }],
+    ['a null rule set', { ...base, ruleSet: null }],
+    ['a qualified output', { ...base, output: 'rgpd:profilage' }],
+    [
+      'a selector with rule sets and qualified names',
+      {
+        ...base,
+        exceptions: [
+          {
+            kind: 'inhibit',
+            targets: { ruleSets: ['rgpd', 'local'], ids: ['rgpd:R1', 'R2'], outputs: ['rgpd:x'] },
+          },
+        ],
+      },
+    ],
+    [
+      'a shortCircuit to a qualified output',
+      { ...base, exceptions: [{ kind: 'shortCircuit', output: 'tva:taux', value: 0 }] },
+    ],
+  ];
+
+  const refused: [string, unknown][] = [
+    ['an id with ":"', { ...base, id: 'a:b' }],
+    ['a capitalized rule set', { ...base, ruleSet: 'Local' }],
+    ['a rule set with ":"', { ...base, ruleSet: 'a:b' }],
+    ['an empty rule set', { ...base, ruleSet: '' }],
+    ['a numeric rule set', { ...base, ruleSet: 1 }],
+    ['an output with two ":"', { ...base, output: 'a:b:c' }],
+    ['an output reserved after its rule set', { ...base, output: 'pack:$x' }],
+    ['an output with "."', { ...base, output: 'a.b' }],
+    ['a qualified output with "."', { ...base, output: 'pack:a.b' }],
+    ['an output of a rule set with "."', { ...base, output: 'p.v2:x' }],
+    ['an output qualified by local', { ...base, output: 'local:x' }],
+    ['an output qualified by an invalid set', { ...base, output: 'P:x' }],
+    ['an output with an empty rule set', { ...base, output: ':x' }],
+    ['an output with an empty name', { ...base, output: 'pack:' }],
+  ];
+
+  /** JSON Schema cannot relate a selector's ids to the rule's own rule set. */
+  const validatorOnly: [string, unknown][] = [
+    [
+      'an id of a rule set the selector does not target',
+      { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: ['rgpd:R1'] } }] },
+    ],
+    [
+      'a bare id while ruleSets leaves out the carrier',
+      {
+        ...base,
+        ruleSet: 'aiact',
+        exceptions: [{ kind: 'inhibit', targets: { ruleSets: ['rgpd'], ids: ['R1'] } }],
+      },
+    ],
+  ];
+
+  it.each(accepted)('accepts %s', (_name, value) => {
+    expect(validateRuleDefinition(value)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(schemaAccepts(value)).toBe(true);
+    expect(normalizeAccepts(value)).toBe(true);
+  });
+
+  it.each(refused)('rejects %s', (_name, value) => {
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(schemaAccepts(value)).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
+  });
+
+  it.each(validatorOnly)('validator-only: rejects %s (the schema cannot)', (_name, value) => {
+    expect(validateRuleDefinition(value).valid).toBe(false);
+    expect(normalizeAccepts(value)).toBe(false);
+    expect(schemaAccepts(value)).toBe(true);
+  });
+
+  it('the schema documents the validator-only selector check', () => {
+    expect(JSON.stringify(schema)).toMatch(/ids.*rule set.*not target/);
   });
 });
 

@@ -1,13 +1,15 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { quoteText, SpecError, unreadableMessage } from '../errors.js';
-import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
 import { readDimensionSpec } from './dimensions.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { readForEach } from './forEach.js';
+import type { ForEach } from './forEach.js';
+import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
 
 const RESERVED = new Set(RESERVED_RULE_FIELDS);
@@ -34,12 +36,18 @@ class Issues {
  * and an `effectiveOn` must hold no lone UTF-16 surrogate. Both bounds must have the same form (two
  * civil dates or two instants, D-13); `timeZone` must pass `isTimeZone`; `effectiveOn` must point
  * to `/$dates/<name>`, `/$item/<path>` (with a `forEach`) or `/$segment/from` (with
- * `forEach.segments`). It checks the closed `exceptions` format and the constraints of the reserved
- * model `EXCEPTION_MODEL` (no `output`, a non-empty `exceptions` list), and refuses output names
- * starting with `$` (reserved, ruling R36) in `output`, in a `shortCircuit` output and in selector
- * `outputs`. Each dimension must be a `DimensionSpec`; JSON Schema cannot refuse an `except` value
- * repeated in `anyOf`. Every text (a string field, a tag, a dimension key or
- * value, an extension key, any string inside `params`, `condition.value`, `exceptions` or an
+ * `forEach.segments`; `$item` also needs `forEach.path` without `groupBy`). It checks the closed
+ * `forEach` format (`ForEach`; JSON Schema cannot count the key names per level, find a repeated
+ * `orderBy` path, or compare `segments.from` with `segments.until`), the closed `exceptions`
+ * format and the constraints of the reserved model `EXCEPTION_MODEL` (no `output`, a non-empty
+ * `exceptions` list); it refuses an `id` holding `:`, a `ruleSet` that is not a rule set id, and
+ * output names that are not `name` or `<rule set>:<name>` (D-4: at most one `:`, no `.`, no `$`
+ * at the start of either part, ruling R36) in `output`, in a `shortCircuit` output and in
+ * selector `outputs`, and a selector id of a rule set the selector does not target (JSON Schema
+ * cannot relate it to the rule's `ruleSet`). Each dimension must be a `DimensionSpec`; JSON
+ * Schema cannot refuse an `except` value repeated in `anyOf`. Every text (a string field, a tag,
+ * a dimension key or value, an extension key, any string inside `params`, `condition.value`,
+ * `forEach`, `exceptions` or an
  * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
  * valid rule always has a checksum. JSON Schema cannot express this check. Like
  * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
@@ -83,6 +91,15 @@ function definitionIssues(value: unknown): {
   }
 
   checkNonEmptyString(value.id, 'id', errors);
+  if (typeof value.id === 'string' && value.id.includes(':')) {
+    errors.add('id', 'id must not contain ":"');
+  }
+  const ruleSetValue = value.ruleSet;
+  let ruleSet: string | undefined = LOCAL_RULE_SET;
+  if (ruleSetValue != null) {
+    ruleSet = isRuleSetId(ruleSetValue) ? ruleSetValue : undefined;
+    if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet'));
+  }
   if (!isRuleVersion(value.version)) errors.add('version', 'version must be a positive integer');
   checkNonEmptyString(value.model, 'model', errors);
   if (value.params === undefined) errors.add('params', 'params is required');
@@ -108,17 +125,24 @@ function definitionIssues(value: unknown): {
   for (const field of OPTIONAL_STRINGS) {
     if (value[field] != null) checkNonEmptyString(value[field], field, errors);
   }
-  if (typeof value.output === 'string' && isReservedOutputName(value.output)) {
-    errors.add('output', reservedOutputNameMessage('output'));
+  const output = value.output;
+  if (typeof output === 'string' && output !== '') {
+    const problem = citedNameProblem(output, 'output', 'output');
+    if (problem !== undefined) errors.add('output', problem);
   }
   if (value.dimensions != null) checkDimensions(value.dimensions, errors);
   if (value.tags != null) checkTags(value.tags, errors);
-  if (value.exceptions != null) checkExceptions(value.exceptions, errors);
+  if (value.exceptions != null) checkExceptions(value.exceptions, ruleSet, errors);
   for (const issue of exceptionModelIssues(value)) errors.add(issue.path, issue.message);
 
-  // Each extension is read once; `forEach` is checked against the copy normalize would keep.
-  let forEach: JsonValue | undefined;
-  let forEachReadable = true;
+  // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
+  const forEachValue = value.forEach;
+  const forEach = forEachValue == null ? null : checkForEach(forEachValue, errors);
+  if (pointer !== undefined && forEach !== undefined) {
+    const problem = effectiveOnContextProblem(pointer, forEach ?? undefined);
+    if (problem !== undefined) errors.add('effectiveOn', problem);
+  }
+
   for (const key of Object.keys(value)) {
     if (RESERVED.has(key)) continue;
     const extension = value[key];
@@ -127,15 +151,7 @@ function definitionIssues(value: unknown): {
       errors.add('', extensionKeyMessage(key));
       continue;
     }
-    const json = toJsonOrIssue(extension, key, errors);
-    if (key === 'forEach') {
-      forEach = json;
-      forEachReadable = json !== undefined;
-    }
-  }
-  if (pointer !== undefined && forEachReadable) {
-    const problem = effectiveOnContextProblem(pointer, forEach);
-    if (problem !== undefined) errors.add('effectiveOn', problem);
+    toJsonOrIssue(extension, key, errors);
   }
 
   return result(errors);
@@ -183,10 +199,24 @@ function toJsonOrIssue(value: unknown, field: string, errors: Issues): JsonValue
   }
 }
 
-function checkExceptions(value: unknown, errors: Issues): void {
+function checkExceptions(value: unknown, ruleSet: string | undefined, errors: Issues): void {
   const json = toJsonOrIssue(value, 'exceptions', errors);
   if (json === undefined) return;
-  for (const issue of readRuleExceptions(json).issues) errors.add(issue.path, issue.message);
+  for (const issue of readRuleExceptions(json, 'exceptions', ruleSet).issues) {
+    errors.add(issue.path, issue.message);
+  }
+}
+
+/** The normal form of a `forEach`, or `undefined` after recording why it is invalid. */
+function checkForEach(value: unknown, errors: Issues): ForEach | undefined {
+  const json = toJsonOrIssue(value, 'forEach', errors);
+  if (json === undefined) return undefined;
+  let valid = true;
+  const forEach = readForEach(json, (path, message) => {
+    valid = false;
+    errors.add(path, message);
+  });
+  return valid ? forEach : undefined;
 }
 
 function checkDate(value: unknown, field: string, errors: Issues): CivilDate | Instant | undefined {

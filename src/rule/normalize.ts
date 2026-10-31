@@ -1,7 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { SpecError, unreadableMessage } from '../errors.js';
-import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
@@ -9,6 +8,15 @@ import { readDimensionSpec } from './dimensions.js';
 import type { DimensionSpec } from './dimensions.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import { exceptionModelIssues, readRuleExceptions } from './exceptions.js';
+import { readForEach } from './forEach.js';
+import type { ForEach } from './forEach.js';
+import {
+  citedNameProblem,
+  isRuleSetId,
+  LOCAL_RULE_SET,
+  ruleSetIdMessage,
+  shortestFrom,
+} from './ruleSet.js';
 import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
 import type { RuleValidationIssue } from './validate.js';
 import {
@@ -31,9 +39,16 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * - each dimension spec takes its normal form (`DimensionSpec`): `anyOf` and `except` sorted
  *   and deduplicated, an empty `except` and `match: 'any'` dropped, `{ anyOf: [v] }` written `v`;
  * - `tags` are sorted and deduplicated;
- * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs` and `models` are
- *   sorted and deduplicated, its dimension specs in normal form, and its empty fields dropped;
- *   an empty list is dropped, as absent;
+ * - `ruleSet: 'local'` is dropped, as absent: a local rule has no rule set (D-4);
+ * - a name qualified by the rule's own rule set is written bare (`rgpd:x` in a rule of `rgpd`
+ *   is `x`, D-37), in `output`, `shortCircuit` outputs and selector `ids` and `outputs`;
+ * - `forEach` takes its normal form (`ForEach`): a `key` list whose names are all equal is
+ *   written as that name, an empty `orderBy` or `dimensions` is dropped, the `facts` of
+ *   `segments` are sorted by pointer and deduplicated; the order of `orderBy` is kept;
+ * - `exceptions` keep their order; each selector's `ids`, `tags`, `outputs`, `models` and
+ *   `ruleSets` are sorted and deduplicated, its dimension specs in normal form, its empty
+ *   fields dropped, and `ruleSets` listing only the rule's own rule set dropped; an empty list
+ *   is dropped, as absent;
  * - `checksum` is removed, and so is every top-level optional or extension field that is
  *   `null` or `undefined` (see `RuleDefinition`); nested `undefined` properties are dropped;
  * - nested values become plain JSON (`Date` to ISO string, `undefined` dropped);
@@ -42,19 +57,24 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * Never mutates `input`; the result shares no reference with it.
  * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
  * positive integer), for a malformed `exceptions` list, for a rule of model `EXCEPTION_MODEL`
- * with an `output` or without exceptions, for an output name starting with `$` (in `output`,
- * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), when
+ * with an `output` or without exceptions, for an `id` holding `:`, a `ruleSet` that is not a
+ * rule set id (`isRuleSetId`), an output name that is not `name` or `<rule set>:<name>` (in
+ * `output`, a `shortCircuit` output or selector `outputs`: at most one `:`, no `.`, no `$` at the
+ * start of either part, ruling R36 and D-4, the rule set part a rule set id other than `local`),
+ * a selector id of a rule set the selector does not target, an invalid `forEach` (see
+ * `ForEach`; its message names the path, `forEach.key has 3 names for 2 levels`), when
  * `effectiveUntil <= effectiveFrom` (an empty window), for bounds of two forms (one civil, one
  * instant: `effectiveFrom and effectiveUntil must both be civil dates or both instants`), for an
  * invalid `timeZone` (`isTimeZone`) or `effectiveOn` (`/$dates/<name>`, `/$item/<path>` with a
- * `forEach`, `/$segment/from` with `forEach.segments`), for an invalid dimension spec (an empty
+ * `forEach` that has `path` and no `groupBy`, `/$segment/from` with `forEach.segments`), for an
+ * invalid dimension spec (an empty
  * value, an empty `anyOf`, an `except` value repeated in `anyOf`, an `except` without `ref`...:
  * see `DimensionSpec`), for a lone UTF-16 surrogate in a string
  * field, a tag, a dimension key or value or an extension key, `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
- * (`params`, `condition.value`, `exceptions`, an extension: a getter or a Proxy trap that
- * throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, or `<field> is too
+ * (`params`, `condition.value`, `forEach`, `exceptions`, an extension: a getter or a Proxy trap
+ * that throws) gives `INVALID_RULE` with `<field> could not be read: <reason>`, or `<field> is too
  * deeply nested` when it overflows the call stack, as in `validateRuleDefinition`; anything
  * else that cannot be read gives `rule definition could not be read: <reason>`.
  */
@@ -73,8 +93,9 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
 
   const { from, until } = readRuleWindow(input.effectiveFrom, input.effectiveUntil);
 
+  const ruleSet = readRuleSet(input.ruleSet);
   const out: Record<string, unknown> = {
-    id: requireString(input.id, 'id'),
+    id: requireId(input.id),
     version: requireVersion(input.version),
     model: requireString(input.model, 'model'),
     params: requireParams(input.params),
@@ -85,6 +106,7 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     tags: normalizeTags(input.tags),
   };
 
+  if (ruleSet !== LOCAL_RULE_SET) out.ruleSet = ruleSet;
   const timeZone = input.timeZone;
   if (timeZone != null) out.timeZone = requireTimeZone(timeZone, 'INVALID_RULE');
   const effectiveOnInput = input.effectiveOn;
@@ -94,15 +116,24 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     const value = input[field];
     if (value != null) out[field] = requireString(value, field);
   }
-  if (typeof out.output === 'string' && isReservedOutputName(out.output)) {
-    invalidRule(reservedOutputNameMessage('output'));
+  if (typeof out.output === 'string') {
+    const problem = citedNameProblem(out.output, 'output', 'output');
+    if (problem !== undefined) invalidRule(problem);
+    out.output = shortestFrom(ruleSet, out.output);
   }
   if (input.exceptions != null) {
-    const read = readRuleExceptions(readJson(input.exceptions, 'exceptions'));
+    const read = readRuleExceptions(
+      readJson(input.exceptions, 'exceptions'),
+      'exceptions',
+      ruleSet,
+    );
     throwFirst(read.issues);
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
   throwFirst(exceptionModelIssues(input));
+  const forEachInput = input.forEach;
+  const forEach = forEachInput == null ? undefined : readForEachField(forEachInput);
+  if (forEach !== undefined) out.forEach = forEach;
 
   for (const key of Object.keys(input)) {
     if (RESERVED.has(key)) continue;
@@ -114,7 +145,6 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
 
   // Checked on the copy the result keeps (`forEach` is read once), so the result is valid.
   if (effectiveOn !== undefined) {
-    const forEach = Object.hasOwn(out, 'forEach') ? out.forEach : undefined;
     const problem = effectiveOnContextProblem(effectiveOn, forEach);
     if (problem !== undefined) invalidRule(problem);
     // The default reference date is written as its absence: one rule, one checksum.
@@ -135,6 +165,30 @@ function readJson(value: unknown, field: string): JsonValue {
     if (error instanceof SpecError) throw error;
     invalidRule(unreadableMessage(field, error));
   }
+}
+
+/** The rule set of the rule: `local` when absent (`null` or `undefined`). */
+function readRuleSet(value: unknown): string {
+  if (value == null) return LOCAL_RULE_SET;
+  if (!isRuleSetId(value)) invalidRule(ruleSetIdMessage('ruleSet'));
+  return value;
+}
+
+/** A non-empty `id` without `:`, which separates a rule set from a name (D-4). */
+function requireId(value: unknown): string {
+  const id = requireString(value, 'id');
+  if (id.includes(':')) invalidRule('id must not contain ":"');
+  return id;
+}
+
+/** The normal form of `forEach` (read once, as JSON), or `INVALID_RULE` for its first problem. */
+function readForEachField(value: unknown): ForEach | undefined {
+  const problems: RuleValidationIssue[] = [];
+  const forEach = readForEach(readJson(value, 'forEach'), (path, message) => {
+    problems.push({ path, message });
+  });
+  throwFirst(problems);
+  return forEach;
 }
 
 function requireParams(value: unknown): unknown {

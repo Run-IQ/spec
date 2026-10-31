@@ -11,7 +11,9 @@
  * `toReferenceDate`, `isTimeZone`, `CivilCalendar`), rule windows (`windowContains`) and
  * coexisting versions (`findOverlappingVersions`); structured dimensions (`DimensionSpec`,
  * `matchDimension`) and dated referentials (`Referential`, `validateReferential`, which agrees
- * with `schema/referential.schema.json`, `resolveMembership`, `computeReferentialDigest`).
+ * with `schema/referential.schema.json`, `resolveMembership`, `computeReferentialDigest`);
+ * collections (`ForEach`, `OrderKey`) and rule sets (`LOCAL_RULE_SET`, `qualifyName`,
+ * `isRuleSetId`, `isPackId`, `packIdProblem`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -46,6 +48,14 @@ export type {
 } from './rule/definition.js';
 export { EXCEPTION_MODEL, matchesSelector } from './rule/exceptions.js';
 export type { RuleException, RuleSelector } from './rule/exceptions.js';
+export type { ForEach, OrderKey, OrderKeyType } from './rule/forEach.js';
+export {
+  isPackId,
+  isRuleSetId,
+  LOCAL_RULE_SET,
+  packIdProblem,
+  qualifyName,
+} from './rule/ruleSet.js';
 export { matchDimension, resolveMembership } from './referential/membership.js';
 export type { DimensionMatch } from './referential/membership.js';
 export { REFERENTIAL_FORMAT } from './referential/types.js';

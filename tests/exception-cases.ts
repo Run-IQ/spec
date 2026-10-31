@@ -17,6 +17,56 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
       'output names starting with "$" are reserved',
   ],
   [
+    'a shortCircuit to an output name with "."',
+    [{ kind: 'shortCircuit', output: 'pack:a.b', value: 1 }],
+    'exceptions[0].output',
+    'exceptions[0].output name must not contain "."',
+  ],
+  [
+    'a shortCircuit to a name qualified by local',
+    [{ kind: 'shortCircuit', output: 'local:x', value: 1 }],
+    'exceptions[0].output',
+    'exceptions[0].output name must not be qualified by "local": a local name is written bare',
+  ],
+  [
+    'a selector naming an output with two ":"',
+    [{ kind: 'inhibit', targets: { outputs: ['a:b:c'] } }],
+    'exceptions[0].targets.outputs[0]',
+    'exceptions[0].targets.outputs[0] name must hold at most one ":": <rule set>:<name>',
+  ],
+  [
+    'a selector naming an output reserved after its rule set',
+    [{ kind: 'inhibit', targets: { outputs: ['pack:$x'] } }],
+    'exceptions[0].targets.outputs[0]',
+    'exceptions[0].targets.outputs[0] name must not start with "$" after ":": ' +
+      'output names starting with "$" are reserved',
+  ],
+  [
+    'a selector naming a rule with two ":"',
+    [{ kind: 'inhibit', targets: { ids: ['a:b:c'] } }],
+    'exceptions[0].targets.ids[0]',
+    'exceptions[0].targets.ids[0] name must hold at most one ":": <rule set>:<name>',
+  ],
+  [
+    'a selector naming a rule of an invalid rule set',
+    [{ kind: 'inhibit', targets: { ids: ['Rgpd:R1'] } }],
+    'exceptions[0].targets.ids[0]',
+    'exceptions[0].targets.ids[0] name must start with a rule set id before ":": ' +
+      '^[a-z0-9][a-z0-9._-]*$',
+  ],
+  [
+    'a selector with an invalid rule set',
+    [{ kind: 'inhibit', targets: { ruleSets: ['rgpd', 'A'], tags: ['t'] } }],
+    'exceptions[0].targets.ruleSets[1]',
+    'exceptions[0].targets.ruleSets[1] must be a rule set id matching ^[a-z0-9][a-z0-9._-]*$',
+  ],
+  [
+    'a selector whose ruleSets is not an array',
+    [{ kind: 'inhibit', targets: { ruleSets: 'rgpd', tags: ['t'] } }],
+    'exceptions[0].targets.ruleSets',
+    'exceptions[0].targets.ruleSets must be an array of non-empty strings',
+  ],
+  [
     'a non-array',
     { kind: 'inhibit', targets: { ids: ['a'] } },
     'exceptions',
@@ -45,7 +95,8 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'missing targets',
     [{ kind: 'inhibit' }],
     'exceptions[0].targets',
-    'exceptions[0].targets must be a selector { ids?, tags?, dimensions?, outputs?, models? }',
+    'exceptions[0].targets must be a selector ' +
+      '{ ids?, tags?, dimensions?, outputs?, models?, ruleSets? }',
   ],
   [
     'an empty selector',

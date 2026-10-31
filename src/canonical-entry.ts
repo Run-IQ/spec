@@ -34,6 +34,14 @@ export type {
 } from './rule/definition.js';
 export { EXCEPTION_MODEL, matchesSelector } from './rule/exceptions.js';
 export type { RuleException, RuleSelector } from './rule/exceptions.js';
+export type { ForEach, OrderKey, OrderKeyType } from './rule/forEach.js';
+export {
+  isPackId,
+  isRuleSetId,
+  LOCAL_RULE_SET,
+  packIdProblem,
+  qualifyName,
+} from './rule/ruleSet.js';
 export { matchDimension, resolveMembership } from './referential/membership.js';
 export type { DimensionMatch } from './referential/membership.js';
 export { REFERENTIAL_FORMAT } from './referential/types.js';

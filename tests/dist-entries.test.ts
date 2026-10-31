@@ -74,6 +74,12 @@ type Entry = {
     timeZone: string,
     calendar: CivilCalendar,
   ) => unknown[];
+  LOCAL_RULE_SET: string;
+  qualifyName: (ruleSet: string, name: string) => string;
+  isRuleSetId: (value: unknown) => boolean;
+  isPackId: (value: unknown) => boolean;
+  packIdProblem: (value: unknown) => string | undefined;
+  normalizeRuleDefinition: (rule: object) => Record<string, unknown>;
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -245,6 +251,35 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(
         entry.matchDimension({ ref: 'ue', anyOf: ['EEE'] }, 'FR', '2026-01-01', tables),
       ).toEqual({ result: true, values: ['FR'], via: ['EEE', 'UE'] });
+    }
+  });
+
+  it('every built entry exports collections and rule sets', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const rule = {
+      id: 'R1',
+      version: 1,
+      model: 'M',
+      params: {},
+      priority: 1,
+      effectiveFrom: '2026-01-01',
+      ruleSet: 'local',
+      forEach: { path: '/enfants', key: ['id'] },
+    };
+    for (const entry of entries) {
+      expect(entry.LOCAL_RULE_SET).toBe('local');
+      expect(entry.qualifyName('rgpd', 'profilage')).toBe('rgpd:profilage');
+      expect(entry.isRuleSetId('local')).toBe(true);
+      expect(entry.isPackId('local')).toBe(false);
+      expect(entry.packIdProblem('rgpd')).toBeUndefined();
+      const normal = entry.normalizeRuleDefinition(rule);
+      expect(normal.forEach).toEqual({ path: '/enfants', key: 'id' });
+      expect(normal).not.toHaveProperty('ruleSet');
     }
   });
 
