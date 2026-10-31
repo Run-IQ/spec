@@ -128,8 +128,9 @@ function objectOf(shape: Shape): Check {
 }
 
 /**
- * Checks a closed object. Unknown keys are reported first, then each field in order. An
- * `undefined` member counts as absent, as in the canonical form; keys in `ignored` are skipped.
+ * Checks a closed object. Unknown keys are reported first, whatever their value (`undefined`
+ * included), then each field in order. A known field whose value is `undefined` counts as
+ * absent, as in the canonical form; keys in `ignored` are skipped.
  * Each own property is read once, so an accessor cannot answer two checks differently. Returns
  * the members read, or `undefined` when `value` is not an object.
  */
@@ -146,8 +147,8 @@ function checkObject(
   }
   const members = new Map<string, unknown>(Object.entries(value));
   const at = (key: string): string => (path ? `${path}.${key}` : key);
-  for (const [key, member] of members) {
-    if (member === undefined || ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
+  for (const key of members.keys()) {
+    if (ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
     add(at(key), `${path || 'proof'} has an unknown key "${key}"`);
   }
   for (const [key, check] of Object.entries(shape.fields)) {
@@ -282,8 +283,10 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  * `validateRuleDefinition`. `errors` holds the same messages, in the same order.
  *
  * It checks the shape only, never the digest or the signature (`verifyProof` does):
- * - the format is closed: every object refuses unknown keys, and an `undefined` member counts
- *   as absent, as in the canonical form;
+ * - the format is closed: every object refuses unknown keys, even with an `undefined` value;
+ *   a known field whose value is `undefined` counts as absent, as in the canonical form;
+ * - a value that cannot be read (a getter or a Proxy trap that throws) gives the single issue
+ *   `proof could not be read: <reason>` at path `''`;
  * - `format` is `PROOF_FORMAT`; `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
  *   in the grammar of rule dates; `inputDigest`, `digest`, rule checksums and `ruleSet.digest`
  *   are lowercase sha256 hex; `signature.value` is 64 bytes in unpadded base64url;
@@ -356,7 +359,10 @@ function readSnapshot(
   try {
     snapshot = toJsonValue(value, '');
   } catch (error) {
-    return { snapshot: undefined, errors: [describeError(error)] };
+    // A SpecError names a value with no JSON form; anything else was thrown while reading.
+    const reason = describeError(error);
+    const message = error instanceof SpecError ? reason : `proof could not be read: ${reason}`;
+    return { snapshot: undefined, errors: [message] };
   }
   if (isPlainObject(snapshot)) for (const key of ignored) delete snapshot[key];
   return { snapshot, errors: messages(collect(snapshot, shape, ignored)) };
@@ -371,13 +377,18 @@ function collect(
   const add: Add = (path, message) => {
     issues.push({ path, message });
   };
-  if (!isPlainObject(value)) {
-    add('', 'a decision proof must be a plain object');
+  try {
+    if (!isPlainObject(value)) {
+      add('', 'a decision proof must be a plain object');
+      return issues;
+    }
+    const members = checkObject(value, '', shape, add, ignored);
+    checkUniqueRules(members?.get('rules'), add);
     return issues;
+  } catch (error) {
+    // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
+    return [{ path: '', message: `proof could not be read: ${describeError(error)}` }];
   }
-  const members = checkObject(value, '', shape, add, ignored);
-  checkUniqueRules(members?.get('rules'), add);
-  return issues;
 }
 
 /** Validator-only: two rule references with the same id and version. */

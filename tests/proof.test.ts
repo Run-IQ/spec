@@ -1103,6 +1103,83 @@ describe('validateProof', () => {
     ]);
   });
 
+  it('refuses an unknown key even with an undefined value, everywhere', () => {
+    expect(validateProof({ ...sealed(), extra: undefined }).issues).toEqual([
+      { path: 'extra', message: 'proof has an unknown key "extra"' },
+    ]);
+    const proof = sealed();
+    proof.outputs.value!.rounding = { scale: 2, mode: 'up' };
+    Object.assign(proof.outputs.value!.rounding, { precision: undefined });
+    expect(validateProof(proof).issues).toEqual([
+      {
+        path: 'outputs.value.rounding.precision',
+        message: 'outputs.value.rounding has an unknown key "precision"',
+      },
+    ]);
+    Object.assign(proof.applied[0]!, { note: undefined });
+    expect(validateProof(proof).issues.map((i) => i.path)).toEqual([
+      'outputs.value.rounding.precision',
+      'applied[0].note',
+    ]);
+  });
+
+  it.each([
+    [
+      'at the top level',
+      (p: DecisionProof) =>
+        Object.defineProperty(p, 'requestId', {
+          enumerable: true,
+          get: () => {
+            throw new Error('boom');
+          },
+        }),
+      'proof could not be read: boom',
+    ],
+    [
+      'inside rounding',
+      (p: DecisionProof) => {
+        p.outputs.value!.rounding = { scale: 2, mode: 'up' };
+        Object.defineProperty(p.outputs.value!.rounding, 'scale', {
+          enumerable: true,
+          get: () => {
+            throw Symbol('scale');
+          },
+        });
+      },
+      'proof could not be read: Symbol(scale)',
+    ],
+  ])('reports a throwing getter %s, and seal and sign refuse it', (_name, poison, message) => {
+    const proof = sealed();
+    poison(proof);
+    expect(validateProof(proof)).toEqual({ errors: [message], issues: [{ path: '', message }] });
+    const sealError = specError(() => sealProof(proof));
+    expect(sealError.code).toBe('INVALID_PROOF');
+    expect(sealError.message).toBe(`Cannot seal the proof: ${message}`);
+    const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
+    expect(signError.code).toBe('INVALID_PROOF');
+    expect(signError.message).toBe(`Cannot sign the proof: ${message}`);
+    expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [message] });
+  });
+
+  it('refuses a proof sealed before strata existed', () => {
+    // A JSON copy of a sealed proof, as an older producer stored it.
+    const old = JSON.parse(JSON.stringify(sealed())) as Record<string, unknown>;
+    delete old.strata;
+    for (const entry of [...(old.applied as object[]), ...(old.skipped as object[])]) {
+      Reflect.deleteProperty(entry, 'stratum');
+    }
+    expect(validateProof(old).errors).toEqual([
+      'strata is required',
+      'applied[0].stratum is required',
+      'skipped[0].stratum is required',
+    ]);
+    expect(verifyProof(old).status).toBe('invalid');
+    // The cast lets a JavaScript caller's malformed value reach sealProof, which checks it.
+    expect(specError(() => sealProof(old as unknown as UnsignedProof)).message).toBe(
+      'Cannot seal the proof: strata is required',
+    );
+  });
+
   it('refuses a Date where an ISO string is expected', () => {
     expect(validateProof({ ...sealed(), sealedAt: new Date(0) }).issues).toEqual([
       {

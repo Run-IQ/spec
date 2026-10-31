@@ -361,6 +361,20 @@ describe('validateOutputDeclaration: rounding', () => {
     ]);
   });
 
+  it('refuses an unknown key, even with an undefined value, as at the top level', () => {
+    expect(validateOutputDeclaration({ type: 'number', combine: 'sum', unit: undefined })).toEqual([
+      { path: 'output.unit', message: 'output has an unknown key "unit"' },
+    ]);
+    expect(
+      validateOutputDeclaration(withRounding({ scale: 2, mode: 'up', precision: undefined })),
+    ).toEqual([
+      {
+        path: 'output.rounding.precision',
+        message: 'output.rounding has an unknown key "precision"',
+      },
+    ]);
+  });
+
   it('refuses an unknown key', () => {
     expect(validateOutputDeclaration(withRounding({ scale: 2, mode: 'up', precision: 4 }))).toEqual(
       [

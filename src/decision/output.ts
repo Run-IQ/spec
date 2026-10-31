@@ -136,8 +136,8 @@ const MAX_SCALE = 20;
  * Checks an output declaration without throwing and reports every problem found, each with
  * its path under `path` (`output.combine`, `output.values[2]`):
  * - `type` and `combine` must be known, and `combine` must apply to `type` (`sum`, `max` and
- *   `min` to `number`; `all` and `any` to `boolean`; `union` to `list`; `highestPriority` to
- *   every type);
+ *   `min` to `number` and `decimal`; `all` and `any` to `boolean`; `union` to `list`;
+ *   `highestPriority` to every type);
  * - `values` is required for an `enum` (a non-empty array of distinct non-empty strings) and
  *   refused for any other type;
  * - `rounding` is allowed on a `number` or `decimal` output only, and is
@@ -190,7 +190,8 @@ export function validateOutputDeclaration(
 
 /**
  * Internal: checks a rounding `{ scale, mode, at? }` at `path`, for an output declaration and
- * for the outputs of a proof alike. An `undefined` member counts as absent.
+ * for the outputs of a proof alike. An unknown key is refused whatever its value; a known key
+ * whose value is `undefined` counts as absent.
  */
 export function checkRounding(
   rounding: unknown,
@@ -202,8 +203,8 @@ export function checkRounding(
     return;
   }
   const members = new Map<string, unknown>(Object.entries(rounding));
-  for (const [key, member] of members) {
-    if (member !== undefined && !ROUNDING_KEYS.has(key)) {
+  for (const key of members.keys()) {
+    if (!ROUNDING_KEYS.has(key)) {
       add(`${path}.${key}`, `${path} has an unknown key "${key}"`);
     }
   }

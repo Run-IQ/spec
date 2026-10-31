@@ -3,8 +3,9 @@
  * stored and executable forms of a rule, and its validator (`validateRuleDefinition`, which
  * agrees with `schema/rule-definition.schema.json`); the rule exception format
  * (`RuleException`, `matchesSelector`), the output declarations (`OutputDeclaration`) and
- * exact decimals (`isCanonicalDecimal`, `toCanonicalDecimal`); the decision proof format (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which
- * agrees with `schema/decision-proof.schema.json`).
+ * exact decimals (`isCanonicalDecimal`, `toCanonicalDecimal`); the decision proof format
+ * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
+ * `schema/decision-proof.schema.json`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon

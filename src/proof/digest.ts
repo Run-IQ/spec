@@ -108,6 +108,8 @@ function proofContent(p: UnsignedProof): Record<string, unknown> {
  *   range: id@version` when its `stratum` is not an index of `strata`, otherwise, for an
  *   applied rule whose `output` is not in `strata[stratum]`, `step stratum mismatch:
  *   id@version`.
+ *
+ * Linear in the size of the proof: each stratum is turned into a set once.
  */
 export function strataProblems(p: UnsignedProof): string[] {
   const issues = new Set<string>();
@@ -120,11 +122,12 @@ export function strataProblems(p: UnsignedProof): string[] {
   for (const name of Object.keys(p.outputs).sort()) {
     if (!placed.has(name)) issues.add(`output not in strata: ${name}`);
   }
+  const members = p.strata.map((names) => new Set(names));
   const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
     const key = `${entry.ruleId}@${entry.version}`;
-    const names = p.strata[entry.stratum];
+    const names = members[entry.stratum];
     if (!names) issues.add(`stratum out of range: ${key}`);
-    else if (output !== undefined && !names.includes(output)) {
+    else if (output !== undefined && !names.has(output)) {
       issues.add(`step stratum mismatch: ${key}`);
     }
   };
@@ -152,23 +155,26 @@ export function reservedOutputNames(p: UnsignedProof): string[] {
  * Internal: each `decimal` output (by sorted name) whose `value`, or the `contribution` or
  * `unrounded` value of an applied rule feeding it, is not a canonical decimal string
  * (`isCanonicalDecimal`), reported once as `decimal value not canonical: name`.
+ *
+ * Linear in the size of the proof: the applied list is read once.
  */
 export function nonCanonicalDecimals(p: UnsignedProof): string[] {
   const canonical = (value: JsonValue): boolean =>
     typeof value === 'string' && isCanonicalDecimal(value);
+  const isDecimal = (name: string): boolean =>
+    Object.hasOwn(p.outputs, name) && p.outputs[name]?.type === 'decimal';
+  const failing = new Set<string>();
+  for (const step of p.applied) {
+    if (!isDecimal(step.output)) continue;
+    const unrounded = step.unrounded === undefined || canonical(step.unrounded);
+    if (!canonical(step.contribution) || !unrounded) failing.add(step.output);
+  }
   const issues: string[] = [];
   for (const name of Object.keys(p.outputs).sort()) {
-    const output = p.outputs[name];
-    if (output?.type !== 'decimal') continue;
-    const steps = p.applied.filter((step) => step.output === name);
-    const valid =
-      canonical(output.value) &&
-      steps.every(
-        (step) =>
-          canonical(step.contribution) &&
-          (step.unrounded === undefined || canonical(step.unrounded)),
-      );
-    if (!valid) issues.push(`decimal value not canonical: ${name}`);
+    if (!isDecimal(name)) continue;
+    if (!canonical(p.outputs[name]?.value ?? null) || failing.has(name)) {
+      issues.push(`decimal value not canonical: ${name}`);
+    }
   }
   return issues;
 }
