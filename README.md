@@ -109,7 +109,7 @@ isCanonicalDecimal('12.50');   // false
 
 A `number` or `decimal` output can declare `rounding: { scale, mode, at? }`: `scale` decimal places (0 to 20), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
 
-A rule reads the outputs computed before it through the reserved variable `$outputs` (`OUTPUTS_VARIABLE`): `$outputs.x` is output `x`.
+A rule reads the outputs computed before it through the reserved variable `$outputs` (`OUTPUTS_VARIABLE`): `$outputs.x` is output `x`. Output names starting with `$` are reserved: a rule `output`, a `shortCircuit` output or a selector `outputs` entry that starts with `$` is refused (`INVALID_RULE`).
 
 A rule can carry exceptions that apply when the rule itself applies:
 
@@ -212,7 +212,7 @@ verifyProof(signed, { trustedKeys });                // { status: 'invalid', iss
 - `sealProof` sets `digest`, the sha256 of the canonical proof without `digest` and `signature`. It hashes lists in the order given: the producer sorts them.
 - `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
 - `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.
-- `strata` lists the outputs of each evaluation stratum, in order: `[['value']]` when no rule reads an output. Each entry of `applied`, `skipped` and `exceptions` carries its `stratum`, the index in `strata`. An output's `rounding` and a rounded contribution's `unrounded` value are kept. A proof is `invalid`, and `sealProof` and `signProof` refuse it, when an output is in no stratum or in two, a stratum names an unknown output, a `stratum` is out of range, or an applied rule's output is not in its stratum (`step stratum mismatch: id@version`).
+- `strata` lists the outputs of each evaluation stratum, in order: `[['value']]` when no rule reads an output. Each entry of `applied`, `skipped` and `exceptions` carries its `stratum`, the index in `strata`. An output's `rounding` and a rounded contribution's `unrounded` value are kept. A proof is `invalid`, and `sealProof` and `signProof` refuse it, when an output is in no stratum or in two, a stratum names an unknown output, a `stratum` is out of range, or an applied rule's output is not in its stratum (`step stratum mismatch: id@version`). The same goes for an output name starting with `$` (`output name reserved: name`) and for a `decimal` output whose value, or an applied contribution or `unrounded` value for it, is not a canonical decimal string (`decimal value not canonical: name`).
 - `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except that it cannot refuse a rule listed twice.
 
 ## Browser entry
