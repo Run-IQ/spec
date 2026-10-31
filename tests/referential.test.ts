@@ -2,11 +2,42 @@ import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
   computeReferentialDigest,
+  normalizeReferential,
   sha256Hex,
   validateReferential,
 } from '../src/index.js';
 import type { Referential, ReferentialMember } from '../src/index.js';
-import { nestedReferential, ueReferential } from './helpers.js';
+import { referentialCheckSteps } from '../src/referential/validate.js';
+import { nestedReferential, specError, ueReferential } from './helpers.js';
+
+/**
+ * The most cycle and depth sweep steps allowed per node of a tree-shaped referential: one path
+ * search and two longest-chain walks per membership, each bounded by the subtree or the chain
+ * (at most 4 levels here), about 12 steps per node; c = 20 leaves room without allowing a
+ * quadratic sweep.
+ */
+const STEPS_PER_NODE = 20;
+
+/** 10 000 groups on 4 levels (10, 100, 1 000, 8 890), each a member twice, on adjacent periods. */
+function layeredReferential(): Referential {
+  const groups: Record<string, ReferentialMember[]> = {};
+  const twice = (value: string): ReferentialMember[] => [
+    { value, from: '2000-01-01', until: '2010-01-01' },
+    { value, from: '2010-01-01' },
+  ];
+  let previous: string[] = [];
+  [10, 100, 1000, 8890].forEach((size, level) => {
+    const names = Array.from({ length: size }, (_, i) => `L${level}-${i}`);
+    for (const name of names) groups[name] = [];
+    names.forEach((name, i) => {
+      const parent = previous[i % Math.max(previous.length, 1)];
+      if (parent !== undefined) groups[parent]?.push(...twice(name));
+    });
+    previous = names;
+  });
+  for (const leaf of previous) groups[leaf]?.push(...twice(`code-${leaf}`));
+  return withGroups(groups);
+}
 
 /** A referential with only the given groups, every group exhaustive. */
 function withGroups(groups: Record<string, ReferentialMember[]>): Referential {
@@ -276,8 +307,8 @@ describe('validateReferential: refused documents', () => {
       ],
     ],
     [
-      'a code period without until',
-      { ...withGroups({ A: [{ value: 'x' }] }), codes: { x: [{ from: '2000-01-01' }] } },
+      'a code period with a non-date until',
+      { ...withGroups({ A: [{ value: 'x' }] }), codes: { x: [{ from: '2000-01-01', until: 1 }] } },
       [
         {
           path: 'codes.x[0].until',
@@ -430,29 +461,18 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     ]);
   });
 
-  it('validates 10 000 groups on 4 levels, each with 2 periods, in under 2 s', () => {
-    const groups: Record<string, ReferentialMember[]> = {};
-    const twice = (value: string): ReferentialMember[] => [
-      { value, from: '2000-01-01', until: '2010-01-01' },
-      { value, from: '2010-01-01' },
-    ];
-    const sizes = [10, 100, 1000, 8890];
-    let previous: string[] = [];
-    sizes.forEach((size, level) => {
-      const names = Array.from({ length: size }, (_, i) => `L${level}-${i}`);
-      for (const name of names) groups[name] = [];
-      names.forEach((name, i) => {
-        const parent = previous[i % Math.max(previous.length, 1)];
-        if (parent !== undefined) groups[parent]?.push(...twice(name));
-      });
-      previous = names;
-    });
-    for (const leaf of previous) groups[leaf]?.push(...twice(`code-${leaf}`));
-    const r = withGroups(groups);
-    expect(Object.keys(r.groups)).toHaveLength(10_000);
-    const start = performance.now();
+  it('checks 10 000 groups on 4 levels, each with 2 periods, in linear work', () => {
+    const r = layeredReferential();
+    const nodes = 10_000 + 2 * (10_000 - 10) + 2 * 8890;
     expect(validateReferential(r)).toEqual([]);
-    expect(performance.now() - start).toBeLessThan(2000);
+    // About 2 steps per node here (97 500 measured; each search walks one subtree); a sweep that
+    // searched the whole graph for each membership would take about 10^8 steps.
+    expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
+  });
+
+  it('checks a long chain of groups in linear work', () => {
+    const r = nestedReferential(64);
+    expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * 64 * 64);
   });
 
   it('refuses invalid options with a SpecError', () => {
@@ -466,9 +486,43 @@ describe('validateReferential: hostile data and scale (I20)', () => {
 });
 
 describe('computeReferentialDigest', () => {
-  it('is the sha256 of the canonical form', () => {
+  it('is the sha256 of the canonical normal form', () => {
     const r = ueReferential();
-    expect(computeReferentialDigest(r)).toBe(sha256Hex(canonicalize(r)));
+    expect(computeReferentialDigest(r)).toBe(sha256Hex(canonicalize(normalizeReferential(r))));
+    expect(computeReferentialDigest(r)).not.toBe(sha256Hex(canonicalize(r)));
+  });
+
+  it('gives one digest to one meaning: member and period order, until null or absent', () => {
+    const written = ueWithCodes();
+    const reordered: Referential = {
+      ...written,
+      codes: {
+        X: [
+          { from: '2010-01-01', until: null },
+          { from: '1990-01-01', until: '2000-01-01' },
+        ],
+        FR: [{ from: '1958-01-01', until: null }],
+      },
+      groups: {
+        ...written.groups,
+        UE: {
+          exhaustive: true,
+          members: [
+            { value: 'X', from: '2010-01-01', until: null },
+            { value: 'X', from: '1990-01-01', until: '2000-01-01' },
+            { value: 'FR', from: '1958-01-01', until: null },
+          ],
+        },
+      },
+    };
+    expect(computeReferentialDigest(reordered)).toBe(computeReferentialDigest(written));
+  });
+
+  it('refuses an invalid referential', () => {
+    const r = withGroups({ A: [{ value: 'A' }] });
+    const error = specError(() => computeReferentialDigest(r));
+    expect(error.code).toBe('INVALID_REFERENTIAL');
+    expect(error.message).toBe('cycle A > A from the beginning');
   });
 
   it('does not depend on the order of keys', () => {
@@ -554,5 +608,163 @@ describe('sourceRef: the legal source, at every level', () => {
     const fr = member.groups.UE?.members[0];
     if (fr) fr.sourceRef = 'Traité de Rome';
     expect(computeReferentialDigest(member)).not.toBe(digest);
+  });
+});
+
+/** ue with codes: FR, and X used twice with a gap, both in UE. */
+function ueWithCodes(): Referential {
+  return {
+    format: 'run-iq.referential/1',
+    id: 'ue',
+    version: '1',
+    dimension: 'pays',
+    codes: {
+      FR: [{ from: '1958-01-01' }],
+      X: [{ from: '1990-01-01', until: '2000-01-01' }, { from: '2010-01-01' }],
+    },
+    groups: {
+      UE: {
+        exhaustive: true,
+        members: [
+          { value: 'FR', from: '1958-01-01' },
+          { value: 'X', from: '1990-01-01', until: '2000-01-01' },
+          { value: 'X', from: '2010-01-01' },
+        ],
+      },
+    },
+  };
+}
+
+describe('normalizeReferential', () => {
+  it('sorts members and periods, writes an open end as absent', () => {
+    const r: Referential = {
+      format: 'run-iq.referential/1',
+      id: 'r',
+      version: '1',
+      dimension: 'd',
+      sourceRef: 'Loi 1',
+      codes: {
+        b: [
+          { from: '2010-01-01', until: null, sourceRef: 'B2' },
+          { from: '2000-01-01', until: '2005-01-01' },
+        ],
+        a: [{ from: '2000-01-01', until: null }],
+      },
+      groups: {
+        G: {
+          exhaustive: false,
+          sourceRef: 'Décret',
+          members: [
+            { value: 'b', from: '2010-01-01', until: null },
+            { value: 'a', sourceRef: 'S' },
+            { value: 'b', from: '2000-01-01', until: '2005-01-01' },
+          ],
+        },
+      },
+    };
+    expect(normalizeReferential(r)).toEqual({
+      format: 'run-iq.referential/1',
+      id: 'r',
+      version: '1',
+      dimension: 'd',
+      sourceRef: 'Loi 1',
+      codes: {
+        a: [{ from: '2000-01-01' }],
+        b: [
+          { from: '2000-01-01', until: '2005-01-01' },
+          { from: '2010-01-01', sourceRef: 'B2' },
+        ],
+      },
+      groups: {
+        G: {
+          exhaustive: false,
+          sourceRef: 'Décret',
+          members: [
+            { value: 'a', sourceRef: 'S' },
+            { value: 'b', from: '2000-01-01', until: '2005-01-01' },
+            { value: 'b', from: '2010-01-01' },
+          ],
+        },
+      },
+    });
+  });
+
+  it('keeps an identical repeated entry once; validate accepts it as one', () => {
+    const r = withGroups({
+      A: [
+        { value: 'x', from: '2000-01-01', until: null },
+        { value: 'x', from: '2000-01-01' },
+      ],
+    });
+    expect(validateReferential(r)).toEqual([]);
+    expect(normalizeReferential(r).groups.A?.members).toEqual([{ value: 'x', from: '2000-01-01' }]);
+    const codes = {
+      ...r,
+      codes: { x: [{ from: '2000-01-01' }, { from: '2000-01-01', until: null }] },
+    };
+    expect(validateReferential(codes)).toEqual([]);
+    expect(normalizeReferential(codes).codes).toEqual({ x: [{ from: '2000-01-01' }] });
+  });
+
+  it('a member with two sources on the same period is still listed twice', () => {
+    const r = withGroups({
+      A: [
+        { value: 'x', sourceRef: 'a' },
+        { value: 'x', sourceRef: 'b' },
+      ],
+    });
+    expect(validateReferential(r)).toEqual([
+      { path: 'groups.A.members', message: 'groups.A.members lists x twice from the beginning' },
+    ]);
+  });
+
+  it('is idempotent', () => {
+    for (const r of [ueReferential(), ueWithCodes(), nestedReferential(64), layeredReferential()]) {
+      const once = normalizeReferential(r);
+      expect(normalizeReferential(once)).toEqual(once);
+    }
+  });
+
+  it('validate(normalize(x)) agrees with validate(x)', () => {
+    for (const r of [ueReferential(), ueWithCodes(), nestedReferential(64), layeredReferential()]) {
+      expect(validateReferential(r)).toEqual([]);
+      expect(validateReferential(normalizeReferential(r))).toEqual([]);
+    }
+    const invalid: unknown[] = [
+      withGroups({ A: [{ value: 'B' }], B: [{ value: 'A' }] }),
+      nestedReferential(65),
+      { ...ueReferential(), format: 'x' },
+      withGroups({ A: [{ value: 'x', from: '2020-01-01', until: '2019-01-01' }] }),
+    ];
+    for (const r of invalid) {
+      const [first] = validateReferential(r);
+      const error = specError(() => normalizeReferential(r));
+      expect(error.code).toBe('INVALID_REFERENTIAL');
+      expect(error.message).toBe(first?.message);
+    }
+  });
+
+  it('shares nothing with its input, and reads each property once', () => {
+    let reads = 0;
+    const r = {
+      ...ueReferential(),
+      get id(): string {
+        reads++;
+        return reads === 1 ? 'ue' : '';
+      },
+    };
+    const normal = normalizeReferential(r);
+    expect(reads).toBe(1);
+    expect(normal.id).toBe('ue');
+    const source = ueReferential();
+    const copy = normalizeReferential(source);
+    source.groups.UE?.members.push({ value: 'XX' });
+    expect(copy.groups.UE?.members).toHaveLength(4);
+  });
+
+  it('honours the limits', () => {
+    expect(specError(() => normalizeReferential(ueReferential(), { maxNodes: 9 })).message).toBe(
+      'referential too large: 10 nodes',
+    );
   });
 });

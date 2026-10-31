@@ -7,7 +7,7 @@ import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
 import { hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
 import { REFERENTIAL_FORMAT } from './types.js';
-import type { Referential } from './types.js';
+import type { Period, Referential, ReferentialMember } from './types.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -46,6 +46,19 @@ interface Edge {
 
 type Add = (path: string, message: string) => void;
 
+/** Options of `validateReferential` and `normalizeReferential`. */
+export interface ReferentialLimits {
+  /** Most nodes (code periods, groups and members); default 100 000. */
+  maxNodes?: number;
+  /** Most groups on one chain of nesting at any date; default 64. */
+  maxDepth?: number;
+}
+
+/** Counts the elementary steps of the cycle and depth sweep (tests bound the work with it). */
+interface Work {
+  steps: number;
+}
+
 /**
  * Checks a referential document (`Referential`) without throwing and returns every problem
  * found, each with the path of its field (`groups.UE.members[0].until`; `''` for the whole
@@ -73,30 +86,80 @@ type Add = (path: string, message: string) => void;
  */
 export function validateReferential(
   value: unknown,
-  options: { maxNodes?: number; maxDepth?: number } = {},
+  options: ReferentialLimits = {},
 ): RuleValidationIssue[] {
+  return check(value, options, { steps: 0 }).issues;
+}
+
+/**
+ * The normal form of a referential, so that one meaning has one form and one digest:
+ * - the members of each group sorted by `value`, then `from` (absent first), `until` (absent
+ *   last) and `sourceRef` (absent first), in UTF-16 code units; the periods of each code sorted
+ *   the same way by `from`, `until` and `sourceRef`;
+ * - `until: null` written as an absent `until` (no end), on members and code periods;
+ * - an entry listed twice, identical once normalized, kept once.
+ *
+ * Reads each property of `referential` once and returns a copy that shares nothing with it.
+ * Throws `SpecError` (`INVALID_REFERENTIAL`) with the first issue of `validateReferential` when
+ * the referential is not valid (with the same `options`).
+ */
+export function normalizeReferential(
+  referential: unknown,
+  options: ReferentialLimits = {},
+): Referential {
+  const { issues, normal } = check(referential, options, { steps: 0 });
+  const [first] = issues;
+  if (first !== undefined || normal === undefined) {
+    throw new SpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
+  }
+  return normal;
+}
+
+/**
+ * `sha256Hex(canonicalize(normalizeReferential(referential, options)))`: the digest a decision
+ * cites for the referential it used (`ruleSets`, `kind: 'referential'`). The same meaning
+ * gives the same digest, whatever the order of keys, members and periods, and whether an open
+ * end is written `until: null` or left out. Throws `SpecError` (`INVALID_REFERENTIAL`) for an
+ * invalid referential.
+ */
+export function computeReferentialDigest(
+  referential: Referential,
+  options: ReferentialLimits = {},
+): string {
+  return sha256Hex(canonicalize(normalizeReferential(referential, options)));
+}
+
+/**
+ * Internal (not exported from the package): the steps the cycle and depth sweep took on
+ * `value`, so that tests bound the work without a clock.
+ */
+export function referentialCheckSteps(value: unknown, options: ReferentialLimits = {}): number {
+  const work = { steps: 0 };
+  check(value, options, work);
+  return work.steps;
+}
+
+function check(
+  value: unknown,
+  options: ReferentialLimits,
+  work: Work,
+): { issues: RuleValidationIssue[]; normal: Referential | undefined } {
   const maxNodes = readOption(options.maxNodes, DEFAULT_MAX_REFERENTIAL_NODES, 'maxNodes');
   const maxDepth = readOption(options.maxDepth, DEFAULT_MAX_GROUP_DEPTH, 'maxDepth');
   const issues: RuleValidationIssue[] = [];
   const add: Add = (path, message) => {
     issues.push({ path, message });
   };
+  let normal: Referential | undefined;
   try {
-    readReferential(value, maxNodes, maxDepth, add);
+    normal = readReferential(value, maxNodes, maxDepth, add, work);
   } catch (error) {
-    return [{ path: '', message: unreadableMessage('referential', error) }];
+    return {
+      issues: [{ path: '', message: unreadableMessage('referential', error) }],
+      normal: undefined,
+    };
   }
-  return issues;
-}
-
-/**
- * `sha256Hex(canonicalize(referential))`: the digest a decision cites for the referential it
- * used (`ruleSets`, `kind: 'referential'`). It does not depend on the order of keys; the order
- * of lists (members, periods) is part of the document. Throws `SpecError` (`NON_SERIALIZABLE`)
- * for a value that is not JSON.
- */
-export function computeReferentialDigest(referential: Referential): string {
-  return sha256Hex(canonicalize(referential));
+  return { issues, normal: issues.length === 0 ? normal : undefined };
 }
 
 function readOption(value: number | undefined, fallback: number, name: string): number {
@@ -110,17 +173,29 @@ function readOption(value: number | undefined, fallback: number, name: string): 
 /** A group as read once: its raw members, read after the size check. */
 interface RawGroup {
   name: string;
+  exhaustive: boolean;
+  sourceRef: string | undefined;
   members: readonly unknown[] | undefined;
   length: number;
 }
 
-function readReferential(value: unknown, maxNodes: number, maxDepth: number, add: Add): void {
+/**
+ * Checks the referential and builds its normal form as it reads it; the form is complete only
+ * when no issue was added.
+ */
+function readReferential(
+  value: unknown,
+  maxNodes: number,
+  maxDepth: number,
+  add: Add,
+  work: Work,
+): Referential | undefined {
   if (!isPlainObject(value)) {
     add('', 'a referential must be a plain object');
-    return;
+    return undefined;
   }
   const fields = readFields(value, '', KEYS, 'referential has an unknown key', add);
-  if (fields === undefined) return;
+  if (fields === undefined) return undefined;
 
   if (fields.format !== REFERENTIAL_FORMAT) {
     add('format', `format must be ${quoteText(REFERENTIAL_FORMAT)}`);
@@ -146,17 +221,19 @@ function readReferential(value: unknown, maxNodes: number, maxDepth: number, add
   for (const group of groups ?? []) nodes += 1 + group.length;
   if (nodes > maxNodes) {
     add('', `referential too large: ${nodes} nodes`);
-    return;
+    return undefined;
   }
 
   const codeNames = new Set<string>();
+  const normalCodes: Record<string, Period[]> = {};
   if (codes !== undefined) {
     for (const [code, periods] of codes) {
       codeNames.add(code);
-      if (periods !== undefined) checkPeriods(periods, `codes.${code}`, add);
+      if (periods !== undefined)
+        defineField(normalCodes, code, checkPeriods(periods, `codes.${code}`, add));
     }
   }
-  if (groups === undefined) return;
+  if (groups === undefined) return undefined;
   const groupNames = new Set(groups.map((g) => g.name));
   for (const name of groupNames) {
     if (codeNames.has(name)) add(`groups.${name}`, `${name} is both a code and a group`);
@@ -164,18 +241,75 @@ function readReferential(value: unknown, maxNodes: number, maxDepth: number, add
 
   const edges: Edge[] = [];
   let membersValid = true;
+  const normalGroups: Referential['groups'] = {};
   for (const group of groups) {
-    if (group.members === undefined) continue;
-    const ok = checkMembers(
-      group,
-      codes === undefined ? undefined : codeNames,
-      groupNames,
-      edges,
-      add,
-    );
-    membersValid &&= ok;
+    const members =
+      group.members === undefined
+        ? undefined
+        : checkMembers(group, codes === undefined ? undefined : codeNames, groupNames, edges, add);
+    if (members === undefined) {
+      membersValid = false;
+      continue;
+    }
+    const normalGroup: Referential['groups'][string] = { exhaustive: group.exhaustive, members };
+    if (group.sourceRef !== undefined) normalGroup.sourceRef = group.sourceRef;
+    defineField(normalGroups, group.name, normalGroup);
   }
-  if (membersValid) checkNesting(edges, maxDepth, add);
+  if (membersValid) checkNesting(edges, maxDepth, add, work);
+
+  const normal: Referential = {
+    format: REFERENTIAL_FORMAT,
+    id: String(fields.id),
+    version: String(fields.version),
+    dimension: String(fields.dimension),
+    groups: normalGroups,
+  };
+  if (typeof fields.codeSystem === 'string') normal.codeSystem = fields.codeSystem;
+  if (codes !== undefined) normal.codes = normalCodes;
+  if (typeof fields.sourceRef === 'string') normal.sourceRef = fields.sourceRef;
+  return normal;
+}
+
+/** Plain assignment would turn a `__proto__` key into a prototype change. */
+function defineField<T>(target: Record<string, T>, key: string, value: T): void {
+  Object.defineProperty(target, key, {
+    value,
+    enumerable: true,
+    writable: true,
+    configurable: true,
+  });
+}
+
+/** Code-unit order, `undefined` first. */
+function compareText(a: string | undefined, b: string | undefined): number {
+  if (a === b) return 0;
+  if (a === undefined) return -1;
+  if (b === undefined) return 1;
+  return a < b ? -1 : 1;
+}
+
+/** The order of normal entries: `from` (absent first), `until` (absent last), `sourceRef`. */
+function compareSpans(
+  a: { from?: string; until?: string | null; sourceRef?: string },
+  b: { from?: string; until?: string | null; sourceRef?: string },
+): number {
+  return (
+    compareText(a.from, b.from) ||
+    compareText(a.until ?? '~', b.until ?? '~') ||
+    compareText(a.sourceRef, b.sourceRef)
+  );
+}
+
+/** `entries` sorted by `compare`, an entry equal (by `canonicalize`) to its neighbour dropped. */
+function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number): T[] {
+  const out: T[] = [];
+  let last: string | undefined;
+  for (const entry of [...entries].sort(compare)) {
+    const key = canonicalize(entry);
+    if (key !== last) out.push(entry);
+    last = key;
+  }
+  return out;
 }
 
 /**
@@ -302,43 +436,56 @@ function readGroups(value: unknown, add: Add): RawGroup[] | undefined {
 }
 
 function readGroup(value: unknown, name: string, path: string, add: Add): RawGroup {
+  const refused = { name, exhaustive: false, sourceRef: undefined, members: undefined, length: 0 };
   if (!isPlainObject(value)) {
     add(path, `${path} must be an object { exhaustive, members }`);
-    return { name, members: undefined, length: 0 };
+    return refused;
   }
   const fields = readFields(value, `${path}.`, GROUP_KEYS, `${path} has an unknown key`, add);
-  if (fields === undefined) return { name, members: undefined, length: 0 };
+  if (fields === undefined) return refused;
   checkSourceRef(fields, `${path}.`, add);
-  if (typeof fields.exhaustive !== 'boolean') {
+  const exhaustive = fields.exhaustive;
+  if (typeof exhaustive !== 'boolean') {
     add(`${path}.exhaustive`, `${path}.exhaustive must be a boolean`);
   }
   const members = fields.members;
   if (!Array.isArray(members)) {
     add(`${path}.members`, `${path}.members must be an array of members`);
-    return { name, members: undefined, length: 0 };
+    return refused;
   }
   const list: readonly unknown[] = members;
-  return { name, members: list, length: list.length };
+  return {
+    name,
+    exhaustive: exhaustive === true,
+    sourceRef: typeof fields.sourceRef === 'string' ? fields.sourceRef : undefined,
+    members: list,
+    length: list.length,
+  };
 }
 
-/** A period `{ from, until }` (`until` required, `null` for no end), or `undefined`. */
-function checkPeriods(periods: readonly unknown[], path: string, add: Add): void {
-  const spans: Span[] = [];
+/**
+ * Checks the periods of one code and returns them in normal form: sorted, `until: null`
+ * dropped, identical ones kept once. Identical periods are one period, not an overlap.
+ */
+function checkPeriods(periods: readonly unknown[], path: string, add: Add): Period[] {
+  const read: Period[] = [];
   const length = periods.length;
   for (let i = 0; i < length; i++) {
     const at = `${path}[${i}]`;
     try {
-      const span = readPeriod(periods[i], at, add);
-      if (span !== undefined) spans.push(span);
+      const period = readPeriod(periods[i], at, add);
+      if (period !== undefined) read.push(period);
     } catch (error) {
       add(at, unreadableMessage(at, error));
     }
   }
-  const overlap = firstOverlap(spans);
+  const normal = sortedUnique(read, compareSpans);
+  const overlap = firstOverlap(normal.map((p) => ({ from: p.from, until: p.until ?? null })));
   if (overlap !== undefined) add(path, `${path} has overlapping periods from ${overlap}`);
+  return normal;
 }
 
-function readPeriod(value: unknown, path: string, add: Add): Span | undefined {
+function readPeriod(value: unknown, path: string, add: Add): Period | undefined {
   if (!isPlainObject(value)) {
     add(path, `${path} must be a period { from, until }`);
     return undefined;
@@ -353,12 +500,17 @@ function readPeriod(value: unknown, path: string, add: Add): Span | undefined {
     add(`${path}.from`, `${path}.from must be a civil date YYYY-MM-DD`);
     valid = false;
   }
-  if (until !== null && !isCivilDate(until)) {
+  if (until != null && !isCivilDate(until)) {
     add(`${path}.until`, `${path}.until must be a civil date YYYY-MM-DD or null`);
     valid = false;
   }
-  if (!valid || !isCivilDate(from) || (until !== null && !isCivilDate(until))) return undefined;
-  return checkSpan(from, until, path, add);
+  if (!valid || !isCivilDate(from)) return undefined;
+  const end = isCivilDate(until) ? until : null;
+  if (checkSpan(from, end, path, add) === undefined) return undefined;
+  const period: Period = { from };
+  if (end !== null) period.until = end;
+  if (typeof fields.sourceRef === 'string') period.sourceRef = fields.sourceRef;
+  return period;
 }
 
 /** The span, or `undefined` after reporting an empty one. */
@@ -392,9 +544,10 @@ function firstOverlap(spans: readonly Span[]): CivilDate | undefined {
 }
 
 /**
- * Checks the members of one group and records its group-in-group memberships in `edges`.
- * Returns false when a member could not be read or was refused, so that nesting is not
- * measured on a partial graph.
+ * Checks the members of one group, records its group-in-group memberships in `edges` and
+ * returns the members in normal form (sorted, `until: null` dropped, identical ones kept once:
+ * an identical repetition is one membership, not an overlap). Returns `undefined` when a member
+ * could not be read or was refused, so that nesting is not measured on a partial graph.
  */
 function checkMembers(
   group: RawGroup,
@@ -402,29 +555,30 @@ function checkMembers(
   groupNames: ReadonlySet<string>,
   edges: Edge[],
   add: Add,
-): boolean {
+): ReferentialMember[] | undefined {
   const path = `groups.${group.name}.members`;
-  const byValue = new Map<string, Span[]>();
+  const read: ReferentialMember[] = [];
   let valid = true;
   const members = group.members ?? [];
   for (let i = 0; i < group.length; i++) {
     const at = `${path}[${i}]`;
-    let member: { value: string; span: Span } | undefined;
+    let member: ReferentialMember | undefined;
     try {
       member = readMember(members[i], at, codes, groupNames, add);
     } catch (error) {
       add(at, unreadableMessage(at, error));
     }
-    if (member === undefined) {
-      valid = false;
-      continue;
-    }
+    if (member === undefined) valid = false;
+    else read.push(member);
+  }
+  const normal = sortedUnique(read, (a, b) => compareText(a.value, b.value) || compareSpans(a, b));
+  const byValue = new Map<string, Span[]>();
+  for (const member of normal) {
+    const span = { from: member.from ?? ALWAYS, until: member.until ?? null };
     const spans = byValue.get(member.value) ?? [];
-    spans.push(member.span);
+    spans.push(span);
     byValue.set(member.value, spans);
-    if (groupNames.has(member.value)) {
-      edges.push({ group: group.name, member: member.value, span: member.span });
-    }
+    if (groupNames.has(member.value)) edges.push({ group: group.name, member: member.value, span });
   }
   for (const [value, spans] of byValue) {
     const overlap = spans.length > 1 ? firstOverlap(spans) : undefined;
@@ -433,7 +587,7 @@ function checkMembers(
       add(path, `${path} lists ${value} twice ${when}`);
     }
   }
-  return valid;
+  return valid ? normal : undefined;
 }
 
 function readMember(
@@ -442,7 +596,7 @@ function readMember(
   codes: ReadonlySet<string> | undefined,
   groupNames: ReadonlySet<string>,
   add: Add,
-): { value: string; span: Span } | undefined {
+): ReferentialMember | undefined {
   if (!isPlainObject(value)) {
     add(path, `${path} must be a member { value, from?, until? }`);
     return undefined;
@@ -480,10 +634,14 @@ function readMember(
     valid = false;
   }
   if (!valid || typeof member !== 'string') return undefined;
-  const start = isCivilDate(from) ? from : ALWAYS;
-  const end = isCivilDate(until) ? until : null;
-  const span = checkSpan(start, end, path, add);
-  return span === undefined ? undefined : { value: member, span };
+  const start = isCivilDate(from) ? from : undefined;
+  const end = isCivilDate(until) ? until : undefined;
+  if (checkSpan(start ?? ALWAYS, end ?? null, path, add) === undefined) return undefined;
+  const normal: ReferentialMember = { value: member };
+  if (start !== undefined) normal.from = start;
+  if (end !== undefined) normal.until = end;
+  if (typeof fields.sourceRef === 'string') normal.sourceRef = fields.sourceRef;
+  return normal;
 }
 
 /**
@@ -493,7 +651,7 @@ function readMember(
  * longest chain through the new membership measures the nesting. Reports the first cycle
  * found and the first excess of depth.
  */
-function checkNesting(edges: readonly Edge[], maxDepth: number, add: Add): void {
+function checkNesting(edges: readonly Edge[], maxDepth: number, add: Add, work: Work): void {
   const starts = new Map<CivilDate, Edge[]>();
   const ends = new Map<CivilDate, Edge[]>();
   for (const edge of edges) {
@@ -501,8 +659,8 @@ function checkNesting(edges: readonly Edge[], maxDepth: number, add: Add): void 
     if (edge.span.until !== null) pushTo(ends, edge.span.until, edge);
   }
   const dates = [...new Set([...starts.keys(), ...ends.keys()])].sort();
-  const down = new Graph();
-  const up = new Graph();
+  const down = new Graph(work);
+  const up = new Graph(work);
   const added = new Set<Edge>();
   let cycleFound = false;
   let tooDeep = false;
@@ -562,6 +720,8 @@ function cycleMessage(cycle: readonly string[], date: CivilDate): string {
 class Graph {
   private readonly next = new Map<string, Map<string, number>>();
 
+  constructor(private readonly work: Work) {}
+
   add(from: string, to: string): void {
     const targets = this.next.get(from) ?? new Map<string, number>();
     targets.set(to, (targets.get(to) ?? 0) + 1);
@@ -584,6 +744,7 @@ class Graph {
     const queue = [from];
     for (let head = 0; head < queue.length; head++) {
       const node = queue[head] ?? '';
+      this.work.steps++;
       if (node === to) {
         const path: string[] = [];
         for (let at = parent.get(node); at !== null && at !== undefined; at = parent.get(at)) {
@@ -592,6 +753,7 @@ class Graph {
         return path;
       }
       for (const target of [...(this.next.get(node)?.keys() ?? [])].sort()) {
+        this.work.steps++;
         if (!parent.has(target)) {
           parent.set(target, node);
           queue.push(target);
@@ -610,6 +772,7 @@ class Graph {
   longest(from: string, cap: number): number {
     const exact = new Map<string, number>();
     const walk = (node: string, budget: number): number => {
+      this.work.steps++;
       const known = exact.get(node);
       if (known !== undefined) return Math.min(known, budget);
       if (budget <= 1) return 1;

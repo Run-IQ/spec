@@ -50,7 +50,12 @@ export { matchDimension, resolveMembership } from './referential/membership.js';
 export type { DimensionMatch } from './referential/membership.js';
 export { REFERENTIAL_FORMAT } from './referential/types.js';
 export type { Membership, Period, Referential, ReferentialMember } from './referential/types.js';
-export { computeReferentialDigest, validateReferential } from './referential/validate.js';
+export {
+  computeReferentialDigest,
+  normalizeReferential,
+  validateReferential,
+} from './referential/validate.js';
+export type { ReferentialLimits } from './referential/validate.js';
 export type { DimensionSpec, DimensionSpecInput } from './rule/dimensions.js';
 export { normalizeRuleDefinition } from './rule/normalize.js';
 export { canonicalRulePayload } from './rule/payload.js';

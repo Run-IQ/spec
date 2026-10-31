@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/referential.schema.json",
   "title": "Run-IQ referential",
-  "description": "A referential (format run-iq.referential/1) as accepted by validateReferential from @run-iq/spec: dated groups of the values of one dimension. sourceRef, optional on the referential, a group, a member and a code period, cites the legal source. Checks NOT expressible in JSON Schema, made only by validateReferential: at most 100 000 nodes (code periods, groups and members) by default; a period's until must be after from; the periods of one code, and of one value listed twice in a group, must not overlap; a value is never both a code and a group; with codes, every member is a group or a code; no cycle of groups at any date; nesting at most 64 groups deep at any date; no text may hold a lone UTF-16 surrogate.",
+  "description": "A referential (format run-iq.referential/1) as accepted by validateReferential from @run-iq/spec: dated groups of the values of one dimension. sourceRef, optional on the referential, a group, a member and a code period, cites the legal source. Checks NOT expressible in JSON Schema, made only by validateReferential: at most 100 000 nodes (code periods, groups and members) by default; a period's until must be after from; the periods of one code, and of one value listed twice in a group, must not overlap (an identical repetition counts once); a value is never both a code and a group; with codes, every member is a group or a code; no cycle of groups at any date; nesting at most 64 groups deep at any date; no text may hold a lone UTF-16 surrogate.",
   "type": "object",
   "required": [
     "format",
@@ -73,8 +73,7 @@
     "period": {
       "type": "object",
       "required": [
-        "from",
-        "until"
+        "from"
       ],
       "properties": {
         "from": {
@@ -95,7 +94,7 @@
         }
       },
       "additionalProperties": false,
-      "description": "A half-open validity period [from, until); until null has no end. until must be after from (validator only)."
+      "description": "A half-open validity period [from, until); until absent or null has no end (normalizeReferential leaves it out). until must be after from (validator only)."
     },
     "member": {
       "type": "object",

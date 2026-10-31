@@ -3,10 +3,13 @@ import type { CivilDate } from '../time/civil.js';
 /** The format of a referential document. */
 export const REFERENTIAL_FORMAT = 'run-iq.referential/1';
 
-/** A half-open period of civil dates, `[from, until)`; `until: null` has no end. */
+/**
+ * A half-open period of civil dates, `[from, until)`; `until` absent (or `null`) has no end.
+ * The normal form (`normalizeReferential`) leaves an open end out.
+ */
 export interface Period {
   from: CivilDate;
-  until: CivilDate | null;
+  until?: CivilDate | null;
   /** The legal source of the period (the act that creates or repeals the code). */
   sourceRef?: string;
 }

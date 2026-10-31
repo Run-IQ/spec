@@ -541,6 +541,8 @@ describe('validateReferential and the referential JSON schema agree', () => {
     ['the ue referential', ue],
     ['codes, a code system and a member with until null', coded],
     ['an empty group', { ...ue, groups: { A: { exhaustive: false, members: [] } } }],
+    ['a code period without until', { ...coded, codes: { FR: [{ from: '1958-01-01' }] } }],
+    ['an identical member twice', group([{ value: 'x' }, { value: 'x', until: null }])],
     ['a qualified-looking dimension name', { ...ue, dimension: 'pays:naissance' }],
     [
       'sourceRef at every level',
@@ -577,7 +579,10 @@ describe('validateReferential and the referential JSON schema agree', () => {
     ['an empty group name', { ...ue, groups: { '': { exhaustive: true, members: [] } } }],
     ['a qualified code', { ...coded, codes: { 'iso:FR': [{ from: '1958-01-01', until: null }] } }],
     ['a code without period', { ...coded, codes: { FR: [] } }],
-    ['a code period without until', { ...coded, codes: { FR: [{ from: '1958-01-01' }] } }],
+    [
+      'a code period with a numeric until',
+      { ...coded, codes: { FR: [{ from: '1958-01-01', until: 1 }] } },
+    ],
     ['a code system with ":"', { ...ue, codeSystem: 'iso:3166' }],
     ['an empty code system', { ...ue, codeSystem: '' }],
     ['an empty sourceRef', { ...ue, sourceRef: '' }],
@@ -593,7 +598,10 @@ describe('validateReferential and the referential JSON schema agree', () => {
   const validatorOnly: [string, unknown][] = [
     ['a cycle', { ...ue, groups: { A: { exhaustive: true, members: [{ value: 'A' }] } } }],
     ['an empty period', group([{ value: 'x', from: '2020-01-01', until: '2019-01-01' }])],
-    ['a member twice on overlapping periods', group([{ value: 'x' }, { value: 'x' }])],
+    [
+      'a member twice on overlapping periods',
+      group([{ value: 'x' }, { value: 'x', from: '2000-01-01' }]),
+    ],
     [
       'a code that is also a group',
       { ...coded, groups: { FR: { exhaustive: true, members: [] } } },

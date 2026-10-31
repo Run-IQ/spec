@@ -177,7 +177,7 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
     return { kind: 'unknown', why: `code ${code} not in referential ${referential.id}` };
   }
   const periods = codes[code] ?? [];
-  const valid = periods.some((p) => p.from <= at && (p.until === null || at < p.until));
+  const valid = periods.some((p) => p.from <= at && (p.until == null || at < p.until));
   return valid
     ? { kind: 'code', code }
     : { kind: 'unknown', why: `code ${code} not valid at ${at}` };

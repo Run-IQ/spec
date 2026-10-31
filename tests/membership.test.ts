@@ -253,11 +253,18 @@ describe('resolveMembership', () => {
         groups[`L${layer}${side}`] = { exhaustive: true, members };
       }
     }
-    const r: Referential = { ...ueReferential(), groups };
-    expect(validateReferential(r)).toEqual([]);
-    const start = performance.now();
+    expect(validateReferential({ ...ueReferential(), groups })).toEqual([]);
+    // Count every read of a group: each of the 50 groups is read once, never once per path.
+    let reads = 0;
+    const counted = new Proxy(groups, {
+      get(target, key, receiver): unknown {
+        if (typeof key === 'string') reads++;
+        return Reflect.get(target, key, receiver);
+      },
+    });
+    const r: Referential = { ...ueReferential(), groups: counted };
     expect(resolveMembership(r, 'L0a', 'x', '2026-01-01')).toEqual({ result: false });
-    expect(performance.now() - start).toBeLessThan(500);
+    expect(reads).toBeLessThanOrEqual(2 * layers);
   });
 });
 
