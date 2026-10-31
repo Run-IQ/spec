@@ -9,7 +9,16 @@ import {
   UNSALTED_SEED,
 } from '../src/index.js';
 import type { ProofInput } from '../src/index.js';
-import { fromHex, hex, nodeHmac, nodeInputSeed, nodeSha256, referenceRoot } from './helpers.js';
+import { inputDigestOf } from '../src/input/tree.js';
+import {
+  fromHex,
+  hex,
+  nodeHmac,
+  nodeInputDigest,
+  nodeInputSeed,
+  nodeSha256,
+  referenceRoot,
+} from './helpers.js';
 import vector from './vectors/input-v1.json';
 
 const SECRET = fromHex(vector.secret);
@@ -32,21 +41,29 @@ const CONTENTS = [
   '["/meta/tenantId","value","t"]',
 ];
 
-/** The root of the vector's input under `seed`, by `node:crypto` alone. */
-function nodeRoot(seed: Uint8Array): string {
+/** The RFC 6962 root of the vector's input under `seed`, by `node:crypto` alone. */
+function nodeRoot(seed: Uint8Array): Uint8Array {
   const leaves = CONTENTS.map((content) => {
     const pointer = (JSON.parse(content) as string[])[0] ?? '';
     const salt = nodeHmac(seed, `input:${pointer}`);
     return nodeSha256(Uint8Array.of(0), 'run-iq.input/1', Uint8Array.of(0), salt, content);
   });
-  return hex(referenceRoot(leaves));
+  return referenceRoot(leaves);
 }
 
 describe('frozen vector input-v1', () => {
   it('node:crypto alone gives the frozen values', () => {
     expect(hex(nodeInputSeed(SECRET, vector.requestId))).toBe(vector.salted.seed);
-    expect(nodeRoot(fromHex(vector.salted.seed))).toBe(vector.salted.inputDigest);
-    expect(nodeRoot(new Uint8Array(32))).toBe(vector.unsalted.inputDigest);
+    const salted = nodeRoot(fromHex(vector.salted.seed));
+    const unsalted = nodeRoot(new Uint8Array(32));
+    expect(CONTENTS).toHaveLength(vector.salted.leafCount);
+    expect(vector.unsalted.leafCount).toBe(vector.salted.leafCount);
+    expect(hex(salted)).toBe(vector.salted.merkleRoot);
+    expect(hex(unsalted)).toBe(vector.unsalted.merkleRoot);
+    expect(nodeInputDigest(CONTENTS.length, salted)).toBe(vector.salted.inputDigest);
+    expect(nodeInputDigest(CONTENTS.length, unsalted)).toBe(vector.unsalted.inputDigest);
+    expect(hex(nodeSha256())).toBe(vector.empty.merkleRoot);
+    expect(nodeInputDigest(vector.empty.leafCount, nodeSha256())).toBe(vector.empty.inputDigest);
     expect(hex(nodeHmac(new Uint8Array(32), 'input:/data/a'))).toBe(vector.unsalted.firstLeaf.salt);
   });
 
@@ -77,6 +94,21 @@ describe('frozen vector input-v1', () => {
       ),
     );
     expect(contents).toEqual(CONTENTS);
+  });
+
+  it('the Merkle roots of the leaves, salted and unsalted', () => {
+    const seed = deriveInputSeed(SECRET, vector.requestId);
+    expect(hex(merkleRoot(inputLeaves(INPUT, seed).map(inputLeafHash)))).toBe(
+      vector.salted.merkleRoot,
+    );
+    expect(hex(merkleRoot(inputLeaves(INPUT, UNSALTED_SEED).map(inputLeafHash)))).toBe(
+      vector.unsalted.merkleRoot,
+    );
+  });
+
+  it('the input digest of an empty tree: its count 0 and the sha256 of nothing', () => {
+    expect(hex(merkleRoot([]))).toBe(vector.empty.merkleRoot);
+    expect(hex(inputDigestOf(0, merkleRoot([])))).toBe(vector.empty.inputDigest);
   });
 
   it('the salted input digest', () => {

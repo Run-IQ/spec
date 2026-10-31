@@ -103,6 +103,13 @@ type Entry = {
   INPUT_TREE_TAG: string;
   inputLeaves: (input: object, seed: Uint8Array) => { pointer: string; salt: string }[];
   inputLeafHash: (leaf: object) => Uint8Array;
+  verifyInputInclusion: (
+    digest: string,
+    size: number,
+    index: number,
+    leafHash: Uint8Array,
+    path: readonly Uint8Array[],
+  ) => boolean;
   computeInputDigest: (input: object, seed: Uint8Array) => string;
   computeIdempotencyDigest: (request: object) => string;
 };
@@ -372,6 +379,13 @@ describeBuilt('built entries: one SpecError identity', () => {
       expect(Buffer.from(root).toString('hex')).toBe(vector.merkle.root);
       const path = entry.inclusionPath(leaves, 2);
       expect(entry.verifyInclusion(leaves[2] ?? root, 2, 3, path, root)).toBe(true);
+      const hashes = entry.inputLeaves(vector.input, seed).map((leaf) => entry.inputLeafHash(leaf));
+      expect(hashes).toHaveLength(vector.salted.leafCount);
+      const digest = vector.salted.inputDigest;
+      const proof = entry.inclusionPath(hashes, 4);
+      const leaf = hashes[4] ?? root;
+      expect(entry.verifyInputInclusion(digest, 10, 4, leaf, proof)).toBe(true);
+      expect(entry.verifyInputInclusion(digest, 11, 4, leaf, proof)).toBe(false);
       const request = { input: vector.input, options: {} };
       expect(entry.computeIdempotencyDigest(request)).toBe(
         entry.sha256Hex(

@@ -6,6 +6,7 @@ import {
   computeIdempotencyDigest,
   computeInputDigest,
   deriveInputSeed,
+  inclusionPath,
   INPUT_TREE_TAG,
   inputLeafHash,
   inputLeaves,
@@ -13,31 +14,39 @@ import {
   sha256Hex,
   UNSALTED_SEED,
   validateProofInput,
+  verifyInclusion,
+  verifyInputInclusion,
 } from '../src/index.js';
 import type { InputLeaf, JsonValue, ProofInput } from '../src/index.js';
-import { lastValuesSpent, MAX_INPUT_POINTER_TEXT } from '../src/values.js';
+import { hashWorkDone } from '../src/merkle.js';
+import { lastValuesSpent, MAX_INPUT_LEAF_TEXT } from '../src/values.js';
 import {
   countValues,
+  expectedHashWork,
+  leafBytes,
   fromHex,
   hex,
   HUMAN_ASSERTION,
   nested,
   nodeHmac,
+  nodeInputDigest,
   nodeInputSeed,
   nodeSha256,
   proofInput,
   referenceRoot,
   pointerText,
+  sharedPointerText,
   specError,
   tooDeepIssue,
-  withPointerText,
 } from './helpers.js';
 
 const SECRET = new Uint8Array(32).fill(0x42);
 /** The problem of an input whose leaf pointers hold too many code units. */
 const POINTER_TEXT =
-  'the leaf pointers of the input hold more than ' + `${MAX_INPUT_POINTER_TEXT} code units`;
+  'the leaf pointers of the input hold more than ' + `${MAX_INPUT_LEAF_TEXT} code units`;
 const SEED = nodeInputSeed(SECRET, 'r1');
+/** The leaves of the `meta` of `proofInput()`: its six members, `dates` holding one date. */
+const META_LEAVES = 6;
 
 /** The input of the D-15 example and of the frozen vector `input-v1`. */
 const EXAMPLE: ProofInput = {
@@ -352,22 +361,45 @@ describe('inputLeafHash (D-15 encoding)', () => {
   });
 
   it('refuses a pointer longer than every leaf pointer of an input may be', () => {
-    const pointer = `/data/${'k'.repeat(MAX_INPUT_POINTER_TEXT)}`;
+    const pointer = `/data/${'k'.repeat(MAX_INPUT_LEAF_TEXT)}`;
     const leaf = { pointer, kind: 'value', value: 1, salt: 'ab'.repeat(32) };
     expect(specError(() => inputLeafHash(loose(leaf)))).toMatchObject({
       code: 'INVALID_INPUT',
       path: '/pointer',
-      message: `invalid input leaf: /pointer is longer than ${MAX_INPUT_POINTER_TEXT} code units`,
+      message: `invalid input leaf: /pointer is longer than ${MAX_INPUT_LEAF_TEXT} code units`,
     });
   });
 });
 
 describe('computeInputDigest (D-15)', () => {
-  it('is the hex RFC 6962 root of the leaf hashes', () => {
+  it('commits the leaf count and the RFC 6962 root of the leaf hashes', () => {
     const input = proofInput({ tags: ['x'] }, { a: [1, { b: 'c' }], d: {} });
     const leaves = inputLeaves(input, SEED);
-    expect(computeInputDigest(input, SEED)).toBe(hex(merkleRoot(leaves.map(inputLeafHash))));
-    expect(computeInputDigest(input, SEED)).toBe(hex(referenceRoot(leaves.map(nodeLeafHash))));
+    const root = referenceRoot(leaves.map(nodeLeafHash));
+    expect(hex(merkleRoot(leaves.map(inputLeafHash)))).toBe(hex(root));
+    expect(leaves).toHaveLength(11);
+    expect(computeInputDigest(input, SEED)).toBe(nodeInputDigest(11, root));
+    expect(computeInputDigest(input, SEED)).not.toBe(hex(root));
+  });
+
+  it('is the digest of the same root under another count no more', () => {
+    const input = proofInput({}, { a: 1 });
+    const root = merkleRoot(inputLeaves(input, SEED).map(inputLeafHash));
+    const digest = computeInputDigest(input, SEED);
+    expect(digest).toBe(nodeInputDigest(7, root));
+    expect(nodeInputDigest(8, root)).not.toBe(digest);
+    expect(nodeInputDigest(2 ** 32 + 7, root)).not.toBe(digest);
+  });
+
+  it('does the hash work of D-14 and D-15 and no more', () => {
+    const input = proofInput({ tags: ['é'] }, { a: [1, { b: 'c\u{1F600}' }], d: {}, e: null });
+    const leaves = inputLeaves(input, SEED);
+    const before = hashWorkDone();
+    computeInputDigest(input, SEED);
+    const after = hashWorkDone();
+    const done = { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
+    expect(done).toEqual(expectedHashWork(leaves.map(leafBytes)));
+    expect(done.calls).toBe(3 * leaves.length);
   });
 
   it('does not depend on key order', () => {
@@ -465,15 +497,99 @@ describe('computeInputDigest (D-15)', () => {
   });
 });
 
-describe(`leaf pointers: at most ${MAX_INPUT_POINTER_TEXT} code units in all`, () => {
+describe('verifyInputInclusion (D-15)', () => {
+  const input = proofInput({}, { a: 1 });
+  const hashes = inputLeaves(input, SEED).map(inputLeafHash);
+  const digest = computeInputDigest(input, SEED);
+  const A = hashes[0] ?? new Uint8Array(32);
+
+  it('is true for each leaf of the input, with its index, its size and its path', () => {
+    expect(hashes).toHaveLength(7);
+    hashes.forEach((leaf, i) => {
+      const path = inclusionPath(hashes, i);
+      expect([i, verifyInputInclusion(digest, 7, i, leaf, path)]).toEqual([i, true]);
+      const other = hashes[(i + 1) % 7] ?? A;
+      expect([i, verifyInputInclusion(digest, 7, i, other, path)]).toEqual([i, false]);
+      expect([i, verifyInputInclusion(digest, 7, (i + 1) % 7, leaf, path)]).toEqual([i, false]);
+    });
+  });
+
+  it('leaf 4 of 7 does not verify against the digest of 8 leaves', () => {
+    const path = inclusionPath(hashes, 4);
+    const leaf = hashes[4] ?? A;
+    const root = merkleRoot(hashes);
+    // The RFC 6962 root alone takes it as leaf 4 of 8; the digest commits to 7, and the
+    // digest of the same root under 8 leaves is another digest.
+    expect(verifyInclusion(leaf, 4, 8, path, root)).toBe(true);
+    expect(verifyInputInclusion(digest, 8, 4, leaf, path)).toBe(false);
+    expect(verifyInputInclusion(nodeInputDigest(8, root), 7, 4, leaf, path)).toBe(false);
+    const eight = computeInputDigest(proofInput({}, { a: 1, b: 2 }), SEED);
+    expect(verifyInputInclusion(eight, 8, 4, leaf, path)).toBe(false);
+    expect(verifyInputInclusion(eight, 7, 4, leaf, path)).toBe(false);
+  });
+
+  it('is false, never throwing, for anything but such a proof', () => {
+    const path = inclusionPath(hashes, 2);
+    const leaf = hashes[2] ?? A;
+    const throwing = [A, A, A];
+    Object.defineProperty(throwing, 0, {
+      get() {
+        throw new Error('read');
+      },
+    });
+    const cases: [unknown, unknown, unknown, unknown, unknown][] = [
+      [digest.toUpperCase(), 7, 2, leaf, path],
+      [digest.slice(1), 7, 2, leaf, path],
+      [`${digest}0`, 7, 2, leaf, path],
+      [fromHex(digest), 7, 2, leaf, path],
+      [null, 7, 2, leaf, path],
+      [digest, 0, 0, leaf, []],
+      [digest, 7.5, 2, leaf, path],
+      [digest, '7', 2, leaf, path],
+      [digest, 7, 7, leaf, path],
+      [digest, 7, -1, leaf, path],
+      [digest, 7, 2, leaf.subarray(1), path],
+      [digest, 7, 2, [...leaf], path],
+      [digest, 7, 2, leaf, path.slice(1)],
+      [digest, 7, 2, leaf, [...path, A]],
+      [digest, 7, 2, leaf, throwing],
+      [digest, 7, 2, leaf, null],
+    ];
+    cases.forEach((args, i) => {
+      expect([
+        i,
+        verifyInputInclusion(...loose<Parameters<typeof verifyInputInclusion>>(args)),
+      ]).toEqual([i, false]);
+    });
+    expect(verifyInputInclusion(digest, 7, 2, leaf, path)).toBe(true);
+  });
+});
+
+describe(`leaf pointers: at most ${MAX_INPUT_LEAF_TEXT} code units in all`, () => {
   it('the test input holds the code units asked for', () => {
-    for (const units of [200, 201, 207, 5_000, 12_345]) {
-      expect(pointerText(withPointerText(units))).toBe(units);
+    for (const [units, depth] of [
+      [300, 3],
+      [301, 3],
+      [307, 3],
+      [5_000, 4],
+      [12_345, 6],
+    ] as const) {
+      const { input, paths } = sharedPointerText(units, depth);
+      expect(pointerText(input)).toBe(units);
+      expect(inputLeaves(input, UNSALTED_SEED)).toHaveLength(paths + 1 + META_LEAVES);
     }
   });
 
+  it(`validateProofInput accepts ${MAX_INPUT_LEAF_TEXT} code units, from short texts`, () => {
+    const { input, paths, width, rest } = sharedPointerText(MAX_INPUT_LEAF_TEXT, 16);
+    // 2^16 paths to one shared value, no text longer than a few thousand code units.
+    expect(paths).toBe(65_536);
+    expect(Math.max(width, rest)).toBeLessThan(70_000);
+    expect(validateProofInput(input)).toEqual([]);
+  });
+
   it('validateProofInput, the digests and inputLeaves refuse one code unit more', () => {
-    const over = withPointerText(MAX_INPUT_POINTER_TEXT + 1);
+    const { input: over } = sharedPointerText(MAX_INPUT_LEAF_TEXT + 1, 16);
     const message = POINTER_TEXT;
     expect(validateProofInput(over)).toEqual([{ path: '', message }]);
     const calls: (() => unknown)[] = [
@@ -482,17 +598,16 @@ describe(`leaf pointers: at most ${MAX_INPUT_POINTER_TEXT} code units in all`, (
       () => computeIdempotencyDigest({ input: over, options: {} }),
     ];
     for (const call of calls) {
+      const before = hashWorkDone();
       expect(specError(call)).toMatchObject({
         code: 'INVALID_INPUT',
         path: '',
         message: `invalid input: ${message}`,
       });
+      // Refused before anything is hashed.
+      expect(hashWorkDone()).toEqual(before);
     }
-  }, 60_000);
-
-  it('validateProofInput accepts the limit itself', () => {
-    expect(validateProofInput(withPointerText(MAX_INPUT_POINTER_TEXT))).toEqual([]);
-  }, 60_000);
+  });
 
   it('a value shared by many paths counts its pointers on each path', () => {
     let shared: JsonValue = ['k'.repeat(1_000_000)];

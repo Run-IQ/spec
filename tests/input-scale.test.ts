@@ -1,15 +1,13 @@
 import { describe, expect, it } from 'vitest';
-import { computeInputDigest, deriveInputSeed, inputLeaves, merkleRoot } from '../src/index.js';
-import { inputLeafHash, validateProofInput } from '../src/index.js';
+import { computeInputDigest, deriveInputSeed, inputLeaves } from '../src/index.js';
 import type { ProofInput } from '../src/index.js';
 import { lastInputLeafCount } from '../src/input/tree.js';
-import { MAX_INPUT_POINTER_TEXT } from '../src/values.js';
-import { hex, proofInput, withPointerText } from './helpers.js';
+import { hashWorkDone } from '../src/merkle.js';
+import { MAX_INPUT_LEAF_TEXT } from '../src/values.js';
+import { expectedHashWork, leafBytes, proofInput, sharedPointerText } from './helpers.js';
 
 /** `core`'s `DEFAULT_LIMITS.maxInputLeaves` (D-26): the default largest input. */
 const MAX_INPUT_LEAVES = 500_000;
-/** The budget of D-26 for the digest of an input of `MAX_INPUT_LEAVES` leaves. */
-const BUDGET_MS = 5_000;
 
 /**
  * An input of exactly `MAX_INPUT_LEAVES` leaves: 166 664 rows of three facts, the list holding
@@ -24,49 +22,48 @@ function largestInput(): ProofInput {
   return proofInput({}, { rows, total: 0 });
 }
 
-/**
- * The CPU time, in milliseconds, the calling thread has used so far: the work it did, whatever
- * else runs on the machine (the other test files run in parallel). `process.threadCpuUsage`
- * exists from Node 23.9; an older Node falls back to the wall clock, which other work can
- * stretch.
- */
-function threadMilliseconds(): number {
-  const clock: unknown = Reflect.get(process, 'threadCpuUsage');
-  if (typeof clock === 'function') {
-    const usage: unknown = Reflect.apply(clock, process, []);
-    if (typeof usage === 'object' && usage !== null) {
-      const user: unknown = Reflect.get(usage, 'user');
-      const system: unknown = Reflect.get(usage, 'system');
-      if (typeof user === 'number' && typeof system === 'number') return (user + system) / 1000;
-    }
-  }
-  return performance.now();
+/** The hash work `call` does (`hashWork`): its calls and the bytes given to them. */
+function hashWorkOf(call: () => unknown): { calls: number; bytes: number } {
+  const before = hashWorkDone();
+  call();
+  const after = hashWorkDone();
+  return { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
 }
 
+// The time budgets of D-26 are measured by `npm run bench`, never asserted here: a test bounds
+// the work by counting it.
 describe(`scale (D-26): an input of ${MAX_INPUT_LEAVES} leaves`, () => {
-  it(`is digested in less than ${BUDGET_MS} ms of the thread's time`, () => {
+  it('is digested by 3 hashes a leaf, over the bytes of its leaves and nothing more', () => {
     const input = largestInput();
     const seed = deriveInputSeed(new Uint8Array(32).fill(1), 'scale');
-    const start = threadMilliseconds();
-    const digest = computeInputDigest(input, seed);
-    const elapsed = threadMilliseconds() - start;
+    let digest = '';
+    const work = hashWorkOf(() => {
+      digest = computeInputDigest(input, seed);
+    });
     expect(lastInputLeafCount()).toBe(MAX_INPUT_LEAVES);
+    const leaves = inputLeaves(input, seed);
+    expect(leaves).toHaveLength(MAX_INPUT_LEAVES);
+    expect(work).toEqual(expectedHashWork(leaves.map(leafBytes)));
+    expect(work.calls).toBe(3 * MAX_INPUT_LEAVES);
+    // Counted independently (Python, report of Task 9H1, round 2).
+    expect(work.bytes).toBe(91_064_644);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
-    expect(elapsed).toBeLessThan(BUDGET_MS);
   }, 60_000);
 });
 
-describe(`leaf pointers of ${MAX_INPUT_POINTER_TEXT} code units, the most an input holds`, () => {
-  it('is digested, and the digest is the root of its leaves', () => {
-    const input = withPointerText(MAX_INPUT_POINTER_TEXT);
-    expect(validateProofInput(input)).toEqual([]);
+describe(`leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units, the most an input holds`, () => {
+  it('is digested, each pointer hashed twice: the work stays linear in the limit', () => {
+    const { input, paths, width, rest } = sharedPointerText(MAX_INPUT_LEAF_TEXT, 16);
     const seed = deriveInputSeed(new Uint8Array(32).fill(2), 'limit');
-    const digest = computeInputDigest(input, seed);
-    expect(lastInputLeafCount()).toBe(17);
-    const leaves = inputLeaves(input, seed);
-    expect(leaves.reduce((total, leaf) => total + leaf.pointer.length, 0)).toBe(
-      MAX_INPUT_POINTER_TEXT,
-    );
-    expect(digest).toBe(hex(merkleRoot(leaves.map(inputLeafHash))));
+    const meta = inputLeaves(proofInput({}, {}), seed).filter((leaf) => leaf.pointer !== '/data');
+    const work = hashWorkOf(() => computeInputDigest(input, seed));
+    expect(lastInputLeafCount()).toBe(paths + 1 + meta.length);
+    // Each shared leaf `/data/k…/l/…` holds the value 0: its content is its pointer and 14 bytes.
+    const pointer = 6 + width + 2 * 16;
+    const shared = { pointerBytes: pointer, contentBytes: pointer + 14 };
+    const last = { pointerBytes: 6 + rest, contentBytes: 6 + rest + 14 };
+    const leaves = [...Array<typeof shared>(paths).fill(shared), last, ...meta.map(leafBytes)];
+    expect(work).toEqual(expectedHashWork(leaves));
+    expect(work.bytes).toBeLessThan(2 * MAX_INPUT_LEAF_TEXT + 200 * (paths + 1 + meta.length));
   }, 120_000);
 });

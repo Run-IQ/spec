@@ -1,14 +1,14 @@
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { JsonValue } from '../canonical.js';
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
-import { createHasherInto, PackedHashes } from '../merkle.js';
+import { createHasherInto, PackedHashes, rootFromPath } from '../merkle.js';
 import { parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { ProofInput } from './types.js';
 import {
   hasLoneSurrogate,
   loneSurrogateMessage,
-  MAX_INPUT_POINTER_TEXT,
+  MAX_INPUT_LEAF_TEXT,
   MAX_JSON_VALUES,
   ownCopy,
   withValueBudget,
@@ -23,8 +23,9 @@ import { readValidInput } from './validate.js';
 
 /**
  * The domain tag of the input tree (D-15): every leaf hash starts with
- * `0x00 ‖ utf8('run-iq.input/1') ‖ 0x00`, so it can be taken neither for a node of the tree
- * (`0x01 ‖ …`) nor for the leaf of another tree.
+ * `0x00 ‖ utf8('run-iq.input/1') ‖ 0x00`, and the digest with `0x02 ‖ utf8('run-iq.input/1') ‖
+ * 0x00`, so neither can be taken for a node of the tree (`0x01 ‖ …`) nor for the leaf or the
+ * digest of another tree.
  */
 export const INPUT_TREE_TAG = 'run-iq.input/1';
 
@@ -42,6 +43,11 @@ export interface InputLeaf {
   length?: number;
   salt: string;
 }
+
+/** The start of the input digest: `0x02 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
+const DIGEST_PREFIX = Uint8Array.from([2, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+/** A digest as `computeInputDigest` writes it. */
+const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The fixed start of every leaf hash: `0x00 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
 const LEAF_PREFIX = Uint8Array.from([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
@@ -81,7 +87,7 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
  *
  * `leaf` is read once, and refused unless some valid input could have it: a plain object with
  * exactly the members of its kind; `pointer` a JSON pointer below `/data` or `/meta`, at most
- * `MAX_INPUT_POINTER_TEXT` code units; `value` a JSON scalar as an input holds it (no lone
+ * `MAX_INPUT_LEAF_TEXT` code units; `value` a JSON scalar as an input holds it (no lone
  * surrogate, a finite number below 2^53 in absolute value); `length` an integer from 0 to
  * `MAX_JSON_VALUES`; `salt` 64 lowercase hex characters. Throws `SpecError`
  * (`INVALID_INPUT`, `invalid input leaf: <first problem>`, its path in the leaf as `path`).
@@ -96,10 +102,11 @@ export function inputLeafHash(leaf: InputLeaf): Uint8Array {
 }
 
 /**
- * Internal: the RFC 6962 root of the input tree of `input` under `seed`, with the checks and
- * errors of `inputLeaves`. Hashes as it walks, into one packed buffer: no leaf object is kept.
+ * Internal: the input digest of `input` under `seed`, 32 bytes (D-15: the leaf count and the
+ * RFC 6962 root, `inputDigestOf`), with the checks and errors of `inputLeaves`. Hashes as it
+ * walks, into one packed buffer: no leaf object is kept.
  */
-export function inputRoot(input: ProofInput, seed: Uint8Array): Uint8Array {
+export function inputDigestBytes(input: ProofInput, seed: Uint8Array): Uint8Array {
   const salt = inputSalter(readSeed(seed));
   const snapshot = readValidInput(input);
   const hashLeaf = createLeafHasher();
@@ -111,10 +118,53 @@ export function inputRoot(input: ProofInput, seed: Uint8Array): Uint8Array {
     }),
   );
   lastLeafCount = hashes.length;
-  return hashes.root();
+  return inputDigestOf(hashes.length, hashes.root());
 }
 
-/** Internal, for tests: the leaves the last `inputRoot` hashed. */
+/**
+ * Internal: the input digest of a tree of `size` leaves (a safe integer) whose RFC 6962 root is
+ * `root` (D-15):
+ * `sha256(0x02 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ uint64be(size) ‖ root)`. The prefix `0x02`
+ * sets it apart from a leaf (`0x00`) and a node (`0x01`); the count makes the digest commit to
+ * the size of the tree, which an RFC 6962 root alone does not.
+ */
+export function inputDigestOf(size: number, root: Uint8Array): Uint8Array {
+  const count = new Uint8Array(8);
+  const view = new DataView(count.buffer);
+  // `size` is a safe integer: its high and low 32 bits, big-endian.
+  view.setUint32(0, Math.floor(size / 2 ** 32));
+  view.setUint32(4, size % 2 ** 32);
+  const out = new Uint8Array(32);
+  createHasherInto()(out, DIGEST_PREFIX, count, root);
+  return out;
+}
+
+/**
+ * True when `path` proves that `leafHash` (`inputLeafHash`) is the leaf at `index` of the input
+ * tree of `size` leaves whose digest is `digest` (`computeInputDigest`): the RFC 6962 root
+ * rebuilt from the leaf and its audit path (`inclusionPath`, as `verifyInclusion` checks it),
+ * committed with `size`, gives `digest`. Since the digest commits to the leaf count, a leaf
+ * cannot be shown under another size (leaf 4 of 7 does not verify as leaf 4 of 8).
+ *
+ * Never throws: false for anything else, in particular a `digest` that is not 64 lowercase hex
+ * characters, and every case where `verifyInclusion` is false (`size` not an integer from 1 to
+ * 2^53 - 1, `index` not below it, a hash that is not 32 bytes, a path of another length, its
+ * length checked before any element is read).
+ */
+export function verifyInputInclusion(
+  digest: string,
+  size: number,
+  index: number,
+  leafHash: Uint8Array,
+  path: readonly Uint8Array[],
+): boolean {
+  const expected: unknown = digest;
+  if (typeof expected !== 'string' || !DIGEST_HEX.test(expected)) return false;
+  const root = rootFromPath(leafHash, index, size, path);
+  return root !== undefined && bytesToHex(inputDigestOf(size, root)) === expected;
+}
+
+/** Internal, for tests: the leaves the last `inputDigestBytes` hashed. */
 export function lastInputLeafCount(): number {
   return lastLeafCount;
 }
@@ -232,8 +282,8 @@ function readLeafPointer(
     add('/pointer', invalid);
     return undefined;
   }
-  if (value.length > MAX_INPUT_POINTER_TEXT) {
-    add('/pointer', `/pointer is longer than ${MAX_INPUT_POINTER_TEXT} code units`);
+  if (value.length > MAX_INPUT_LEAF_TEXT) {
+    add('/pointer', `/pointer is longer than ${MAX_INPUT_LEAF_TEXT} code units`);
     return undefined;
   }
   let head: string | undefined;

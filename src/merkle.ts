@@ -30,9 +30,25 @@ export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) =>
   const work = sha256.create();
   return (out, ...parts) => {
     fresh._cloneInto(work);
-    for (const part of parts) work.update(part);
+    hashWork.calls += 1;
+    for (const part of parts) {
+      hashWork.bytes += part.length;
+      work.update(part);
+    }
     work.digestInto(out);
   };
+}
+
+/**
+ * Internal: the hash work this package has done since it was loaded: `calls`, the sha256 and
+ * HMAC computations, and `bytes`, the bytes given to them (an HMAC's fixed key blocks aside).
+ * Tests bound a digest's work by its difference across a call, never by a clock.
+ */
+export const hashWork = { calls: 0, bytes: 0 };
+
+/** Internal, for tests: a copy of `hashWork` as it stands. */
+export function hashWorkDone(): { calls: number; bytes: number } {
+  return { ...hashWork };
 }
 
 /** Internal: as `createHasherInto`, each digest in a fresh array. */
@@ -79,8 +95,12 @@ export class PackedHashes {
    * the end of a level goes up unchanged): afterwards the buffer holds no meaningful hash.
    */
   root(): Uint8Array {
-    if (this.count === 0) return sha256(new Uint8Array(0));
     const hashInto = createHasherInto();
+    if (this.count === 0) {
+      const empty = new Uint8Array(HASH_BYTES);
+      hashInto(empty);
+      return empty;
+    }
     const node = new Uint8Array(1 + 2 * HASH_BYTES);
     node[0] = 1;
     const at = (i: number): Uint8Array => this.bytes.subarray(i * HASH_BYTES, (i + 1) * HASH_BYTES);
@@ -158,7 +178,7 @@ export function inclusionPath(leafHashes: readonly Uint8Array[], index: number):
  * The root does not commit to `size` (RFC 6962): a leaf whose audit path is the same in a
  * larger tree (leaf 4 of 7 and of 8) verifies under both sizes. Its place is right in both,
  * but whoever relies on `size` itself (that a leaf is the last one) takes it from a source
- * that authenticates it.
+ * that authenticates it: the input digest commits to it (`verifyInputInclusion`).
  */
 export function verifyInclusion(
   leafHash: Uint8Array,
@@ -167,22 +187,38 @@ export function verifyInclusion(
   path: readonly Uint8Array[],
   root: Uint8Array,
 ): boolean {
+  const expected = hashOf(root);
+  const computed = rootFromPath(leafHash, index, size, path);
+  return expected !== undefined && computed !== undefined && sameBytes(computed, expected);
+}
+
+/**
+ * Internal: the RFC 6962 root that `path` gives for `leafHash` at `index` of a tree of `size`
+ * leaves (RFC 9162, section 2.1.3.2), or `undefined` when the arguments cannot be such a proof
+ * (the checks of `verifyInclusion`, the length of `path` compared before any element is read).
+ * Never throws.
+ */
+export function rootFromPath(
+  leafHash: Uint8Array,
+  index: number,
+  size: number,
+  path: readonly Uint8Array[],
+): Uint8Array | undefined {
   const n: unknown = size;
   const at: unknown = index;
-  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1) return false;
-  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || at >= n) return false;
+  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1) return undefined;
+  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || at >= n) return undefined;
   const steps = auditSteps(at, n);
   const hashes = readPath(path, steps.length);
   const leaf = hashOf(leafHash);
-  const expected = hashOf(root);
-  if (hashes === undefined || leaf === undefined || expected === undefined) return false;
+  if (hashes === undefined || leaf === undefined) return undefined;
   const hash = createHasher();
   let current = leaf;
   steps.forEach((left, i) => {
     const sibling = hashes[i] ?? current;
     current = left ? hash(NODE_PREFIX, sibling, current) : hash(NODE_PREFIX, current, sibling);
   });
-  return sameBytes(current, expected);
+  return current;
 }
 
 /** Internal: the RFC 6962 hash of `leaves`, hashes this package owns, in order. */
@@ -302,7 +338,7 @@ function hashOf(value: unknown): Uint8Array | undefined {
   return bytes?.length === HASH_BYTES ? bytes : undefined;
 }
 
-/** True when `a` and `b` hold the same bytes. */
-function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
+/** Internal: true when `a` and `b` hold the same bytes. */
+export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
   return a.length === b.length && a.every((byte, i) => byte === b[i]);
 }

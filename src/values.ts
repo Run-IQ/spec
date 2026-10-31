@@ -32,11 +32,12 @@ export const MAX_JSON_VALUES = 10_000_000;
  * Each leaf of the input tree hashes its full pointer twice (its salt and its content), so the
  * work of a digest follows the total length of the pointers, which can grow far faster than
  * the input: a long key above many values is repeated in each of their pointers, and a value
- * shared by many paths has leaves on each. Past it, `validateProofInput` reports the input and
- * every digest of it refuses it, before anything is hashed. An input of `MAX_JSON_VALUES`
- * leaves fits when its pointers average 26 code units.
+ * shared by many paths has leaves on each. Past it, `validateProofInput` reports the input
+ * (`the leaf pointers of the input hold more than 268435456 code units`) and every digest of it
+ * refuses it, before anything is hashed. The total is counted, never built. An input of
+ * `MAX_JSON_VALUES` leaves fits when its pointers average 26 code units.
  */
-export const MAX_INPUT_POINTER_TEXT = 268_435_456;
+export const MAX_INPUT_LEAF_TEXT = 2 ** 28;
 
 /** The values the current call may still read; `undefined` outside `withValueBudget`. */
 let budget: { remaining: number } | undefined;

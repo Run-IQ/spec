@@ -179,7 +179,8 @@ describe('inclusionPath and verifyInclusion', () => {
   it('the root does not commit to the size: the caller takes it from a trusted source', () => {
     // RFC 6962 roots do not bind the number of leaves: leaf 4 of 7 has the same audit path
     // as leaf 4 of 8 whose last subtree hash is that of leaves 4 to 6. Leaves 0 to 6 keep
-    // their place, but whoever relies on `size` (an absence after the last leaf) must check it.
+    // their place, but whoever relies on `size` (an absence after the last leaf) must check it;
+    // the input digest commits to it (`verifyInputInclusion`).
     const leaves = leafHashes(7);
     const root = merkleRoot(leaves);
     const path = inclusionPath(leaves, 4);

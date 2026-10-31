@@ -10,6 +10,7 @@ import {
   merkleRoot,
   UNSALTED_SEED,
   verifyInclusion,
+  verifyInputInclusion,
   isPackId,
   isRuleSetId,
   LOCAL_RULE_SET,
@@ -307,6 +308,15 @@ describe('the input tree (Task 9H1)', () => {
     expectTypeOf<InputLeaf['kind']>().toEqualTypeOf<'value' | 'array' | 'object'>();
     expectTypeOf(inputLeaves).toEqualTypeOf<(input: ProofInput, seed: Uint8Array) => InputLeaf[]>();
     expectTypeOf(inputLeafHash).toEqualTypeOf<(leaf: InputLeaf) => Uint8Array>();
+    expectTypeOf(verifyInputInclusion).toEqualTypeOf<
+      (
+        digest: string,
+        size: number,
+        index: number,
+        leafHash: Uint8Array,
+        path: readonly Uint8Array[],
+      ) => boolean
+    >();
     expectTypeOf(computeInputDigest).toEqualTypeOf<
       (input: ProofInput, seed: Uint8Array) => string
     >();

@@ -1,6 +1,7 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
 import { expect } from 'vitest';
 import {
+  canonicalize,
   inputLeaves,
   normalizeRuleDefinition,
   SpecError,
@@ -11,6 +12,7 @@ import type {
   CivilCalendar,
   JsonValue,
   FactAssertion,
+  InputLeaf,
   ProofInput,
   Referential,
   RuleDefinitionInput,
@@ -272,6 +274,16 @@ export function nodeInputSeed(secret: Uint8Array, requestId: string): Uint8Array
   return new Uint8Array(hkdfSync('sha256', secret, 'run-iq.input-seed/1', requestId, 32));
 }
 
+/**
+ * The input digest by `node:crypto` (D-15) of a tree of `size` leaves whose RFC 6962 root is
+ * `root`: `sha256(0x02 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ uint64be(size) ‖ root)`, in hex.
+ */
+export function nodeInputDigest(size: number, root: Uint8Array): string {
+  const count = Buffer.alloc(8);
+  count.writeBigUInt64BE(BigInt(size));
+  return hex(nodeSha256(Uint8Array.of(2), 'run-iq.input/1', Uint8Array.of(0), count, root));
+}
+
 /** Lowercase hex of `bytes`. */
 export function hex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -323,18 +335,58 @@ export function pointerText(input: ProofInput): number {
 }
 
 /**
- * A valid input whose leaf pointers hold exactly `units` code units (at least 200): a list of
- * 9 zeros under one long key, one more value under a second key for the remainder, and the
- * fixed leaves of `meta` (`proofInput`).
+ * A valid input whose leaf pointers hold exactly `units` code units, built from short texts: one
+ * value `0` shared by the `2^depth` paths of a chain of `depth` objects `{ l, r }` (each object
+ * holds the next one twice), under a key `k…` of `width` units (`/data/k…/l/r/…`, `6 + width +
+ * 2 * depth` units each), one more value under a key `z…` for the remainder (`/data/z…`), and
+ * the fixed leaves of `meta` (`proofInput`). Its `paths`, `width` and `rest` (the length of
+ * `z…`) are given beside it.
  */
-export function withPointerText(units: number): ProofInput {
-  const fixed = pointerText(proofInput({}, { k: [] })) - '/data/k'.length;
-  // The list `/data/<key>` and its 9 elements `/data/<key>/<i>`: 10 * (6 + key) + 2 * 9 units;
-  // the second key `/data/<z…>` takes the rest, at least 7 units.
-  const key = Math.floor((units - fixed - 18 - 7) / 10) - 6;
-  const rest = units - fixed - 18 - 10 * (6 + key);
-  return proofInput(
-    {},
-    { ['k'.repeat(key)]: new Array<number>(9).fill(0), ['z'.repeat(rest - 6)]: 0 },
-  );
+export function sharedPointerText(
+  units: number,
+  depth: number,
+): { input: ProofInput; paths: number; width: number; rest: number } {
+  const fixed = pointerText(proofInput({}, { z: 0 })) - '/data/z'.length;
+  const paths = 2 ** depth;
+  const width = Math.floor((units - fixed - 7) / paths) - 6 - 2 * depth;
+  const rest = units - fixed - paths * (6 + width + 2 * depth) - 6;
+  if (width < 1 || rest < 1) throw new RangeError(`no input of ${units} units at depth ${depth}`);
+  let shared: JsonValue = 0;
+  for (let level = 0; level < depth; level++) shared = { l: shared, r: shared };
+  const input = proofInput({}, { ['k'.repeat(width)]: shared, ['z'.repeat(rest)]: 0 });
+  return { input, paths, width, rest };
+}
+
+/**
+ * The hash work (`hashWork`) a digest of these leaves does, by D-14 and D-15 alone: per leaf,
+ * its salt (an HMAC of `input:` and its pointer, the message counted) and its hash
+ * (`0x00 ‖ tag ‖ 0x00`, 16 bytes, its salt, its content); the `n - 1` nodes of 65 bytes; the
+ * digest (`0x02 ‖ tag ‖ 0x00`, the count and the root, 56 bytes). Each leaf is given as the
+ * UTF-8 bytes of its pointer and of its content (`[pointer, kind, …]` in JCS).
+ */
+export function expectedHashWork(
+  leaves: Iterable<{ pointerBytes: number; contentBytes: number }>,
+): { calls: number; bytes: number } {
+  let n = 0;
+  let bytes = 0;
+  for (const leaf of leaves) {
+    n += 1;
+    bytes += 'input:'.length + leaf.pointerBytes + 16 + 32 + leaf.contentBytes;
+  }
+  bytes += 65 * Math.max(n - 1, 0) + 56;
+  return { calls: 2 * n + Math.max(n - 1, 0) + 1, bytes };
+}
+
+/** The UTF-8 bytes of a leaf's pointer and of its content, `[pointer, kind, …]` in JCS. */
+export function leafBytes(leaf: InputLeaf): { pointerBytes: number; contentBytes: number } {
+  const content =
+    leaf.kind === 'value'
+      ? [leaf.pointer, leaf.kind, leaf.value ?? null]
+      : leaf.kind === 'array'
+        ? [leaf.pointer, leaf.kind, leaf.length ?? 0]
+        : [leaf.pointer, leaf.kind];
+  return {
+    pointerBytes: Buffer.byteLength(leaf.pointer, 'utf8'),
+    contentBytes: Buffer.byteLength(canonicalize(content), 'utf8'),
+  };
 }

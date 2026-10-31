@@ -7,16 +7,20 @@ import { citeName, newSpecError, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
 import { expectPlainObject, readFields, requireFields, runCheck, walkJson } from '../input/read.js';
-import { inputRoot } from '../input/tree.js';
+import { inputDigestBytes } from '../input/tree.js';
 import { readValidInput } from '../input/validate.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { readUnsignedProof } from './validate.js';
 import { ownCopy, withValueBudget } from '../values.js';
 
 /**
- * The digest a proof keeps in place of its input (D-15): the lowercase hex of the RFC 6962 root
- * of the input tree of `input` under `seed` (`inputLeaves`, `inputLeafHash`, `merkleRoot`).
- * Key order does not change it; every fact, the seed and the place of each value do. With a
+ * The digest a proof keeps in place of its input (D-15), lowercase hex:
+ * `sha256(0x02 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ uint64be(n) ‖ root)`, where `n` is the number
+ * of leaves of the input tree of `input` under `seed` (`inputLeaves`) and `root` the RFC 6962
+ * root of their hashes (`inputLeafHash`, `merkleRoot`; the sha256 of nothing when `n` is 0).
+ * It commits to the leaf count, so a disclosed leaf is checked against it with its size
+ * (`verifyInputInclusion`). Key order does not change it; every fact, the seed and the place
+ * of each value do. With a
  * secret seed (`deriveInputSeed`), the leaves are salted: a fact can later be disclosed alone,
  * and the digest cannot be tested against guessed inputs; with `UNSALTED_SEED`, anyone holding
  * the input can recompute it.
@@ -28,7 +32,7 @@ import { ownCopy, withValueBudget } from '../values.js';
  * value counted once.
  */
 export function computeInputDigest(input: ProofInput, seed: Uint8Array): string {
-  return withValueBudget(() => bytesToHex(inputRoot(input, seed)));
+  return withValueBudget(() => bytesToHex(inputDigestBytes(input, seed)));
 }
 
 /**

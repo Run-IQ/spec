@@ -1,10 +1,17 @@
 {
   "format": "run-iq.input/1",
-  "description": "Frozen vector of the input tree (D-14, D-15), from the plan (Task 9H1). Leaf = sha256(0x00 || utf8('run-iq.input/1') || 0x00 || salt || utf8(JCS([pointer, kind, value-or-length]))); salt = HMAC-SHA256(seed, utf8('input:' + pointer)); seed = HKDF-SHA256(ikm = secret, salt = utf8('run-iq.input-seed/1'), info = utf8(requestId), 32 bytes); root = RFC 6962 Merkle tree hash of the leaves sorted by decoded pointer segments.",
+  "description": "Frozen vector of the input tree (D-14, D-15), from the plan (Task 9H1). Leaf = sha256(0x00 || utf8('run-iq.input/1') || 0x00 || salt || utf8(JCS([pointer, kind, value-or-length]))); salt = HMAC-SHA256(seed, utf8('input:' + pointer)); seed = HKDF-SHA256(ikm = secret, salt = utf8('run-iq.input-seed/1'), info = utf8(requestId), 32 bytes); merkleRoot = RFC 6962 Merkle tree hash of the leaves sorted by decoded pointer segments; inputDigest = sha256(0x02 || utf8('run-iq.input/1') || 0x00 || uint64be(leafCount) || merkleRoot).",
   "secret": "4242424242424242424242424242424242424242424242424242424242424242",
   "requestId": "r1",
   "input": {
-    "data": { "a": 1, "b": [], "c": {}, "d": { "e": null } },
+    "data": {
+      "a": 1,
+      "b": [],
+      "c": {},
+      "d": {
+        "e": null
+      }
+    },
     "meta": {
       "tenantId": "t",
       "dates": {},
@@ -21,7 +28,9 @@
       "salt": "468eb2ec77d6c10c2c90a6f43a17217ad29fed0d5d713ea4c13bcb5cbae96e20",
       "hash": "8ca125b28185429613f1ed565718eba5b603c69110b3a3ac9b30dc043e29f322"
     },
-    "inputDigest": "ed75157664fd1dd502ac3953e8f69fa41e74d56da05af625085c68f8b8089148"
+    "leafCount": 10,
+    "merkleRoot": "ed75157664fd1dd502ac3953e8f69fa41e74d56da05af625085c68f8b8089148",
+    "inputDigest": "3311862834ce93b342465de7d6f99754dffd06b51b524025b3e4a98e588d03e5"
   },
   "unsalted": {
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
@@ -29,10 +38,17 @@
       "pointer": "/data/a",
       "salt": "bd59bbc358daa463d7fb8a9af69e608e26a8725a1cf53cf57fc3e7da582acd0b"
     },
-    "inputDigest": "200d3aba56343c06fb121f41f743ecaf716969f6de52373603d1b597e1fcebb4"
+    "leafCount": 10,
+    "merkleRoot": "200d3aba56343c06fb121f41f743ecaf716969f6de52373603d1b597e1fcebb4",
+    "inputDigest": "d0ca64aa1bbb7350e98b88272da725534529d80726df75b435f07a0dcace3d97"
   },
   "merkle": {
     "leaves": ["sha256('a')", "sha256('b')", "sha256('c')"],
     "root": "1394b29c3086a6150915a75bd1ab6c5dd7e461ec0c5e7d31939ae192d08eb59a"
+  },
+  "empty": {
+    "leafCount": 0,
+    "merkleRoot": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+    "inputDigest": "295679704456c8a72cd298984be90da7570a10d5419da5dca4f05ac5f72571d5"
   }
 }

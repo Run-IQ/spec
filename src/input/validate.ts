@@ -15,7 +15,7 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
-  MAX_INPUT_POINTER_TEXT,
+  MAX_INPUT_LEAF_TEXT,
   ownCopy,
 } from '../values.js';
 import { leafPointerText } from './leaves.js';
@@ -61,7 +61,7 @@ const PLAIN_OBJECT = 'a plain object';
  * `MAX_JSON_VALUES` (10 000 000) property values in all, counted before they are read
  * (`<pointer> is too large: more than 10000000 values`, which stops the check); the reserved
  * segments of a `source.subject` well formed (`isSubject`); once no other problem is found, at
- * most `MAX_INPUT_POINTER_TEXT` (2^28) UTF-16 code units in the pointers of its leaves, all
+ * most `MAX_INPUT_LEAF_TEXT` (2^28) UTF-16 code units in the pointers of its leaves, all
  * added up, each leaf on each path counted (the leaves of the input tree, D-15; at `''`: `the
  * leaf pointers of the input hold more than 268435456 code units`): the work of a digest
  * follows them.
@@ -134,9 +134,9 @@ export function readValidInput(value: unknown): ProofInput {
   return snapshot;
 }
 
-/** The problem of an input whose leaf pointers pass `MAX_INPUT_POINTER_TEXT`. */
+/** The problem of an input whose leaf pointers pass `MAX_INPUT_LEAF_TEXT`. */
 const POINTER_TEXT_MESSAGE =
-  'the leaf pointers of the input hold more than ' + `${MAX_INPUT_POINTER_TEXT} code units`;
+  'the leaf pointers of the input hold more than ' + `${MAX_INPUT_LEAF_TEXT} code units`;
 
 function check(
   value: unknown,
@@ -153,8 +153,8 @@ function check(
   // Only a valid input has a copy; its leaves are those the input tree hashes (D-15).
   if (issues.length === 0 && snapshot !== undefined) {
     const copied = snapshot;
-    const text = ownCopy(() => leafPointerText(copied, MAX_INPUT_POINTER_TEXT));
-    if (text > MAX_INPUT_POINTER_TEXT) issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
+    const text = ownCopy(() => leafPointerText(copied, MAX_INPUT_LEAF_TEXT));
+    if (text > MAX_INPUT_LEAF_TEXT) issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
   }
   return { issues, reads, snapshot };
 }

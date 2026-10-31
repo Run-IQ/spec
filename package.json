@@ -46,6 +46,7 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "bench": "npm run build && node bench/input.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
     "lint": "eslint src/ tests/ && prettier --check src/ tests/ schema/",
     "lint:fix": "eslint src/ tests/ --fix && prettier --write src/ tests/"

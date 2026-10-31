@@ -384,6 +384,7 @@ describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
         message(() => s.canonicalize(sp())),
         message(() => s.merkleRoot(sp())),
         s.verifyInclusion(new Uint8Array(32), 0, 2, sp(), new Uint8Array(32)),
+        s.verifyInputInclusion('0'.repeat(64), 2, 0, new Uint8Array(32), sp()),
       ]));`;
     const out = execFileSync(
       process.execPath,
@@ -398,6 +399,7 @@ describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
       'rules is too large: more than 10000000 values',
       '(root) is too large: more than 10000000 values',
       'leaf hashes is too large: more than 10000000 values',
+      false,
       false,
     ]);
   });

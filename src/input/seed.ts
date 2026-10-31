@@ -3,6 +3,7 @@ import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { newSpecError } from '../errors.js';
+import { hashWork } from '../merkle.js';
 import { Utf8Writer } from '../utf8.js';
 import { bytesOf, hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 
@@ -83,7 +84,10 @@ export function inputSalter(seed: Uint8Array): (pointer: string) => Uint8Array {
   const writer = new Utf8Writer();
   return (pointer) => {
     keyed._cloneInto(work);
-    work.update(writer.encode(`input:${pointer}`));
+    const message = writer.encode(`input:${pointer}`);
+    hashWork.calls += 1;
+    hashWork.bytes += message.length;
+    work.update(message);
     work.digestInto(salt);
     return salt;
   };
