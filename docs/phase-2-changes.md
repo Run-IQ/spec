@@ -18,6 +18,15 @@ Dependants that use `^1.0.0-next.0` accept the new version. Node.js 20.19 or lat
 - `DEFAULT_OUTPUT` is `value`, the output of a rule that names none. `DEFAULT_OUTPUT_DECLARATION` is `{ type: 'number', combine: 'sum' }`, frozen.
 - There is no JSON schema for declarations: they live in calculation models, not in rules.
 
+## Decimals, rounding and strata
+
+- **`OutputType` gains `decimal`.** A decimal output holds an exact decimal as a canonical string: no exponent, no leading zero, no trailing fractional zero, no `-0` (`"1234.5"`). `sum`, `max`, `min` and `highestPriority` combine it; `union`, `all` and `any` do not. `valueMatchesOutputType` accepts only a canonical string, never a number. `number` stays a floating-point value: an amount is declared `decimal`. A `switch` over `OutputType` needs the new case.
+- `isCanonicalDecimal(text)` tells a canonical decimal. `toCanonicalDecimal(text)` writes `-?digits(.digits)?` canonically (`"0012.50"` gives `"12.5"`, `"-0.0"` gives `"0"`), for any number of digits, and is idempotent. It refuses anything else, an exponent, `+`, spaces, `".5"` or `"5."`, with the new error code **`INVALID_DECIMAL`**. Both are pure text functions, with no dependency, in both entries.
+- `OutputDeclaration` gains `rounding?: { scale, mode, at? }`, for `number` and `decimal` outputs only: `scale` an integer from 0 to 20, `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor` (`RoundingMode`), and `at` `output` (the default) or `contribution`. `validateOutputDeclaration` checks it.
+- `OUTPUTS_VARIABLE` is `$outputs`, the reserved variable through which a rule reads an output (`$outputs.x`).
+- **The proof gains required fields.** `UnsignedProof.strata` (`string[][]`) lists the outputs of each evaluation stratum, in order; a stratum may be empty, and a rule set where no rule reads an output has one stratum. `ProofStep`, `ProofSkip` and `ProofException` gain a required `stratum`, a safe integer index in `strata`. `ProofStep` gains `unrounded?`, the contribution before rounding, and `ProofOutput` gains `rounding?`, checked as in a declaration. The format stays `run-iq.proof/1`: it was not published before this change.
+- `verifyProof` makes a proof `invalid`, and `sealProof` and `signProof` refuse it (`INVALID_PROOF`), when `strata` contradicts the rest of the proof: `stratum output unknown: name`, `stratum output repeated: name`, `output not in strata: name`, `stratum out of range: id@version`, `step stratum mismatch: id@version`. `validateProof` and the JSON schema check the shape of the new fields and agree on it.
+
 ## Exceptions
 
 - **`exceptions` is now a closed format**, where phase 1 accepted any JSON value. Each item is `{ kind: 'inhibit', targets }`, `{ kind: 'substitute', targets, params }` or `{ kind: 'shortCircuit', output, value, reason? }`, and nothing else. A rule whose `exceptions` does not follow it is refused by `validateRuleDefinition` and the JSON schema, and `normalizeRuleDefinition` throws `INVALID_RULE`, so it has no checksum.
@@ -34,7 +43,7 @@ Dependants that use `^1.0.0-next.0` accept the new version. Node.js 20.19 or lat
 - `signProof(p, privateKey, keyId)` signs the 64 characters of `digest` with ed25519 and stores `{ alg: 'ed25519', keyId, value }`, `value` in base64url without padding. It refuses a proof whose digest does not match its content or that cites an unlisted rule (`INVALID_PROOF`) and a malformed key (`INVALID_KEY`). `createSigningKeyPair()` returns hex keys.
 - `verifyProof(p, { trustedKeys?, rules? })` never runs anything and never throws. It returns `authentic` (digest matches, signed by a trusted key), `consistent` (digest matches, but unsigned or signed by a key that is not trusted) or `invalid`, with short issues such as `digest mismatch`, `unsigned`, `untrusted key`, `signature invalid`, `cited rule not listed: id@version` (or `: id`), `rule missing: id@version`, `unexpected rule: id@version` and `rule checksum mismatch: id@version`. **An unsigned proof is never `authentic`.** The proof is read once into a JSON snapshot and every check runs on it; act on verified data (a JSON copy), not on a live object.
 - `validateProof(value)` checks the shape and returns `{ errors, issues }` like `validateRuleDefinition`. The JSON schema `schema/decision-proof.schema.json` accepts the same proofs, except that it cannot refuse a rule listed twice.
-- **`SpecErrorCode` gains `INVALID_PROOF` and `INVALID_KEY`.** A `switch` that covers every code needs the two new cases.
+- **`SpecErrorCode` gains `INVALID_PROOF`, `INVALID_KEY` and `INVALID_DECIMAL`.** A `switch` that covers every code needs the three new cases.
 
 ## Portable hashing
 
