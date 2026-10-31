@@ -1,6 +1,6 @@
 # @run-iq/spec
 
-The rule contract shared by every Run-IQ package. It defines what a rule is, its canonical JSON form, its checksum and fingerprint, and how a rule moves between a store and the engine.
+The rule contract shared by every Run-IQ package. It defines what a rule is, its canonical JSON form, its checksum and fingerprint, how a rule moves between a store and the engine, and the proof that records a decision.
 
 [`@run-iq/core`](https://github.com/Run-IQ/core), [`@run-iq/context-engine`](https://github.com/Run-IQ/context-engine), [`@run-iq/dg`](https://github.com/Run-IQ/decision-graph), [`@run-iq/rule-registry`](https://github.com/Run-IQ/rule-registry) and [`@run-iq/policy-bridge`](https://github.com/Run-IQ/policy-bridge) all use it, so a rule sealed by one is accepted by the others.
 
@@ -66,10 +66,10 @@ computeRuleChecksum(copy) === computeRuleChecksum(rule);       // false
 | `condition` | Optional `{ dsl, value }` |
 | `priority` | Finite number |
 | `effectiveFrom`, `effectiveUntil` | Validity window, see below. `effectiveUntil` is optional |
-| `output`, `dominanceGroup`, `sourceRef` | Optional strings |
+| `output`, `dominanceGroup`, `sourceRef` | Optional strings. `output` names the output the rule contributes to (`value` when absent) |
 | `dimensions` | Optional `Record<string, string>`, for example `{ country: 'TG' }` |
 | `tags` | Optional string array |
-| `exceptions` | Optional JSON value |
+| `exceptions` | Optional list of exceptions, see below |
 
 Every other top-level key is a plugin extension. Extensions enter the checksum and the fingerprint. `RESERVED_RULE_FIELDS` lists the names above plus `checksum`.
 
@@ -79,9 +79,44 @@ Every other top-level key is a plugin extension. Extensions enter the checksum a
 - Missing `effectiveUntil`, `dimensions` and `tags` become `null`, `{}` and `[]`. Tags are sorted and deduplicated.
 - At the top level, `null`, `undefined` and an absent key mean the same thing. Inside `params`, `condition.value`, `exceptions` and extension values, `null` is data.
 - `checksum` is dropped.
-- `exceptions: []` is data, not a default: it seals differently from an absent `exceptions` (`null` counts as absent). Which empty form is canonical will be decided with the exceptions format in phase 2.
+- `exceptions: []`, `null` and an absent `exceptions` are the same rule, with the same checksum. In each selector, `ids`, `tags`, `outputs` and `models` are sorted and deduplicated, and empty fields are dropped. The order of the exceptions is kept.
 
 `canonicalize` writes JSON with keys sorted at every depth. `NaN`, `Infinity`, `bigint`, `Map`, `Set`, class instances and cycles throw `NON_SERIALIZABLE` instead of being written as `null` or `{}`. Convert values such as `Decimal` to JSON first. Strings are not Unicode-normalized.
+
+## Outputs and exceptions
+
+A rule contributes to one named output. Its calculation model declares the output's type and how the contributions of several rules combine:
+
+```js
+import { validateOutputDeclaration } from '@run-iq/spec';
+
+validateOutputDeclaration({ type: 'list', combine: 'sum' });
+// [ { path: 'output.combine', message: 'output.combine "sum" cannot combine a list output: it applies to number' } ]
+```
+
+The types are `number`, `boolean`, `string`, `enum` (with its `values`), `list` and `object`. `sum`, `max` and `min` combine numbers, `all` and `any` booleans, `union` lists, and `highestPriority` any type. An undeclared output is a number, summed (`DEFAULT_OUTPUT_DECLARATION`).
+
+A rule can carry exceptions that apply when the rule itself applies:
+
+| Kind | Effect |
+|---|---|
+| `{ kind: 'inhibit', targets }` | The targeted rules do not apply |
+| `{ kind: 'substitute', targets, params }` | The targeted rules apply with `params` deep-merged into theirs |
+| `{ kind: 'shortCircuit', output, value, reason? }` | The output takes `value`, whatever other rules contribute |
+
+`targets` is a selector: `{ ids?, tags?, dimensions?, outputs?, models? }`. Fields combine by AND, the values of one field by OR, and a selector must constrain at least one field. `matchesSelector(rule, targets)` implements it. A rule of the reserved model `@run-iq/exception` (`EXCEPTION_MODEL`) computes nothing: it has a non-empty `exceptions` list and no `output`.
+
+```js
+import { EXCEPTION_MODEL, matchesSelector, normalizeRuleDefinition } from '@run-iq/spec';
+
+// `rule` is the shipping-fee rule of the first example
+const waiver = {
+  id: 'free-shipping-members', version: 1, model: EXCEPTION_MODEL, params: {}, priority: 10,
+  effectiveFrom: '2025-01-01',
+  exceptions: [{ kind: 'inhibit', targets: { ids: ['shipping-fee'] } }],
+};
+matchesSelector(normalizeRuleDefinition(rule), waiver.exceptions[0].targets); // true
+```
 
 ## Validity window
 
@@ -121,9 +156,51 @@ validateRuleDefinition({
 
 The JSON schema `@run-iq/spec/schema/rule-definition.schema.json` (draft 2020-12) accepts the same definitions, except that it cannot check that `effectiveUntil` is after `effectiveFrom`.
 
+## Decision proofs
+
+A proof records one decision without its input: the digest of the input, the rules received with their checksums, the engine and plugin versions, the outputs, and the trace (rules applied, rules skipped, exceptions). `@run-iq/core` builds it; `verifyProof` checks it without running anything.
+
+```js
+import {
+  computeInputDigest, computeRuleChecksum, createSigningKeyPair, sealProof, signProof, verifyProof,
+} from '@run-iq/spec';
+
+const proof = sealProof({
+  format: 'run-iq.proof/1',
+  requestId: 'order-42',
+  evaluatedAt: '2025-06-01',
+  sealedAt: '2025-06-01T10:00:00.000Z',
+  inputDigest: computeInputDigest({
+    data: { orderTotal: 200 },
+    meta: { tenantId: 'shop', effectiveDate: '2025-06-01', tags: [], dimensions: {}, context: {} },
+  }),
+  rules: [{ id: 'shipping-fee', version: 1, checksum: computeRuleChecksum(rule) }],
+  versions: { engine: '1.0.0-next.1', plugins: {}, dsls: {} },
+  outputs: { value: { type: 'number', combine: 'sum', value: 10, contributors: ['shipping-fee'] } },
+  applied: [{ ruleId: 'shipping-fee', version: 1, model: 'PERCENTAGE', output: 'value', contribution: 10 }],
+  skipped: [],
+  exceptions: [],
+});
+verifyProof(proof); // { status: 'consistent', issues: ['unsigned'] }
+
+const { privateKey, publicKey } = createSigningKeyPair();
+const signed = signProof(proof, privateKey, 'shop-server');
+const trustedKeys = { 'shop-server': publicKey };
+verifyProof(signed, { trustedKeys, rules: [rule] }); // { status: 'authentic', issues: [] }
+verifyProof(signed, { trustedKeys, rules: [] });     // { status: 'invalid', issues: ['rule missing: shipping-fee@1'] }
+
+signed.outputs.value.value = 0;
+verifyProof(signed, { trustedKeys });                // { status: 'invalid', issues: ['digest mismatch'] }
+```
+
+- `sealProof` sets `digest`, the sha256 of the canonical proof without `digest` and `signature`. It hashes lists in the order given: the producer sorts them.
+- `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
+- `verifyProof` never throws. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.
+- `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except that it cannot refuse a rule listed twice.
+
 ## Browser entry
 
-`@run-iq/spec/canonical` imports no Node.js module. It exports `canonicalize`, `normalizeRuleDefinition`, `canonicalRulePayload`, `validateRuleDefinition`, `isEffectiveAt`, `sha256Hex`, `SpecError` and the types. `sha256Hex` is a portable sha256 (`@noble/hashes`), so the checksum is computed the same way in a browser:
+`@run-iq/spec/canonical` imports no Node.js module. It exports everything except `computeRuleChecksum`, `verifyRuleChecksum`, `computeRuleFingerprint` and the stored-rule conversions, so proofs are verified in a browser too. `sha256Hex` is a portable sha256 (`@noble/hashes`), so the checksum is computed the same way in a browser:
 
 ```js
 import { canonicalRulePayload, sha256Hex } from '@run-iq/spec/canonical';
@@ -134,11 +211,11 @@ const checksum = sha256Hex(canonicalRulePayload(rule));
 
 ## Errors
 
-Every function throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE` or `INVALID_RULE`. `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
+Every function throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE`, `INVALID_RULE`, `INVALID_PROOF` or `INVALID_KEY`. `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
 
 ## Documents
 
-[docs/](docs) holds the redesign document, the study notes and the [phase 1 changes](docs/phase-1-changes.md).
+[docs/](docs) holds the redesign document, the study notes, and the [phase 1](docs/phase-1-changes.md) and [phase 2](docs/phase-2-changes.md) changes.
 
 ## License
 
