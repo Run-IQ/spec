@@ -10,7 +10,7 @@ The rule contract shared by every Run-IQ package. It defines what a rule is, its
 npm install @run-iq/spec@next
 ```
 
-The 1.0 line is published under the `next` tag. No runtime dependencies. Requires Node.js 20 or later.
+The 1.0 line is published under the `next` tag. Depends on `@noble/hashes` and `@noble/curves`. Requires Node.js 20.19 or later.
 
 ## Example
 
@@ -123,14 +123,12 @@ The JSON schema `@run-iq/spec/schema/rule-definition.schema.json` (draft 2020-12
 
 ## Browser entry
 
-`@run-iq/spec/canonical` imports no Node.js module. It exports `canonicalize`, `normalizeRuleDefinition`, `canonicalRulePayload`, `validateRuleDefinition`, `isEffectiveAt`, `SpecError` and the types, but no hashing. Hash `canonicalRulePayload(rule)` with any sha256 to get the checksum:
+`@run-iq/spec/canonical` imports no Node.js module. It exports `canonicalize`, `normalizeRuleDefinition`, `canonicalRulePayload`, `validateRuleDefinition`, `isEffectiveAt`, `sha256Hex`, `SpecError` and the types. `sha256Hex` is a portable sha256 (`@noble/hashes`), so the checksum is computed the same way in a browser:
 
 ```js
-import { canonicalRulePayload } from '@run-iq/spec/canonical';
+import { canonicalRulePayload, sha256Hex } from '@run-iq/spec/canonical';
 
-const bytes = new TextEncoder().encode(canonicalRulePayload(rule));
-const digest = await crypto.subtle.digest('SHA-256', bytes);
-const checksum = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+const checksum = sha256Hex(canonicalRulePayload(rule));
 // checksum === computeRuleChecksum(rule)
 ```
 
