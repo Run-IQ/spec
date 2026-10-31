@@ -85,7 +85,7 @@ describe('@run-iq/spec/canonical', () => {
     expect(isEffectiveAt(normalizeRuleDefinition(rules[0]!), new Date('2025-02-01'))).toBe(true);
   });
 
-  it('imports no node: module anywhere in its module graph, only @noble/hashes', () => {
+  it('imports no node: module anywhere in its module graph, only @noble', () => {
     const src = resolve(dirname(fileURLToPath(import.meta.url)), '../src');
     const seen = new Set<string>();
     const nodeImports: string[] = [];
@@ -96,7 +96,7 @@ describe('@run-iq/spec/canonical', () => {
       for (const match of code.matchAll(/(?:from|import)\s*\(?\s*'([^']+)'/g)) {
         const spec = match[1]!;
         if (spec.startsWith('.')) visit(resolve(dirname(file), spec.replace(/\.js$/, '.ts')));
-        else if (!spec.startsWith('@noble/hashes/')) nodeImports.push(`${file}: ${spec}`);
+        else if (!/^@noble\/(?:hashes|curves)\//.test(spec)) nodeImports.push(`${file}: ${spec}`);
       }
     };
     visit(resolve(src, 'canonical-entry.ts'));

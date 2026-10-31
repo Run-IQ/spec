@@ -31,7 +31,8 @@ export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = Object.fr
   combine: 'sum',
 });
 
-const OUTPUT_TYPES: readonly OutputType[] = [
+/** Every output type, in documentation order. Internal: not exported from the package. */
+export const OUTPUT_TYPES: readonly OutputType[] = [
   'number',
   'boolean',
   'string',
@@ -51,7 +52,8 @@ const COMBINABLE: Readonly<Record<CombineStrategy, readonly OutputType[]>> = {
   any: ['boolean'],
 };
 
-const COMBINE_STRATEGIES: readonly CombineStrategy[] = [
+/** Every combine strategy, in documentation order. Internal: not exported from the package. */
+export const COMBINE_STRATEGIES: readonly CombineStrategy[] = [
   'sum',
   'max',
   'min',
@@ -69,8 +71,7 @@ const KEYS = new Set(['type', 'combine', 'values']);
  *   `min` to `number`; `all` and `any` to `boolean`; `union` to `list`; `highestPriority` to
  *   every type);
  * - `values` is required for an `enum` (a non-empty array of distinct non-empty strings) and
- *   refused
- *   for any other type;
+ *   refused for any other type;
  * - no other key is allowed.
  */
 export function validateOutputDeclaration(

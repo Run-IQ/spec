@@ -3,7 +3,9 @@
  * no `node:` module, so it runs in a browser or any other JavaScript runtime.
  *
  * It hashes with a portable sha256 (`sha256Hex`, from `@noble/hashes`):
- * `computeRuleChecksum(x)` is `sha256Hex(canonicalRulePayload(x))`.
+ * `computeRuleChecksum(x)` is `sha256Hex(canonicalRulePayload(x))`. It also holds the whole
+ * decision proof API; signatures use ed25519 from `@noble/curves`, so `verifyProof` runs in a
+ * browser too.
  *
  * @packageDocumentation
  */
@@ -36,3 +38,20 @@ export {
   valueMatchesOutputType,
 } from './decision/output.js';
 export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export { PROOF_FORMAT } from './proof/types.js';
+export type {
+  DecisionProof,
+  ProofException,
+  ProofInput,
+  ProofOutput,
+  ProofRuleRef,
+  ProofSkip,
+  ProofStatus,
+  ProofStep,
+  ProofVerification,
+  UnsignedProof,
+} from './proof/types.js';
+export { computeInputDigest, sealProof } from './proof/digest.js';
+export { createSigningKeyPair, signProof } from './proof/sign.js';
+export { verifyProof } from './proof/verify.js';
+export { validateProof } from './proof/validate.js';

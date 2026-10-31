@@ -2,7 +2,9 @@
  * @run-iq/spec: the canonical form of a Run-IQ rule, its checksum and its fingerprint, the
  * stored and executable forms of a rule, and its validator (`validateRuleDefinition`, which
  * agrees with `schema/rule-definition.schema.json`); the rule exception format
- * (`RuleException`, `matchesSelector`) and the output declarations (`OutputDeclaration`).
+ * (`RuleException`, `matchesSelector`) and the output declarations (`OutputDeclaration`); the
+ * decision proof format (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which
+ * agrees with `schema/decision-proof.schema.json`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -43,3 +45,20 @@ export {
   valueMatchesOutputType,
 } from './decision/output.js';
 export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export { PROOF_FORMAT } from './proof/types.js';
+export type {
+  DecisionProof,
+  ProofException,
+  ProofInput,
+  ProofOutput,
+  ProofRuleRef,
+  ProofSkip,
+  ProofStatus,
+  ProofStep,
+  ProofVerification,
+  UnsignedProof,
+} from './proof/types.js';
+export { computeInputDigest, sealProof } from './proof/digest.js';
+export { createSigningKeyPair, signProof } from './proof/sign.js';
+export { verifyProof } from './proof/verify.js';
+export { validateProof } from './proof/validate.js';

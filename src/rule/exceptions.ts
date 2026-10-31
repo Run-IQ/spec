@@ -62,7 +62,8 @@ export function matchesSelector(
   return true;
 }
 
-const KINDS = ['inhibit', 'substitute', 'shortCircuit'] as const;
+/** Every exception kind. Internal: not exported from the package. */
+export const KINDS = ['inhibit', 'substitute', 'shortCircuit'] as const;
 const KEYS_BY_KIND: Readonly<Record<RuleException['kind'], readonly string[]>> = {
   inhibit: ['kind', 'targets'],
   substitute: ['kind', 'targets', 'params'],

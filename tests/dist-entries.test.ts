@@ -23,7 +23,18 @@ type SpecErrorClass = new (
   code: string;
   path?: string;
 };
-type Entry = { SpecError: SpecErrorClass; sha256Hex: (text: string) => string };
+type Proof = { digest: string };
+type Entry = {
+  SpecError: SpecErrorClass;
+  sha256Hex: (text: string) => string;
+  sealProof: (proof: object) => Proof;
+  signProof: (proof: Proof, privateKey: string, keyId: string) => Proof;
+  createSigningKeyPair: () => { privateKey: string; publicKey: string };
+  verifyProof: (
+    proof: unknown,
+    options?: { trustedKeys?: Record<string, string> },
+  ) => { status: string; issues: string[] };
+};
 
 async function esm(file: string): Promise<Entry> {
   return (await import(/* @vite-ignore */ pathToFileURL(resolve(dist, file)).href)) as Entry;
@@ -76,6 +87,38 @@ describeBuilt('built entries: one SpecError identity', () => {
     for (const entry of entries) {
       expect(entry.sha256Hex('')).toBe(empty);
       expect(entry.sha256Hex('é')).toBe(createHash('sha256').update('é', 'utf8').digest('hex'));
+    }
+  });
+
+  it('a proof signed through one built entry is authentic through every other', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const unsigned = {
+      format: 'run-iq.proof/1',
+      requestId: 'req-1',
+      evaluatedAt: null,
+      sealedAt: '2025-06-01T10:00:00.000Z',
+      inputDigest: '0'.repeat(64),
+      rules: [],
+      versions: { engine: '1.0.0', plugins: {}, dsls: {} },
+      outputs: {},
+      applied: [],
+      skipped: [],
+      exceptions: [],
+    };
+    for (const signer of entries) {
+      const { privateKey, publicKey } = signer.createSigningKeyPair();
+      const proof = signer.signProof(signer.sealProof(unsigned), privateKey, 'k');
+      for (const verifier of entries) {
+        expect(verifier.verifyProof(proof, { trustedKeys: { k: publicKey } })).toEqual({
+          status: 'authentic',
+          issues: [],
+        });
+      }
     }
   });
 
