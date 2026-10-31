@@ -195,7 +195,7 @@ verifyProof(signed, { trustedKeys });                // { status: 'invalid', iss
 
 - `sealProof` sets `digest`, the sha256 of the canonical proof without `digest` and `signature`. It hashes lists in the order given: the producer sorts them.
 - `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
-- `verifyProof` never throws. A proof is `invalid` if it cites in `applied`, `skipped` or `exceptions` a rule its `rules` does not list; `sealProof` refuses to seal one. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.
+- `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.
 - `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except that it cannot refuse a rule listed twice.
 
 ## Browser entry
