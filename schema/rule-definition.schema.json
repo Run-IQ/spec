@@ -651,12 +651,12 @@
     "ruleRef": {
       "description": "A rule cited by a selector: id or <rule set>:<id>, with at most one ':'; the rule set part is a rule set id other than local (a local id is written bare).",
       "type": "string",
-      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9._-]*:)?[^:]+$"
+      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9_-]*:)?[^:]+$"
     },
     "ruleSetId": {
-      "description": "A rule set id (D-4); local names the rules without a rule set.",
+      "description": "A rule set id (D-4): lowercase letters, digits, '_' and '-'; no '.' (a version is never part of the id, and every qualified name stays readable by every DSL). local names the rules without a rule set.",
       "type": "string",
-      "pattern": "^[a-z0-9][a-z0-9._-]*$"
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
     },
     "forEach": {
       "description": "A collection or time segments. Literal segments of a path never start with @ or ! (they mark subjects, D-2); pointers into an element name one value (no '*' segment) and hold no '-' segment. NOT expressible in JSON Schema, checked only by validateRuleDefinition and normalizeRuleDefinition: a key list holds one name per level; each orderBy path appears once; segments.from and segments.until differ.",

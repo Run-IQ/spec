@@ -10,12 +10,25 @@ import { typeName } from '../values.js';
  */
 export const LOCAL_RULE_SET = 'local';
 
-const RULE_SET_ID = /^[a-z0-9][a-z0-9._-]*$/;
+const RULE_SET_ID = /^[a-z0-9][a-z0-9_-]*$/;
 /** Internal: the grammar of a rule set id, as messages write it. */
-export const RULE_SET_GRAMMAR = '^[a-z0-9][a-z0-9._-]*$';
+export const RULE_SET_GRAMMAR = '^[a-z0-9][a-z0-9_-]*$';
 
 /**
- * True for a rule set id (D-4): `^[a-z0-9][a-z0-9._-]*$`, `local` included. Never throws.
+ * Internal: the named issue of a rule set id holding `.`. A version is never part of the id, and
+ * an id without `.` keeps every qualified name (`<rule set>:<name>`) readable by every DSL.
+ */
+const NO_DOT = 'must not contain ".": a version is never part of a rule set id';
+
+/** Internal: the problem of a string that is not a rule set id, after its subject. */
+function idProblem(value: string): string {
+  return value.includes('.') ? NO_DOT : `must match ${RULE_SET_GRAMMAR}`;
+}
+
+/**
+ * True for a rule set id (D-4, tightened): `^[a-z0-9][a-z0-9_-]*$`, `local` included. No `.`:
+ * a version is never part of the id, so every qualified name stays readable by every DSL.
+ * Never throws.
  */
 export function isRuleSetId(value: unknown): value is string {
   return typeof value === 'string' && RULE_SET_ID.test(value);
@@ -32,16 +45,15 @@ export function isPackId(value: unknown): value is string {
 /**
  * What is wrong with `value` as a pack id, or `undefined` (see `isPackId`): `local` is reserved
  * (`pack id "local" is reserved: it names the rules without a rule set`), and an id must match
- * `^[a-z0-9][a-z0-9._-]*$`. Never throws.
+ * `^[a-z0-9][a-z0-9_-]*$` (`pack id "p.v2" must not contain ".": a version is never part of a
+ * rule set id`). Never throws.
  */
 export function packIdProblem(value: unknown): string | undefined {
   if (typeof value !== 'string') return `a pack id must be a string, got ${describeType(value)}`;
   if (value === LOCAL_RULE_SET) {
     return 'pack id "local" is reserved: it names the rules without a rule set';
   }
-  return RULE_SET_ID.test(value)
-    ? undefined
-    : `pack id ${quoteText(value)} must match ${RULE_SET_GRAMMAR}`;
+  return RULE_SET_ID.test(value) ? undefined : `pack id ${quoteText(value)} ${idProblem(value)}`;
 }
 
 /**
@@ -56,7 +68,11 @@ export function qualifyName(ruleSet: string, name: string): string {
     nameError(`a rule set id must be a string, got ${describeType(ruleSet)}`);
   }
   if (!RULE_SET_ID.test(ruleSet)) {
-    nameError(`${quoteText(ruleSet)} is not a rule set id (${RULE_SET_GRAMMAR})`);
+    nameError(
+      ruleSet.includes('.')
+        ? `${quoteText(ruleSet)} ${NO_DOT}`
+        : `${quoteText(ruleSet)} is not a rule set id (${RULE_SET_GRAMMAR})`,
+    );
   }
   if (typeof name !== 'string') nameError(`a name must be a string, got ${describeType(name)}`);
   if (name === '' || name.includes(':')) {
@@ -97,9 +113,14 @@ export function ruleSetOf(ruleSet: string, name: string): string {
   return colon >= 0 ? name.slice(0, colon) : ruleSet;
 }
 
-/** Internal: the message refusing a value that is not a rule set id, at `path`. */
-export function ruleSetIdMessage(path: string): string {
-  return `${path} must be a rule set id matching ${RULE_SET_GRAMMAR}`;
+/**
+ * Internal: the message refusing `value`, which is not a rule set id, at `path`: the named issue
+ * of a `.` (a version) for a string holding one, else the grammar.
+ */
+export function ruleSetIdMessage(path: string, value: unknown): string {
+  return typeof value === 'string' && value.includes('.')
+    ? `${path} ${NO_DOT}`
+    : `${path} must be a rule set id matching ${RULE_SET_GRAMMAR}`;
 }
 
 /**

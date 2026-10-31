@@ -98,7 +98,7 @@ function definitionIssues(value: unknown): {
   let ruleSet: string | undefined = LOCAL_RULE_SET;
   if (ruleSetValue != null) {
     ruleSet = isRuleSetId(ruleSetValue) ? ruleSetValue : undefined;
-    if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet'));
+    if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet', ruleSetValue));
   }
   if (!isRuleVersion(value.version)) errors.add('version', 'version must be a positive integer');
   checkNonEmptyString(value.model, 'model', errors);

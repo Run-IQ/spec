@@ -170,7 +170,7 @@ function readJson(value: unknown, field: string): JsonValue {
 /** The rule set of the rule: `local` when absent (`null` or `undefined`). */
 function readRuleSet(value: unknown): string {
   if (value == null) return LOCAL_RULE_SET;
-  if (!isRuleSetId(value)) invalidRule(ruleSetIdMessage('ruleSet'));
+  if (!isRuleSetId(value)) invalidRule(ruleSetIdMessage('ruleSet', value));
   return value;
 }
 

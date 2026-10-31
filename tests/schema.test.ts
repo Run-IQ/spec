@@ -563,6 +563,7 @@ describe('rule sets and qualified names: validator, JSON schema and normalize ag
     ['an explicit local rule', { ...base, ruleSet: 'local' }],
     ['a null rule set', { ...base, ruleSet: null }],
     ['a qualified output', { ...base, output: 'rgpd:profilage' }],
+    ['a rule set with "-"', { ...base, ruleSet: 'p-v2', output: 'p-v2:x' }],
     [
       'a selector with rule sets and qualified names',
       {
@@ -592,6 +593,15 @@ describe('rule sets and qualified names: validator, JSON schema and normalize ag
     ['an output with "."', { ...base, output: 'a.b' }],
     ['a qualified output with "."', { ...base, output: 'pack:a.b' }],
     ['an output of a rule set with "."', { ...base, output: 'p.v2:x' }],
+    ['a rule set with "."', { ...base, ruleSet: 'p.v2' }],
+    [
+      'a selector rule set with "."',
+      { ...base, exceptions: [{ kind: 'inhibit', targets: { ruleSets: ['p.v2'], tags: ['t'] } }] },
+    ],
+    [
+      'a selector id of a rule set with "."',
+      { ...base, exceptions: [{ kind: 'inhibit', targets: { ids: ['p.v2:R1'] } }] },
+    ],
     ['an output qualified by local', { ...base, output: 'local:x' }],
     ['an output qualified by an invalid set', { ...base, output: 'P:x' }],
     ['an output with an empty rule set', { ...base, output: ':x' }],

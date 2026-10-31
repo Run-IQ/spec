@@ -16,24 +16,37 @@ import {
 import type { RuleDefinitionInput, VersionedRuleWindow } from '../src/index.js';
 import { BASE_RULE, expectRuleRefused, fixedCalendar, specError } from './helpers.js';
 
-const RULE_SET_ID = 'ruleSet must be a rule set id matching ^[a-z0-9][a-z0-9._-]*$';
+const RULE_SET_ID = 'ruleSet must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$';
 
 describe('rule set ids (D-4)', () => {
   it('names the rules without a rule set local', () => {
     expect(LOCAL_RULE_SET).toBe('local');
   });
 
-  it.each(['local', 'rgpd', 'a.b_c-1', '0x', 'tva2026', 'a'])('accepts the id %j', (id) => {
+  it.each(['local', 'rgpd', 'a_b-1', 'p-v2', '0x', 'tva2026', 'a'])('accepts the id %j', (id) => {
     expect(isRuleSetId(id)).toBe(true);
   });
 
-  it.each(['Local', 'a:b', '', '-a', '.a', '_a', ' a', 'a b', 'é', 'a/b', 1, null, undefined])(
-    'refuses the id %j',
-    (id) => {
-      expect(isRuleSetId(id)).toBe(false);
-      expect(isPackId(id)).toBe(false);
-    },
-  );
+  it.each([
+    'Local',
+    'a:b',
+    '',
+    '-a',
+    '.a',
+    '_a',
+    'p.v2',
+    'a.',
+    ' a',
+    'a b',
+    'é',
+    'a/b',
+    1,
+    null,
+    undefined,
+  ])('refuses the id %j', (id) => {
+    expect(isRuleSetId(id)).toBe(false);
+    expect(isPackId(id)).toBe(false);
+  });
 
   it('refuses local as a pack id, with a named issue', () => {
     expect(isPackId('local')).toBe(false);
@@ -42,8 +55,47 @@ describe('rule set ids (D-4)', () => {
     expect(packIdProblem('local')).toBe(
       'pack id "local" is reserved: it names the rules without a rule set',
     );
-    expect(packIdProblem('Rgpd')).toBe('pack id "Rgpd" must match ^[a-z0-9][a-z0-9._-]*$');
+    expect(packIdProblem('Rgpd')).toBe('pack id "Rgpd" must match ^[a-z0-9][a-z0-9_-]*$');
     expect(packIdProblem(7)).toBe('a pack id must be a string, got a value of type number');
+  });
+});
+
+describe('a version is never part of a rule set id (D-4, tightened)', () => {
+  const DOT = 'must not contain ".": a version is never part of a rule set id';
+
+  it('refuses p.v2 with a named issue wherever a rule set id is written', () => {
+    expect(packIdProblem('p.v2')).toBe(`pack id "p.v2" ${DOT}`);
+    expectRuleRefused({ ...BASE_RULE, ruleSet: 'p.v2' }, 'ruleSet', `ruleSet ${DOT}`);
+    expectRuleRefused(
+      {
+        ...BASE_RULE,
+        exceptions: [{ kind: 'inhibit', targets: { ruleSets: ['p.v2'], tags: ['t'] } }],
+      },
+      'exceptions[0].targets.ruleSets[0]',
+      `exceptions[0].targets.ruleSets[0] ${DOT}`,
+    );
+    expect(specError(() => qualifyName('p.v2', 'x'))).toMatchObject({
+      code: 'INVALID_RULE',
+      message: `qualifyName: "p.v2" ${DOT}`,
+    });
+    expect(
+      specError(() =>
+        findOverlappingVersions(
+          [{ id: 'R1', version: 1, ruleSet: 'p.v2', effectiveFrom: '2025-01-01' }],
+          'UTC',
+          fixedCalendar,
+        ),
+      ),
+    ).toMatchObject({ code: 'INVALID_RULE', message: `rule R1@1: ruleSet ${DOT}` });
+  });
+
+  it('accepts p-v2 and its qualified names', () => {
+    expect(isPackId('p-v2')).toBe(true);
+    expect(qualifyName('p-v2', 'x')).toBe('p-v2:x');
+    const rule = { ...BASE_RULE, output: 'p-v2:x', ruleSet: 'p-v2' };
+    expect(validateRuleDefinition(rule).valid).toBe(true);
+    expect(normalizeRuleDefinition(rule).output).toBe('x');
+    expect(validateRuleDefinition({ ...BASE_RULE, output: 'p-v2:x' }).valid).toBe(true);
   });
 });
 
@@ -55,7 +107,7 @@ describe('qualifyName', () => {
   });
 
   it.each([
-    ['Local', 'x', 'qualifyName: "Local" is not a rule set id (^[a-z0-9][a-z0-9._-]*$)'],
+    ['Local', 'x', 'qualifyName: "Local" is not a rule set id (^[a-z0-9][a-z0-9_-]*$)'],
     ['rgpd', 'a:b', 'qualifyName: "a:b" is not a bare name: it is empty or holds ":"'],
     ['rgpd', '', 'qualifyName: "" is not a bare name: it is empty or holds ":"'],
     [1, 'x', 'qualifyName: a rule set id must be a string, got a value of type number'],
@@ -122,8 +174,8 @@ describe('output names (D-4, pre-flight M-14)', () => {
     ['pack:a.b', 'output name must not contain "."'],
     ['p.v2:x', 'output name must not contain "."'],
     ['local:x', 'output name must not be qualified by "local": a local name is written bare'],
-    ['Pack:x', 'output name must start with a rule set id before ":": ^[a-z0-9][a-z0-9._-]*$'],
-    [':x', 'output name must start with a rule set id before ":": ^[a-z0-9][a-z0-9._-]*$'],
+    ['Pack:x', 'output name must start with a rule set id before ":": ^[a-z0-9][a-z0-9_-]*$'],
+    [':x', 'output name must start with a rule set id before ":": ^[a-z0-9][a-z0-9_-]*$'],
     ['pack:', 'output name must name an output after ":"'],
   ])('refuses the output %j', (output, message) => {
     expectRuleRefused({ ...BASE_RULE, output }, 'output', message);
@@ -222,12 +274,12 @@ describe('selectors with ruleSets', () => {
     const rule = { id: 'R1', ruleSet: 'Bad', tags: [], dimensions: {}, model: 'M' };
     expect(specError(() => matchesSelector(rule, { ids: ['R1'] }))).toMatchObject({
       code: 'INVALID_RULE',
-      message: 'rule ruleSet "Bad" is not a rule set id (^[a-z0-9][a-z0-9._-]*$)',
+      message: 'rule ruleSet "Bad" is not a rule set id (^[a-z0-9][a-z0-9_-]*$)',
     });
     const local = { ...rule, ruleSet: undefined };
     expect(specError(() => matchesSelector(local, { ids: ['R1'] }, 'A'))).toMatchObject({
       code: 'INVALID_RULE',
-      message: 'carrier ruleSet "A" is not a rule set id (^[a-z0-9][a-z0-9._-]*$)',
+      message: 'carrier ruleSet "A" is not a rule set id (^[a-z0-9][a-z0-9_-]*$)',
     });
   });
 
@@ -270,7 +322,7 @@ describe('selectors with ruleSets', () => {
     [
       { ruleSets: ['Rgpd'], tags: ['t'] },
       'exceptions[0].targets.ruleSets[0]',
-      'exceptions[0].targets.ruleSets[0] must be a rule set id matching ^[a-z0-9][a-z0-9._-]*$',
+      'exceptions[0].targets.ruleSets[0] must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$',
     ],
     [
       { ruleSets: 'rgpd', tags: ['t'] },

@@ -346,7 +346,7 @@ function readRuleSets(value: JsonValue | undefined, path: string, fail: Add): st
   list.forEach((id, i) => {
     if (!isRuleSetId(id)) {
       valid = false;
-      fail(`${path}[${i}]`, ruleSetIdMessage(`${path}[${i}]`));
+      fail(`${path}[${i}]`, ruleSetIdMessage(`${path}[${i}]`, id));
     }
   });
   return valid ? list : undefined;

@@ -51,8 +51,8 @@ export interface RuleDefinitionBase {
    */
   forEach?: ForEach;
   /**
-   * The rule set (pack) of the rule, `^[a-z0-9][a-z0-9._-]*$` (D-4). Absent for a local rule:
-   * `ruleSet: 'local'` (`LOCAL_RULE_SET`) is normalized away. The names a rule cites bare
+   * The rule set (pack) of the rule, `^[a-z0-9][a-z0-9_-]*$` (D-4, no `.`). Absent for a local
+   * rule: `ruleSet: 'local'` (`LOCAL_RULE_SET`) is normalized away. The names a rule cites bare
    * (`output`, selector `ids` and `outputs`) designate its own rule set (D-37).
    */
   ruleSet?: string;

@@ -52,13 +52,13 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     [{ kind: 'inhibit', targets: { ids: ['Rgpd:R1'] } }],
     'exceptions[0].targets.ids[0]',
     'exceptions[0].targets.ids[0] name must start with a rule set id before ":": ' +
-      '^[a-z0-9][a-z0-9._-]*$',
+      '^[a-z0-9][a-z0-9_-]*$',
   ],
   [
     'a selector with an invalid rule set',
     [{ kind: 'inhibit', targets: { ruleSets: ['rgpd', 'A'], tags: ['t'] } }],
     'exceptions[0].targets.ruleSets[1]',
-    'exceptions[0].targets.ruleSets[1] must be a rule set id matching ^[a-z0-9][a-z0-9._-]*$',
+    'exceptions[0].targets.ruleSets[1] must be a rule set id matching ^[a-z0-9][a-z0-9_-]*$',
   ],
   [
     'a selector whose ruleSets is not an array',
