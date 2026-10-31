@@ -51,13 +51,15 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
     'an empty selector',
     [{ kind: 'inhibit', targets: {} }],
     'exceptions[0].targets',
-    'exceptions[0].targets must constrain at least one of ids, tags, dimensions, outputs, models: an empty selector would target every rule',
+    'exceptions[0].targets must constrain at least one of ids, tags, dimensions, outputs, ' +
+      'models: an empty selector would target every rule',
   ],
   [
     'a selector whose fields are all empty',
     [{ kind: 'inhibit', targets: { ids: [], tags: [], dimensions: {}, outputs: [], models: [] } }],
     'exceptions[0].targets',
-    'exceptions[0].targets must constrain at least one of ids, tags, dimensions, outputs, models: an empty selector would target every rule',
+    'exceptions[0].targets must constrain at least one of ids, tags, dimensions, outputs, ' +
+      'models: an empty selector would target every rule',
   ],
   [
     'an unknown selector key',
@@ -180,6 +182,7 @@ export const REFUSED_EXCEPTIONS: [string, unknown, string, string][] = [
       { kind: 'inhibit', targets: {} },
     ],
     'exceptions[1].targets',
-    'exceptions[1].targets must constrain at least one of ids, tags, dimensions, outputs, models: an empty selector would target every rule',
+    'exceptions[1].targets must constrain at least one of ids, tags, dimensions, outputs, ' +
+      'models: an empty selector would target every rule',
   ],
 ];

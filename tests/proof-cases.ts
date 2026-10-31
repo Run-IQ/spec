@@ -469,7 +469,8 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'an unknown rounding mode',
     proofWith({ outputs: { value: { ...output, rounding: { ...rounding, mode: 'bankers' } } } }),
     'outputs.value.rounding.mode',
-    'outputs.value.rounding.mode must be one of halfUp, halfDown, halfEven, up, down, ceiling, floor',
+    'outputs.value.rounding.mode must be one of ' +
+      'halfUp, halfDown, halfEven, up, down, ceiling, floor',
   ],
   [
     'an unknown rounding at',

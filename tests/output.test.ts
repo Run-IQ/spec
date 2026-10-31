@@ -274,9 +274,9 @@ describe('validateOutputDeclaration: decimal', () => {
     expect(validateOutputDeclaration({ type: 'decimal', combine }, 'models.TAX.output')).toEqual([
       {
         path: 'models.TAX.output.combine',
-        message: `models.TAX.output.combine "${combine}" cannot combine a decimal output: it applies to ${
-          combine === 'union' ? 'list' : 'boolean'
-        }`,
+        message:
+          `models.TAX.output.combine "${combine}" cannot combine a decimal output: ` +
+          `it applies to ${combine === 'union' ? 'list' : 'boolean'}`,
       },
     ]);
   });
@@ -345,7 +345,8 @@ describe('validateOutputDeclaration: rounding', () => {
       {
         path: 'output.rounding.mode',
         message:
-          'output.rounding.mode must be one of halfUp, halfDown, halfEven, up, down, ceiling, floor',
+          'output.rounding.mode must be one of ' +
+          'halfUp, halfDown, halfEven, up, down, ceiling, floor',
       },
       {
         path: 'output.rounding.at',

@@ -69,7 +69,9 @@ const sha256: Check = (value, path, add) => {
   }
 };
 
-/** An ISO date string, in the grammar of rule dates. A `Date` object is refused: proofs are JSON. */
+/**
+ * An ISO date string, in the grammar of rule dates. A `Date` object is refused: proofs are JSON.
+ */
 function isoDate(nullable: boolean): Check {
   return (value, path, add) => {
     if (nullable && value === null) return;

@@ -79,7 +79,9 @@ describe('canonicalize is JCS (RFC 8785)', () => {
   it('escapes strings as section 3.2.2.2 says', () => {
     // RFC: "\u20ac$\u000F\u000aA'\u0042\u0022\u005c\\\"\/" gives "€$\u000f\nA'B\"\\\\\"/"
     const value = `${ch(0x20ac)}$${ch(0x0f, 0x0a)}A'B"${ch(0x5c, 0x5c)}"/`;
-    const escaped = `"${ch(0x20ac)}$${ch(0x5c)}u000f${ch(0x5c)}nA'B${ch(0x5c)}"${ch(0x5c, 0x5c, 0x5c, 0x5c, 0x5c)}"/"`;
+    const backslash = ch(0x5c);
+    const escaped =
+      `"${ch(0x20ac)}$${backslash}u000f${backslash}nA'B${backslash}"` + `${backslash.repeat(5)}"/"`;
     expect(canonicalize(value)).toBe(escaped);
   });
 
@@ -131,7 +133,7 @@ describe('canonicalize refuses lone UTF-16 surrogates (I-JSON, pre-flight M-1)',
     );
   });
 
-  it('omits a key with a lone surrogate whose value is undefined, like any undefined member', () => {
+  it('omits a key with a lone surrogate whose value is undefined, like any undefined one', () => {
     expect(canonicalize({ a: 1, '\udfff': undefined })).toBe('{"a":1}');
   });
 

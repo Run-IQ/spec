@@ -57,7 +57,8 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     input.effectiveUntil == null ? null : parseRuleDate(input.effectiveUntil, 'effectiveUntil');
   if (until !== null && until.getTime() <= from.getTime()) {
     invalidRule(
-      `effectiveUntil (${until.toISOString()}) must be after effectiveFrom (${from.toISOString()}): ` +
+      `effectiveUntil (${until.toISOString()}) must be after ` +
+        `effectiveFrom (${from.toISOString()}): ` +
         'the window [effectiveFrom, effectiveUntil) would be empty',
     );
   }

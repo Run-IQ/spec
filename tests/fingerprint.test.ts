@@ -434,7 +434,7 @@ describe('computeRuleFingerprint vs checksum', () => {
     expect(fp(rich)).not.toBe(cs(rich));
   });
 
-  it('two copies of a rule under another id and window share the fingerprint, not the checksum', () => {
+  it('copies of a rule under another id and window share the fingerprint, not the checksum', () => {
     const copy = {
       ...rich,
       id: 'copy',

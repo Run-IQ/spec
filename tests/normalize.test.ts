@@ -427,7 +427,8 @@ describe('lone UTF-16 surrogates in a rule definition', () => {
   const escaped = '\\ud800';
   const lone = (field: string): string => `${field} contains a lone UTF-16 surrogate`;
   const notJson = (path: string): string =>
-    `Value at "${path}" cannot be serialized to canonical JSON: a string with a lone UTF-16 surrogate`;
+    `Value at "${path}" cannot be serialized to canonical JSON: ` +
+    'a string with a lone UTF-16 surrogate';
 
   // [label, fields changed on `base`, issue path, issue message, SpecError code of normalize]
   const CASES: [string, Record<string, unknown>, string, string, string][] = [

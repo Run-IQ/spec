@@ -65,7 +65,8 @@ describe('EXCEPTION_MODEL', () => {
   ])('requires exceptions: refuses them %s', (_label, exceptions) => {
     const value = { ...carrier, exceptions };
     const message =
-      'exceptions must list at least one exception: a rule of model "@run-iq/exception" only carries exceptions';
+      'exceptions must list at least one exception: ' +
+      'a rule of model "@run-iq/exception" only carries exceptions';
     expect(issuesOf(value)).toEqual([{ path: 'exceptions', message }]);
     expect(normalizeError(value)).toMatchObject({ code: 'INVALID_RULE', message });
   });

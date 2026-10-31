@@ -54,7 +54,10 @@ export function hasLoneSurrogate(text: string): boolean {
   return LONE_SURROGATE.test(text);
 }
 
-/** Internal: the message refusing `subject` (a field path, or a description) for a lone surrogate. */
+/**
+ * Internal: the message refusing `subject` (a field path, or a description) for a lone
+ * surrogate.
+ */
 export function loneSurrogateMessage(subject: string): string {
   return `${subject} contains a lone UTF-16 surrogate`;
 }

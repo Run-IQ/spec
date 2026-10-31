@@ -103,7 +103,9 @@ describe('toCanonicalDecimal', () => {
     expect(thrown).toBeInstanceOf(SpecError);
     expect(thrown).toMatchObject({
       code: 'INVALID_DECIMAL',
-      message: `Not a decimal: ${JSON.stringify(text)} (expected an optional "-", digits, and an optional "." followed by digits; no exponent, no spaces)`,
+      message:
+        `Not a decimal: ${JSON.stringify(text)} (expected an optional "-", digits, ` +
+        'and an optional "." followed by digits; no exponent, no spaces)',
     });
   });
 
