@@ -103,6 +103,10 @@ If you persist audit events:
 - A node whose definition spec refuses, for example without `params`, fails at compile time with a `SchemaValidationError` naming the node, instead of at `saveRule`.
 - Node `exceptions` are not emitted yet (phase 2).
 
+## plugin-fiscal
+
+`priority` must now be set on fiscal rules before sealing: it is part of the checksum, and a rule without it cannot be sealed (`computeRuleChecksum` throws) or is skipped as `INVALID_RULE`. The plugin's default priority from jurisdiction and scope (`NATIONAL` 3000, `REGIONAL` 2000, `MUNICIPAL` 1000, times 1.0 / 1.1 / 1.2 for the scope) no longer applies, because core verifies the rule before the plugin runs. Set that value yourself. The default is reviewed in phase 3.
+
 ## mcp-server
 
 The tools report a rule spec refuses instead of failing the whole call:
