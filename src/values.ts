@@ -1,4 +1,16 @@
 import { citeName } from './errors.js';
+
+/**
+ * The deepest a free-form JSON value carried by the format may nest: rule `params`,
+ * `condition.value` and extension values, proof output values, contributions and unrounded
+ * values, and the values of a decision input (below `data`, `meta.context`, or the value of a
+ * temporal period: `data.a` is 1 level deep). A value holds at most this many nested levels of
+ * non-empty arrays or objects (`{ "a": 1 }` is 1 level). A deeper value is refused, so every
+ * consumer of the format (another runtime, a plain `JSON.parse`, a recursive reader) can read
+ * any valid document on an ordinary stack. JSON Schema cannot express it: the validators check
+ * it. `core`'s `maxInputDepth` stays at or below it.
+ */
+export const MAX_JSON_DEPTH = 1000;
 /**
  * Value classification shared by `canonicalize` and the rule normalizer. Both checks work
  * across realms (vm contexts, iframes, worker globals), where `instanceof` fails.

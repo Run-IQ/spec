@@ -6,8 +6,9 @@ import {
   SpecError,
   validateRuleDefinition,
 } from '../src/index.js';
-import type { RuleDefinitionInput } from '../src/index.js';
-import { specError } from './helpers.js';
+import type { JsonValue, RuleDefinitionInput } from '../src/index.js';
+import { MAX_JSON_DEPTH } from '../src/values.js';
+import { nested, specError } from './helpers.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
 function without(obj: object, key: string): RuleDefinitionInput {
@@ -24,6 +25,13 @@ const base = {
   priority: 1,
   effectiveFrom: '2025-01-01',
 };
+
+/** Each free-form field of a rule, and a rule holding a given value there. */
+const FREE_FORM_FIELDS: [string, (value: JsonValue) => RuleDefinitionInput][] = [
+  ['params', (value) => ({ ...base, params: value })],
+  ['condition.value', (value) => ({ ...base, condition: { dsl: 'jsonlogic', value } })],
+  ['ext', (value) => ({ ...base, ext: value })],
+];
 
 const invalidDate = expect.objectContaining({ code: 'INVALID_DATE' });
 const DATE_FORMS =
@@ -640,14 +648,43 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition(extension).errors).toEqual(['meta could not be read: y']);
   });
 
-  it('accepts a field nested at any depth: the copy keeps no call stack', () => {
+  it(`accepts a free-form value ${MAX_JSON_DEPTH} levels deep, refuses one level more`, () => {
+    expect(MAX_JSON_DEPTH).toBe(1000);
+    for (const [field, at] of FREE_FORM_FIELDS) {
+      const accepted = at(nested(MAX_JSON_DEPTH));
+      expect(validateRuleDefinition(accepted)).toEqual({ valid: true, errors: [], issues: [] });
+      expect(normalizeRuleDefinition(accepted)).toBeDefined();
+      const message = `${field} is nested deeper than 1000 levels`;
+      const refused = at(nested(MAX_JSON_DEPTH + 1));
+      expect(validateRuleDefinition(refused)).toEqual({
+        valid: false,
+        errors: [message],
+        issues: [{ path: field, message }],
+      });
+      expect(specError(() => normalizeRuleDefinition(refused))).toMatchObject({
+        code: 'NON_SERIALIZABLE',
+        message,
+      });
+    }
+  });
+
+  it('counts only non-empty arrays and objects as levels', () => {
+    let params: unknown = [];
+    for (let i = 0; i < MAX_JSON_DEPTH; i++) params = i % 2 === 0 ? { a: params } : [params];
+    const rule = { ...base, params };
+    expect(validateRuleDefinition(rule).valid).toBe(true);
+    expect(canonicalize(normalizeRuleDefinition(rule).params)).toBe(canonicalize(params));
+    expect(validateRuleDefinition({ ...base, params: [params] }).errors).toEqual([
+      'params is nested deeper than 1000 levels',
+    ]);
+  });
+
+  it('refuses a free-form value 200,000 levels deep without overflowing the stack', () => {
     let params: Record<string, unknown> = {};
     for (let i = 0; i < 200_000; i++) params = { a: params };
-    const rule = { ...base, params };
-    expect(validateRuleDefinition(rule)).toEqual({ valid: true, errors: [], issues: [] });
-    expect(canonicalize(normalizeRuleDefinition(rule).params)).toBe(
-      `${'{"a":'.repeat(200_000)}{}${'}'.repeat(200_000)}`,
-    );
+    expect(validateRuleDefinition({ ...base, params }).errors).toEqual([
+      'params is nested deeper than 1000 levels',
+    ]);
   });
 
   it('reports a hostile Proxy', () => {

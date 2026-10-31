@@ -1,4 +1,4 @@
-import { toJsonValue } from '../canonical.js';
+import { toJsonDocument } from '../canonical.js';
 import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages } from '../issues.js';
@@ -127,7 +127,9 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
     try {
       // One JSON snapshot of the rule (each property read once), then its canonical payload.
       // canonicalRulePayload validates any value; the cast only lets it be called.
-      const payload = canonicalRulePayload(toJsonValue(rule, `rules[${i}]`) as RuleDefinitionInput);
+      const payload = canonicalRulePayload(
+        toJsonDocument(rule, `rules[${i}]`) as RuleDefinitionInput,
+      );
       // The payload is the canonical JSON of a normalized definition.
       const definition = JSON.parse(payload) as RuleDefinition;
       key = `${definition.id}@${definition.version}`;

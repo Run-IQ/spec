@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { validateProofInput } from '../src/index.js';
 import { reservedDimensionNameMessage } from '../src/rule/dimensions.js';
-import { MAX_INPUT_DEPTH, MAX_INPUT_VALUES } from '../src/input/read.js';
+import { MAX_INPUT_VALUES } from '../src/input/read.js';
+import { MAX_JSON_DEPTH } from '../src/values.js';
 import { inputCheckReads } from '../src/input/validate.js';
 import { expectBoundedIssues, nested, proofInput, sortedByPath } from './helpers.js';
 
@@ -408,13 +409,13 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     ]);
   });
 
-  it(`accepts values ${MAX_INPUT_DEPTH} levels deep and refuses one level more`, () => {
-    expect(MAX_INPUT_DEPTH).toBe(1000);
-    expect(validateProofInput(proofInput({}, { a: nested(MAX_INPUT_DEPTH - 1) as never }))).toEqual(
+  it(`accepts values ${MAX_JSON_DEPTH} levels deep and refuses one level more`, () => {
+    expect(MAX_JSON_DEPTH).toBe(1000);
+    expect(validateProofInput(proofInput({}, { a: nested(MAX_JSON_DEPTH - 1) as never }))).toEqual(
       [],
     );
-    const path = `/data${'/a'.repeat(MAX_INPUT_DEPTH)}`;
-    expect(validateProofInput(proofInput({}, { a: nested(MAX_INPUT_DEPTH) as never }))).toEqual([
+    const path = `/data${'/a'.repeat(MAX_JSON_DEPTH)}`;
+    expect(validateProofInput(proofInput({}, { a: nested(MAX_JSON_DEPTH) as never }))).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
         message: `${path.slice(0, 256)}… nests values more than 1000 levels deep`,
@@ -425,7 +426,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
   it('names a nesting 10 000 levels deep without overflowing the stack', () => {
     let list: unknown = [];
     for (let i = 0; i < 10_000; i++) list = [list];
-    const path = `/meta/context/l${'/0'.repeat(MAX_INPUT_DEPTH - 1)}`;
+    const path = `/meta/context/l${'/0'.repeat(MAX_JSON_DEPTH - 1)}`;
     expect(validateProofInput(proofInput({ context: { l: list as never } }))).toEqual([
       {
         path: `${path.slice(0, 1024)}…`,
@@ -451,11 +452,11 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     expect(reads).toBe(1);
 
     const shared = nested(10);
-    const deep = nested(MAX_INPUT_DEPTH - 5) as Record<string, unknown>;
+    const deep = nested(MAX_JSON_DEPTH - 5) as Record<string, unknown>;
     let cursor = deep;
-    for (let i = 0; i < MAX_INPUT_DEPTH - 6; i++) cursor = cursor.a as Record<string, unknown>;
+    for (let i = 0; i < MAX_JSON_DEPTH - 6; i++) cursor = cursor.a as Record<string, unknown>;
     cursor.a = shared;
-    const path = `/data/deep${'/a'.repeat(MAX_INPUT_DEPTH - 5)}`;
+    const path = `/data/deep${'/a'.repeat(MAX_JSON_DEPTH - 5)}`;
     expect(
       validateProofInput(proofInput({}, { first: shared as never, deep: deep as never })),
     ).toEqual([
@@ -510,8 +511,8 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
   it('reports every problem of a shared value, whichever path reaches it first (review M3)', () => {
     const shared = { n: 2 ** 53, s: 'x\uD800' };
     let chain: unknown = shared;
-    for (let i = 0; i < MAX_INPUT_DEPTH - 1; i++) chain = { a: chain };
-    const deep = `/data/a${'/a'.repeat(MAX_INPUT_DEPTH - 1)}`;
+    for (let i = 0; i < MAX_JSON_DEPTH - 1; i++) chain = { a: chain };
+    const deep = `/data/a${'/a'.repeat(MAX_JSON_DEPTH - 1)}`;
     const expected = [
       {
         path: `${deep.slice(0, 1024)}…`,

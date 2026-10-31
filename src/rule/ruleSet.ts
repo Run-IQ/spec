@@ -142,8 +142,9 @@ export function citedNameProblem(
   }
   const parts = name.split(':');
   if (parts.length === 1) return undefined;
-  if (parts.length > 2)
+  if (parts.length > 2) {
     return `${citeName(path)} name must hold at most one ":": <rule set>:<name>`;
+  }
   const [set = '', bare = ''] = parts;
   if (set === LOCAL_RULE_SET) {
     return `${citeName(path)} name must not be qualified by "local": a local name is written bare`;

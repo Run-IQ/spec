@@ -1,4 +1,4 @@
-import { toJsonValue } from '../canonical.js';
+import { toJsonDocument, toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import {
   checkRounding,
@@ -46,8 +46,9 @@ const SIGNATURE_BASE64URL = /^[A-Za-z0-9_-]{85}[AQgw]$/;
 const DATE_FORMS = 'YYYY-MM-DD, or a date-time with Z or an offset';
 
 const nonEmptyString: Check = (value, path, add) => {
-  if (typeof value !== 'string' || value === '')
+  if (typeof value !== 'string' || value === '') {
     add(path, `${citeName(path)} must be a non-empty string`);
+  }
 };
 
 const anyString: Check = (value, path, add) => {
@@ -91,8 +92,9 @@ function isoDate(nullable: boolean): Check {
 
 /** A format listed in `PROOF_FORMATS`; an unknown one is reported by `formatGate`. */
 const proofFormat: Check = (value, path, add) => {
-  if (!isProofFormat(value))
+  if (!isProofFormat(value)) {
     add(path, `${citeName(path)} must be one of ${PROOF_FORMATS.join(', ')}`);
+  }
 };
 
 /**
@@ -338,8 +340,8 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  *   a known field whose value is `undefined` counts as absent, as in the canonical form;
  * - a value that cannot be read (a getter or a Proxy trap that throws) gives the single issue
  *   `proof could not be read: <reason>` at path `''`; an output value, contribution or
- *   `unrounded` value that cannot be read is reported at its path; such a value is read
- *   whole at any depth (the copy keeps its own stack);
+ *   `unrounded` value that cannot be read is reported at its path, and one nested more than
+ *   `MAX_JSON_DEPTH` (1000) levels deep gives `<path> is nested deeper than 1000 levels`;
  * - `format` is one of `PROOF_FORMATS`; a string that is not gives the single issue
  *   `unknown format: <format>` at path `format` (the rest follows rules of another format);
  *   `evaluatedAt` (or `null`) and `sealedAt` are ISO date strings
@@ -416,7 +418,7 @@ function readSnapshot(
 
   let snapshot: JsonValue;
   try {
-    snapshot = toJsonValue(value, '');
+    snapshot = toJsonDocument(value, '');
   } catch (error) {
     // A SpecError names a value with no JSON form; anything else was thrown while reading.
     const message = isOwnError(error) ? describeError(error) : unreadableMessage('proof', error);

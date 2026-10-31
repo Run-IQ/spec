@@ -180,14 +180,16 @@ function declarationIssues(declaration: unknown, path: string): RuleValidationIs
     return issues.toArray();
   }
   for (const key of Object.keys(declaration)) {
-    if (!KEYS.has(key))
+    if (!KEYS.has(key)) {
       add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
+    }
   }
 
   const { type, combine, values, rounding } = declaration;
   const knownType = isOneOf(type, OUTPUT_TYPES);
-  if (!knownType)
+  if (!knownType) {
     add(`${path}.type`, `${citeName(path)}.type must be one of ${OUTPUT_TYPES.join(', ')}`);
+  }
   if (!isOneOf(combine, COMBINE_STRATEGIES)) {
     add(
       `${path}.combine`,
@@ -291,9 +293,11 @@ function checkEnumValues(
   items.forEach((item, i) => {
     if (typeof item !== 'string' || item === '') {
       add(`${path}[${i}]`, `${citeName(path)}[${i}] must be a non-empty string`);
-    } else if (seen.has(item))
+    } else if (seen.has(item)) {
       add(`${path}[${i}]`, `${citeName(path)}[${i}] repeats ${quoteText(item)}`);
-    else seen.add(item);
+    } else {
+      seen.add(item);
+    }
   });
 }
 

@@ -43,7 +43,7 @@ const PLAIN_OBJECT = 'a plain object';
  * `schema/proof-input.schema.json` on JSON documents, and also checks what JSON Schema cannot
  * express: `meta.tags` and each list of dimension values sorted by UTF-16 code unit
  * (`tags must be sorted without duplicates`); no text or key with a lone UTF-16 surrogate;
- * values at most `MAX_INPUT_DEPTH` (1000) levels below `data` or `meta.context`
+ * values at most `MAX_JSON_DEPTH` (1000) levels below `data` or `meta.context`
  * (`<pointer> nests values more than 1000 levels deep`); at most `MAX_INPUT_VALUES`
  * (10 000 000) property values in all, counted before they are read (`input too large: more
  * than 10000000 values`, which stops the check); the reserved segments of a `source.subject`

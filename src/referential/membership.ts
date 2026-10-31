@@ -213,8 +213,9 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
           `${citeName(referential.id)}`,
       };
     }
-    if (system !== own)
+    if (system !== own) {
       return { kind: 'unknown', why: `code system ${citeName(system)} is not ${citeName(own)}` };
+    }
   }
   if (Object.hasOwn(referential.groups, code)) {
     throw newSpecError(
@@ -276,8 +277,9 @@ function combine(
   const unknown = judged.find((j) => j.membership.result === 'unknown')?.membership;
   if (all) {
     const failed = judged.find((j) => j.membership.result === false);
-    if (failed)
+    if (failed) {
       return { result: false, why: `input value ${citeName(failed.value)} does not match` };
+    }
   } else if (!judged.some((j) => j.membership.result === true)) {
     return unknown?.result === 'unknown'
       ? { result: 'unknown', why: unknown.why }

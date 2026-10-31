@@ -221,8 +221,9 @@ function requireParams(value: unknown): unknown {
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
   for (const key of Object.keys(value)) {
-    if (key !== 'dsl' && key !== 'value')
+    if (key !== 'dsl' && key !== 'value') {
       invalidRule(`condition has an unknown key ${quoteText(key)}`);
+    }
   }
   if (value.value === undefined) invalidRule('condition.value is required');
   return {
@@ -268,8 +269,9 @@ function normalizeTags(value: unknown): string[] {
 }
 
 function requireString(value: unknown, field: string): string {
-  if (typeof value !== 'string' || value === '')
+  if (typeof value !== 'string' || value === '') {
     invalidRule(`${citeName(field)} must be a non-empty string`);
+  }
   if (hasLoneSurrogate(value)) invalidRule(loneSurrogateMessage(field));
   return value;
 }

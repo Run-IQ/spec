@@ -22,7 +22,7 @@ import type {
   UnsignedProof,
 } from '../src/index.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-cases.js';
-import { specError } from './helpers.js';
+import { nested, specError } from './helpers.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -1080,12 +1080,43 @@ describe('verifyProof: hostile input', () => {
     });
   });
 
-  it('a very deeply nested output value is read whole: only the tampering is reported', () => {
+  it('a very deeply nested output value: refused by its depth, without throwing', () => {
     const proof = sealed();
     const tampered = { ...proof, outputs: { value: { ...proof.outputs.value!, value: deep } } };
-    const result = verifyProof(tampered);
-    expect(result.status).toBe('invalid');
-    expect(result.issues).toEqual(['digest mismatch', 'unsigned']);
+    expect(verifyProof(tampered)).toEqual({
+      status: 'invalid',
+      issues: ['outputs.value.value is nested deeper than 1000 levels'],
+    });
+  });
+
+  it('an output value 1000 levels deep is read; one level more is refused', () => {
+    const proof = sealed();
+    const withValue = (value: unknown): unknown => ({
+      ...proof,
+      outputs: { value: { ...proof.outputs.value!, value } },
+    });
+    expect(verifyProof(withValue(nested(1000))).issues).toEqual(['digest mismatch', 'unsigned']);
+    expect(validateProof(withValue(nested(1001))).issues).toEqual([
+      {
+        path: 'outputs.value.value',
+        message: 'outputs.value.value is nested deeper than 1000 levels',
+      },
+    ]);
+  });
+
+  it('a contribution or unrounded value more than 1000 levels deep is refused at its path', () => {
+    const proof = sealed();
+    const applied = { ...proof.applied[0]!, contribution: nested(1001), unrounded: nested(1001) };
+    expect(validateProof({ ...proof, applied: [applied] }).issues).toEqual([
+      {
+        path: 'applied[0].contribution',
+        message: 'applied[0].contribution is nested deeper than 1000 levels',
+      },
+      {
+        path: 'applied[0].unrounded',
+        message: 'applied[0].unrounded is nested deeper than 1000 levels',
+      },
+    ]);
   });
 
   it('a hostile entry in the rules option', () => {

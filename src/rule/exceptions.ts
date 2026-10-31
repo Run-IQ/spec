@@ -197,8 +197,9 @@ function copySelector(selector: unknown): RuleSelector {
   for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
     const value = selector[field];
     if (value === undefined) continue;
-    if (!isStringArray(value))
+    if (!isStringArray(value)) {
       selectorError(`selector.${citeName(field)} must be an array of strings`);
+    }
     copy[field] = [...value];
   }
   const dimensions = selector.dimensions;
@@ -419,8 +420,9 @@ function readException(
     }
     if (output !== undefined && ruleSet !== undefined) output = shortestFrom(ruleSet, output);
     const value = item.value;
-    if (value === undefined)
+    if (value === undefined) {
       fail(`${path}.value`, `${citeName(path)}.value is required (null is a value)`);
+    }
     const reason =
       item.reason === undefined
         ? undefined
@@ -460,8 +462,9 @@ function readSelector(
     add(at, message);
   };
   for (const key of Object.keys(value)) {
-    if (!SELECTOR_KEYS.includes(key))
+    if (!SELECTOR_KEYS.includes(key)) {
       fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
+    }
   }
 
   const ruleSets = readRuleSets(value.ruleSets, `${path}.ruleSets`, fail);

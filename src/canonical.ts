@@ -1,5 +1,5 @@
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
-import { dateTimeOf, hasLoneSurrogate, isPlainObject } from './values.js';
+import { dateTimeOf, hasLoneSurrogate, isPlainObject, MAX_JSON_DEPTH } from './values.js';
 
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: string]: JsonValue };
 
@@ -42,16 +42,26 @@ export function canonicalizeAt(value: unknown, path: string): string {
   if (typeof root !== 'string') {
     throw newSpecError('INVALID_PATH', `path must be a string, got a value of type ${typeof root}`);
   }
-  return write(value, root, true);
+  return write(value, root, true, Infinity);
 }
 
 /**
- * Internal: copies a value into plain JSON data, with the same rules as `canonicalize`. What a
- * getter or a Proxy trap throws is passed on as it is: every caller reads under its own guard,
- * which names the field that could not be read.
+ * Internal: copies a free-form value the format carries (rule `params`, a proof output value...)
+ * into plain JSON data, with the same rules as `canonicalize`, and at most `MAX_JSON_DEPTH`
+ * levels deep: a deeper value throws `SpecError` (`NON_SERIALIZABLE`, `<path> is nested deeper
+ * than 1000 levels`, at `path`). What a getter or a Proxy trap throws is passed on as it is:
+ * every caller reads under its own guard, which names the field that could not be read.
  */
 export function toJsonValue(value: unknown, path: string): JsonValue {
-  return JSON.parse(write(value, path, false)) as JsonValue;
+  return JSON.parse(write(value, path, false, MAX_JSON_DEPTH)) as JsonValue;
+}
+
+/**
+ * Internal: `toJsonValue` for a whole document (a proof, a rule) whose free-form values are
+ * checked one by one at their own path: no limit of depth here.
+ */
+export function toJsonDocument(value: unknown, path: string): JsonValue {
+  return JSON.parse(write(value, path, false, Infinity)) as JsonValue;
 }
 
 /** An array or an object being written: its members are read one by one. */
@@ -70,10 +80,11 @@ interface Frame {
 
 /**
  * The canonical text of `root`, by a depth-first walk over an explicit stack: members in index
- * or sorted-key order, as a recursive walk would visit them, at any depth. With `guarded`, what
- * a read throws (other than this package's own errors) is reported at the path read.
+ * or sorted-key order, as a recursive walk would visit them. With `guarded`, what a read throws
+ * (other than this package's own errors) is reported at the path read. A non-empty array or
+ * object more than `maxDepth` levels deep is refused as a whole, at `rootPath`.
  */
-function write(root: unknown, rootPath: string, guarded: boolean): string {
+function write(root: unknown, rootPath: string, guarded: boolean, maxDepth: number): string {
   const read = <T>(path: string, fn: () => T): T => {
     if (!guarded) return fn();
     try {
@@ -116,6 +127,13 @@ function write(root: unknown, rootPath: string, guarded: boolean): string {
       }
       keys = read(path, () => Object.keys(node).sort());
       length = keys.length;
+    }
+    if (length > 0 && stack.length >= maxDepth) {
+      throw newSpecError(
+        'NON_SERIALIZABLE',
+        `${citeName(rootPath)} is nested deeper than ${maxDepth} levels`,
+        rootPath,
+      );
     }
     ancestors.add(node);
     stack.push({ node, path, keys, length, index: 0, out: '', pending: '' });

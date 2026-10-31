@@ -58,9 +58,10 @@ type Issues = IssueList;
  *
  * It never throws. A field that cannot be read while its value is converted to JSON (`params`,
  * `condition.value`, `exceptions`, an extension: a getter or a Proxy trap that throws) gives
- * `<field> could not be read: <reason>`; the copy keeps its own stack, so a value nested at any
- * depth is read whole (a getter that itself overflows the call stack gives `<field> is too
- * deeply nested`). Anything else that cannot be read (a top-level property, the object itself)
+ * `<field> could not be read: <reason>`. A free-form value (`params`, `condition.value`, an
+ * extension) nested more than `MAX_JSON_DEPTH` (1000) levels deep gives `<field> is nested
+ * deeper than 1000 levels`; the copy keeps its own stack, so it never overflows the call
+ * stack. Anything else that cannot be read (a top-level property, the object itself)
  * gives the single issue `rule definition could not be read: <reason>` at `''`.
  *
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with

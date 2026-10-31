@@ -2,21 +2,19 @@ import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { dateTimeOf, hasLoneSurrogate, isPlainObject, loneSurrogateMessage } from '../values.js';
+import {
+  dateTimeOf,
+  hasLoneSurrogate,
+  isPlainObject,
+  loneSurrogateMessage,
+  MAX_JSON_DEPTH,
+} from '../values.js';
 
 /**
  * Internal to `@run-iq/spec`: reading a proof input once, without recursion and without ever
  * throwing a raw error, shared by `validateProofInput`, `validateTemporalFact` and the
  * assertion functions.
  */
-
-/**
- * The deepest a value of the input may sit below `data` (or `meta.context`, or the value of a
- * temporal period): `data.a` is 1 level deep. Deeper values are refused: `canonicalize` and every
- * reader of the input recurse, so a fixed ceiling keeps every valid input readable on any stack.
- * `core`'s `maxInputDepth` stays at or below it.
- */
-export const MAX_INPUT_DEPTH = 1000;
 
 /**
  * The most property values one check reads (each key of an object, each element of a list,
@@ -75,7 +73,7 @@ function createReader(encode: boolean): Reader {
     depthIssues: 0,
     reads: 0,
     maxValues: MAX_INPUT_VALUES,
-    maxDepth: MAX_INPUT_DEPTH,
+    maxDepth: MAX_JSON_DEPTH,
     heights: new Map(),
   };
   return encode ? { ...reader, encodings: new Map() } : reader;
@@ -282,13 +280,13 @@ interface Closed {
 /**
  * Checks that `root`, at `path` and `depth` 0, is plain JSON as an input holds it: strings
  * without lone surrogate, finite numbers of absolute value below 2^53 (D-5), booleans, `null`,
- * plain objects (keys without lone surrogate) and lists, at most `MAX_INPUT_DEPTH` levels
+ * plain objects (keys without lone surrogate) and lists, at most `MAX_JSON_DEPTH` levels
  * deep, without cycle. With `reservedRoot`, a key of the root starting with `$` is refused
  * (`reserved key <pointer>`, D-3) and not read.
  *
  * Iterative (an explicit stack), so no nesting overflows the call stack. Each object is read
  * once, even when several paths lead to it: its height is kept, and a later path only checks
- * that the height still fits under `MAX_INPUT_DEPTH` there. A value too deep is reported once
+ * that the height still fits under `MAX_JSON_DEPTH` there. A value too deep is reported once
  * at its path and its members are not read; an object holding it is not kept, so a shorter
  * path reads it again and every problem is found whatever the order of keys. Every member read
  * is counted (`announce`) before it happens.

@@ -2,6 +2,7 @@ import { expect } from 'vitest';
 import { normalizeRuleDefinition, SpecError, validateRuleDefinition } from '../src/index.js';
 import type {
   CivilCalendar,
+  JsonValue,
   FactAssertion,
   ProofInput,
   Referential,
@@ -201,8 +202,8 @@ export function sortedByPath<T extends { path: string }>(issues: readonly T[]): 
 }
 
 /** A value whose deepest value is `levels` objects below it: `nested(1)` is `{ a: 1 }`. */
-export function nested(levels: number): unknown {
-  let value: unknown = 1;
+export function nested(levels: number): JsonValue {
+  let value: JsonValue = 1;
   for (let i = 0; i < levels; i++) value = { a: value };
   return value;
 }
