@@ -397,3 +397,44 @@ describe('validateOutputDeclaration: rounding', () => {
     }
   });
 });
+
+describe('validateOutputDeclaration: unreadable input', () => {
+  const throwing = (target: object, key: string, thrown: unknown): void => {
+    Object.defineProperty(target, key, {
+      enumerable: true,
+      get: () => {
+        throw thrown;
+      },
+    });
+  };
+
+  it('reports a throwing getter at the top level as one issue, without throwing', () => {
+    const declaration = { combine: 'sum' };
+    throwing(declaration, 'type', new Error('boom'));
+    expect(validateOutputDeclaration(declaration, 'models.TAX.output')).toEqual([
+      { path: 'models.TAX.output', message: 'models.TAX.output could not be read: boom' },
+    ]);
+  });
+
+  it('reports a throwing getter inside rounding', () => {
+    const rounding = { mode: 'up' };
+    throwing(rounding, 'scale', Symbol('scale'));
+    expect(validateOutputDeclaration({ type: 'decimal', combine: 'sum', rounding })).toEqual([
+      { path: 'output', message: 'output could not be read: Symbol(scale)' },
+    ]);
+  });
+
+  it('reports a hostile Proxy', () => {
+    const hostile = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          throw 7;
+        },
+      },
+    );
+    expect(validateOutputDeclaration(hostile)).toEqual([
+      { path: 'output', message: 'output could not be read: 7' },
+    ]);
+  });
+});

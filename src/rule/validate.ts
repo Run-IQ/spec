@@ -1,6 +1,6 @@
 import { toJsonValue } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { SpecError } from '../errors.js';
+import { describeError, SpecError } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
@@ -36,11 +36,29 @@ class Issues {
  *
  * `checksum` is ignored, as in normalize.
  *
+ * It never throws. A field that cannot be read (a getter or a Proxy trap that throws while its
+ * value is converted to JSON) gives `<field> could not be read: <reason>`; anything else that
+ * cannot be read gives the single issue `rule definition could not be read: <reason>` at `''`.
+ *
  * `errors` holds the messages; `issues` holds the same problems, in the same order, each with
  * the path of the offending field (`params.rates[1]`, `dimensions.country`; `''` when the
  * value itself is not an object).
  */
 export function validateRuleDefinition(value: unknown): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
+  try {
+    return definitionIssues(value);
+  } catch (error) {
+    const unreadable = new Issues();
+    unreadable.add('', `rule definition could not be read: ${describeError(error)}`);
+    return result(unreadable);
+  }
+}
+
+function definitionIssues(value: unknown): {
   valid: boolean;
   errors: string[];
   issues: RuleValidationIssue[];
@@ -175,12 +193,13 @@ function checkTags(value: unknown, errors: Issues): void {
 }
 
 /**
- * Records a thrown error as an issue on `field`. Only `Error`s are data problems here: anything
- * else thrown is a bug and goes on up.
+ * Records a thrown error as an issue on `field`: a `SpecError` with its own message and path;
+ * anything else was thrown while reading the value (a getter, a Proxy trap) and gives
+ * `<field> could not be read: <reason>`.
  */
 function addError(error: unknown, field: string, errors: Issues): void {
-  if (!(error instanceof Error)) throw error;
-  errors.add(pathOf(error, field), error.message);
+  if (error instanceof SpecError) errors.add(pathOf(error, field), error.message);
+  else errors.add(field, `${field} could not be read: ${describeError(error)}`);
 }
 
 /** Path of a `SpecError` about one value, else the checked field. */

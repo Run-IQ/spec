@@ -1,4 +1,5 @@
 import type { JsonValue } from '../canonical.js';
+import { describeError } from '../errors.js';
 import type { RuleValidationIssue } from '../rule/validate.js';
 import { isPlainObject } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
@@ -144,11 +145,22 @@ const MAX_SCALE = 20;
  *   `{ scale, mode, at? }`: `scale` an integer from 0 to 20, `mode` a `RoundingMode`, `at`
  *   `output` or `contribution`; no other key;
  * - no other key is allowed.
+ *
+ * A value that cannot be read (a getter or a Proxy trap that throws, at any depth) gives the
+ * single issue `<path> could not be read: <reason>` at `path`.
  */
 export function validateOutputDeclaration(
   declaration: unknown,
   path = 'output',
 ): RuleValidationIssue[] {
+  try {
+    return declarationIssues(declaration, path);
+  } catch (error) {
+    return [{ path, message: `${path} could not be read: ${describeError(error)}` }];
+  }
+}
+
+function declarationIssues(declaration: unknown, path: string): RuleValidationIssue[] {
   const issues: RuleValidationIssue[] = [];
   const add = (at: string, message: string): void => {
     issues.push({ path: at, message });

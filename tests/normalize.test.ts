@@ -308,3 +308,83 @@ describe('reserved output names (R36)', () => {
     expect(normalizeRuleDefinition(value).output).toBe('tax$2025');
   });
 });
+
+describe('unreadable rule definitions', () => {
+  const throwing = (target: object, key: string, thrown: unknown): void => {
+    Object.defineProperty(target, key, {
+      enumerable: true,
+      get: () => {
+        throw thrown;
+      },
+    });
+  };
+
+  /** The `SpecError` `call` throws; fails the test when it throws anything else. */
+  function specErrorOf(call: () => unknown): SpecError {
+    try {
+      call();
+    } catch (error) {
+      if (error instanceof SpecError) return error;
+      throw error;
+    }
+    throw new Error('expected a SpecError');
+  }
+
+  it('reports a throwing getter at the top level, and normalize refuses it', () => {
+    const rule = { ...base };
+    throwing(rule, 'id', new Error('boom'));
+    const message = 'rule definition could not be read: boom';
+    expect(validateRuleDefinition(rule)).toEqual({
+      valid: false,
+      errors: [message],
+      issues: [{ path: '', message }],
+    });
+    const error = specErrorOf(() => normalizeRuleDefinition(rule));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe(message);
+    expect(() => computeRuleChecksum(rule)).toThrow(
+      expect.objectContaining({ code: 'INVALID_RULE', message }),
+    );
+  });
+
+  it('reports a throwing getter inside exceptions at its field', () => {
+    const exception = { targets: { ids: ['r0'] } };
+    throwing(exception, 'kind', Symbol('kind'));
+    const rule = { ...base, exceptions: [exception] };
+    expect(validateRuleDefinition(rule)).toEqual({
+      valid: false,
+      errors: ['exceptions could not be read: Symbol(kind)'],
+      issues: [{ path: 'exceptions', message: 'exceptions could not be read: Symbol(kind)' }],
+    });
+    const error = specErrorOf(() => normalizeRuleDefinition(rule as RuleDefinitionInput));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe('rule definition could not be read: Symbol(kind)');
+  });
+
+  it('reports a throwing getter inside params at its field', () => {
+    const params = {};
+    throwing(params, 'rate', new Error('nope'));
+    const rule = { ...base, params };
+    expect(validateRuleDefinition(rule).issues).toEqual([
+      { path: 'params', message: 'params could not be read: nope' },
+    ]);
+    expect(specErrorOf(() => normalizeRuleDefinition(rule)).code).toBe('INVALID_RULE');
+  });
+
+  it('reports a hostile Proxy', () => {
+    const hostile = new Proxy(
+      { ...base },
+      {
+        ownKeys: () => {
+          throw new Error('keys');
+        },
+      },
+    );
+    expect(validateRuleDefinition(hostile).issues).toEqual([
+      { path: '', message: 'rule definition could not be read: keys' },
+    ]);
+    expect(specErrorOf(() => normalizeRuleDefinition(hostile as RuleDefinitionInput)).message).toBe(
+      'rule definition could not be read: keys',
+    );
+  });
+});

@@ -1,5 +1,5 @@
 import { toJsonValue } from '../canonical.js';
-import { SpecError } from '../errors.js';
+import { describeError, SpecError } from '../errors.js';
 import { isReservedOutputName, reservedOutputNameMessage } from '../decision/output.js';
 import { isPlainObject } from '../values.js';
 import { parseRuleDate } from './date.js';
@@ -30,9 +30,20 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * a `shortCircuit` output or selector `outputs`: reserved, ruling R36), or when
  * `effectiveUntil <= effectiveFrom` (an empty window), `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
- * `validateRuleDefinition` do.
+ * `validateRuleDefinition` do. A value that cannot be read (a getter or a Proxy trap that
+ * throws) gives `INVALID_RULE` with `rule definition could not be read: <reason>`.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  try {
+    return normalize(input);
+  } catch (error) {
+    if (error instanceof SpecError) throw error;
+    // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
+    invalidRule(`rule definition could not be read: ${describeError(error)}`);
+  }
+}
+
+function normalize(input: RuleDefinitionInput): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
 
   const from = parseRuleDate(input.effectiveFrom, 'effectiveFrom');
