@@ -1,14 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canonicalize,
   computeRuleChecksum,
   createSigningKeyPair,
   sealProof,
-  sha256Hex,
   signProof,
   verifyProof,
 } from '../src/index.js';
-import type { DecisionProof, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
+import type { RuleDefinitionInput, UnsignedProof } from '../src/index.js';
 import {
   baseContent,
   RFC_SECRET,
@@ -21,13 +19,7 @@ import {
   unsaltedSalt,
   unsigned,
 } from './proof-cases.js';
-import { specError } from './helpers.js';
-
-/** `content` sealed by hand, as a faulty producer would: sealProof refuses it. */
-const handSealed = (content: UnsignedProof): DecisionProof => ({
-  ...content,
-  digest: sha256Hex(canonicalize(content)),
-});
+import { handSealed, specError } from './helpers.js';
 
 describe('verifyProof: invalid, with a readable issue', () => {
   it('a field changed after sealing', () => {

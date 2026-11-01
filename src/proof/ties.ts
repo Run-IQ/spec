@@ -30,12 +30,13 @@ export interface Ties {
   /**
    * In the order of `exceptions`: `exception of an excluded carrier: id@version[ at subject]`
    * (its carrier excluded for a reason that stops it: it fired nothing), `exception of a pending
-   * carrier` (pending other than on its own parameters); for a
+   * carrier` (its `conditionHeld` false), `pending carrier without conditionHeld`; for a
    * discarded carrier, `exception status differs from its carrier's decision`, and
    * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
    * id@version` (a second short circuit of an output at the same stratum, precedence and
    * priority, its carrier not excluded `RULE_CONFLICT`); then `pending carrier without a
-   * pending carrier: id@version` (`PENDING_CARRIER` while no carrier is pending unfired).
+   * pending carrier: id@version` (`PENDING_CARRIER` while no pending entry has `conditionHeld`
+   * false).
    */
   problems: readonly string[];
 }
@@ -110,44 +111,11 @@ function stopsCarrier(reason: string): boolean {
 }
 
 /**
- * The causes of a pending `ERROR` (`<CAUSE>: <message>`, D-8) after which the carrier fired:
- * its condition held, and its own computation failed (R18). Every other cause, known or not,
- * failed before the condition held, or stops a carrier:
- *
- * - fired, its condition true and its own computation failing: `INVALID_PARAMS`,
- *   `MODEL_ERROR`, `INVALID_ORDER_VALUE`;
- * - fired nothing, the condition's evaluation failing: `DSL_ERROR`, `TIMEOUT`, `DSL_NOT_FOUND`;
- * - fired nothing, the rule refused before its condition: `CHECKSUM_MISMATCH`, `INVALID_RULE`,
- *   `TEMPORAL_OVERLAP`; its instances not formed: `NOT_A_COLLECTION`;
- * - stopped at the exception stage (core `ExceptionResult`): `OUTPUT_MISMATCH`;
- * - fired nothing: any other cause, not known to follow a true condition.
- */
-const FIRING_CAUSES: ReadonlySet<string> = new Set([
-  'INVALID_PARAMS',
-  'MODEL_ERROR',
-  'INVALID_ORDER_VALUE',
-]);
-
-/**
- * True when a carrier pending for `entry` still fired its exceptions (R18: a carrier whose
- * condition is true fires them even when its own computation fails): pending `ERROR` with a
- * cause of `FIRING_CAUSES`; `AMBIGUOUS_ORDER` (D-21: the tie bears only on its contribution to
- * that output); `PENDING_DOMINANT` (dominance runs after the exceptions, D-22). Pending
- * otherwise (`UNDETERMINED`: its condition unknown; `PENDING_CARRIER`: a pending carrier would
- * have reached it; another cause; any other reason), it fired nothing, and the rules it would
- * have affected are pending `PENDING_CARRIER`.
- */
-function pendingFired(entry: ProofPending): boolean {
-  if (entry.reason === 'AMBIGUOUS_ORDER' || entry.reason === 'PENDING_DOMINANT') return true;
-  if (entry.reason !== 'ERROR') return false;
-  const colon = entry.detail.indexOf(':');
-  return colon > 0 && FIRING_CAUSES.has(entry.detail.slice(0, colon));
-}
-
-/**
  * The ties the exceptions of `p` show, and the problems of their carriers. A carrier excluded
- * for a reason that stops it (`stopsCarrier`) fired nothing, as one pending other than on its
- * own parameters (`pendingFired`). One excluded for its own computation afterwards
+ * for a reason that stops it (`stopsCarrier`) fired nothing. A pending one fired exactly when
+ * its condition held (`conditionHeld`, R18): neither its reason nor the cause of its error says
+ * so, an undetermined model, an output mismatch or an ambiguous order coming before or after
+ * the condition. One excluded for its own computation afterwards
  * (`SHORT_CIRCUITED`, `INVALID_PARAMS`, `DOMINATED`, a tie on its own output, any other
  * reason) fired its exceptions first (core `ExceptionResult`).
  */
@@ -179,8 +147,12 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
       return;
     }
     const pending = waiting.get(instanceKey(exception));
-    if (pending !== undefined && !pendingFired(pending)) {
-      problems.push(`exception of a pending carrier: ${cited()}`);
+    if (pending !== undefined && pending.conditionHeld !== true) {
+      problems.push(
+        pending.conditionHeld === undefined
+          ? `pending carrier without conditionHeld: ${cited()}`
+          : `exception of a pending carrier: ${cited()}`,
+      );
       discarded.add(index);
       return;
     }
@@ -223,13 +195,11 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
 
 /**
  * `pending carrier without a pending carrier: id@version[ at subject]`: a rule pending
- * `PENDING_CARRIER` though no carrier in the proof is pending without firing (D-8).
+ * `PENDING_CARRIER` though no carrier in the proof is pending with its condition not held
+ * (`conditionHeld: false`, D-8).
  */
 function appendPendingCarriers(p: UnsignedProof, problems: string[]): void {
-  const held = p.pending.some(
-    (entry) => entry.reason !== 'PENDING_CARRIER' && !pendingFired(entry),
-  );
-  if (held) return;
+  if (p.pending.some((entry) => entry.conditionHeld === false)) return;
   for (const entry of p.pending) {
     if (full(problems)) return;
     if (entry.reason === 'PENDING_CARRIER') {

@@ -15,7 +15,7 @@ import {
   validateProofInput,
   verifyProof,
 } from '../src/index.js';
-import type { DecisionProof, ProofInput, UnsignedProof } from '../src/index.js';
+import type { ProofInput, UnsignedProof } from '../src/index.js';
 import {
   input,
   RFC_PUBLIC,
@@ -28,17 +28,11 @@ import {
   TRUSTED,
   unsigned,
 } from './proof-cases.js';
-import { specError } from './helpers.js';
+import { handSealed, specError } from './helpers.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
 const b64url = (hex: string): string => Buffer.from(hex, 'hex').toString('base64url');
-
-/** `content` sealed by hand, as a faulty producer would: sealProof refuses it. */
-const handSealed = (content: UnsignedProof): DecisionProof => ({
-  ...content,
-  digest: sha256Hex(canonicalize(content)),
-});
 
 describe('PROOF_FORMAT', () => {
   it('names version 1 of the format', () => {

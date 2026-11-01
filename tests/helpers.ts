@@ -2,7 +2,13 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
-import { normalizeRuleDefinition, SpecError, validateRuleDefinition } from '../src/index.js';
+import {
+  canonicalize,
+  normalizeRuleDefinition,
+  sha256Hex,
+  SpecError,
+  validateRuleDefinition,
+} from '../src/index.js';
 import { MAX_JSON_VALUES } from '../src/values.js';
 import type {
   CivilCalendar,
@@ -343,4 +349,12 @@ export function counted<T extends object>(target: T, counter: { reads: number })
       return Reflect.get(object, key, receiver) as unknown;
     },
   });
+}
+
+/**
+ * `content` sealed by hand, as a faulty producer would (the sha256 of its canonical form,
+ * unchecked): `sealProof` refuses what `verifyProof` then reports.
+ */
+export function handSealed<T extends object>(content: T): T & { digest: string } {
+  return { ...content, digest: sha256Hex(canonicalize(content)) };
 }

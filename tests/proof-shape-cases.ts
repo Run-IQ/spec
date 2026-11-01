@@ -241,6 +241,12 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'digest must be a lowercase sha256 hex string',
   ],
   [
+    'conditionHeld as text',
+    entryWith('pending', 0, { conditionHeld: 'yes' }),
+    'pending[0].conditionHeld',
+    'pending[0].conditionHeld must be a boolean',
+  ],
+  [
     'inputSalted as text',
     proofWith({ inputSalted: 'no' }),
     'inputSalted',

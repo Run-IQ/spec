@@ -1,8 +1,8 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, sealProof, sha256Hex, signProof, verifyProof } from '../src/index.js';
-import type { DecisionProof, UnsignedProof } from '../src/index.js';
+import { sealProof, signProof, verifyProof } from '../src/index.js';
+import type { UnsignedProof } from '../src/index.js';
 import { RFC_PUBLIC, RFC_SECRET, RULES, TRUSTED, unsaltedSalt, unsigned } from './proof-cases.js';
-import { specError } from './helpers.js';
+import { handSealed, specError } from './helpers.js';
 
 const salt = unsaltedSalt('rules', 0);
 
@@ -53,12 +53,6 @@ function staged(): UnsignedProof {
     skipped: [],
   };
 }
-
-/** `content` sealed by hand, as a faulty producer would: sealProof refuses it. */
-const handSealed = (content: UnsignedProof): DecisionProof => ({
-  ...content,
-  digest: sha256Hex(canonicalize(content)),
-});
 
 describe('strata, decimals and rounding in a proof', () => {
   it('seals, signs and verifies a proof of several strata', () => {

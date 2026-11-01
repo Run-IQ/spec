@@ -216,6 +216,13 @@ export interface ProofPending {
   reason: string;
   detail: string;
   missing: JsonPointer[];
+  /**
+   * For a rule that carries exceptions, and only for one: whether its condition held (R18). A
+   * pending carrier whose condition held fired its exceptions, though its own computation
+   * failed; one whose condition did not hold, or is not known to, fired nothing, and the rules
+   * it would have affected are pending `PENDING_CARRIER` (D-8).
+   */
+  conditionHeld?: boolean;
   stratum: number;
   salt: string;
 }
