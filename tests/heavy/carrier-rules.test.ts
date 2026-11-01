@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition } from '../../src/index.js';
 import type { RuleDefinition, RuleDefinitionInput, UnsignedProof } from '../../src/index.js';
 import { carrierRuleFindings } from '../../src/proof/carrier-rules.js';
@@ -67,21 +67,31 @@ const definitions = new Map<string, RuleDefinition>([
 
 /**
  * The property reads of the decisions of `proof` and of `rules` the carrier checks make, the
- * carrier instances they mark in a trie (`Scope`) and the questions they ask a trie (`covers`);
- * none is found.
+ * carrier instances they mark in a trie (`Scope`), those of them in a merged trie, and the
+ * questions they ask a trie (`covers`); none is found.
  */
 function costOf(
   proof: UnsignedProof,
   rules: ReadonlyMap<string, RuleDefinition> = definitions,
-): { reads: number; marks: number; queries: number } {
-  const mark = vi.spyOn(Scope.prototype, 'mark');
-  const covers = vi.spyOn(Scope.prototype, 'covers');
+): { reads: number; marks: number; merged: number; queries: number } {
+  // Counted by wrapping the trie's methods, never by a spy: a spy keeps every call's arguments.
+  const { mark, covers } = Scope.prototype;
+  const cost = { marks: 0, merged: 0, queries: 0 };
+  Scope.prototype.mark = function (this: Scope, entry: { ruleId: string; subject?: string }) {
+    cost.marks++;
+    // A carrier's own trie is keyed by its rule (`id@version`), a merged one by its group.
+    if (!entry.ruleId.includes('@')) cost.merged++;
+    mark.call(this, entry);
+  };
+  Scope.prototype.covers = function (this: Scope, entry: { ruleId: string; subject?: string }) {
+    cost.queries++;
+    return covers.call(this, entry);
+  };
   try {
-    const reads = readsOf(proof, rules);
-    return { reads, marks: mark.mock.calls.length, queries: covers.mock.calls.length };
+    return { reads: readsOf(proof, rules), ...cost };
   } finally {
-    mark.mockRestore();
-    covers.mockRestore();
+    Scope.prototype.mark = mark;
+    Scope.prototype.covers = covers;
   }
 }
 
@@ -172,6 +182,42 @@ function broad(
   return [proof, rules];
 }
 
+/**
+ * The reviewer's `many` shape: `k` broad carriers X<j> (tag `vat`), `n` instances each, and
+ * `m` target rules T<i> tagged `vat`, with `d` steps each, each also selected by id by Y<i>,
+ * pending once: `m` groups {X<0…k-1>, Y<i>} sharing the X instances. No step is in the scope
+ * of a carrier.
+ */
+function shared(
+  k: number,
+  n: number,
+  m: number,
+  d: number,
+): [UnsignedProof, Map<string, RuleDefinition>] {
+  const proof = outputProof({ type: 'number', combine: 'sum', value: m * d });
+  proof.applied = Array.from({ length: m * d }, (_, x) => ({
+    ...step(`T${pad(Math.floor(x / d))}`),
+    subject: `/f/${pad(x % d)}`,
+  }));
+  const entry = hostile(1).pending[0]!;
+  proof.pending = Array.from({ length: k * n }, (_, x) => ({
+    ...entry,
+    ruleId: `X${pad(Math.floor(x / n))}`,
+    subject: `/e/${pad(x)}`,
+  }));
+  const selecting = (id: string, targets: { tags?: string[]; ids?: string[] }) =>
+    definition({ ...ruleA, id, exceptions: [{ kind: 'inhibit', targets }] });
+  const rules = new Map<string, RuleDefinition>();
+  for (let j = 0; j < k; j++) rules.set(`X${pad(j)}@1`, selecting(`X${pad(j)}`, { tags: ['vat'] }));
+  for (let i = 0; i < m; i++) {
+    const id = `T${pad(i)}`;
+    rules.set(`${id}@1`, definition({ ...ruleA, id, tags: ['vat'] }));
+    rules.set(`Y${pad(i)}@1`, selecting(`Y${pad(i)}`, { ids: [id] }));
+    proof.pending.push({ ...entry, ruleId: `Y${pad(i)}`, subject: `/g/${pad(i)}` });
+  }
+  return [proof, rules];
+}
+
 /** The reads of the carrier checks on `manyCarriers(k, n)`. */
 const readsWith = (k: number, n: number): number => readsOf(...manyCarriers(k, n));
 
@@ -227,6 +273,22 @@ describe('the carriers against their rules, on hostile proofs', () => {
       // X's 20 000 instances and each Y<i>'s one; each step asks X's trie and Y<i>'s at most.
       expect(marks).toBe(20_000 + m);
       expect(queries).toBeLessThanOrEqual(2 * m);
+    }
+  }, 600_000);
+
+  it('groups sharing 1 000 carriers: merged marks within the pending entries and decisions', () => {
+    // 1 000 carriers of 50 instances, 160 targets of 50 or 49 steps: each group {X…, Y<i>} would
+    // save a few questions merged (d 50), or none (d 49); merging all would copy the 50 000
+    // instances 160 times.
+    for (const d of [50, 49]) {
+      const [proof, rules] = shared(1_000, 50, 160, d);
+      const { marks, merged, queries } = costOf(proof, rules);
+      const pending = proof.pending.length;
+      const decisions = proof.applied.length;
+      expect(merged).toBeLessThanOrEqual(pending + decisions);
+      expect(marks - merged).toBeLessThanOrEqual(pending);
+      // At most the carriers selecting its rule, 1 001, per decision.
+      expect(queries).toBeLessThanOrEqual(decisions * 1_001);
     }
   }, 600_000);
 });

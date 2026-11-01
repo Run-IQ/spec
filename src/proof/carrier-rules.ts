@@ -204,14 +204,15 @@ function selectedBy(
  * - the candidates of each selector: the target rules of its most selective field, one lookup
  *   per name it lists (`Index`), each confirmed by `matchesSelector`;
  * - the pairs (carrier rule, target rule it selects), each refining the target's group once;
- * - Σ over the groups of min(I_g, D_g × C_g) questions or marks, each linear in a subject's
- *   depth: a group whose instances are fewer than D_g × C_g has them merged in one trie, asked
- *   once per decision; any other asks, per decision, the trie of each of its carriers in turn
- *   (at most C_g questions, a number the rules fix, never the proof), each carrier instance
- *   marked once in its own carrier's trie, whatever the groups;
- * so at most P + Σ min(I_g, D_g × C_g) marks, and at most D_g × C_g questions per group. One
- * carrier with N instances selecting M target rules marks N instances, never N × M; a carrier
- * beside M carriers selecting one target each, N + M.
+ * - the questions: each decision of a group asks its merged trie once, or the trie of each of
+ *   its carriers in turn, stopping at the first that reaches it: at most C_g questions, a
+ *   number the rules fix, never the proof; each question linear in the subject's depth.
+ * Memory is linear in P + D, beside the index and the groups of the rules (R, and the pairs):
+ * each carrier instance is marked at most once in its own carrier's trie, and the merged
+ * tries, chosen by saving (D_g × C_g - I_g, the greatest first, ties in the order of their
+ * first decision), hold at most P + D marks in all. One carrier with N instances selecting M
+ * target rules marks N instances, never N × M; a carrier beside M carriers selecting one
+ * target each, N + M; groups sharing carriers never copy them beyond the budget.
  */
 function waitingTargets(
   p: UnsignedProof,
@@ -291,9 +292,15 @@ function waitingTargets(
     }
     plan.decisions += 1;
   }
-  // A group whose instances are fewer than its decisions times its carriers has them merged in
-  // one trie (`merged`, its id as `ruleId`); any other asks the trie of each of its carriers
-  // (`own`, the carrier rule as `ruleId`), each instance marked there once.
+  // The groups merged in one trie (`merged`, the group's id as `ruleId`): by saving (D_g × C_g
+  // questions for I_g marks), the greatest first, ties in the order of their first decision,
+  // while their marks fit a budget of the pending entries and the decisions (P + D: memory
+  // linear in the proof). Any other group asks the trie of each of its carriers (`own`, the
+  // carrier rule as `ruleId`), where each instance is marked once.
+  const saving = (plan: Plan): number => plan.decisions * plan.members.length - plan.instances;
+  const bySaving = [...plans].filter(([, plan]) => saving(plan) > 0);
+  bySaving.sort(([, a], [, b]) => saving(b) - saving(a));
+  let budget = p.pending.length + decisions.length;
   const own = new Scope();
   const ownMarked = new Set<string>();
   const merged = new Scope();
@@ -302,14 +309,18 @@ function waitingTargets(
       scope.mark(subject === undefined ? { ruleId } : { ruleId, subject });
     }
   };
-  for (const [group, plan] of plans) {
-    plan.merged = plan.instances < plan.decisions * plan.members.length;
+  for (const [group, plan] of bySaving) {
+    if (plan.instances > budget) continue;
+    budget -= plan.instances;
+    plan.merged = true;
+    for (const key of plan.members) markAll(merged, group.id, key);
+  }
+  for (const plan of plans.values()) {
+    if (plan.merged) continue;
     for (const key of plan.members) {
-      if (plan.merged) markAll(merged, group.id, key);
-      else if (!ownMarked.has(key)) {
-        ownMarked.add(key);
-        markAll(own, key, key);
-      }
+      if (ownMarked.has(key)) continue;
+      ownMarked.add(key);
+      markAll(own, key, key);
     }
   }
   // In the order of the decisions: a carrier instance at the decision's subject, above it or
