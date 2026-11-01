@@ -220,7 +220,13 @@ export interface ProofPending {
   salt: string;
 }
 
-/** One exception that took effect, the stratum it was evaluated in, and the rules it affected. */
+/**
+ * One exception that took effect, the stratum it was evaluated in, and the rules it affected.
+ * An exception whose carrier is excluded `RULE_CONFLICT` with status `conflict` is a carrier
+ * discarded by an exception precedence conflict (R15): it produced nothing, its `affected` are
+ * the rules it would have inhibited, one of them a carrier processed before it, and the
+ * outputs they feed are `conflict` (D-7).
+ */
 export interface ProofException {
   ruleId: string;
   version: number;
@@ -273,8 +279,11 @@ export interface ProofUndeclaredRead {
  * decision has one proof (D-16): `rules` by (rule set, `id`, `version`); `outputs` by `name`;
  * `items` by (`output`, `subject`); `applied`, `skipped` and `pending` by (rule set, `id`,
  * `version`, subject), an entry without subject first; `exceptions` in the order their
- * carriers were processed; `factsRead` and `missingFacts` by `path` (`comparePointers`);
- * `readsUndeclared` by (rule set, `id`, `version`).
+ * carriers were processed (stratum, then rule-set precedence, priority descending, identity,
+ * subject; the exceptions of one carrier instance in the order of its definition); `factsRead`
+ * and `missingFacts` by `path` (`comparePointers`); `readsUndeclared` by (rule set, `id`,
+ * `version`). `contributors` and `pending` of an output or item are in contribution order
+ * (rule-set precedence, priority descending, identity).
  *
  * `strata` lists the outputs of each evaluation stratum, in evaluation order: every output
  * appears in exactly one stratum, and a stratum may be empty. Every entry of `applied`,

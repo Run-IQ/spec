@@ -13,6 +13,7 @@ import type { ProofPending, ProofStep } from './types.js';
 // competing instances (D-21), and a status that is the strongest of its causes (D-7).
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
+const CONFLICT = rankOf('conflict');
 
 /** What feeds one output or item: its steps, its pending rules, its strongest exclusion. */
 export interface Feed {
@@ -22,6 +23,8 @@ export interface Feed {
   waiting: ProofPending[];
   /** The rank of the strongest exclusion that would have fed it, -1 when none. */
   candidates: number;
+  /** True when a tie settled among exceptions puts it in `conflict` (D-7, `Ties`). */
+  tie: boolean;
 }
 
 /**
@@ -141,10 +144,13 @@ export function rankProblems(target: Target): string[] {
 }
 
 /**
- * The status of a settled target against its causes (D-7): the strongest of its steps and its
- * candidate exclusions (`output status weaker than its contributions`, `… than its
- * candidates`), never stronger (`output status stronger than its causes`): a `conflict` comes
- * from the decisions a tie settled, `provisional` from those an assertion made so.
+ * The status of a target against its causes (D-7): no weaker than its steps, its candidate
+ * exclusions and a tie settled among exceptions (`output status weaker than its
+ * contributions`, `… than its candidates`, `… than its tie`); once settled, never stronger
+ * than the strongest of them (`output status stronger than its causes`): a `conflict` comes
+ * from the decisions a tie settled or from a tie among exceptions the proof shows (two short
+ * circuits at the top, a discarded carrier), `provisional` from the decisions an assertion
+ * made so.
  */
 export function causeProblems(target: Target, feed: Feed): string[] {
   const issues: string[] = [];
@@ -155,8 +161,10 @@ export function causeProblems(target: Target, feed: Feed): string[] {
   if (feed.candidates > rank) {
     issues.push(`output status weaker than its candidates: ${target.cite()}`);
   }
+  const tie = feed.tie ? CONFLICT : -1;
+  if (tie > rank) issues.push(`output status weaker than its tie: ${target.cite()}`);
   const settled = target.status !== 'undetermined';
-  if (settled && rank > Math.max(0, steps, feed.candidates)) {
+  if (settled && rank > Math.max(0, steps, feed.candidates, tie)) {
     issues.push(`output status stronger than its causes: ${target.cite()}`);
   }
   return issues;

@@ -16,6 +16,7 @@ import {
 } from './completeness.js';
 import type { Feed } from './completeness.js';
 import { declarationOf, instanceKey } from './output-values.js';
+import type { Ties } from './ties.js';
 import type {
   ProofBounds,
   ProofItem,
@@ -37,16 +38,24 @@ export function citeItem(output: string, subject: string): string {
   return `${citeName(output)} at ${citeName(subject)}`;
 }
 
-const newFeed = (): Feed => ({ steps: [], pending: [], waiting: [], candidates: -1 });
+const newFeed = (): Feed => ({
+  steps: [],
+  pending: [],
+  waiting: [],
+  candidates: -1,
+  tie: false,
+});
 
 /** A node of the trie of the subjects of a per output: an item ends at it, or an exclusion. */
 interface Node {
   children: Map<string, Node>;
   item?: Feed;
   skip: number;
+  /** An exclusion of a rule a tie among exceptions reaches ends here. */
+  tie: boolean;
 }
 
-const newNode = (): Node => ({ children: new Map(), skip: -1 });
+const newNode = (): Node => ({ children: new Map(), skip: -1, tie: false });
 
 /**
  * The feeds of the items of one per output, by subject. A step or a pending rule goes to the
@@ -57,6 +66,7 @@ const newNode = (): Node => ({ children: new Map(), skip: -1 });
 class ItemTrie {
   private readonly root = newNode();
   private everywhere = -1;
+  private tiedEverywhere = false;
 
   /** Adds an item; false when one with this subject is already there (a duplicate). */
   add(subject: string, feed: Feed): boolean {
@@ -75,25 +85,37 @@ class ItemTrie {
     return found;
   }
 
-  exclude(subject: string | undefined, rank: number): void {
+  /** An exclusion at `subject` (every item without), of status `rank`, `tie` when tied. */
+  exclude(subject: string | undefined, rank: number, tie: boolean): void {
     if (subject === undefined) {
       this.everywhere = Math.max(this.everywhere, rank);
+      this.tiedEverywhere ||= tie;
       return;
     }
     const containing = this.deepest(subject);
-    if (containing !== undefined) containing.candidates = Math.max(containing.candidates, rank);
+    if (containing !== undefined) {
+      containing.candidates = Math.max(containing.candidates, rank);
+      containing.tie ||= tie;
+    }
     const node = this.walk(subject, true);
-    if (node !== undefined) node.skip = Math.max(node.skip, rank);
+    if (node !== undefined) {
+      node.skip = Math.max(node.skip, rank);
+      node.tie ||= tie;
+    }
   }
 
-  /** Passes down the strongest exclusion of each node to the items below it. */
+  /** Passes down the strongest exclusion of each node, and its ties, to the items below it. */
   settle(): void {
-    const stack: [Node, number][] = [[this.root, this.everywhere]];
+    const stack: [Node, number, boolean][] = [[this.root, this.everywhere, this.tiedEverywhere]];
     for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-      const [node, above] = next;
+      const [node, above, tiedAbove] = next;
       const rank = Math.max(above, node.skip);
-      if (node.item !== undefined) node.item.candidates = Math.max(node.item.candidates, rank);
-      for (const child of node.children.values()) stack.push([child, rank]);
+      const tie = tiedAbove || node.tie;
+      if (node.item !== undefined) {
+        node.item.candidates = Math.max(node.item.candidates, rank);
+        node.item.tie ||= tie;
+      }
+      for (const child of node.children.values()) stack.push([child, rank, tie]);
     }
   }
 
@@ -121,7 +143,7 @@ interface Feeds {
   strays: string[];
 }
 
-function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): Feeds {
+function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
   const outputs = new Map<string, Feed>();
   const items = new Map<ProofItem, Feed>();
   const tries = new Map<string, ItemTrie>();
@@ -150,12 +172,19 @@ function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): Fe
     if (feed === undefined) strays.push(`${what} feeds no item: ${citeName(instanceKey(entry))}`);
     return feed;
   };
-  for (const step of p.applied) route(step, step.output, 'step')?.steps.push(step);
+  for (const step of p.applied) {
+    const feed = route(step, step.output, 'step');
+    if (feed === undefined) continue;
+    feed.steps.push(step);
+    feed.tie ||= ties.reaches(step);
+  }
   for (const entry of p.pending) {
     if (entry.output === undefined) continue;
     const feed = route(entry, entry.output, 'pending rule');
-    feed?.pending.push(entry.ruleId);
-    feed?.waiting.push(entry);
+    if (feed === undefined) continue;
+    feed.pending.push(entry.ruleId);
+    feed.waiting.push(entry);
+    feed.tie ||= ties.reaches(entry);
   }
   for (const skip of p.skipped) {
     // A per output is fed by instances (D-21): an exclusion without subject is grouped.
@@ -163,18 +192,31 @@ function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): Fe
     if (perOutput && skip.subject === undefined && skip.instances === undefined) {
       strays.push(`exclusion feeds no item: ${citeName(instanceKey(skip))}`);
     }
-    exclude(skip, outputs, tries);
+    exclude(skip, outputs, tries, ties.reaches(skip));
+  }
+  for (const name of ties.shortCircuits) {
+    const direct = outputs.get(name);
+    if (direct !== undefined) direct.tie = true;
+    tries.get(name)?.exclude(undefined, -1, true);
   }
   for (const trie of tries.values()) trie.settle();
   return { outputs, items, strays };
 }
 
-function exclude(skip: ProofSkip, outputs: Map<string, Feed>, tries: Map<string, ItemTrie>): void {
+function exclude(
+  skip: ProofSkip,
+  outputs: Map<string, Feed>,
+  tries: Map<string, ItemTrie>,
+  tie: boolean,
+): void {
   if (skip.output === undefined) return;
   const rank = rankOf(skip.status);
   const direct = outputs.get(skip.output);
-  if (direct !== undefined) direct.candidates = Math.max(direct.candidates, rank);
-  tries.get(skip.output)?.exclude(skip.subject, rank);
+  if (direct !== undefined) {
+    direct.candidates = Math.max(direct.candidates, rank);
+    direct.tie ||= tie;
+  }
+  tries.get(skip.output)?.exclude(skip.subject, rank, tie);
 }
 
 /** What an output and an item share: a status, a value, bounds, a selection. */
@@ -269,7 +311,7 @@ export function outputProblems(
       issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
     }
   }
-  const feeds = feedsOf(p, listed);
+  const feeds = feedsOf(p, listed, context.ties);
   append(issues, feeds.strays);
   const targets = targetsOf(p, listed, feeds);
   for (const { target, feed, pending } of targets) {

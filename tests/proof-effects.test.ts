@@ -109,6 +109,8 @@ describe('exceptions and the decisions they produced agree (I6)', () => {
       exceptions: [{ ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [] }],
     });
     expect(problems(traceProof(skipped))).toEqual([
+      // An excluded carrier fires nothing.
+      'exception of an excluded carrier: X@1',
       'short circuit without its carrier applied: X@1',
     ]);
   });

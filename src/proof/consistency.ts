@@ -20,6 +20,7 @@ import {
   unroundedProblems,
 } from './placement.js';
 import { citeItem, outputProblems } from './statuses.js';
+import { tiesOf } from './ties.js';
 import type { ProofOutput, UnsignedProof } from './types.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
@@ -96,7 +97,8 @@ export function inconsistencies(p: UnsignedProof): string[] {
   const listed = new Map<string, ProofOutput>();
   for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
   const imposed = imposedSteps(p);
-  const context = { imposed, standings: standingsOf(p) };
+  const standings = standingsOf(p);
+  const context = { imposed, standings, ties: tiesOf(p, standings) };
   const checks: (() => string[])[] = [
     () => citationProblems(p, listed),
     () => ruleSetProblems(p),
@@ -111,7 +113,7 @@ export function inconsistencies(p: UnsignedProof): string[] {
     () => undeclaredReadProblems(p),
     () => undecidedRules(p),
     () => decisionProblems(p, imposed),
-    () => exceptionProblems(p, imposed),
+    () => exceptionProblems(p, imposed, context.ties),
   ];
   // Each problem once, in the order found, up to what `verifyProof` lists.
   const issues: string[] = [];

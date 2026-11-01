@@ -29,6 +29,8 @@ export interface Trace {
   exceptions?: Entry[];
   items?: Entry[];
   ruleSets?: Entry[];
+  /** The strata, by output name: one stratum of every output unless given. */
+  strata?: string[][];
 }
 
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -85,7 +87,7 @@ export function traceProof(trace: Trace): Content {
     timeZone: 'UTC',
     ruleSets: trace.ruleSets ?? [],
     versions: { engine: '1', plugins: {}, dsls: {}, models: { M: '1' }, components: [] },
-    strata: [outputs.map((output) => text(output.name))],
+    strata: trace.strata ?? [outputs.map((output) => text(output.name))],
     rules: salt('rules', rules),
     outputs: salt('outputs', outputs),
     items: salt('items', trace.items ?? []),

@@ -13,6 +13,7 @@ import type { Top } from './highest.js';
 import { imposedKey } from './output-values.js';
 import { inStandingOrder, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
+import type { Ties } from './ties.js';
 import type { ProofSelection, ProofStep } from './types.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
@@ -35,6 +36,8 @@ export interface Context {
   /** The steps a `shortCircuit` imposed (`imposedKey`). */
   imposed: ReadonlySet<string>;
   standings: Standings;
+  /** The ties settled among exceptions that the proof shows (D-7, R15). */
+  ties: Ties;
 }
 
 /** The strategies whose value is one contribution, named by `selected` (D-27). */

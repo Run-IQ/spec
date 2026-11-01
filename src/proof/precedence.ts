@@ -91,8 +91,9 @@ export function inStandingOrder(
 
 /**
  * Internal: where `exceptions` is not in the order their carriers were processed (R18, D-23):
- * precedence, priority descending, identity, then subject (none first); the exceptions of one
- * carrier instance stay in the order of its definition (`exceptions not sorted at i`).
+ * stratum by stratum, then precedence, priority descending, identity, then subject (none
+ * first); the exceptions of one carrier instance stay in the order of its definition
+ * (`exceptions not sorted at i`).
  */
 export function exceptionOrderProblems(p: UnsignedProof, standings: Standings): string[] {
   const issues: string[] = [];
@@ -105,6 +106,7 @@ export function exceptionOrderProblems(p: UnsignedProof, standings: Standings): 
     }
     if (previous !== undefined) {
       const order =
+        previous.exception.stratum - exception.stratum ||
         byStanding(previous.standing, standing) ||
         bySubject(previous.exception.subject, exception.subject);
       if (order > 0) issues.push(`exceptions not sorted at ${i}`);
