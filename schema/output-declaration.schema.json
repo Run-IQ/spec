@@ -272,7 +272,7 @@
       }
     },
     {
-      "description": "The values of an enum that sets a dimension are dimension values: no empty code system before a colon, no empty code after it.",
+      "description": "The values of an enum that sets a dimension are dimension values, split at their first colon: no empty code system before it, no empty code after it (a:b: and a:: are valid).",
       "if": {
         "type": "object",
         "required": ["type", "dimension"],
@@ -289,7 +289,7 @@
             "type": "array",
             "items": {
               "type": "string",
-              "pattern": "^(?!:)(?![\\s\\S]*:$)"
+              "pattern": "^(?!:)(?![^:]*:$)"
             }
           }
         }

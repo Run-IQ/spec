@@ -212,6 +212,10 @@ const VALUES: Record<string, unknown[]> = {
     [':x'],
     ['y:'],
     [':'],
+    ['a:b:'],
+    ['a::', 'b'],
+    ['a:b:c'],
+    [':a', 'b:'],
   ],
   rounding: [
     undefined,
@@ -235,6 +239,7 @@ const BASES: Record<string, unknown>[] = [
   { type: 'number', combine: 'sum' },
   { type: 'decimal', combine: 'sum' },
   { type: 'enum', combine: 'max', values: ['low', 'high'] },
+  { type: 'enum', combine: 'max', values: ['iso:TG', 'b'], dimension: 'country' },
   { type: 'boolean', combine: 'all' },
   { type: 'string', combine: 'highestPriority' },
   { type: 'number', combine: 'count' },
@@ -338,6 +343,92 @@ describe('the output declaration schema: what only the validator checks', () => 
         value,
         validateOutputDeclaration(value).length === 0,
       ]);
+    }
+  });
+});
+
+/** Every string of 1 to `n` characters drawn from `alphabet`. */
+function stringsOf(alphabet: readonly string[], n: number): string[] {
+  let level = [''];
+  const all: string[] = [];
+  for (let length = 1; length <= n; length++) {
+    level = level.flatMap((text) => alphabet.map((c) => text + c));
+    all.push(...level);
+  }
+  return all;
+}
+
+describe('each text pattern of the declaration schema matches its validator exactly', () => {
+  /** Asserts the schema and the validator agree on `declare(text)` for every `text`. */
+  function agree(texts: readonly string[], declare: (text: string) => object): void {
+    for (const text of texts) {
+      const value = declare(text);
+      expect([text, declarationSchemaAccepts(value)]).toEqual([
+        text,
+        validateOutputDeclaration(value).length === 0,
+      ]);
+    }
+  }
+
+  it.each(['a:b:', 'a::', ':', 'a:', ':a', 'a:b:c', ''])(
+    'an enum value of a dimension: %j',
+    (text) => {
+      agree([text], (v) => ({ type: 'enum', combine: 'max', values: [v], dimension: 'd' }));
+    },
+  );
+
+  it('an enum value of a dimension: every string of up to 6 of a, :, space', () => {
+    const texts = stringsOf(['a', ':', ' '], 6);
+    agree(texts, (v) => ({ type: 'enum', combine: 'max', values: [v], dimension: 'd' }));
+    agree(texts, (v) => ({ type: 'enum', combine: 'max', values: [v] }));
+  });
+
+  it('a unit: every string of up to 4 of a, white spaces and look-alikes', () => {
+    const texts = stringsOf(['a', ' ', '\n', '\u00a0', '\u2028', '\ufeff', '\u0085', '\u200b'], 4);
+    agree(texts, (v) => ({ type: 'decimal', combine: 'sum', unit: v }));
+  });
+
+  it('a dimension name: every string of up to 4 of a, $, -, space', () => {
+    const texts = stringsOf(['a', '$', '-', ' '], 4);
+    agree(texts, (v) => ({ type: 'string', combine: 'highestPriority', dimension: v }));
+  });
+
+  it('per: every string of up to 5 of /, a, *, -, @, ~, 0, $', () => {
+    const texts = stringsOf(['/', 'a', '*', '-', '@', '~', '0', '$'], 5);
+    agree(texts, (v) => ({ type: 'number', combine: 'sum', per: v }));
+  });
+
+  it('an increment, on a decimal and on a number: every string of up to 5 of 0, 1, 5, ., -', () => {
+    const texts = [
+      ...stringsOf(['0', '1', '5', '.', '-'], 5),
+      `0.${'0'.repeat(19)}1`,
+      `0.${'0'.repeat(20)}1`,
+      `1${'0'.repeat(19)}`,
+      `1${'0'.repeat(20)}`,
+      `${'9'.repeat(20)}.${'9'.repeat(20)}`,
+      `${'9'.repeat(20)}.${'9'.repeat(21)}`,
+    ];
+    for (const type of ['decimal', 'number']) {
+      agree(texts, (v) => ({ type, combine: 'sum', rounding: { increment: v, mode: 'up' } }));
+      // The proof schema and validateProof agree on the same texts, in the normal form.
+      for (const text of texts) {
+        const proof = proofWith({
+          outputs: {
+            value: {
+              type,
+              combine: 'max',
+              value: null,
+              contributors: [],
+              rounding: { increment: text, mode: 'up' },
+            },
+          },
+        });
+        expect([type, text, schemaAccepts(proof)]).toEqual([
+          type,
+          text,
+          validateProof(proof).issues.length === 0,
+        ]);
+      }
     }
   });
 });
