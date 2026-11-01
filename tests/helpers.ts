@@ -377,24 +377,30 @@ export function sharedPointerText(
   return { input, paths, width, rest };
 }
 
+/** The UTF-8 bytes of a leaf's pointer, of its pointer in JCS, and of its content in JCS. */
+export interface LeafBytes {
+  pointerBytes: number;
+  quotedBytes: number;
+  contentBytes: number;
+}
+
 /**
  * The hash work (`hashWork`) a digest of these leaves does, by D-14 and D-15 alone: per leaf,
- * its salt (an HMAC of `input:` and its pointer, the message counted) and its hash
- * (`0x00 ‖ tag ‖ 0x00`, 16 bytes, its salt, its content); the `n - 1` nodes of 65 bytes; the
- * digest (`0x02 ‖ tag ‖ 0x00`, the count and the root, 56 bytes). Each leaf is given as the
- * UTF-8 bytes of its pointer and of its content (`[pointer, kind, …]` in JCS).
+ * its two salts (HMACs of `input:` and `value:` with its pointer, the messages counted), the
+ * hash of its pointer in JCS, its commitment `C` (`0x03 ‖ tag ‖ 0x00`, 16 bytes, its value salt,
+ * its content) and its hash (16 bytes, its salt, the pointer hash, `C`: 112 bytes); the `n - 1`
+ * nodes of 65 bytes; the digest (`0x02 ‖ tag ‖ 0x00`, the count and the root, 56 bytes).
  */
-export function expectedHashWork(
-  leaves: Iterable<{ pointerBytes: number; contentBytes: number }>,
-): { calls: number; bytes: number } {
+export function expectedHashWork(leaves: Iterable<LeafBytes>): { calls: number; bytes: number } {
   let n = 0;
   let bytes = 0;
   for (const leaf of leaves) {
     n += 1;
-    bytes += 'input:'.length + leaf.pointerBytes + 16 + 32 + leaf.contentBytes;
+    bytes += 2 * ('input:'.length + leaf.pointerBytes) + leaf.quotedBytes;
+    bytes += 16 + 32 + leaf.contentBytes + 112;
   }
   bytes += 65 * Math.max(n - 1, 0) + 56;
-  return { calls: 2 * n + Math.max(n - 1, 0) + 1, bytes };
+  return { calls: 5 * n + Math.max(n - 1, 0) + 1, bytes };
 }
 
 /**
@@ -409,35 +415,61 @@ export function hashWorkOf(call: () => unknown): { calls: number; bytes: number 
   return { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
 }
 
-/** The UTF-8 bytes of a leaf's pointer and of its content, `[pointer, kind, …]` in JCS. */
-export function leafBytes(leaf: InputLeaf): { pointerBytes: number; contentBytes: number } {
-  const content =
-    leaf.kind === 'value'
-      ? [leaf.pointer, leaf.kind, leaf.value ?? null]
-      : leaf.kind === 'array'
-        ? [leaf.pointer, leaf.kind, leaf.length ?? 0]
-        : [leaf.pointer, leaf.kind];
+/** The bytes of a leaf (`LeafBytes`): its content is `[kind, …]` in JCS. */
+export function leafBytes(leaf: InputLeaf): LeafBytes {
   return {
     pointerBytes: Buffer.byteLength(leaf.pointer, 'utf8'),
-    contentBytes: Buffer.byteLength(canonicalize(content), 'utf8'),
+    quotedBytes: Buffer.byteLength(canonicalize(leaf.pointer), 'utf8'),
+    contentBytes: Buffer.byteLength(canonicalize(leafContent(leaf)), 'utf8'),
   };
+}
+
+/** The content `c` of a leaf (D-15): `['value', value]`, `['array', length]` or `['object']`. */
+export function leafContent(leaf: Pick<InputLeaf, 'kind' | 'value' | 'length'>): JsonValue[] {
+  if (leaf.kind === 'value') return [leaf.kind, leaf.value ?? null];
+  if (leaf.kind === 'array') return [leaf.kind, leaf.length ?? 0];
+  return [leaf.kind];
 }
 
 /** The longest list at `/data/a`: every input holds `data`, `meta`, its six members and `a`. */
 export const LONGEST_DATA_LIST = MAX_JSON_VALUES - 9;
 
-/** The leaf hash of D-15, by `node:crypto`: what `inputLeafHash` must give. */
-export function nodeLeafHash(leaf: InputLeaf): Uint8Array {
-  const content: JsonValue[] = [leaf.pointer, leaf.kind];
-  if (leaf.kind === 'value') content.push(leaf.value ?? null);
-  if (leaf.kind === 'array') content.push(leaf.length ?? 0);
+/**
+ * The commitment `C` of a leaf (D-15), by `node:crypto`: `sha256(0x03 ‖ tag ‖ 0x00 ‖ valueSalt
+ * ‖ utf8(canonicalize(c)))`.
+ */
+export function nodeCommitment(leaf: InputLeaf): Uint8Array {
+  return nodeSha256(
+    Uint8Array.of(3),
+    'run-iq.input/1',
+    Uint8Array.of(0),
+    fromHex(leaf.valueSalt),
+    canonicalize(leafContent(leaf)),
+  );
+}
+
+/**
+ * The hash of a leaf from its pointer, its salt (hex) and its commitment (D-15), by
+ * `node:crypto`: `sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ sha256(utf8(canonicalize(pointer))) ‖ C)`.
+ */
+export function nodeCommittedLeafHash(
+  pointer: string,
+  salt: string,
+  commitment: Uint8Array,
+): Uint8Array {
   return nodeSha256(
     Uint8Array.of(0),
     'run-iq.input/1',
     Uint8Array.of(0),
-    fromHex(leaf.salt),
-    canonicalize(content),
+    fromHex(salt),
+    nodeSha256(canonicalize(pointer)),
+    commitment,
   );
+}
+
+/** The leaf hash of D-15, by `node:crypto`: what `inputLeafHash` must give. */
+export function nodeLeafHash(leaf: InputLeaf): Uint8Array {
+  return nodeCommittedLeafHash(leaf.pointer, leaf.salt, nodeCommitment(leaf));
 }
 
 /** `value` typed as what a JavaScript caller may pass. */
@@ -465,11 +497,20 @@ export function jsonCopy<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T;
 }
 
-/** A leaf of a tree built by hand: its content, before its salt. */
-export type TreeLeaf = Omit<InputLeaf, 'salt'>;
+/** A leaf of a tree built by hand: its content, before its salts. */
+export type TreeLeaf = Omit<InputLeaf, 'salt' | 'valueSalt'>;
 
-/** A disclosed leaf of a tree built by hand: an input leaf, its index and its audit path. */
+/** A shown leaf of a tree built by hand: an input leaf, its index and its audit path. */
 export interface HandLeaf extends InputLeaf {
+  index: number;
+  path: string[];
+}
+
+/** A neighbour of a tree built by hand: pointer, salt, commitment, index and audit path. */
+export interface HandNeighbour {
+  pointer: string;
+  salt: string;
+  commitment: string;
   index: number;
   path: string[];
 }
@@ -477,24 +518,37 @@ export interface HandLeaf extends InputLeaf {
 /**
  * A tree of input leaves built by hand, in the order given (sorted or not: it may be a tree no
  * honest signer builds), each salted under `seed` as D-14 salts it. Gives its digest (D-15, by
- * `node:crypto`) and each leaf as a disclosure carries it (`leaf(i)`).
+ * `node:crypto`), each leaf as a disclosure shows it (`leaf(i)`) and as a neighbour
+ * (`neighbour(i)`).
  */
 export function handTree(
   contents: readonly TreeLeaf[],
   seed: Uint8Array,
-): { digest: string; size: number; leaf: (index: number) => HandLeaf } {
+): {
+  digest: string;
+  size: number;
+  leaf: (index: number) => HandLeaf;
+  neighbour: (index: number) => HandNeighbour;
+} {
   const leaves: InputLeaf[] = contents.map((content) => ({
     ...content,
     salt: hex(nodeHmac(seed, `input:${content.pointer}`)),
+    valueSalt: hex(nodeHmac(seed, `value:${content.pointer}`)),
   }));
   const hashes = leaves.map(nodeLeafHash);
+  const at = (index: number): InputLeaf => {
+    const leaf = leaves[index];
+    if (leaf === undefined) throw new RangeError(`no leaf ${index}`);
+    return leaf;
+  };
   return {
     digest: nodeInputDigest(hashes.length, referenceRoot(hashes)),
     size: hashes.length,
-    leaf: (index) => {
-      const leaf = leaves[index];
-      if (leaf === undefined) throw new RangeError(`no leaf ${index}`);
-      return { ...leaf, index, path: referencePath(hashes, index).map(hex) };
+    leaf: (index) => ({ ...at(index), index, path: referencePath(hashes, index).map(hex) }),
+    neighbour: (index) => {
+      const { pointer, salt } = at(index);
+      const commitment = hex(nodeCommitment(at(index)));
+      return { pointer, salt, commitment, index, path: referencePath(hashes, index).map(hex) };
     },
   };
 }

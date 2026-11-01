@@ -38,10 +38,16 @@ function changed(change: (copy: Record<string, unknown>) => void): Record<string
 
 /** The first fact of `copy` as a plain record. */
 function firstFact(copy: Record<string, unknown>): Record<string, unknown> {
-  const facts = copy.facts as Record<string, unknown>[];
-  const [fact] = facts;
+  const [fact] = loose<Record<string, unknown>[]>(copy.facts);
   if (fact === undefined) throw new Error('no fact');
   return fact;
+}
+
+/** The first leaf of the first fact of `copy` as a plain record. */
+function firstLeaf(copy: Record<string, unknown>): Record<string, unknown> {
+  const [leaf] = loose<Record<string, unknown>[]>(firstFact(copy).leaves);
+  if (leaf === undefined) throw new Error('no leaf');
+  return leaf;
 }
 
 /** `verifyFactDisclosure(value, digest)`, failing the test if it throws. */
@@ -96,8 +102,18 @@ describe('verifyFactDisclosure never throws: a hostile value is a named problem'
   it('a getter that throws, at every place it is read', () => {
     const top = changed((copy) => throwAt(copy, 'size'));
     expect(verify(top)).toEqual(refused(['/size could not be read: boom']));
-    const leaf = changed((copy) => throwAt(firstFact(copy), 'salt'));
-    expect(verify(leaf)).toEqual(refused(['/facts/0/salt could not be read: boom']));
+    const leaf = changed((copy) => throwAt(firstLeaf(copy), 'salt'));
+    expect(verify(leaf)).toEqual(refused(['/facts/0/leaves/0/salt could not be read: boom']));
+    const fact = changed((copy) => throwAt(firstFact(copy), 'leaves'));
+    expect(verify(fact)).toEqual(refused(['/facts/0/leaves could not be read: boom']));
+    const neighbour = changed((copy) => {
+      const [absence] = loose<Record<string, unknown>[]>(copy.absent);
+      const before = loose<Record<string, unknown> | undefined>(absence?.before);
+      if (before) throwAt(before, 'commitment');
+    });
+    expect(verify(neighbour)).toEqual(
+      refused(['/absent/0/before/commitment could not be read: boom']),
+    );
     const entry = changed((copy) => {
       const [absence] = copy.absent as Record<string, unknown>[];
       if (absence) throwAt(absence, 'before');
@@ -110,8 +126,11 @@ describe('verifyFactDisclosure never throws: a hostile value is a named problem'
     expect(verify(changed((copy) => (copy.facts = throwingProxy([]))))).toEqual(
       refused(['/facts could not be read: boom']),
     );
-    expect(verify(changed((copy) => (firstFact(copy).path = throwingProxy([]))))).toEqual(
-      refused(['/facts/0/path could not be read: boom']),
+    expect(verify(changed((copy) => (firstLeaf(copy).path = throwingProxy([]))))).toEqual(
+      refused(['/facts/0/leaves/0/path could not be read: boom']),
+    );
+    expect(verify(changed((copy) => (firstFact(copy).leaves = throwingProxy([]))))).toEqual(
+      refused(['/facts/0/leaves could not be read: boom']),
     );
     const { proxy, revoke } = Proxy.revocable({}, {});
     revoke();
@@ -124,13 +143,22 @@ describe('verifyFactDisclosure never throws: a hostile value is a named problem'
 
   it('nesting 10 000 levels deep, wherever a scalar, a leaf or a list is expected', () => {
     const deep = nested(10_000);
-    expect(verify(changed((copy) => (firstFact(copy).value = deep)))).toEqual(
-      refused(['/facts/0/value must be a JSON scalar']),
+    expect(verify(changed((copy) => (firstLeaf(copy).value = deep)))).toEqual(
+      refused(['/facts/0/leaves/0/value must be a JSON scalar']),
     );
     let list: unknown = 1;
     for (let i = 0; i < 10_000; i++) list = [list];
     expect(verify(changed((copy) => (copy.facts = [list])))).toEqual(
-      refused(['/facts/0 must be an object { pointer, kind, value or length, salt, index, path }']),
+      refused(['/facts/0 must be an object { pointer, leaves, before?, after? }']),
+    );
+    expect(verify(changed((copy) => (firstFact(copy).leaves = [list])))).toEqual(
+      refused([
+        '/facts/0/leaves/0 must be an object ' +
+          '{ pointer, kind, value or length, salt, valueSalt, index, path }',
+      ]),
+    );
+    expect(verify(changed((copy) => (copy.absent = [{ pointer: '/a', after: list }])))).toEqual(
+      refused(['/absent/0/after must be an object { pointer, salt, commitment, index, path }']),
     );
     expect(verify(changed((copy) => (copy.absent = [{ pointer: deep }])))).toEqual(
       refused(['/absent/0/pointer must be a string']),
@@ -203,12 +231,12 @@ describe('verifyFactDisclosure never throws: a hostile value is a named problem'
     elementReads = 0;
     const d = changed((copy) => {
       copy.absent = [];
-      copy.facts = [{ ...firstFact(copy), path: claiming(1_000_000) }];
+      firstFact(copy).leaves = [{ ...firstLeaf(copy), path: claiming(1_000_000) }];
     });
     let result: FactDisclosureVerification | undefined;
     const work = hashWorkOf(() => (result = verify(d)));
     expect(result).toEqual(
-      refused(['/facts/0/path must hold 4 hashes (the audit path of leaf 0 of 10)']),
+      refused(['/facts/0/leaves/0/path must hold 4 hashes (the audit path of leaf 0 of 10)']),
     );
     expect(elementReads).toBe(0);
     expect(work.calls).toBe(0);
@@ -217,7 +245,10 @@ describe('verifyFactDisclosure never throws: a hostile value is a named problem'
   it('more facts than leaves, or more values than the budget, before any element is read', () => {
     elementReads = 0;
     expect(verify(changed((copy) => (copy.facts = claiming(1e9))))).toEqual(
-      refused(['/facts holds 1000000000 leaves, more than the size of the tree (10)']),
+      refused(['/facts holds 1000000000 facts, more than the size of the tree (10)']),
+    );
+    expect(verify(changed((copy) => (firstFact(copy).leaves = claiming(11))))).toEqual(
+      refused(['/facts/0/leaves holds 11 leaves, more than the size of the tree (10)']),
     );
     expect(verify(changed((copy) => (copy.absent = claiming(2 ** 32 - 1))))).toEqual(
       refused(['/absent is too large: more than 10000000 values']),

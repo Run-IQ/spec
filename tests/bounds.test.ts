@@ -406,6 +406,9 @@ describe('under a 1 GB heap (built dist)', () => {
           size: 1, facts: [], absent: sp() }, '0'.repeat(64)).issues[0],
         s.verifyFactDisclosure({ format: 'run-iq.disclosure/1', inputDigest: '0'.repeat(64),
           size: 10000000, facts: sp(), absent: [] }, '0'.repeat(64)).issues[0],
+        s.verifyFactDisclosure({ format: 'run-iq.disclosure/1', inputDigest: '0'.repeat(64),
+          size: 10000000, facts: [{ pointer: '/a', leaves: sp() }], absent: [] },
+          '0'.repeat(64)).issues[0],
         message(() => s.discloseFacts(input, seed, sp(), [])),
         message(() => s.discloseFacts(input, seed, [], sp())),
       ]));`;
@@ -425,7 +428,8 @@ describe('under a 1 GB heap (built dist)', () => {
       false,
       false,
       '/absent is too large: more than 10000000 values',
-      '/facts holds 4294967295 leaves, more than the size of the tree (10000000)',
+      '/facts holds 4294967295 facts, more than the size of the tree (10000000)',
+      '/facts/0/leaves holds 4294967295 leaves, more than the size of the tree (10000000)',
       'present is too large: more than 10000000 values',
       'absent is too large: more than 10000000 values',
     ]);

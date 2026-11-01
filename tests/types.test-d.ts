@@ -37,11 +37,13 @@ import {
 } from '../src/index.js';
 import type {
   AbsenceProof,
+  DisclosedFact,
   DisclosedLeaf,
   FactDisclosure,
   FactDisclosureVerification,
   JsonPointer,
   InputLeaf,
+  NeighbourLeaf,
   ProofInput,
   ForEach,
   OrderKey,
@@ -314,6 +316,14 @@ describe('the input tree (Task 9H1)', () => {
     expectTypeOf(UNSALTED_SEED).toEqualTypeOf<Uint8Array>();
     expectTypeOf<typeof INPUT_TREE_TAG>().toEqualTypeOf<'run-iq.input/1'>();
     expectTypeOf<InputLeaf['kind']>().toEqualTypeOf<'value' | 'array' | 'object'>();
+    expectTypeOf<InputLeaf>().toEqualTypeOf<{
+      pointer: JsonPointer;
+      kind: 'value' | 'array' | 'object';
+      value?: JsonValue;
+      length?: number;
+      salt: string;
+      valueSalt: string;
+    }>();
     expectTypeOf(inputLeaves).toEqualTypeOf<(input: ProofInput, seed: Uint8Array) => InputLeaf[]>();
     expectTypeOf(inputLeafHash).toEqualTypeOf<(leaf: InputLeaf) => Uint8Array>();
     expectTypeOf(verifyInputInclusion).toEqualTypeOf<
@@ -343,19 +353,33 @@ describe('fact disclosure types (Task 9H2)', () => {
       value?: JsonValue;
       length?: number;
       salt: string;
+      valueSalt: string;
       index: number;
       path: string[];
     }>();
+    expectTypeOf<NeighbourLeaf>().toEqualTypeOf<{
+      pointer: JsonPointer;
+      salt: string;
+      commitment: string;
+      index: number;
+      path: string[];
+    }>();
+    expectTypeOf<DisclosedFact>().toEqualTypeOf<{
+      pointer: JsonPointer;
+      leaves: DisclosedLeaf[];
+      before?: NeighbourLeaf;
+      after?: NeighbourLeaf;
+    }>();
     expectTypeOf<AbsenceProof>().toEqualTypeOf<{
       pointer: JsonPointer;
-      before?: DisclosedLeaf;
-      after?: DisclosedLeaf;
+      before?: NeighbourLeaf;
+      after?: NeighbourLeaf;
     }>();
     expectTypeOf<FactDisclosure>().toEqualTypeOf<{
       format: 'run-iq.disclosure/1';
       inputDigest: string;
       size: number;
-      facts: DisclosedLeaf[];
+      facts: DisclosedFact[];
       absent: AbsenceProof[];
     }>();
     expectTypeOf<FactDisclosureVerification>().toEqualTypeOf<{

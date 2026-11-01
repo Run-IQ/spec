@@ -3,7 +3,7 @@ import { inputLeafHash, validateProofInput } from '../../src/index.js';
 import { MAX_INPUT_LEAF_TEXT, MAX_JSON_VALUES } from '../../src/values.js';
 import { hex, LONGEST_DATA_LIST, loose, nodeLeafHash, proofInput, specError } from '../helpers.js';
 
-const SALT_A = 'ab'.repeat(32);
+const SALTS = { salt: 'ab'.repeat(32), valueSalt: 'cd'.repeat(32) };
 
 describe('inputLeafHash at the limits of an input (heavy)', () => {
   it('refuses a pointer longer than a leaf there can be, and accepts the longest', () => {
@@ -11,7 +11,7 @@ describe('inputLeafHash at the limits of an input (heavy)', () => {
     const longest = MAX_INPUT_LEAF_TEXT - 80;
     const pointer = `/data/${'k'.repeat(longest - '/data/'.length)}`;
     expect(pointer).toHaveLength(longest);
-    const leaf = { pointer, kind: 'value', value: 1, salt: 'ab'.repeat(32) };
+    const leaf = { pointer, kind: 'value', value: 1, ...SALTS };
     expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
     expect(
       specError(() => inputLeafHash(loose({ ...leaf, pointer: `${pointer}k` }))),
@@ -30,7 +30,7 @@ describe('inputLeafHash at the limits of an input (heavy)', () => {
     expect(validateProofInput(over)).toEqual([
       { path: '/meta', message: '/meta is too large: more than 10000000 values' },
     ]);
-    const leaf = { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST, salt: SALT_A };
+    const leaf = { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST, ...SALTS };
     expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
   }, 60_000);
 });

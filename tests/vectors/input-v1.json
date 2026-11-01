@@ -1,6 +1,6 @@
 {
   "format": "run-iq.input/1",
-  "description": "Frozen vector of the input tree (D-14, D-15), from the plan (Task 9H1). Leaf = sha256(0x00 || utf8('run-iq.input/1') || 0x00 || salt || utf8(JCS([pointer, kind, value-or-length]))); salt = HMAC-SHA256(seed, utf8('input:' + pointer)); seed = HKDF-SHA256(ikm = secret, salt = utf8('run-iq.input-seed/1'), info = utf8(requestId), 32 bytes); merkleRoot = RFC 6962 Merkle tree hash of the leaves sorted by decoded pointer segments; inputDigest = sha256(0x02 || utf8('run-iq.input/1') || 0x00 || uint64be(leafCount) || merkleRoot).",
+  "description": "Frozen vector of the input tree (D-14, D-15), from the plan (Task 9H1; leaf encoding of Task 9H2 round 2). Leaf = sha256(0x00 || utf8('run-iq.input/1') || 0x00 || salt || sha256(utf8(JCS(pointer))) || C); C = sha256(0x03 || utf8('run-iq.input/1') || 0x00 || valueSalt || utf8(JCS(c))), c = ['value', value], ['array', length] or ['object']; salt = HMAC-SHA256(seed, utf8('input:' + pointer)); valueSalt = HMAC-SHA256(seed, utf8('value:' + pointer)); seed = HKDF-SHA256(ikm = secret, salt = utf8('run-iq.input-seed/1'), info = utf8(requestId), 32 bytes); merkleRoot = RFC 6962 Merkle tree hash of the leaves sorted by decoded pointer segments; inputDigest = sha256(0x02 || utf8('run-iq.input/1') || 0x00 || uint64be(leafCount) || merkleRoot).",
   "secret": "4242424242424242424242424242424242424242424242424242424242424242",
   "requestId": "r1",
   "input": {
@@ -26,21 +26,24 @@
     "firstLeaf": {
       "pointer": "/data/a",
       "salt": "468eb2ec77d6c10c2c90a6f43a17217ad29fed0d5d713ea4c13bcb5cbae96e20",
-      "hash": "8ca125b28185429613f1ed565718eba5b603c69110b3a3ac9b30dc043e29f322"
+      "valueSalt": "eef09c81e219e9ee88504bfc952e006b4206ca02dfb3b8d34661aa024c3ec1e7",
+      "commitment": "5703d61a05fa8312f30d7d1f6900dc17c647a23297a7a40e66e2babd3701d743",
+      "hash": "e9123b1dd41fae248aa3abb6f0958e60f3c91f8455b99241c38f3fd1354e6a93"
     },
     "leafCount": 10,
-    "merkleRoot": "ed75157664fd1dd502ac3953e8f69fa41e74d56da05af625085c68f8b8089148",
-    "inputDigest": "3311862834ce93b342465de7d6f99754dffd06b51b524025b3e4a98e588d03e5"
+    "merkleRoot": "333bb3bd194d4f5f929d84d0f0c98395a9fcefbb622f0ed7f64eaa231db23353",
+    "inputDigest": "2f053bea1578debcec80ba3b98d8e63f8c4150f5fe40be9c82cb1d6122f41acd"
   },
   "unsalted": {
     "seed": "0000000000000000000000000000000000000000000000000000000000000000",
     "firstLeaf": {
       "pointer": "/data/a",
-      "salt": "bd59bbc358daa463d7fb8a9af69e608e26a8725a1cf53cf57fc3e7da582acd0b"
+      "salt": "bd59bbc358daa463d7fb8a9af69e608e26a8725a1cf53cf57fc3e7da582acd0b",
+      "valueSalt": "45bae62f7bb02c33fffdb2da49dcb95c3236a2644733be377cc2137872195371"
     },
     "leafCount": 10,
-    "merkleRoot": "200d3aba56343c06fb121f41f743ecaf716969f6de52373603d1b597e1fcebb4",
-    "inputDigest": "d0ca64aa1bbb7350e98b88272da725534529d80726df75b435f07a0dcace3d97"
+    "merkleRoot": "b98c177ec0ef9b3b31fd4acf245bddef4317703827ad148bed468e6275dee301",
+    "inputDigest": "82ea408a8b9ac3638aff9ff173e9b1a7e79d696634f680e2df44866e4b646be2"
   },
   "merkle": {
     "leaves": ["sha256('a')", "sha256('b')", "sha256('c')"],

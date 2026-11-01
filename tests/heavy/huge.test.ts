@@ -20,12 +20,12 @@ import { hex, nodeHmac, nodeInputDigest, referenceRoot, specError } from '../hel
 const META = { tenantId: 't', dates: {}, tags: [], dimensions: {}, context: {}, assertions: {} };
 /** The leaves of `META`, in order, with their content (D-15). */
 const META_LEAVES: [string, string][] = [
-  ['/meta/assertions', '["/meta/assertions","object"]'],
-  ['/meta/context', '["/meta/context","object"]'],
-  ['/meta/dates', '["/meta/dates","object"]'],
-  ['/meta/dimensions', '["/meta/dimensions","object"]'],
-  ['/meta/tags', '["/meta/tags","array",0]'],
-  ['/meta/tenantId', '["/meta/tenantId","value","t"]'],
+  ['/meta/assertions', '["object"]'],
+  ['/meta/context', '["object"]'],
+  ['/meta/dates', '["object"]'],
+  ['/meta/dimensions', '["object"]'],
+  ['/meta/tags', '["array",0]'],
+  ['/meta/tenantId', '["value","t"]'],
 ];
 const META_TEXT =
   '"meta":{"assertions":{},"context":{},"dates":{},"dimensions":{},"tags":[],"tenantId":"t"}';
@@ -38,17 +38,22 @@ function oracle(parts: readonly (string | Uint8Array)[]): Uint8Array {
   return new Uint8Array(hash.digest());
 }
 
-/** The leaf hash of `content` (given in pieces) at `pointer`, unsalted, by the oracle. */
+/**
+ * The leaf hash of `content` (given in pieces) at `pointer`, unsalted, by the oracle (D-15):
+ * its commitment over its value salt and content, then the leaf over its salt, the hash of its
+ * pointer in JCS and that commitment.
+ */
 function oracleLeaf(pointer: string, content: readonly string[]): Uint8Array {
+  const valueSalt = nodeHmac(UNSALTED_SEED, `value:${pointer}`);
+  const commitment = oracle([Uint8Array.of(3), TAG, Uint8Array.of(0), valueSalt, ...content]);
   const salt = nodeHmac(UNSALTED_SEED, `input:${pointer}`);
-  return oracle([Uint8Array.of(0), TAG, Uint8Array.of(0), salt, ...content]);
+  const pointerHash = oracle([JSON.stringify(pointer)]);
+  return oracle([Uint8Array.of(0), TAG, Uint8Array.of(0), salt, pointerHash, commitment]);
 }
 
 /** The unsalted input digest of `data` (its keys sorted, each holding `text`), by the oracle. */
 function oracleInputDigest(keys: readonly string[], text: string): string {
-  const data = keys.map((key) =>
-    oracleLeaf(`/data/${key}`, [`["/data/${key}","value","`, text, '"]']),
-  );
+  const data = keys.map((key) => oracleLeaf(`/data/${key}`, ['["value","', text, '"]']));
   const meta = META_LEAVES.map(([pointer, content]) => oracleLeaf(pointer, [content]));
   const leaves = [...data, ...meta];
   return nodeInputDigest(leaves.length, referenceRoot(leaves));
@@ -90,10 +95,9 @@ describe('digests of a value whose canonical text no string can hold (I1)', () =
     });
     expect(computeInputDigest(input, UNSALTED_SEED)).toBe(oracleInputDigest(['a'], text));
     const salt = hex(nodeHmac(UNSALTED_SEED, 'input:/data/a'));
-    const leaf = { pointer: '/data/a', kind: 'value' as const, value: text, salt };
-    expect(hex(inputLeafHash(leaf))).toBe(
-      hex(oracleLeaf('/data/a', ['["/data/a","value","', text, '"]'])),
-    );
+    const valueSalt = hex(nodeHmac(UNSALTED_SEED, 'value:/data/a'));
+    const leaf = { pointer: '/data/a', kind: 'value' as const, value: text, salt, valueSalt };
+    expect(hex(inputLeafHash(leaf))).toBe(hex(oracleLeaf('/data/a', ['["value","', text, '"]'])));
     expect(computeIdempotencyDigest({ input, options: {} })).toBe(oracleIdempotency(['a'], text));
   }, 180_000);
 });

@@ -25,9 +25,9 @@ import { readValidInput } from './validate.js';
 
 /**
  * The domain tag of the input tree (D-15): every leaf hash starts with
- * `0x00 ‖ utf8('run-iq.input/1') ‖ 0x00`, and the digest with `0x02 ‖ utf8('run-iq.input/1') ‖
- * 0x00`, so neither can be taken for a node of the tree (`0x01 ‖ …`) nor for the leaf or the
- * digest of another tree.
+ * `0x00 ‖ utf8('run-iq.input/1') ‖ 0x00`, every content commitment with `0x03 ‖ …`, and the
+ * digest with `0x02 ‖ utf8('run-iq.input/1') ‖ 0x00`, so none can be taken for another, for a
+ * node of the tree (`0x01 ‖ …`), nor for the leaf or the digest of another tree.
  */
 export const INPUT_TREE_TAG = 'run-iq.input/1';
 
@@ -35,8 +35,9 @@ export const INPUT_TREE_TAG = 'run-iq.input/1';
  * One leaf of the input tree (D-15): a scalar (`kind: 'value'`, with its `value`, `null`
  * included), a list (`kind: 'array'`, with its `length`; its elements have their own leaves) or
  * an empty object (`kind: 'object'`) of a `ProofInput`, at its `pointer` (`/data/…`,
- * `/meta/…`), with its `salt`: `HMAC-SHA256(seed, utf8('input:' + pointer))` in lowercase hex.
- * A non-empty object has no leaf: its descendants imply it.
+ * `/meta/…`), with its two salts, in lowercase hex: `salt`, `HMAC-SHA256(seed, utf8('input:' +
+ * pointer))`, and `valueSalt`, `HMAC-SHA256(seed, utf8('value:' + pointer))`. A non-empty
+ * object has no leaf: its descendants imply it.
  */
 export interface InputLeaf {
   pointer: JsonPointer;
@@ -44,6 +45,7 @@ export interface InputLeaf {
   value?: JsonValue;
   length?: number;
   salt: string;
+  valueSalt: string;
 }
 
 /** The start of the input digest: `0x02 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
@@ -53,6 +55,8 @@ const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The fixed start of every leaf hash: `0x00 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
 const LEAF_PREFIX = Uint8Array.from([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+/** The fixed start of every content commitment: `0x03 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
+const COMMITMENT_PREFIX = Uint8Array.from([3, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
 
 /**
  * The leaves of `input` under `seed` (D-14, D-15), sorted by `comparePointers`: decoded
@@ -67,12 +71,18 @@ const LEAF_PREFIX = Uint8Array.from([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
  */
 export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
   return withValueBudget(() => {
-    const salt = inputSalter(readSeed(seed));
+    const bytes = readSeed(seed);
+    const salt = inputSalter(bytes, 'input:');
+    const valueSalt = inputSalter(bytes, 'value:');
     const snapshot = readValidInput(input);
     const leaves: InputLeaf[] = [];
     ownCopy(() =>
       forEachLeaf(snapshot, (leaf) => {
-        leaves.push({ ...leaf, salt: bytesToHex(salt(leaf.pointer)) });
+        leaves.push({
+          ...leaf,
+          salt: bytesToHex(salt(leaf.pointer)),
+          valueSalt: bytesToHex(valueSalt(leaf.pointer)),
+        });
       }),
     );
     return leaves;
@@ -80,14 +90,18 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
 }
 
 /**
- * The hash of one input leaf (D-15), 32 bytes: `sha256(0x00 ‖ utf8('run-iq.input/1') ‖ 0x00
- * ‖ salt (32 raw bytes) ‖ utf8(canonicalize(c)))`, where `c` is `[pointer, 'value', value]`,
- * `[pointer, 'array', length]` or `[pointer, 'object']`, hashed as it is written (a value of
- * any length).
+ * The hash of one input leaf (D-15), 32 bytes:
+ * `sha256(0x00 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ salt ‖ sha256(utf8(canonicalize(pointer))) ‖
+ * C)`, where `C`, the commitment to its content, is `sha256(0x03 ‖ utf8('run-iq.input/1') ‖ 0x00
+ * ‖ valueSalt ‖ utf8(canonicalize(c)))` and `c` is `['value', value]`, `['array', length]` or
+ * `['object']` (salts as 32 raw bytes). The kind and the value are inside `C` alone: a leaf can
+ * be shown by its pointer, `salt` and `C`, its content hidden (a neighbour in a proof of
+ * absence, `run-iq.disclosure/1`). Everything is hashed as it is written (a value of any length).
  *
- * `leaf` is read once: a plain object with exactly the members of its kind, `salt` 64 lowercase
- * hex characters. It is refused unless a valid input can hold such a leaf, judged by the leaf
- * alone (its siblings, their order and their share of the budgets are not known here):
+ * `leaf` is read once: a plain object with exactly the members of its kind, `salt` and
+ * `valueSalt` 64 lowercase hex characters each. It is refused unless a valid input can hold
+ * such a leaf, judged by the leaf alone (its siblings, their order and their share of the
+ * budgets are not known here):
  * - `pointer` is a JSON pointer below `/data` or `/meta` naming a place that holds a leaf in
  *   some valid input (`/meta` itself, `/meta/foo`, `/data/$x`, an assertion, anything below a
  *   string of `meta`, anything more than `MAX_JSON_DEPTH` (1000) levels below `/data` or
@@ -111,9 +125,9 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
  */
 export function inputLeafHash(leaf: InputLeaf): Uint8Array {
   return withValueBudget(() => {
-    const { content, salt } = readLeaf(leaf);
+    const { content, salt, valueSalt } = readLeaf(leaf);
     const out = new Uint8Array(32);
-    createLeafHasher()(out, content, hexToBytes(salt));
+    createLeafHasher().hash(out, content, hexToBytes(salt), hexToBytes(valueSalt));
     return out;
   });
 }
@@ -124,13 +138,15 @@ export function inputLeafHash(leaf: InputLeaf): Uint8Array {
  * walks, into one packed buffer: no leaf object is kept.
  */
 export function inputDigestBytes(input: ProofInput, seed: Uint8Array): Uint8Array {
-  const salt = inputSalter(readSeed(seed));
+  const bytes = readSeed(seed);
+  const salt = inputSalter(bytes, 'input:');
+  const valueSalt = inputSalter(bytes, 'value:');
   const snapshot = readValidInput(input);
-  const hashLeaf = createLeafHasher();
+  const hasher = createLeafHasher();
   const hashes = new PackedHashes();
   ownCopy(() =>
     forEachLeaf(snapshot, (leaf) => {
-      hashLeaf(hashes.next(), leaf, salt(leaf.pointer));
+      hasher.hash(hashes.next(), leaf, salt(leaf.pointer), valueSalt(leaf.pointer));
       hashes.push();
     }),
   );
@@ -181,15 +197,13 @@ export function verifyInputInclusion(
 }
 
 /**
- * Writes the JSON text of a leaf's content `c` (D-15): `[pointer, kind]`, then its value or
- * length. Exactly `canonicalize(c)`: a three-member list of scalars, each written as
- * `canonicalize` writes a scalar (a number by `String`, a string as `JSON.stringify` escapes it,
- * slice by slice), without spaces; written piece by piece, never built whole.
+ * Writes the JSON text of a leaf's content `c` (D-15): `[kind]`, then its value or length.
+ * Exactly `canonicalize(c)`: a list of scalars, each written as `canonicalize` writes a scalar
+ * (a number by `String`, a string as `JSON.stringify` escapes it, slice by slice), without
+ * spaces; written piece by piece, never built whole.
  */
 function writeContent(out: TextOut, content: LeafContent): void {
-  out.text('[');
-  writeJsonString(out, content.pointer);
-  out.text(`,"${content.kind}"`);
+  out.text(`["${content.kind}"`);
   if (content.kind !== 'object') {
     const last = content.kind === 'array' ? content.length : content.value;
     out.text(',');
@@ -199,32 +213,91 @@ function writeContent(out: TextOut, content: LeafContent): void {
   out.text(']');
 }
 
-/**
- * Internal: the hash of a leaf from its content and its raw salt (D-15), written into `out`,
- * through the shared hash stream (`withSha256`): the content is hashed as it is written.
- */
-export function createLeafHasher(): (
-  out: Uint8Array,
-  content: LeafContent,
-  salt: Uint8Array,
-) => void {
-  return (out, content, salt) => {
-    const hash = withSha256((stream) => {
-      stream.bytes(LEAF_PREFIX);
-      stream.bytes(salt);
-      writeContent(stream, content);
-    });
-    out.set(hash);
+/** Internal: hashes leaves (D-15), each into a given array, its commitment `C` kept. */
+export interface LeafHasher {
+  /**
+   * Writes into `out` the hash of the leaf of `content` with its raw `salt` and `valueSalt`,
+   * through the shared hash stream (`withSha256`): the content is hashed as it is written.
+   */
+  hash(out: Uint8Array, content: LeafContent, salt: Uint8Array, valueSalt: Uint8Array): void;
+  /** The commitment `C` of the last leaf hashed: the same array, rewritten by each call. */
+  readonly commitment: Uint8Array;
+}
+
+/** Internal: a `LeafHasher`. */
+export function createLeafHasher(): LeafHasher {
+  const commitment = new Uint8Array(32);
+  return {
+    commitment,
+    hash(out, content, salt, valueSalt) {
+      commitment.set(
+        withSha256((stream) => {
+          stream.bytes(COMMITMENT_PREFIX);
+          stream.bytes(valueSalt);
+          writeContent(stream, content);
+        }),
+      );
+      writeLeafHash(out, content.pointer, salt, commitment);
+    },
   };
 }
 
-const LEAF_KEYS: readonly string[] = ['pointer', 'kind', 'value', 'length', 'salt'];
+/**
+ * Writes into `out` the hash of the leaf at `pointer` with its raw `salt` and its commitment
+ * (D-15): the pointer is hashed first, as `canonicalize` writes a string.
+ */
+function writeLeafHash(
+  out: Uint8Array,
+  pointer: string,
+  salt: Uint8Array,
+  commitment: Uint8Array,
+): void {
+  const pointerHash = withSha256((stream) => {
+    writeJsonString(stream, pointer);
+  });
+  hashLeafInto(out, LEAF_PREFIX, salt, pointerHash, commitment);
+}
+
+/** The hasher of the fixed 112 bytes of a leaf hash: no text, no stream needed. */
+const hashLeafInto = createHasherInto();
+
+/**
+ * Internal: the hash of a leaf shown without its content (D-15): its `pointer`, its raw `salt`
+ * and its commitment `C` (32 bytes each). Throws `SpecError` (`INVALID_INPUT`, `invalid input
+ * leaf: <problem>`, `/pointer` as `path`) for a pointer at which no valid input has a leaf, as
+ * `inputLeafHash` refuses it; its kind is not known, so nothing else is checked.
+ */
+export function committedLeafHash(
+  pointer: string,
+  salt: Uint8Array,
+  commitment: Uint8Array,
+): Uint8Array {
+  let problem: { path: string; message: string } | undefined;
+  readLeafPointer(pointer, (path, message) => {
+    problem ??= { path, message };
+  });
+  if (problem !== undefined) {
+    throw newSpecError('INVALID_INPUT', `invalid input leaf: ${problem.message}`, problem.path);
+  }
+  const out = new Uint8Array(32);
+  writeLeafHash(out, pointer, salt, commitment);
+  return out;
+}
+
+const LEAF_KEYS: readonly string[] = ['pointer', 'kind', 'value', 'length', 'salt', 'valueSalt'];
 const KINDS: readonly string[] = ['value', 'array', 'object'];
 const SALT_HEX = /^[0-9a-f]{64}$/;
 
-/** The content and the salt of a caller's leaf, or a thrown `SpecError` (`INVALID_INPUT`). */
-function readLeaf(value: unknown): { content: LeafContent; salt: string } {
-  let read: { content: LeafContent; salt: string } | undefined;
+/** A caller's leaf as read: its content and its two salts (hex). */
+interface ReadLeaf {
+  content: LeafContent;
+  salt: string;
+  valueSalt: string;
+}
+
+/** The content and the salts of a caller's leaf, or a thrown `SpecError` (`INVALID_INPUT`). */
+function readLeaf(value: unknown): ReadLeaf {
+  let read: ReadLeaf | undefined;
   const { issues } = runCheck(
     (reader) => {
       read = readLeafFields(value, reader);
@@ -242,15 +315,12 @@ function readLeaf(value: unknown): { content: LeafContent; salt: string } {
   return read;
 }
 
-function readLeafFields(
-  value: unknown,
-  reader: Reader,
-): { content: LeafContent; salt: string } | undefined {
+function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
   const { add } = reader;
   if (!expectPlainObject(value, '', 'a plain object', add, 'an input leaf')) return undefined;
   const fields = readFields(value, '', 'input leaf', LEAF_KEYS, reader);
   if (fields === undefined) return undefined;
-  requireFields(fields, '', ['pointer', 'kind', 'salt'], add);
+  requireFields(fields, '', ['pointer', 'kind', 'salt', 'valueSalt'], add);
   const has = (key: string): boolean => fields.values.has(key);
   const located = has('pointer') ? readLeafPointer(fields.values.get('pointer'), add) : undefined;
   const at = located?.place;
@@ -292,14 +362,15 @@ function readLeafFields(
       } else if (pointer !== undefined) content = { pointer, kind, length };
     }
   }
-  const salt = fields.values.get('salt');
-  if (has('salt') && (typeof salt !== 'string' || !SALT_HEX.test(salt))) {
-    add('/salt', '/salt must be 64 lowercase hex characters');
-  }
-  if (content === undefined || typeof salt !== 'string' || reader.issues.length > 0) {
+  const [salt, valueSalt] = ['salt', 'valueSalt'].map((key) => {
+    const hex = fields.values.get(key);
+    if (typeof hex === 'string' && SALT_HEX.test(hex)) return hex;
+    if (has(key)) add(`/${key}`, `/${key} must be 64 lowercase hex characters`);
     return undefined;
-  }
-  return { content, salt };
+  });
+  if (content === undefined || salt === undefined || valueSalt === undefined) return undefined;
+  if (reader.issues.length > 0) return undefined;
+  return { content, salt, valueSalt };
 }
 
 function isKind(value: unknown): value is LeafKind {

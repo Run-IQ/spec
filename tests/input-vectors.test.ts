@@ -30,28 +30,50 @@ const INPUT: ProofInput = vector.input;
  * The leaves of the vector's input written by hand, in their order (D-15): the expected
  * contents, independent of `inputLeaves`.
  */
-const CONTENTS = [
-  '["/data/a","value",1]',
-  '["/data/b","array",0]',
-  '["/data/c","object"]',
-  '["/data/d/e","value",null]',
-  '["/meta/assertions","object"]',
-  '["/meta/context","object"]',
-  '["/meta/dates","object"]',
-  '["/meta/dimensions","object"]',
-  '["/meta/tags","array",0]',
-  '["/meta/tenantId","value","t"]',
+const CONTENTS: [string, string][] = [
+  ['/data/a', '["value",1]'],
+  ['/data/b', '["array",0]'],
+  ['/data/c', '["object"]'],
+  ['/data/d/e', '["value",null]'],
+  ['/meta/assertions', '["object"]'],
+  ['/meta/context', '["object"]'],
+  ['/meta/dates', '["object"]'],
+  ['/meta/dimensions', '["object"]'],
+  ['/meta/tags', '["array",0]'],
+  ['/meta/tenantId', '["value","t"]'],
 ];
+
+/**
+ * The hash of the leaf at `pointer` holding `content` (its JCS text) under `seed`, by
+ * `node:crypto` alone, every byte of D-14 and D-15 written out here.
+ */
+function nodeLeaf(seed: Uint8Array, pointer: string, content: string): Uint8Array {
+  const tag = ['run-iq.input/1', Uint8Array.of(0)] as const;
+  const commitment = nodeSha256(
+    Uint8Array.of(3),
+    ...tag,
+    nodeHmac(seed, `value:${pointer}`),
+    content,
+  );
+  const pointerHash = nodeSha256(JSON.stringify(pointer));
+  const salt = nodeHmac(seed, `input:${pointer}`);
+  return nodeSha256(Uint8Array.of(0), ...tag, salt, pointerHash, commitment);
+}
 
 /** The RFC 6962 root of the vector's input under `seed`, by `node:crypto` alone. */
 function nodeRoot(seed: Uint8Array): Uint8Array {
-  const leaves = CONTENTS.map((content) => {
-    const pointer = (JSON.parse(content) as string[])[0] ?? '';
-    const salt = nodeHmac(seed, `input:${pointer}`);
-    return nodeSha256(Uint8Array.of(0), 'run-iq.input/1', Uint8Array.of(0), salt, content);
-  });
-  return referenceRoot(leaves);
+  return referenceRoot(CONTENTS.map(([pointer, content]) => nodeLeaf(seed, pointer, content)));
 }
+
+/** The content `c` of a leaf in JCS (D-15). */
+const contentOf = (leaf: InputLeaf): string =>
+  JSON.stringify(
+    leaf.kind === 'value'
+      ? [leaf.kind, leaf.value]
+      : leaf.kind === 'array'
+        ? [leaf.kind, leaf.length]
+        : [leaf.kind],
+  );
 
 describe('frozen vector input-v1', () => {
   it('node:crypto alone gives the frozen values', () => {
@@ -67,35 +89,41 @@ describe('frozen vector input-v1', () => {
     expect(hex(nodeSha256())).toBe(vector.empty.merkleRoot);
     expect(nodeInputDigest(vector.empty.leafCount, nodeSha256())).toBe(vector.empty.inputDigest);
     expect(hex(nodeHmac(new Uint8Array(32), 'input:/data/a'))).toBe(vector.unsalted.firstLeaf.salt);
+    expect(hex(nodeHmac(new Uint8Array(32), 'value:/data/a'))).toBe(
+      vector.unsalted.firstLeaf.valueSalt,
+    );
   });
 
   it('the seed', () => {
     expect(hex(deriveInputSeed(SECRET, vector.requestId))).toBe(vector.salted.seed);
   });
 
-  it('the first leaf: its salt and its hash', () => {
+  it('the first leaf: its salts, its commitment and its hash', () => {
     const seed = deriveInputSeed(SECRET, vector.requestId);
     const [first] = inputLeaves(INPUT, seed);
+    const frozen = vector.salted.firstLeaf;
     expect(first).toEqual({
-      pointer: vector.salted.firstLeaf.pointer,
+      pointer: frozen.pointer,
       kind: 'value',
       value: 1,
-      salt: vector.salted.firstLeaf.salt,
+      salt: frozen.salt,
+      valueSalt: frozen.valueSalt,
     });
-    expect(first === undefined ? '' : hex(inputLeafHash(first))).toBe(vector.salted.firstLeaf.hash);
+    expect(first === undefined ? '' : hex(inputLeafHash(first))).toBe(frozen.hash);
+    expect(hex(nodeLeaf(seed, frozen.pointer, '["value",1]'))).toBe(frozen.hash);
+    const commitment = nodeSha256(
+      Uint8Array.of(3),
+      'run-iq.input/1',
+      Uint8Array.of(0),
+      fromHex(frozen.valueSalt),
+      '["value",1]',
+    );
+    expect(hex(commitment)).toBe(frozen.commitment);
   });
 
   it('the leaf contents, in order', () => {
-    const contents = inputLeaves(INPUT, UNSALTED_SEED).map((leaf) =>
-      JSON.stringify(
-        leaf.kind === 'value'
-          ? [leaf.pointer, leaf.kind, leaf.value]
-          : leaf.kind === 'array'
-            ? [leaf.pointer, leaf.kind, leaf.length]
-            : [leaf.pointer, leaf.kind],
-      ),
-    );
-    expect(contents).toEqual(CONTENTS);
+    const leaves = inputLeaves(INPUT, UNSALTED_SEED);
+    expect(leaves.map((leaf) => [leaf.pointer, contentOf(leaf)])).toEqual(CONTENTS);
   });
 
   it('the Merkle roots of the leaves, salted and unsalted', () => {
@@ -123,6 +151,7 @@ describe('frozen vector input-v1', () => {
     expect(hex(UNSALTED_SEED)).toBe(vector.unsalted.seed);
     const [first] = inputLeaves(INPUT, UNSALTED_SEED);
     expect(first?.salt).toBe(vector.unsalted.firstLeaf.salt);
+    expect(first?.valueSalt).toBe(vector.unsalted.firstLeaf.valueSalt);
     expect(computeInputDigest(INPUT, UNSALTED_SEED)).toBe(vector.unsalted.inputDigest);
   });
 
@@ -137,28 +166,12 @@ describe('frozen vector input-v2: escapes, unicode, index order, numbers, nestin
   const secret = fromHex(second.secret);
   // A JSON module types `method` as any string: the validator's own reader gives the type.
   const input: ProofInput = readValidInput(second.input);
-  const contentOf = (leaf: InputLeaf): string =>
-    JSON.stringify(
-      leaf.kind === 'value'
-        ? [leaf.pointer, leaf.kind, leaf.value]
-        : leaf.kind === 'array'
-          ? [leaf.pointer, leaf.kind, leaf.length]
-          : [leaf.pointer, leaf.kind],
-    );
 
   it('node:crypto alone gives the frozen roots and digests from the frozen contents', () => {
     expect(second.contents).toHaveLength(second.leafCount);
     const rootOf = (seed: Uint8Array): Uint8Array =>
       referenceRoot(
-        second.contents.map(([pointer = '', content = '']) =>
-          nodeSha256(
-            Uint8Array.of(0),
-            'run-iq.input/1',
-            Uint8Array.of(0),
-            nodeHmac(seed, `input:${pointer}`),
-            content,
-          ),
-        ),
+        second.contents.map(([pointer = '', content = '']) => nodeLeaf(seed, pointer, content)),
       );
     const seed = nodeInputSeed(secret, second.requestId);
     expect(hex(seed)).toBe(second.salted.seed);
@@ -179,6 +192,7 @@ describe('frozen vector input-v2: escapes, unicode, index order, numbers, nestin
     const [first] = leaves;
     expect(first?.pointer).toBe(second.salted.firstLeaf.pointer);
     expect(first?.salt).toBe(second.salted.firstLeaf.salt);
+    expect(first?.valueSalt).toBe(second.salted.firstLeaf.valueSalt);
     expect(first === undefined ? '' : hex(inputLeafHash(first))).toBe(second.salted.firstLeaf.hash);
     expect(hex(merkleRoot(leaves.map(inputLeafHash)))).toBe(second.salted.merkleRoot);
   });

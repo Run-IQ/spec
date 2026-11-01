@@ -97,7 +97,10 @@ type Entry = {
   deriveInputSeed: (secret: Uint8Array, requestId: string) => Uint8Array;
   UNSALTED_SEED: Uint8Array;
   INPUT_TREE_TAG: string;
-  inputLeaves: (input: object, seed: Uint8Array) => { pointer: string; salt: string }[];
+  inputLeaves: (
+    input: object,
+    seed: Uint8Array,
+  ) => { pointer: string; salt: string; valueSalt: string }[];
   inputLeafHash: (leaf: object) => Uint8Array;
   verifyInputInclusion: (
     digest: string,
@@ -118,7 +121,7 @@ type Entry = {
   verifyFactDisclosure: (
     d: unknown,
     inputDigest: string,
-  ) => { valid: boolean; issues: string[]; absent: string[] };
+  ) => { valid: boolean; issues: string[]; facts: object; absent: string[] };
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -387,6 +390,7 @@ describe('built entries: one SpecError identity', () => {
       );
       const [first] = entry.inputLeaves(vector.input, seed);
       expect(first?.salt).toBe(vector.salted.firstLeaf.salt);
+      expect(first?.valueSalt).toBe(vector.salted.firstLeaf.valueSalt);
       expect(Buffer.from(entry.inputLeafHash(first ?? {})).toString('hex')).toBe(
         vector.salted.firstLeaf.hash,
       );
@@ -436,6 +440,8 @@ describe('built entries: one SpecError identity', () => {
           issues: [],
           absent: c.disclosure.absent.map((a) => a.pointer),
         });
+        const shown = entry.verifyFactDisclosure(c.disclosure, digest).facts;
+        expect(Object.keys(shown)).toEqual(c.disclosure.facts.map((fact) => fact.pointer));
       }
     }
   });

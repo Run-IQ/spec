@@ -69,19 +69,26 @@ export function readSeed(seed: Uint8Array): Uint8Array {
   return bytes;
 }
 
+/** What a salt is for (D-14): a leaf's place (`input:`), or its value (`value:`). */
+export type SaltPurpose = 'input:' | 'value:';
+
 /**
- * Internal: the salt of each input leaf under `seed` (a copy this package owns), D-14:
- * `HMAC-SHA256(seed, utf8('input:' + pointer))`, 32 bytes, the pointer written as it is (no
- * `'input:' + pointer` is built). The keyed state is built once and cloned for each pointer;
- * each salt is written into the same 32-byte array, returned by every call: use it before the
- * next call.
+ * Internal: a salt of each input leaf under `seed` (a copy this package owns), D-14:
+ * `HMAC-SHA256(seed, utf8(purpose + pointer))`, 32 bytes, the pointer written as it is (no
+ * `purpose + pointer` is built). With `input:`, the salt of the leaf (it hides its pointer);
+ * with `value:`, the salt of its value (it hides its content, `C`, D-15). The keyed state is
+ * built once and cloned for each pointer; each salt is written into the same 32-byte array,
+ * returned by every call: use it before the next call.
  */
-export function inputSalter(seed: Uint8Array): (pointer: string) => Uint8Array {
+export function inputSalter(
+  seed: Uint8Array,
+  purpose: SaltPurpose,
+): (pointer: string) => Uint8Array {
   const stream = HashStream.hmacSha256(seed);
   const salt = new Uint8Array(SEED_BYTES);
   return (pointer) => {
     stream.start();
-    stream.text('input:');
+    stream.text(purpose);
     stream.text(pointer);
     stream.digestInto(salt);
     return salt;

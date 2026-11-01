@@ -58,3 +58,26 @@ describe('discloseFacts on 500 000 leaves (heavy)', () => {
     expect(result.absent).toEqual(['/data/k1/x', '/data/k25x', '/data/zz', '/meta/z']);
   }, 120_000);
 });
+
+describe('a fact of 150 001 leaves: a list of 50 000 lists (heavy)', () => {
+  it('is shown whole and rebuilt, by the hash work of the digest; one leaf less is refused', () => {
+    const rows: JsonValue[] = Array.from({ length: 50_000 }, (_, i) => [i, `r${i}`]);
+    const input = proofInput({}, { rows, z: 0 });
+    const digest = computeInputDigest(input, SEED);
+    let disclosure: ReturnType<typeof discloseFacts> | undefined;
+    const work = hashWorkOf(() => (disclosure = discloseFacts(input, SEED, ['/data/rows'], [])));
+    expect(work).toEqual(expectedHashWork(inputLeaves(input, SEED).map(leafBytes)));
+    const [fact] = disclosure?.facts ?? [];
+    expect(fact?.leaves).toHaveLength(150_001);
+    expect(fact?.after?.pointer).toBe('/data/z');
+    const result = verifyFactDisclosure(disclosure, digest);
+    expect(result.valid).toBe(true);
+    expect(result.facts).toEqual({ '/data/rows': rows });
+    expect(Object.keys(result.lists)).toHaveLength(50_001);
+    if (fact === undefined) throw new Error('no fact');
+    const short = { ...disclosure, facts: [{ ...fact, leaves: fact.leaves.slice(0, -1) }] };
+    expect(verifyFactDisclosure(short, digest).issues).toEqual([
+      'fact not shown whole: /data/rows (the after leaf is not just after its last leaf)',
+    ]);
+  }, 120_000);
+});

@@ -52,6 +52,7 @@ import {
   specError,
   tooDeepIssue,
 } from './helpers.js';
+import type { TreeLeaf } from './helpers.js';
 
 const SECRET = new Uint8Array(32).fill(0x42);
 /** The problem of an input whose leaf pointers hold too many code units. */
@@ -62,6 +63,7 @@ const SEED = nodeInputSeed(SECRET, 'r1');
 const META_ALWAYS = '/meta always holds its six members, so it is never a leaf';
 const NON_EMPTY = '/value must be a non-empty string';
 const SALT_A = 'ab'.repeat(32);
+const VALUE_SALT_A = 'cd'.repeat(32);
 /** The leaves of the `meta` of `proofInput()`: its six members, `dates` holding one date. */
 const META_LEAVES = 6;
 
@@ -74,6 +76,12 @@ const EXAMPLE: ProofInput = {
 /** The salt of the leaf at `pointer` under `seed`, by `node:crypto`. */
 const saltOf = (seed: Uint8Array, pointer: string): string =>
   hex(nodeHmac(seed, `input:${pointer}`));
+
+/** The salts of the leaf at `pointer` under `SEED`, by `node:crypto`. */
+const saltsOf = (pointer: string): { salt: string; valueSalt: string } => ({
+  salt: saltOf(SEED, pointer),
+  valueSalt: hex(nodeHmac(SEED, `value:${pointer}`)),
+});
 
 /** The pointers of the leaves of `input`, in order. */
 const pointers = (input: ProofInput, seed: Uint8Array = SEED): string[] =>
@@ -137,11 +145,11 @@ describe('deriveInputSeed (D-14)', () => {
 });
 
 describe('inputLeaves (D-15)', () => {
-  it('lists the example leaves in order, each salted by HMAC-SHA256(seed, input:<ptr>)', () => {
-    const leaf = (pointer: string, rest: Omit<InputLeaf, 'pointer' | 'salt'>): InputLeaf => ({
+  it('lists the example leaves in order, salted by HMAC-SHA256(seed, input:|value:<ptr>)', () => {
+    const leaf = (pointer: string, rest: Omit<TreeLeaf, 'pointer'>): InputLeaf => ({
       pointer,
       ...rest,
-      salt: saltOf(SEED, pointer),
+      ...saltsOf(pointer),
     });
     expect(inputLeaves(EXAMPLE, SEED)).toEqual([
       leaf('/data/a', { kind: 'value', value: 1 }),
@@ -160,16 +168,16 @@ describe('inputLeaves (D-15)', () => {
   it('a leaf has exactly the members of its kind', () => {
     const leaves = inputLeaves(EXAMPLE, SEED);
     expect(leaves.map((leaf) => Object.keys(leaf))).toEqual([
-      ['pointer', 'kind', 'value', 'salt'],
-      ['pointer', 'kind', 'length', 'salt'],
-      ['pointer', 'kind', 'salt'],
-      ['pointer', 'kind', 'value', 'salt'],
-      ['pointer', 'kind', 'salt'],
-      ['pointer', 'kind', 'salt'],
-      ['pointer', 'kind', 'salt'],
-      ['pointer', 'kind', 'salt'],
-      ['pointer', 'kind', 'length', 'salt'],
-      ['pointer', 'kind', 'value', 'salt'],
+      ['pointer', 'kind', 'value', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'length', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'value', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'length', 'salt', 'valueSalt'],
+      ['pointer', 'kind', 'value', 'salt', 'valueSalt'],
     ]);
   });
 
@@ -177,10 +185,10 @@ describe('inputLeaves (D-15)', () => {
     const input = proofInput({}, { 'a/b': 1, x: [5, 6] });
     const leaves = inputLeaves(input, SEED).filter((leaf) => leaf.pointer.startsWith('/data'));
     expect(leaves).toEqual([
-      { pointer: '/data/a~1b', kind: 'value', value: 1, salt: saltOf(SEED, '/data/a~1b') },
-      { pointer: '/data/x', kind: 'array', length: 2, salt: saltOf(SEED, '/data/x') },
-      { pointer: '/data/x/0', kind: 'value', value: 5, salt: saltOf(SEED, '/data/x/0') },
-      { pointer: '/data/x/1', kind: 'value', value: 6, salt: saltOf(SEED, '/data/x/1') },
+      { pointer: '/data/a~1b', kind: 'value', value: 1, ...saltsOf('/data/a~1b') },
+      { pointer: '/data/x', kind: 'array', length: 2, ...saltsOf('/data/x') },
+      { pointer: '/data/x/0', kind: 'value', value: 5, ...saltsOf('/data/x/0') },
+      { pointer: '/data/x/1', kind: 'value', value: 6, ...saltsOf('/data/x/1') },
     ]);
   });
 
@@ -222,7 +230,7 @@ describe('inputLeaves (D-15)', () => {
     expect(inputLeaves(proofInput({}, {}), SEED)[0]).toEqual({
       pointer: '/data',
       kind: 'object',
-      salt: saltOf(SEED, '/data'),
+      ...saltsOf('/data'),
     });
   });
 
@@ -242,7 +250,11 @@ describe('inputLeaves (D-15)', () => {
     expect(leaves.map((leaf) => leaf.salt)).toEqual(
       leaves.map((leaf) => saltOf(new Uint8Array(32), leaf.pointer)),
     );
-    expect(new Set(leaves.map((leaf) => leaf.salt)).size).toBe(leaves.length);
+    expect(leaves.map((leaf) => leaf.valueSalt)).toEqual(
+      leaves.map((leaf) => hex(nodeHmac(new Uint8Array(32), `value:${leaf.pointer}`))),
+    );
+    const salts = leaves.flatMap((leaf) => [leaf.salt, leaf.valueSalt]);
+    expect(new Set(salts).size).toBe(2 * leaves.length);
   });
 
   it('reads the input once and charges each of its values once', () => {
@@ -253,7 +265,7 @@ describe('inputLeaves (D-15)', () => {
 });
 
 describe('inputLeafHash (D-15 encoding)', () => {
-  it('is sha256(0x00 ‖ utf8(run-iq.input/1) ‖ 0x00 ‖ raw salt ‖ utf8(canonicalize(c)))', () => {
+  it('is sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ sha256(JCS(pointer)) ‖ C), C over valueSalt, c', () => {
     expect(INPUT_TREE_TAG).toBe('run-iq.input/1');
     const input = proofInput(
       { context: { s: 'é"\\\u{1F600}', n: -0 } },
@@ -270,8 +282,9 @@ describe('inputLeafHash (D-15 encoding)', () => {
   });
 
   it('refuses a leaf no valid input could give, with INVALID_INPUT', () => {
-    const salt = 'ab'.repeat(32);
-    const value = { pointer: '/data/a', kind: 'value', value: 1, salt };
+    const salt = SALT_A;
+    const valueSalt = VALUE_SALT_A;
+    const value = { pointer: '/data/a', kind: 'value', value: 1, salt, valueSalt };
     const cases: [unknown, string, string][] = [
       [null, '', 'an input leaf must be a plain object'],
       [{ ...value, extra: 1 }, '/extra', 'input leaf has an unknown key "extra"'],
@@ -315,24 +328,31 @@ describe('inputLeafHash (D-15 encoding)', () => {
       [{ ...value, length: 1 }, '/length', '/length is only for a leaf of kind array'],
       [{ ...value, salt: 'AB'.repeat(32) }, '/salt', '/salt must be 64 lowercase hex characters'],
       [{ ...value, salt: 'ab' }, '/salt', '/salt must be 64 lowercase hex characters'],
-      [{ pointer: '/data/a', kind: 'array', salt }, '/length', '/length is required'],
+      [{ ...value, valueSalt: undefined }, '/valueSalt', '/valueSalt is required'],
       [
-        { pointer: '/data/a', kind: 'array', length: -1, salt },
+        { ...value, valueSalt: 'CD'.repeat(32) },
+        '/valueSalt',
+        '/valueSalt must be 64 lowercase hex characters',
+      ],
+      [{ ...value, valueSalt: 1 }, '/valueSalt', '/valueSalt must be 64 lowercase hex characters'],
+      [{ pointer: '/data/a', kind: 'array', salt, valueSalt }, '/length', '/length is required'],
+      [
+        { pointer: '/data/a', kind: 'array', length: -1, salt, valueSalt },
         '/length',
         `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
-        { pointer: '/data/a', kind: 'array', length: 1.5, salt },
+        { pointer: '/data/a', kind: 'array', length: 1.5, salt, valueSalt },
         '/length',
         `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
-        { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST + 1, salt },
+        { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST + 1, salt, valueSalt },
         '/length',
         `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
-        { pointer: '/data/a', kind: 'object', value: 1, salt },
+        { pointer: '/data/a', kind: 'object', value: 1, salt, valueSalt },
         '/value',
         '/value is only for a leaf of kind value',
       ],
@@ -347,7 +367,7 @@ describe('inputLeafHash (D-15 encoding)', () => {
 
   it('reads each member of the leaf once', () => {
     const reads: string[] = [];
-    const leaf = { pointer: '/data/a', kind: 'value', value: 1, salt: 'ab'.repeat(32) };
+    const leaf = { pointer: '/data/a', kind: 'value', value: 1, salt: SALT_A, valueSalt: SALT_A };
     const counted = new Proxy(leaf, {
       get(target, key, receiver) {
         reads.push(String(key));
@@ -355,11 +375,11 @@ describe('inputLeafHash (D-15 encoding)', () => {
       },
     });
     expect(hex(inputLeafHash(loose(counted)))).toBe(hex(nodeLeafHash(loose(leaf))));
-    expect(reads.sort()).toEqual(['kind', 'pointer', 'salt', 'value']);
+    expect(reads.sort()).toEqual(['kind', 'pointer', 'salt', 'value', 'valueSalt']);
   });
 
   it('refuses every leaf whose place, kind or value no valid input has (M3)', () => {
-    const salt = 'ab'.repeat(32);
+    const salts = { salt: SALT_A, valueSalt: VALUE_SALT_A };
     const none = (why: string): string => `/pointer names no leaf of a valid input: ${why}`;
     const digest = 'a'.repeat(64);
     const cases: [object, string, string][] = [
@@ -520,7 +540,7 @@ describe('inputLeafHash (D-15 encoding)', () => {
       ],
     ];
     for (const [leaf, path, message] of cases) {
-      expect([leaf, specError(() => inputLeafHash(loose({ ...leaf, salt })))]).toMatchObject([
+      expect([leaf, specError(() => inputLeafHash(loose({ ...leaf, ...salts })))]).toMatchObject([
         leaf,
         { code: 'INVALID_INPUT', path, message: `invalid input leaf: ${message}` },
       ]);
@@ -586,7 +606,7 @@ describe('inputLeafHash (D-15 encoding)', () => {
       ['/data', (value) => ({ data: value, meta })],
       ['/meta/context', (value) => ({ data: {}, meta: { ...meta, context: value } })],
     ];
-    const kinds: [Omit<InputLeaf, 'pointer' | 'salt'>, JsonValue][] = [
+    const kinds: [Omit<TreeLeaf, 'pointer'>, JsonValue][] = [
       [{ kind: 'value', value: 1 }, 1],
       [{ kind: 'object' }, {}],
       [{ kind: 'array', length: 0 }, []],
@@ -600,7 +620,7 @@ describe('inputLeafHash (D-15 encoding)', () => {
           const issues = validateProofInput(inputOf(under(levels, leaf)));
           let hashed = 'accepted';
           try {
-            inputLeafHash({ ...fields, pointer, salt: SALT_A });
+            inputLeafHash({ ...fields, pointer, salt: SALT_A, valueSalt: VALUE_SALT_A });
           } catch (error) {
             hashed = error instanceof SpecError ? `${error.code} ${error.message}` : 'other';
           }
@@ -662,7 +682,7 @@ describe('computeInputDigest (D-15)', () => {
     const after = hashWorkDone();
     const done = { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
     expect(done).toEqual(expectedHashWork(leaves.map(leafBytes)));
-    expect(done.calls).toBe(3 * leaves.length);
+    expect(done.calls).toBe(6 * leaves.length);
   });
 
   it('does not depend on key order', () => {
