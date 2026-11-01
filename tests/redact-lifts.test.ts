@@ -495,9 +495,11 @@ const LIFT_CASES: {
   },
   {
     check: 'decisions of a fired carrier',
+    // One exception record: no tie may discard it (round 6), a hidden short circuit may still
+    // make the step its effect.
     content: () => SITES[3]!.content(),
     message: 'inhibited rule applied: A@1',
-    lifting: 'skipped',
+    lifting: 'exceptions',
     unrelated: 'pending',
   },
   {

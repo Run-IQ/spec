@@ -7,7 +7,7 @@ import type { Standing, Standings } from './precedence.js';
 import { firedProblems, pendingCarrierProblems } from './carriers.js';
 import { full } from './collect.js';
 import type { ProofPending, ProofSection, ProofSkip, ProofView } from './types.js';
-import { isLifted, LIFTS } from './lifts.js';
+import { isLifted, LIFTS, redactedIn } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
 // proof shows them (D-7, R15): they put `conflict` on outputs, not on the winners' steps.
@@ -52,8 +52,8 @@ export interface Ties {
   /**
    * The sections whose redacted entries may change these ties (empty when none may): `rules`
    * (the standings that tie two short circuits), `skipped` (an exclusion `RULE_CONFLICT`) and
-   * `exceptions` (one fired before), while an exception and an exclusion `RULE_CONFLICT` may
-   * be in the proof (`tieInputs`). A problem computed from them is free there (`Problem.ties`).
+   * `exceptions` (one fired before), while two exception records and an exclusion
+   * `RULE_CONFLICT` may be in the proof (`tieInputs`). A problem computed from them is free there (`Problem.ties`).
    */
   uncertain: ReadonlySet<ProofSection>;
 }
@@ -62,15 +62,16 @@ export interface Ties {
  * The sections of `hidden` whose redacted entries may change the ties of `p` (`Ties.uncertain`).
  * A carrier is discarded only by an exclusion `RULE_CONFLICT` in a proof that holds together
  * (one that stops it, or a pending entry without `fired: true`, is a problem of its own): no
- * tie while `skipped` shows none and has no redacted entry, nor without an exception. The
- * standings tie short circuits only.
+ * tie while `skipped` shows none and has no redacted entry. A tie needs two exception records,
+ * visible or redacted: a short circuit and the one that lost to it, or, R15, an exception that
+ * fired and the inhibition it discarded. The standings tie short circuits only.
  */
 export function tieInputs(p: ProofView, hidden: ReadonlySet<ProofSection>): Set<ProofSection> {
   const uncertain = new Set<ProofSection>();
   const conflicts =
     hidden.has('skipped') || p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT');
-  const exceptions = hidden.has('exceptions') || p.exceptions.length > 0;
-  if (!conflicts || !exceptions) return uncertain;
+  const records = p.exceptions.length + redactedIn(hidden, 'exceptions');
+  if (!conflicts || records < 2) return uncertain;
   const shortCircuits =
     hidden.has('exceptions') || p.exceptions.some((exception) => exception.kind === 'shortCircuit');
   if (shortCircuits && hidden.has('rules')) uncertain.add('rules');

@@ -80,11 +80,30 @@ const INHIBIT: Trace = {
   exceptions: [{ ruleId: 'P', kind: 'inhibit', affected: [{ ruleId: 'Q' }] }],
 };
 
+/** The short circuit tie on `value`, and B feeding a second output `w`. */
+const twoOutputs = (): Trace => ({
+  ...tie(),
+  outputs: [
+    {
+      name: 'w',
+      type: 'number',
+      combine: 'sum',
+      value: 2,
+      contributors: ['B'],
+      status: 'determined',
+      pending: [],
+    },
+  ],
+  rules: [...tie().rules, { id: 'B' }],
+  steps: [...(tie().steps ?? []), { ruleId: 'B', output: 'w', contribution: 2 }],
+});
+
 describe('an honest redaction of ties and exceptions is never refused (round 5, C1)', () => {
   it.each([
     ['a short circuit tie', traceProof(tie()), 9],
     ['an inhibition discarded (R15)', traceProof(r15()), 10],
     ['an inhibition', traceProof(INHIBIT), 8],
+    ['a short circuit tie beside a second output', traceProof(twoOutputs()), 12],
   ])('%s: every subset of its entries', (_, content, entries) => {
     const proof = honestProof(content);
     const n = placesOf(proof).length;
@@ -408,7 +427,11 @@ describe('each site computed from the ties, in its sections (round 5, mutants)',
       output: { type: 'number', combine: 'sum', value: 0 },
       rules: [{ id: 'B' }, { id: 'X' }],
       skipped: [{ ruleId: 'B', reason: 'RULE_CONFLICT', status: 'conflict' }],
-      exceptions: [{ ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [] }],
+      // Two exception records: a tie may be hidden (round 6).
+      exceptions: [
+        { ruleId: 'B', kind: 'inhibit', affected: [], status: 'conflict' },
+        { ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [] },
+      ],
     });
     liftedBy(
       content,
@@ -508,5 +531,69 @@ describe('carriers and settled outputs, their identities (round 5, mutants)', ()
     });
     expect(plainIssues(content)).toContain('settled output with pending rules: value');
     expect(verifyProof(forged(content, 'applied')).status).toBe('consistent-redacted');
+  });
+});
+
+describe('a tie needs two exception records, visible or redacted (round 6)', () => {
+  /** Two outputs in conflict, no exception: no tie can explain them. */
+  const conflicts = (skipped: boolean): Content =>
+    traceProof({
+      output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'], status: 'conflict' },
+      outputs: [
+        {
+          name: 'w',
+          type: 'number',
+          combine: 'sum',
+          value: 1,
+          contributors: ['B'],
+          status: 'conflict',
+          pending: [],
+        },
+      ],
+      rules: [{ id: 'A' }, { id: 'B' }, { id: 'Z' }],
+      steps: [
+        { ruleId: 'A', contribution: 1 },
+        { ruleId: 'B', output: 'w', contribution: 1 },
+      ],
+      skipped: skipped ? [{ ruleId: 'Z', reason: 'RULE_CONFLICT', status: 'conflict' }] : [],
+    } as Trace);
+  const VALUE = 'output status stronger than its causes: value';
+  const W = 'output status stronger than its causes: w';
+  /** The inhibition of an applied P, a visible exception record. */
+  const withRecord = (content: Content): Content => {
+    const one = traceProof({
+      output: { type: 'number', combine: 'sum', value: 0 },
+      rules: [{ id: 'P' }],
+      exceptions: [{ ruleId: 'P', kind: 'inhibit', affected: [] }],
+    } as Trace) as Record<string, unknown[]>;
+    return { ...content, exceptions: one.exceptions! };
+  };
+
+  it('a RULE_CONFLICT and one exceptions marker: one record, no tie', () => {
+    const result = verifyProof(forged(conflicts(true), 'exceptions'));
+    expect(result.status).toBe('invalid');
+    expect(result.issues).toEqual(expect.arrayContaining([VALUE, W]));
+  });
+
+  it('a skipped marker and one exceptions marker: one record, no tie', () => {
+    const result = verifyProof(forged(conflicts(false), 'skipped', 'exceptions'));
+    expect(result.status).toBe('invalid');
+    expect(result.issues).toEqual(expect.arrayContaining([VALUE, W]));
+  });
+
+  it('two records, redacted or visible: the ties may be hidden', () => {
+    for (const result of [
+      verifyProof(forged(conflicts(true), 'exceptions', 'exceptions')),
+      verifyProof(forged(withRecord(conflicts(true)), 'exceptions')),
+      verifyProof(forged(conflicts(false), 'skipped', 'exceptions', 'exceptions')),
+    ]) {
+      expect(result.issues).not.toContain(VALUE);
+      expect(result.issues).not.toContain(W);
+    }
+  });
+
+  it('one visible record and nothing in exceptions redacted: no tie', () => {
+    const result = verifyProof(forged(withRecord(conflicts(false)), 'skipped'));
+    expect(result.issues).toEqual(expect.arrayContaining([VALUE, W]));
   });
 });

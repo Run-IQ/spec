@@ -267,6 +267,15 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
   return Object.assign(new Set(counts.keys()), { ledger });
 }
 
+/**
+ * The redacted entries of `section` in `hidden`: their count when recorded (`hiddenSections`),
+ * any number when only the section is known to have one, none when it has none.
+ */
+export function redactedIn(hidden: ReadonlySet<ProofSection>, section: ProofSection): number {
+  if (!hidden.has(section)) return 0;
+  return (hidden as HiddenSections).ledger?.counts.get(section) ?? Number.POSITIVE_INFINITY;
+}
+
 const bit = (section: ProofSection): number => 1 << PROOF_SECTIONS.indexOf(section);
 
 /** What `problem` needs of an entry of `section`, by its row `check` (`Problem`). */
