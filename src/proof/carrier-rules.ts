@@ -156,12 +156,50 @@ export function carrierRuleFindings(
 }
 
 /**
- * `target decided as if its carrier were not pending` (see `carrierRuleFindings`). Linear in
- * the decisions and the rule definitions, plus the rules each selector may select, plus, per
- * target rule, the instances of the carriers selecting it: the target rules are indexed by
- * each field a selector names (`Index`), so each selector costs one lookup per name it lists;
- * the instances of all the carriers selecting a target rule are merged in one trie (`Scope`,
- * by the target rule as `ruleId`), and each decision asks it once.
+ * A set of carrier rules, as a chain: `carrier`, then those of `parent`. The target rules a
+ * group stands for are selected by exactly its carriers; `refined` holds the groups of one
+ * carrier more.
+ */
+interface Group {
+  id: string;
+  carrier: string;
+  parent: Group | undefined;
+  refined: Map<string, Group>;
+}
+
+/** The target rules (among `targets`, through `index`) `carrier`, rule `key`, selects. */
+function selectedBy(
+  carrier: RuleDefinition,
+  key: string,
+  index: Index,
+  targets: ReadonlyMap<string, RuleDefinition>,
+): Set<string> {
+  const own = carrier.ruleSet ?? LOCAL_RULE_SET;
+  const chosen = new Set<string>();
+  for (const selector of selectorsOf(carrier)) {
+    for (const target of index.candidates(selector, own)) {
+      const definition = targets.get(target);
+      if (target === key || chosen.has(target) || definition === undefined) continue;
+      if (matchesSelector(selected(definition), selector, own)) chosen.add(target);
+    }
+  }
+  return chosen;
+}
+
+/**
+ * `target decided as if its carrier were not pending` (see `carrierRuleFindings`). With D
+ * decisions, P pending entries, R rule definitions, the target rules (those with a decision
+ * that does not wait) grouped by the exact set of carrier rules (pending with `fired: false`)
+ * selecting them, the work is linear in:
+ * - D + P + R: the decisions, the carrier instances and the target rules, each indexed once;
+ * - the candidates of each selector: the target rules of its most selective field, one lookup
+ *   per name it lists (`Index`), each confirmed by `matchesSelector`;
+ * - the pairs (carrier rule, target rule it selects), each refining the target's group once;
+ * - Σ over the groups of the instances of their carriers: each group has one trie (`Scope`,
+ *   its id as `ruleId`) where each instance of each of its carriers is marked once. With one
+ *   carrier selecting M target rules, its N instances are marked once (N, never N × M); at
+ *   most min(groups, target rules) tries hold an instance;
+ * and each decision asks its group's trie once, in time linear in its subject.
  */
 function waitingTargets(
   p: UnsignedProof,
@@ -203,33 +241,46 @@ function waitingTargets(
     if (subjects === undefined) carriers.set(key, [entry.subject]);
     else subjects.push(entry.subject);
   }
-  // Each target rule, with the instances of every carrier selecting it, in one trie.
+  // The target rules by the exact set of carrier rules selecting them (`Group`), refined
+  // carrier by carrier: one step per carrier rule and target rule it selects.
   const index = new Index(targets);
-  const waiting = new Scope();
-  for (const [key, subjects] of carriers) {
+  const groupOf = new Map<string, Group>();
+  const top = new Map<string, Group>();
+  let groups = 0;
+  for (const key of carriers.keys()) {
     const carrier = definitions.get(key);
     if (carrier === undefined) continue;
-    const own = carrier.ruleSet ?? LOCAL_RULE_SET;
-    const chosen = new Set<string>();
-    for (const selector of selectorsOf(carrier)) {
-      for (const target of index.candidates(selector, own)) {
-        const definition = targets.get(target);
-        if (target === key || chosen.has(target) || definition === undefined) continue;
-        if (matchesSelector(selected(definition), selector, own)) chosen.add(target);
+    for (const target of selectedBy(carrier, key, index, targets)) {
+      const parent = groupOf.get(target);
+      const children = parent?.refined ?? top;
+      let group = children.get(key);
+      if (group === undefined) {
+        group = { id: String(groups++), carrier: key, parent, refined: new Map() };
+        children.set(key, group);
       }
+      groupOf.set(target, group);
     }
-    for (const target of chosen) {
-      for (const subject of subjects) {
-        waiting.mark(subject === undefined ? { ruleId: target } : { ruleId: target, subject });
+  }
+  // One trie per group (its id as `ruleId`): the instances of each of its carriers, once.
+  const waiting = new Scope();
+  const marked = new Set<Group>();
+  for (const group of groupOf.values()) {
+    if (marked.has(group)) continue;
+    marked.add(group);
+    for (let link: Group | undefined = group; link !== undefined; link = link.parent) {
+      for (const subject of carriers.get(link.carrier) ?? []) {
+        waiting.mark(subject === undefined ? { ruleId: group.id } : { ruleId: group.id, subject });
       }
     }
   }
   // In the order of the decisions: a carrier instance at the decision's subject, above it or
   // under it (D-21).
   for (const decision of early) {
-    const key = ruleKey(decision);
+    const group = groupOf.get(ruleKey(decision));
+    if (group === undefined) continue;
+    const { id } = group;
     const at =
-      decision.subject === undefined ? { ruleId: key } : { ruleId: key, subject: decision.subject };
+      decision.subject === undefined ? { ruleId: id } : { ruleId: id, subject: decision.subject };
     if (!waiting.covers(at) && !waiting.within(at)) continue;
     invalid(
       `target decided as if its carrier were not pending: ${citeName(instanceKey(decision))}`,

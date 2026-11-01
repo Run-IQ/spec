@@ -150,6 +150,37 @@ describe('given the rules, the targets of a carrier that did not fire wait for i
     }
   });
 
+  it('judges each target against the carriers that select it, and only those', () => {
+    // X selects `vat`, at /e/1; W selects `gst`, at /e/2. A: `vat`, B: `gst`, C: both.
+    const selecting = (id: string, tag: string) =>
+      rule(id, { exceptions: [{ kind: 'inhibit', targets: { tags: [tag] } }] });
+    const rules = [
+      rule('A', { tags: ['vat'] }),
+      rule('B', { tags: ['gst'] }),
+      rule('C', { tags: ['vat', 'gst'] }),
+      selecting('W', 'gst'),
+      selecting('X', 'vat'),
+    ];
+    const at = (subject: string): Trace => ({
+      output: { type: 'number', combine: 'sum', value: 3, contributors: ['A', 'B', 'C'] },
+      rules: ['A', 'B', 'C', 'W', 'X'].map((id) => ({ id })),
+      steps: ['A', 'B', 'C'].map((ruleId) => ({ ruleId, subject, contribution: 1 })),
+      pending: [
+        { ...root, ruleId: 'W', subject: '/e/2' },
+        { ...root, subject: '/e/1' },
+      ],
+    });
+    const decided = (ids: string[], subject: string): string[] => [
+      'unsigned',
+      ...ids.map(
+        (id) => `target decided as if its carrier were not pending: ${id}@1 at ${subject}`,
+      ),
+    ];
+    expect(issues(at('/e/1'), rules)).toEqual(decided(['A', 'C'], '/e/1'));
+    expect(issues(at('/e/2'), rules)).toEqual(decided(['B', 'C'], '/e/2'));
+    expect(issues(at('/e/3'), rules)).toEqual(['unsigned']);
+  });
+
   /** Y, applied, substituted T at `/e/2`, then T applied there; X pending at `subject`. */
   const substituted = (subject: string): Trace =>
     decided({
