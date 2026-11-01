@@ -66,19 +66,22 @@ const definitions = new Map<string, RuleDefinition>([
 ]);
 
 /**
- * The property reads of the decisions of `proof` and of `rules` the carrier checks make, and
- * the carrier instances they mark in a trie (`Scope`); none is found.
+ * The property reads of the decisions of `proof` and of `rules` the carrier checks make, the
+ * carrier instances they mark in a trie (`Scope`) and the questions they ask a trie (`covers`);
+ * none is found.
  */
 function costOf(
   proof: UnsignedProof,
   rules: ReadonlyMap<string, RuleDefinition> = definitions,
-): { reads: number; marks: number } {
+): { reads: number; marks: number; queries: number } {
   const mark = vi.spyOn(Scope.prototype, 'mark');
+  const covers = vi.spyOn(Scope.prototype, 'covers');
   try {
     const reads = readsOf(proof, rules);
-    return { reads, marks: mark.mock.calls.length };
+    return { reads, marks: mark.mock.calls.length, queries: covers.mock.calls.length };
   } finally {
     mark.mockRestore();
+    covers.mockRestore();
   }
 }
 
@@ -134,26 +137,37 @@ const step = (ruleId: string) => ({
 });
 
 /**
- * Carriers pending without firing, `n` instances each at `/e/<i>`: X selecting the tag `vat`
- * (and, with `groups`, W selecting `gst`); `m` target rules T<i> with one step each at
- * `/f/0`, tagged `vat` (with `groups`: `vat`, `gst` or both, in turn: three groups of target
- * rules by the carriers selecting them). No step is in the scope of a carrier.
+ * Carriers pending without firing, `n` instances each at `/e/<i>`, and `m` target rules T<i>
+ * with one step each at `/f/0`; no step is in the scope of a carrier:
+ * - `one`: X selects the tag `vat`, every T<i> is tagged `vat`;
+ * - `groups`: X selects `vat`, W selects `gst`, T<i> is tagged `vat`, `gst` or both, in turn;
+ * - `mix`: X selects `vat`, every T<i> is tagged `vat` and selected by id by Y<i>, pending
+ *   once at `/g/<i>`: `m` sets of carriers {X, Y<i>}.
  */
-function broad(n: number, m: number, groups = false): [UnsignedProof, Map<string, RuleDefinition>] {
+function broad(
+  n: number,
+  m: number,
+  shape: 'one' | 'groups' | 'mix',
+): [UnsignedProof, Map<string, RuleDefinition>] {
   const proof = outputProof({ type: 'number', combine: 'sum', value: m });
   proof.applied = Array.from({ length: m }, (_, i) => step(`T${pad(i)}`));
-  const carriers = groups ? ['W', 'X'] : ['X'];
+  const carriers = shape === 'groups' ? ['W', 'X'] : ['X'];
   proof.pending = carriers.flatMap((ruleId) =>
     hostile(n).pending.map((entry) => ({ ...entry, ruleId })),
   );
-  const selecting = (id: string, tag: string) =>
-    definition({ ...ruleA, id, exceptions: [{ kind: 'inhibit', targets: { tags: [tag] } }] });
-  const rules = new Map([['X@1', selecting('X', 'vat')]]);
-  if (groups) rules.set('W@1', selecting('W', 'gst'));
+  const selecting = (id: string, targets: { tags?: string[]; ids?: string[] }) =>
+    definition({ ...ruleA, id, exceptions: [{ kind: 'inhibit', targets }] });
+  const rules = new Map([['X@1', selecting('X', { tags: ['vat'] })]]);
+  if (shape === 'groups') rules.set('W@1', selecting('W', { tags: ['gst'] }));
   const tagsOf = (i: number): string[] =>
-    groups ? [['vat'], ['gst'], ['vat', 'gst']][i % 3]! : ['vat'];
+    shape === 'groups' ? [['vat'], ['gst'], ['vat', 'gst']][i % 3]! : ['vat'];
   for (let i = 0; i < m; i++) {
-    rules.set(`T${pad(i)}@1`, definition({ ...ruleA, id: `T${pad(i)}`, tags: tagsOf(i) }));
+    const id = `T${pad(i)}`;
+    rules.set(`${id}@1`, definition({ ...ruleA, id, tags: tagsOf(i) }));
+    if (shape !== 'mix') continue;
+    rules.set(`Y${pad(i)}@1`, selecting(`Y${pad(i)}`, { ids: [id] }));
+    const pending = hostile(1).pending[0]!;
+    proof.pending.push({ ...pending, ruleId: `Y${pad(i)}`, subject: `/g/${pad(i)}` });
   }
   return [proof, rules];
 }
@@ -174,6 +188,10 @@ describe('the carriers against their rules, on hostile proofs', () => {
     const one = readsWith(1, 20_000);
     const thousand = readsWith(1_000, 20_000);
     const many = readsWith(4_000, 20_000);
+    // The 4 000 carriers' instances marked once each, in one trie each step asks once.
+    const { marks, queries } = costOf(...manyCarriers(4_000, 20_000));
+    expect(marks).toBe(4_000);
+    expect(queries).toBe(20_000);
     // Each carrier rule costs a few reads (a tag and an id selector differ by a few), whatever
     // the number of carriers or steps: never one per other rule, nor one per step.
     expect(Math.abs(many - thousand - 3 * (thousand - one))).toBeLessThanOrEqual(3_000);
@@ -182,7 +200,7 @@ describe('the carriers against their rules, on hostile proofs', () => {
   }, 600_000);
 
   it('one broad carrier, 20 000 instances, 400 targets: marks the instances once', () => {
-    const cost = (n: number, m: number) => costOf(...broad(n, m));
+    const cost = (n: number, m: number) => costOf(...broad(n, m, 'one'));
     const [one, hundred, many] = [1, 100, 400].map((m) => cost(20_000, m));
     // One trie for the target rules X selects: its instances marked once, whatever their number.
     expect([one!.marks, hundred!.marks, many!.marks]).toEqual([20_000, 20_000, 20_000]);
@@ -193,12 +211,22 @@ describe('the carriers against their rules, on hostile proofs', () => {
     expect(perTargets).toBeLessThan(399 * 100);
   }, 600_000);
 
-  it('two carriers, three groups of targets: each group marks its carriers once', () => {
-    const cost = (n: number, m: number) => costOf(...broad(n, m, true));
-    // `vat` (X), `gst` (W), both (W and X): n + n + 2n marks, whatever the targets.
-    expect(cost(10_000, 3).marks).toBe(40_000);
-    expect(cost(10_000, 300).marks).toBe(40_000);
+  it('two carriers, three groups of targets: each instance marked once', () => {
+    const cost = (n: number, m: number) => costOf(...broad(n, m, 'groups'));
+    // `vat` (X), `gst` (W), both (W and X): each of the 2n instances once, whatever the targets.
+    expect(cost(10_000, 3).marks).toBe(20_000);
+    expect(cost(10_000, 300).marks).toBe(20_000);
+    expect(cost(10_000, 300).queries).toBeLessThanOrEqual(2 * 300);
     const perInstances = cost(20_000, 300).reads - cost(10_000, 300).reads;
     expect(perInstances).toBe(cost(20_000, 3).reads - cost(10_000, 3).reads);
+  }, 600_000);
+
+  it('a broad carrier beside one carrier per target: each instance marked once', () => {
+    for (const m of [10, 100, 400]) {
+      const { marks, queries } = costOf(...broad(20_000, m, 'mix'));
+      // X's 20 000 instances and each Y<i>'s one; each step asks X's trie and Y<i>'s at most.
+      expect(marks).toBe(20_000 + m);
+      expect(queries).toBeLessThanOrEqual(2 * m);
+    }
   }, 600_000);
 });

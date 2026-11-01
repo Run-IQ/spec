@@ -167,6 +167,14 @@ interface Group {
   refined: Map<string, Group>;
 }
 
+/** How a group's decisions ask its carriers' instances (see `waitingTargets`). */
+interface Plan {
+  members: string[];
+  instances: number;
+  decisions: number;
+  merged: boolean;
+}
+
 /** The target rules (among `targets`, through `index`) `carrier`, rule `key`, selects. */
 function selectedBy(
   carrier: RuleDefinition,
@@ -188,18 +196,22 @@ function selectedBy(
 
 /**
  * `target decided as if its carrier were not pending` (see `carrierRuleFindings`). With D
- * decisions, P pending entries, R rule definitions, the target rules (those with a decision
+ * decisions, P pending entries, R rule definitions, and the target rules (those with a decision
  * that does not wait) grouped by the exact set of carrier rules (pending with `fired: false`)
- * selecting them, the work is linear in:
+ * selecting them, a group g having I_g carrier instances, D_g decisions and C_g carriers, the
+ * work is linear in:
  * - D + P + R: the decisions, the carrier instances and the target rules, each indexed once;
  * - the candidates of each selector: the target rules of its most selective field, one lookup
  *   per name it lists (`Index`), each confirmed by `matchesSelector`;
  * - the pairs (carrier rule, target rule it selects), each refining the target's group once;
- * - Σ over the groups of the instances of their carriers: each group has one trie (`Scope`,
- *   its id as `ruleId`) where each instance of each of its carriers is marked once. With one
- *   carrier selecting M target rules, its N instances are marked once (N, never N × M); at
- *   most min(groups, target rules) tries hold an instance;
- * and each decision asks its group's trie once, in time linear in its subject.
+ * - Σ over the groups of min(I_g, D_g × C_g) questions or marks, each linear in a subject's
+ *   depth: a group whose instances are fewer than D_g × C_g has them merged in one trie, asked
+ *   once per decision; any other asks, per decision, the trie of each of its carriers in turn
+ *   (at most C_g questions, a number the rules fix, never the proof), each carrier instance
+ *   marked once in its own carrier's trie, whatever the groups;
+ * so at most P + Σ min(I_g, D_g × C_g) marks, and at most D_g × C_g questions per group. One
+ * carrier with N instances selecting M target rules marks N instances, never N × M; a carrier
+ * beside M carriers selecting one target each, N + M.
  */
 function waitingTargets(
   p: UnsignedProof,
@@ -261,27 +273,60 @@ function waitingTargets(
       groupOf.set(target, group);
     }
   }
-  // One trie per group (its id as `ruleId`): the instances of each of its carriers, once.
-  const waiting = new Scope();
-  const marked = new Set<Group>();
-  for (const group of groupOf.values()) {
-    if (marked.has(group)) continue;
-    marked.add(group);
-    for (let link: Group | undefined = group; link !== undefined; link = link.parent) {
-      for (const subject of carriers.get(link.carrier) ?? []) {
-        waiting.mark(subject === undefined ? { ruleId: group.id } : { ruleId: group.id, subject });
+  // Per group, its carriers and their instances, and its decisions.
+  const plans = new Map<Group, Plan>();
+  for (const decision of early) {
+    const group = groupOf.get(ruleKey(decision));
+    if (group === undefined) continue;
+    let plan = plans.get(group);
+    if (plan === undefined) {
+      const members: string[] = [];
+      let instances = 0;
+      for (let link: Group | undefined = group; link !== undefined; link = link.parent) {
+        members.push(link.carrier);
+        instances += carriers.get(link.carrier)?.length ?? 0;
+      }
+      plan = { members, instances, decisions: 0, merged: false };
+      plans.set(group, plan);
+    }
+    plan.decisions += 1;
+  }
+  // A group whose instances are fewer than its decisions times its carriers has them merged in
+  // one trie (`merged`, its id as `ruleId`); any other asks the trie of each of its carriers
+  // (`own`, the carrier rule as `ruleId`), each instance marked there once.
+  const own = new Scope();
+  const ownMarked = new Set<string>();
+  const merged = new Scope();
+  const markAll = (scope: Scope, ruleId: string, key: string): void => {
+    for (const subject of carriers.get(key) ?? []) {
+      scope.mark(subject === undefined ? { ruleId } : { ruleId, subject });
+    }
+  };
+  for (const [group, plan] of plans) {
+    plan.merged = plan.instances < plan.decisions * plan.members.length;
+    for (const key of plan.members) {
+      if (plan.merged) markAll(merged, group.id, key);
+      else if (!ownMarked.has(key)) {
+        ownMarked.add(key);
+        markAll(own, key, key);
       }
     }
   }
   // In the order of the decisions: a carrier instance at the decision's subject, above it or
-  // under it (D-21).
+  // under it (D-21), the first found ending the questions.
+  const reaches = (scope: Scope, ruleId: string, subject: string | undefined): boolean => {
+    const at = subject === undefined ? { ruleId } : { ruleId, subject };
+    return scope.covers(at) || scope.within(at);
+  };
   for (const decision of early) {
     const group = groupOf.get(ruleKey(decision));
-    if (group === undefined) continue;
-    const { id } = group;
-    const at =
-      decision.subject === undefined ? { ruleId: id } : { ruleId: id, subject: decision.subject };
-    if (!waiting.covers(at) && !waiting.within(at)) continue;
+    const plan = group && plans.get(group);
+    if (group === undefined || plan === undefined) continue;
+    const { subject } = decision;
+    const waited = plan.merged
+      ? reaches(merged, group.id, subject)
+      : plan.members.some((key) => reaches(own, key, subject));
+    if (!waited) continue;
     invalid(
       `target decided as if its carrier were not pending: ${citeName(instanceKey(decision))}`,
     );
