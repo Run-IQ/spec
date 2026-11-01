@@ -118,7 +118,9 @@ describe('validateOutputDeclaration: combinations', () => {
       expect(issues).toEqual([
         {
           path: 'output.combine',
-          message: expect.stringContaining(`"${combine}" cannot combine a ${type} output`),
+          message: expect.stringContaining(
+            `"${combine}" cannot combine ${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type} output`,
+          ),
         },
       ]);
     }

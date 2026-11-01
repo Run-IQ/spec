@@ -163,9 +163,18 @@ describe('proofs', () => {
     rules: [{ id: 'r1', version: 1, checksum: 'b'.repeat(64) }],
     versions: { engine: '1', plugins: {}, dsls: {} },
     strata: [['value']],
-    outputs: { value: { type: 'object', combine: 'all', value: { a: 1 }, contributors: ['r1'] } },
+    outputs: {
+      value: { type: 'object', combine: 'highestPriority', value: { a: 1 }, contributors: ['r1'] },
+    },
     applied: [
-      { ruleId: 'r1', version: 1, model: 'FLAT', output: 'value', contribution: 1, stratum: 0 },
+      {
+        ruleId: 'r1',
+        version: 1,
+        model: 'FLAT',
+        output: 'value',
+        contribution: { a: 1 },
+        stratum: 0,
+      },
     ],
     skipped: [],
     exceptions: [],

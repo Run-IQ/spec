@@ -57,6 +57,24 @@ const COMBINABLE: Readonly<Record<CombineStrategy, readonly OutputType[]>> = {
   count: ['number'],
 };
 
+/**
+ * Internal: the problem of `combine` on a `type` it cannot combine, the text after the path
+ * (`"sum" cannot combine a string output: it applies to number, decimal`), or `undefined`.
+ * `type` and `combine` are known.
+ */
+export function combinationProblem(type: OutputType, combine: CombineStrategy): string | undefined {
+  const types = COMBINABLE[combine];
+  return types.includes(type)
+    ? undefined
+    : `${quoteText(combine)} cannot combine ${article(type)} ${type} output: ` +
+        `it applies to ${types.join(', ')}`;
+}
+
+/** `an` before a type starting with a vowel (`an enum`, `an object`), `a` otherwise. */
+export function article(type: string): string {
+  return /^[aeiou]/.test(type) ? 'an' : 'a';
+}
+
 const KEYS = ['type', 'combine', 'values', 'rounding', 'unit', 'empty', 'per', 'dimension', 'sign'];
 const KEY_SET = new Set(KEYS);
 /** The members of a declaration, as a message lists them: `{ type, combine, values?, … }`. */
@@ -119,12 +137,9 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
   if (!isOneOf(combine, COMBINE_STRATEGIES)) {
     const at = `${path}.combine`;
     fail(at, `${citeName(at)} must be one of ${COMBINE_STRATEGIES.join(', ')}`);
-  } else if (isOneOf(type, OUTPUT_TYPES) && !COMBINABLE[combine].includes(type)) {
-    fail(
-      `${path}.combine`,
-      `${citeName(path)}.combine ${quoteText(combine)} cannot combine a ${type} output: ` +
-        `it applies to ${COMBINABLE[combine].join(', ')}`,
-    );
+  } else if (isOneOf(type, OUTPUT_TYPES)) {
+    const problem = combinationProblem(type, combine);
+    if (problem !== undefined) fail(`${path}.combine`, `${citeName(path)}.combine ${problem}`);
   }
   const read = new Fields(members, path, fail, type, combine);
   const values = read.values();

@@ -125,3 +125,46 @@ function decimalPlaces(text: string): number {
   const point = text.indexOf('.');
   return point < 0 ? 0 : text.length - point - 1;
 }
+
+/**
+ * Internal: the shortest decimal text that reads back as the finite number `n`, without
+ * exponent, canonical (`1e-7` gives `"0.0000001"`, `1e21` gives `"1000000000000000000000"`,
+ * `-0` gives `"0"`): the decimal a binary number stands for when it is rounded to a step.
+ */
+export function numberToDecimal(n: number): string {
+  const text = String(n);
+  const match = /^(-?)([0-9]+)(?:\.([0-9]+))?e([+-][0-9]+)$/.exec(text);
+  if (match === null) return toCanonicalDecimal(text);
+  const [, sign = '', integer = '', fraction = '', exponent = '0'] = match;
+  const digits = integer + fraction;
+  const point = integer.length + Number(exponent);
+  const plain =
+    point <= 0
+      ? `0.${'0'.repeat(-point)}${digits}`
+      : point >= digits.length
+        ? digits + '0'.repeat(point - digits.length)
+        : `${digits.slice(0, point)}.${digits.slice(point)}`;
+  return toCanonicalDecimal(sign + plain);
+}
+
+/**
+ * Internal: true when the canonical decimal `value` is a multiple of the step of a valid
+ * rounding: at most `scale` decimal places, or a whole multiple of `increment`. Exact, for any
+ * number of digits; the work is linear in the digits of `value`.
+ */
+export function isOnStep(value: string, step: { scale?: number; increment?: string }): boolean {
+  const places = decimalPlaces(value);
+  if (step.increment === undefined) return places <= (step.scale ?? 0);
+  const k = decimalPlaces(step.increment);
+  // A multiple of the increment has at most its decimal places (`value` ends in no zero).
+  if (places > k) return false;
+  const digits = value.replace('-', '').replace('.', '') + '0'.repeat(k - places);
+  const divisor = BigInt(step.increment.replace('.', ''));
+  // The remainder, 15 digits at a time: never a number as long as `value`.
+  let remainder = 0n;
+  for (let i = 0; i < digits.length; i += 15) {
+    const chunk = digits.slice(i, i + 15);
+    remainder = (remainder * 10n ** BigInt(chunk.length) + BigInt(chunk)) % divisor;
+  }
+  return remainder === 0n;
+}

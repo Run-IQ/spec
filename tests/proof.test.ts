@@ -961,12 +961,17 @@ describe('strata, decimals and rounding in a proof', () => {
     );
   });
 
-  it('checks decimals only on decimal outputs', () => {
+  it('checks decimals only on decimal outputs; a number output takes numbers', () => {
     const content = staged();
     content.outputs.risk!.value = 150.5;
     content.applied[0]!.contribution = 150.5;
-    content.applied[0]!.unrounded = '150.50';
+    content.applied[0]!.unrounded = 150.5;
     expect(verifyProof(sealProof(content)).issues).toEqual(['unsigned']);
+    content.applied[0]!.unrounded = '150.50';
+    expect(verifyProof(handSealed(content)).issues).toEqual([
+      'contribution does not match its output declaration: risk',
+      'unsigned',
+    ]);
   });
 
   it('reports every inconsistency once, citations first, in a fixed order', () => {
@@ -1118,7 +1123,12 @@ describe('verifyProof: hostile input', () => {
       ...proof,
       outputs: { value: { ...proof.outputs.value!, value } },
     });
-    expect(verifyProof(withValue(nested(1000))).issues).toEqual(['digest mismatch', 'unsigned']);
+    // Read to its depth, then found not to be a number.
+    expect(verifyProof(withValue(nested(1000))).issues).toEqual([
+      'digest mismatch',
+      'output value does not match its declaration: value',
+      'unsigned',
+    ]);
     expect(validateProof(withValue(nested(1001))).issues).toEqual([
       tooDeepIssue(`outputs.value.value${'.a'.repeat(1000)}`),
     ]);

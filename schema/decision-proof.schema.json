@@ -200,7 +200,7 @@
       "additionalProperties": false
     },
     "output": {
-      "description": "An output. rounding, when present, applies to a number or decimal output only.",
+      "description": "An output. Its combine applies to its type, as in an output declaration; rounding, when present, applies to a number or decimal output that is not a count, and is written in its normal form.",
       "type": "object",
       "required": ["type", "combine", "value", "contributors"],
       "properties": {
@@ -234,20 +234,174 @@
         }
       },
       "additionalProperties": false,
-      "if": {
-        "type": "object",
-        "required": ["type"],
-        "properties": {
-          "type": {
-            "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
+      "allOf": [
+        {
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rounding": false
+            }
+          }
+        },
+        {
+          "description": "sum combines number, decimal.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["sum"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["number", "decimal"]
+              }
+            }
+          }
+        },
+        {
+          "description": "max combines number, decimal, enum, date, dateTime.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["max"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["number", "decimal", "enum", "date", "dateTime"]
+              }
+            }
+          }
+        },
+        {
+          "description": "min combines number, decimal, enum, date, dateTime.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["min"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["number", "decimal", "enum", "date", "dateTime"]
+              }
+            }
+          }
+        },
+        {
+          "description": "union combines list.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["union"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["list"]
+              }
+            }
+          }
+        },
+        {
+          "description": "all combines boolean.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["all"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["boolean"]
+              }
+            }
+          }
+        },
+        {
+          "description": "any combines boolean.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["any"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["boolean"]
+              }
+            }
+          }
+        },
+        {
+          "description": "count combines number.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["count"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "type": {
+                "enum": ["number"]
+              }
+            }
+          }
+        },
+        {
+          "description": "No rounding on a count: its value is an integer.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["count"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rounding": false
+            }
           }
         }
-      },
-      "then": {
-        "properties": {
-          "rounding": false
-        }
-      }
+      ]
     },
     "step": {
       "type": "object",
@@ -328,7 +482,7 @@
       "additionalProperties": false
     },
     "rounding": {
-      "description": "A declared rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a multiple of that step: a canonical decimal string greater than 0 with at most 20 decimal places, such as 0.05 or 10); at is output (the default) or contribution.",
+      "description": "A declared rounding in its normal form (normalizeOutputDeclaration): mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 decimal places that is not a power of ten from 1 to 10^-20, which is written as its scale: 0.05, 10); at is contribution or absent (output, the default, is never written).",
       "type": "object",
       "required": ["mode"],
       "oneOf": [
@@ -353,13 +507,13 @@
         },
         "increment": {
           "type": "string",
-          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
+          "pattern": "^(?!1$)(?!0\\.0*1$)(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
         },
         "mode": {
           "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]
         },
         "at": {
-          "enum": ["output", "contribution"]
+          "enum": ["contribution"]
         }
       },
       "additionalProperties": false

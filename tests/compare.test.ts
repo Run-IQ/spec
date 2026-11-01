@@ -84,7 +84,9 @@ describe('compareOutputValues', () => {
       const declaration: OutputDeclaration = { type, combine: 'highestPriority' };
       expect(specError(() => compareOutputValues('a', 'b', declaration))).toMatchObject({
         code: 'INVALID_RULE',
-        message: `a ${type} output has no order: only number, decimal, enum, date and dateTime do`,
+        message:
+          `${type === 'object' ? 'an' : 'a'} ${type} output has no order: ` +
+          'only number, decimal, enum, date and dateTime do',
       });
     },
   );

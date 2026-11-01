@@ -123,6 +123,26 @@ function checkStep(scale: unknown, increment: unknown, path: string, fail: Add):
   }
 }
 
+/**
+ * Internal: reports each way a valid rounding, as written, is not its normal form (a proof
+ * writes the normal form, one meaning one text): `at: 'output'` (the default) written out, and
+ * an increment that is a power of ten from 1 to 10^-20 instead of its `scale`.
+ */
+export function checkNormalRounding(read: RoundingRead, path: string, add: Add): void {
+  const { copy, normal } = read;
+  if (normal === undefined) return;
+  if (copy.at === 'output') {
+    add(`${path}.at`, `${citeName(path)}.at must be absent: output is the default`);
+  }
+  const { increment } = copy;
+  if (typeof increment === 'string' && normal.scale !== undefined) {
+    add(
+      `${path}.increment`,
+      `${citeName(path)}.increment ${quoteText(increment)} must be written as scale ${normal.scale}`,
+    );
+  }
+}
+
 /** Internal: reports a rounding on an output whose type cannot be rounded. */
 export function roundingNotApplicable(path: string, add: Add): void {
   add(path, `${citeName(path)} applies only to a number or decimal output`);

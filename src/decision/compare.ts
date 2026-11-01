@@ -3,6 +3,7 @@ import { newSpecError, quoteText } from '../errors.js';
 import { typeName, withValueBudget } from '../values.js';
 import { compareCanonicalDecimals } from './decimal.js';
 import { matchesValue, validDeclaration } from './output.js';
+import { article } from './read-declaration.js';
 import type { OutputDeclaration, OutputType } from './output.js';
 
 /** The output types whose values have an order. */
@@ -32,7 +33,7 @@ export function compareOutputValues(
   if (!ORDERED.includes(type)) {
     throw newSpecError(
       'INVALID_RULE',
-      `a ${type} output has no order: only number, decimal, enum, date and dateTime do`,
+      `${article(type)} ${type} output has no order: only number, decimal, enum, date and dateTime do`,
     );
   }
   for (const value of [a, b]) {

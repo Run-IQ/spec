@@ -70,8 +70,14 @@ const INPUT: ProofInput = proofInput(
   { revenue: 1000, items: [{ q: 1 }, { q: 2 }] },
 );
 
-/** An unsigned proof citing `rule`, whose output value and contribution are given. */
+/**
+ * An unsigned proof citing `rule`, whose output value and contribution are given: a `list`
+ * output (`union`) for an array value, an `object` output (`highestPriority`) otherwise.
+ */
 function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution: JsonValue) {
+  const declared = Array.isArray(value)
+    ? ({ type: 'list', combine: 'union' } as const)
+    : ({ type: 'object', combine: 'highestPriority' } as const);
   const proof: UnsignedProof = {
     format: PROOF_FORMAT,
     requestId: 'req-1',
@@ -81,7 +87,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     rules: [{ id: 'r1', version: 1, checksum: computeRuleChecksum(rule) }],
     versions: { engine: '1', plugins: {}, dsls: {} },
     strata: [['value']],
-    outputs: { value: { type: 'object', combine: 'all', value, contributors: ['r1'] } },
+    outputs: { value: { ...declared, value, contributors: ['r1'] } },
     applied: [
       { ruleId: 'r1', version: 1, model: 'FLAT', output: 'value', contribution, stratum: 0 },
     ],

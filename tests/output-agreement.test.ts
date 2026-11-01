@@ -2,6 +2,7 @@ import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
 import {
+  canonicalize,
   normalizeOutputDeclaration,
   sameDeclaration,
   validateOutputDeclaration,
@@ -9,12 +10,18 @@ import {
 } from '../src/index.js';
 import type { OutputDeclaration } from '../src/index.js';
 import { proofWith } from './proof-cases.js';
-import { loose, specError } from './helpers.js';
+import { jsonCopy, loose, specError } from './helpers.js';
 
 const schema = JSON.parse(
   readFileSync(new URL('../schema/decision-proof.schema.json', import.meta.url), 'utf8'),
 ) as object;
 const schemaAccepts = new Ajv2020({ strict: true, allErrors: true }).compile(schema);
+const declarationSchema = JSON.parse(
+  readFileSync(new URL('../schema/output-declaration.schema.json', import.meta.url), 'utf8'),
+) as object;
+const declarationSchemaAccepts = new Ajv2020({ strict: true, allErrors: true }).compile(
+  declarationSchema,
+);
 
 /** A deterministic generator (mulberry32): the same cases on every run. */
 function generator(seed: number): <T>(choices: readonly T[]) => T {
@@ -81,9 +88,12 @@ describe('a rounding: the declaration validator, the proof validator and the sch
     let accepted = 0;
     for (let i = 0; i < 3_000; i++) {
       const value = rounding(pick);
+      const declaration = { type: 'decimal', combine: 'sum', rounding: value };
+      // A proof takes a valid rounding in its normal form only.
       const declared =
-        validateOutputDeclaration({ type: 'decimal', combine: 'sum', rounding: value }).length ===
-        0;
+        validateOutputDeclaration(declaration).length === 0 &&
+        canonicalize(normalizeOutputDeclaration(loose<OutputDeclaration>(declaration)).rounding) ===
+          canonicalize(value);
       const proved = validateProof(proofOf(value)).issues.length === 0;
       expect([value, proved, schemaAccepts(proofOf(value))]).toEqual([value, declared, declared]);
       if (declared) accepted += 1;
@@ -92,10 +102,48 @@ describe('a rounding: the declaration validator, the proof validator and the sch
     expect(accepted).toBeLessThan(2_900);
   });
 
-  it('a proof keeps its rounding as written: an increment of 0.01 stays one', () => {
+  it('a proof refuses a rounding not in its normal form, naming the normal writing', () => {
     const value = { increment: '0.01', mode: 'up', at: 'output' };
-    expect(validateProof(proofOf(value)).issues).toEqual([]);
-    expect(schemaAccepts(proofOf(value))).toBe(true);
+    expect(validateProof(proofOf(value)).issues).toEqual([
+      {
+        path: 'outputs.value.rounding.at',
+        message: 'outputs.value.rounding.at must be absent: output is the default',
+      },
+      {
+        path: 'outputs.value.rounding.increment',
+        message: 'outputs.value.rounding.increment "0.01" must be written as scale 2',
+      },
+    ]);
+    expect(schemaAccepts(proofOf(value))).toBe(false);
+    const normal = { scale: 2, mode: 'up' };
+    expect(validateProof(proofOf(normal)).issues).toEqual([]);
+    expect(schemaAccepts(proofOf(normal))).toBe(true);
+  });
+
+  it('a proof refuses a combination its declaration could not have, and a rounded count', () => {
+    const cases: [Record<string, unknown>, string, string][] = [
+      [
+        { type: 'string', combine: 'sum', value: 'a', contributors: [] },
+        'outputs.value.combine',
+        'outputs.value.combine "sum" cannot combine a string output: it applies to number, decimal',
+      ],
+      [
+        {
+          type: 'number',
+          combine: 'count',
+          value: 1,
+          contributors: [],
+          rounding: { scale: 0, mode: 'up' },
+        },
+        'outputs.value.rounding',
+        'outputs.value.rounding does not apply to a count: its value is an integer',
+      ],
+    ];
+    for (const [output, path, message] of cases) {
+      const proof = proofWith({ outputs: { value: output } });
+      expect(validateProof(proof).issues).toEqual([{ path, message }]);
+      expect(schemaAccepts(proof)).toBe(false);
+    }
   });
 });
 
@@ -172,13 +220,18 @@ function declaration(pick: <T>(choices: readonly T[]) => T): Record<string, unkn
   return drawn;
 }
 
-describe('validateOutputDeclaration and normalizeOutputDeclaration agree', () => {
+describe('validateOutputDeclaration, normalizeOutputDeclaration and the JSON schema agree', () => {
   it('on 20 000 drawn declarations: same verdict, same first problem, a stable normal form', () => {
     const pick = generator(42);
     let accepted = 0;
     for (let i = 0; i < 20_000; i++) {
       const value = declaration(pick);
       const issues = validateOutputDeclaration(value);
+      // The schema reads the JSON text: an `undefined` member has none, as it is absent.
+      expect([value, declarationSchemaAccepts(jsonCopy(value))]).toEqual([
+        value,
+        issues.length === 0,
+      ]);
       const first = issues[0];
       if (first === undefined) {
         accepted += 1;
@@ -198,5 +251,59 @@ describe('validateOutputDeclaration and normalizeOutputDeclaration agree', () =>
     }
     expect(accepted).toBeGreaterThan(2_000);
     expect(accepted).toBeLessThan(18_000);
+  });
+});
+
+describe('the output declaration schema: what only the validator checks', () => {
+  const LONE = String.fromCharCode(0xd800);
+  const cases: [string, Record<string, unknown>][] = [
+    ['a lone surrogate in unit', { type: 'number', combine: 'sum', unit: `X${LONE}` }],
+    [
+      'a lone surrogate in an enum value',
+      { type: 'enum', combine: 'max', values: ['a', `b${LONE}`] },
+    ],
+    [
+      'a lone surrogate in dimension',
+      { type: 'string', combine: 'highestPriority', dimension: `d${LONE}` },
+    ],
+  ];
+
+  it.each(cases)('%s: accepted by the schema, refused by the validator', (_name, value) => {
+    expect(declarationSchemaAccepts(value)).toBe(true);
+    expect(validateOutputDeclaration(value)).not.toEqual([]);
+  });
+
+  it('the schema documents them', () => {
+    expect(JSON.stringify(declarationSchema)).toMatch(
+      /made only by validateOutputDeclaration: no text .* may hold a lone UTF-16 surrogate/,
+    );
+  });
+
+  it('agrees on the cases of the other tests: units, signs, per and dimension', () => {
+    const cases: Record<string, unknown>[] = [
+      { type: 'decimal', combine: 'sum', unit: ' XOF' },
+      { type: 'decimal', combine: 'sum', unit: 'XOF\n' },
+      { type: 'decimal', combine: 'sum', unit: 'X O F' },
+      { type: 'enum', combine: 'max', values: ['a'], dimension: '-' },
+      { type: 'enum', combine: 'max', values: ['a'], dimension: '$d' },
+      { type: 'enum', combine: 'max', values: ['a'], dimension: '-d' },
+      { type: 'enum', combine: 'max', values: ['a', 'a'] },
+      { type: 'number', combine: 'sum', per: '/a/*/b' },
+      { type: 'number', combine: 'sum', per: '/a/@x' },
+      { type: 'number', combine: 'sum', per: '/a/0/b' },
+      { type: 'number', combine: 'count', unit: 'persons' },
+      { type: 'boolean', combine: 'all', empty: false },
+      {
+        type: 'decimal',
+        combine: 'sum',
+        rounding: { increment: '0.01', mode: 'up', at: 'output' },
+      },
+    ];
+    for (const value of cases) {
+      expect([value, declarationSchemaAccepts(value)]).toEqual([
+        value,
+        validateOutputDeclaration(value).length === 0,
+      ]);
+    }
   });
 });

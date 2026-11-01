@@ -1,3 +1,4 @@
+import { offDeclarationValues } from './output-values.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
@@ -148,7 +149,8 @@ export function contentDigest(p: UnsignedProof): string {
 /**
  * Internal: every way `p` contradicts itself, each reported once, in this order: its unlisted
  * citations (`unlistedCitations`), its strata problems (`strataProblems`), its reserved output
- * names (`reservedOutputNames`) and its non-canonical decimals (`nonCanonicalDecimals`). `p`
+ * names (`reservedOutputNames`), its non-canonical decimals (`nonCanonicalDecimals`) and its
+ * values that contradict their output's declaration (`offDeclarationValues`). `p`
  * must be a plain-JSON snapshot that `validateProof` accepts.
  */
 export function inconsistencies(p: UnsignedProof): string[] {
@@ -157,6 +159,7 @@ export function inconsistencies(p: UnsignedProof): string[] {
     ...strataProblems(p),
     ...reservedOutputNames(p),
     ...nonCanonicalDecimals(p),
+    ...offDeclarationValues(p),
   ];
 }
 

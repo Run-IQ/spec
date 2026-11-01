@@ -1,6 +1,12 @@
 import { toJsonValue } from '../canonical.js';
 import { COMBINE_STRATEGIES, OUTPUT_TYPES } from '../decision/output.js';
-import { checkRounding, isRoundable, roundingNotApplicable } from '../decision/rounding.js';
+import { combinationProblem } from '../decision/read-declaration.js';
+import {
+  checkNormalRounding,
+  checkRounding,
+  isRoundable,
+  roundingNotApplicable,
+} from '../decision/rounding.js';
 import {
   citeName,
   describeError,
@@ -295,18 +301,34 @@ const OUTPUT: Shape = {
 };
 
 /**
- * An output. Its `rounding` is checked as in an output declaration: on a known type that
- * cannot be rounded, only that is reported; otherwise its shape is checked.
+ * An output. Its `combine` must apply to its `type`, as in an output declaration. Its
+ * `rounding` is checked as in an output declaration (on a known type that cannot be rounded, or
+ * on a `count`, only that is reported; otherwise its shape), and must be written in its normal
+ * form (`normalizeOutputDeclaration`): no `at: 'output'`, no increment that is a scale.
  */
 const output: Check = (value, path, add) => {
   const read = checkObject(value, path, OUTPUT, add, new Set());
   if (read === undefined) return undefined;
+  const type = read.members.get('type');
+  const combine = read.members.get('combine');
+  const knownType = OUTPUT_TYPES.find((t) => t === type);
+  const knownCombine = COMBINE_STRATEGIES.find((c) => c === combine);
+  if (knownType !== undefined && knownCombine !== undefined) {
+    const problem = combinationProblem(knownType, knownCombine);
+    if (problem !== undefined) add(`${path}.combine`, `${citeName(path)}.combine ${problem}`);
+  }
   const rounding = read.members.get('rounding');
   if (rounding === undefined) return read.copy;
-  const type = read.members.get('type');
-  if (OUTPUT_TYPES.some((t) => t === type) && !isRoundable(type)) {
-    roundingNotApplicable(`${path}.rounding`, add);
-  } else read.copy.rounding = checkRounding(rounding, `${path}.rounding`, add)?.copy;
+  const at = `${path}.rounding`;
+  if (knownType !== undefined && !isRoundable(knownType)) {
+    roundingNotApplicable(at, add);
+  } else if (knownCombine === 'count') {
+    add(at, `${citeName(at)} does not apply to a count: its value is an integer`);
+  } else {
+    const checked = checkRounding(rounding, at, add);
+    if (checked !== undefined) checkNormalRounding(checked, at, add);
+    read.copy.rounding = checked?.copy;
+  }
   return read.copy;
 };
 

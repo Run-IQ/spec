@@ -1,0 +1,367 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Run-IQ/spec/schema/output-declaration.schema.json",
+  "title": "Run-IQ output declaration",
+  "description": "An output declaration as accepted by validateOutputDeclaration from @run-iq/spec: the type of an output, how the contributions of several rules combine, and its optional members. Checks NOT expressible in JSON Schema, made only by validateOutputDeclaration: no text (an enum value, unit, per, dimension) may hold a lone UTF-16 surrogate; one call reads at most 10 000 000 values. A member whose value is undefined (no JSON form) is absent. The normal form (normalizeOutputDeclaration, which sameDeclaration compares) drops empty: false and rounding.at: output, and writes an increment that is a power of ten from 1 to 10^-20 as its scale.",
+  "type": "object",
+  "required": ["type", "combine"],
+  "properties": {
+    "type": {
+      "enum": [
+        "number",
+        "boolean",
+        "string",
+        "enum",
+        "list",
+        "object",
+        "decimal",
+        "date",
+        "dateTime"
+      ]
+    },
+    "combine": {
+      "enum": ["sum", "max", "min", "highestPriority", "union", "all", "any", "count"]
+    },
+    "values": {
+      "description": "The strings of an enum, distinct and ranked in their order.",
+      "type": "array",
+      "minItems": 1,
+      "uniqueItems": true,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      }
+    },
+    "rounding": {
+      "$ref": "#/$defs/rounding"
+    },
+    "unit": {
+      "description": "The unit of a number or decimal output: not empty, no white space around it.",
+      "type": "string",
+      "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+    },
+    "empty": {
+      "description": "Allowed on an all output only.",
+      "type": "boolean"
+    },
+    "per": {
+      "description": "One value per element of a collection: a pointer as forEach.path (same refusals).",
+      "type": "string",
+      "pattern": "^/(?!\\$)(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*(?:/\\*/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*)*$"
+    },
+    "dimension": {
+      "description": "The dimension a string or enum output sets: not empty, not -, not starting with $.",
+      "type": "string",
+      "pattern": "^(?!\\$)(?!-$)[\\s\\S]+$"
+    },
+    "sign": {
+      "description": "Allowed on a sum only.",
+      "enum": ["nonNegative", "nonPositive"]
+    }
+  },
+  "additionalProperties": false,
+  "allOf": [
+    {
+      "description": "sum combines number, decimal.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["sum"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["number", "decimal"]
+          }
+        }
+      }
+    },
+    {
+      "description": "max combines number, decimal, enum, date, dateTime.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["max"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["number", "decimal", "enum", "date", "dateTime"]
+          }
+        }
+      }
+    },
+    {
+      "description": "min combines number, decimal, enum, date, dateTime.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["min"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["number", "decimal", "enum", "date", "dateTime"]
+          }
+        }
+      }
+    },
+    {
+      "description": "union combines list.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["union"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["list"]
+          }
+        }
+      }
+    },
+    {
+      "description": "all combines boolean.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["all"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["boolean"]
+          }
+        }
+      }
+    },
+    {
+      "description": "any combines boolean.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["any"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["boolean"]
+          }
+        }
+      }
+    },
+    {
+      "description": "count combines number.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["count"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "type": {
+            "enum": ["number"]
+          }
+        }
+      }
+    },
+    {
+      "description": "values is required for an enum, refused otherwise.",
+      "if": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["enum"]
+          }
+        }
+      },
+      "then": {
+        "required": ["values"],
+        "properties": {
+          "values": {}
+        }
+      }
+    },
+    {
+      "if": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["number", "boolean", "string", "list", "object", "decimal", "date", "dateTime"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "values": false
+        }
+      }
+    },
+    {
+      "description": "rounding and unit apply to a number or decimal output only.",
+      "if": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rounding": false,
+          "unit": false
+        }
+      }
+    },
+    {
+      "description": "No rounding on a count: its value is an integer.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["count"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rounding": false
+        }
+      }
+    },
+    {
+      "description": "empty applies to an all output only.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["sum", "max", "min", "highestPriority", "union", "any", "count"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "empty": false
+        }
+      }
+    },
+    {
+      "description": "sign applies to a sum only.",
+      "if": {
+        "type": "object",
+        "required": ["combine"],
+        "properties": {
+          "combine": {
+            "enum": ["max", "min", "highestPriority", "union", "all", "any", "count"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "sign": false
+        }
+      }
+    },
+    {
+      "description": "dimension applies to a string or enum output only.",
+      "if": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["number", "boolean", "list", "object", "decimal", "date", "dateTime"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "dimension": false
+        }
+      }
+    },
+    {
+      "description": "per and dimension are exclusive (D-19).",
+      "not": {
+        "required": ["per", "dimension"],
+        "properties": {
+          "per": {},
+          "dimension": {}
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "rounding": {
+      "description": "A rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 decimal places); at is output (the default) or contribution.",
+      "type": "object",
+      "required": ["mode"],
+      "oneOf": [
+        {
+          "required": ["scale"],
+          "properties": {
+            "scale": {}
+          }
+        },
+        {
+          "required": ["increment"],
+          "properties": {
+            "increment": {}
+          }
+        }
+      ],
+      "properties": {
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
+        },
+        "increment": {
+          "type": "string",
+          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
+        },
+        "mode": {
+          "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]
+        },
+        "at": {
+          "enum": ["output", "contribution"]
+        }
+      },
+      "additionalProperties": false
+    }
+  }
+}
