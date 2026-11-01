@@ -1,3 +1,4 @@
+import { newSpecError } from '../errors.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { LiftedCheck, ProofSection, ProofStep } from './types.js';
 
@@ -247,7 +248,8 @@ interface Ledger {
 
 /**
  * The sections of a proof that have a redacted entry and, when they are recorded
- * (`hiddenSections`), what the checks asked of them (`isLifted`).
+ * (`hiddenSections`), what the checks asked of them (`isLifted`). Without a ledger, no section
+ * (`ledgerOf`).
  */
 export interface HiddenSections extends ReadonlySet<ProofSection> {
   readonly ledger?: Ledger;
@@ -268,12 +270,24 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
 }
 
 /**
- * The redacted entries of `section` in `hidden`: their count when recorded (`hiddenSections`),
- * any number when only the section is known to have one, none when it has none.
+ * The ledger of `hidden` (`hiddenSections`), none when no section is hidden. Internal error
+ * for hidden sections without one: nothing would bound what they explain, so every check they
+ * could lift would pass. Every verification builds its sections with `hiddenSections`.
+ */
+function ledgerOf(hidden: ReadonlySet<ProofSection>): Ledger | undefined {
+  const { ledger } = hidden as HiddenSections;
+  if (ledger === undefined && hidden.size > 0) {
+    throw newSpecError('INVALID_PROOF', 'internal: hidden sections without a ledger');
+  }
+  return ledger;
+}
+
+/**
+ * The redacted entries of `section` in `hidden` (`hiddenSections`), none when it has none.
+ * Internal error for hidden sections without a ledger (`ledgerOf`).
  */
 export function redactedIn(hidden: ReadonlySet<ProofSection>, section: ProofSection): number {
-  if (!hidden.has(section)) return 0;
-  return (hidden as HiddenSections).ledger?.counts.get(section) ?? Number.POSITIVE_INFINITY;
+  return ledgerOf(hidden)?.counts.get(section) ?? 0;
 }
 
 const bit = (section: ProofSection): number => 1 << PROOF_SECTIONS.indexOf(section);
@@ -288,23 +302,21 @@ function needOf(check: Lift, problem: Problem, section: ProofSection): Need | 'n
  * True when `hidden` lifts `check` for `problem`: one of the sections it may be explained in
  * has a redacted entry, and the redacted entries have not already failed to explain what they
  * were asked. Asked once the check found `problem`; recorded then, with what a redacted entry
- * needs to explain it.
+ * needs to explain it. Internal error for hidden sections without a ledger (`ledgerOf`).
  */
 export function isLifted<N extends Need>(
   hidden: HiddenSections,
   check: Lift<N>,
   problem: Problem<N>,
 ): boolean {
+  const ledger = ledgerOf(hidden);
   const row = check as Lift;
   const asked = problem as Problem;
   const present = row.sections.filter((section) => {
     const need = needOf(row, asked, section);
     return hidden.has(section) && need !== 'none' && need !== 'tie';
   });
-  if (present.length === 0) return false;
-  const { ledger } = hidden;
-  if (ledger === undefined) return true;
-  if (ledger.failed) return false;
+  if (present.length === 0 || ledger === undefined || ledger.failed) return false;
   const sections = ledger.lifted.get(row) ?? new Set<ProofSection>();
   for (const section of present) sections.add(section);
   ledger.lifted.set(row, sections);
@@ -349,9 +361,10 @@ export function isLifted<N extends Need>(
  * The problems lifted, each said once in the order found, when the redacted entries of
  * `hidden` cannot explain them all (Hall's condition, rules, outputs and pairs each); no check
  * is lifted then, and later ones are not. Empty when they can, or when already reported.
+ * Internal error for hidden sections without a ledger (`ledgerOf`).
  */
 export function unexplained(hidden: HiddenSections): string[] {
-  const { ledger } = hidden;
+  const ledger = ledgerOf(hidden);
   if (ledger === undefined || ledger.failed) return [];
   const capacity = new Array<number>(PROOF_SECTIONS.length).fill(0);
   for (const [section, count] of ledger.counts) capacity[PROOF_SECTIONS.indexOf(section)] = count;
@@ -366,12 +379,14 @@ export function unexplained(hidden: HiddenSections): string[] {
 
 /**
  * The checks `hidden` lifted (`isLifted`), in the order of `LIFTS`, each with the sections
- * that lifted it; none once unexplained.
+ * that lifted it; none once unexplained. Internal error for hidden sections without a ledger
+ * (`ledgerOf`).
  */
 export function liftedChecks(hidden: HiddenSections): LiftedCheck[] {
+  const ledger = ledgerOf(hidden);
   const lifted: LiftedCheck[] = [];
   for (const entry of Object.values(LIFTS) as Lift[]) {
-    const sections = hidden.ledger?.lifted.get(entry);
+    const sections = ledger?.lifted.get(entry);
     if (sections === undefined) continue;
     lifted.push({
       check: entry.check,

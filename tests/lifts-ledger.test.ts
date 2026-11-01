@@ -9,6 +9,7 @@ import {
   liftedChecks,
   LIFTS,
   matched,
+  redactedIn,
   unexplained,
 } from '../src/proof/lifts.js';
 import type { HiddenSections, Lift, RuleIdentity } from '../src/proof/lifts.js';
@@ -329,11 +330,39 @@ describe('the ledger', () => {
     expect(liftedChecks(hidden)).toEqual([]);
   });
 
-  it('without a ledger, a redacted section lifts and nothing is recorded', () => {
+  it('without a ledger, a redacted section is an internal error, never a lift (round 7)', () => {
     const hidden = new Set<ProofSection>(['rules']);
-    expect(isLifted(hidden, LIFTS.ruleCitations, { message: 'Z', rule: rule('Z') })).toBe(true);
+    const internal = { name: 'SpecError', code: 'INVALID_PROOF' };
+    expect(() => isLifted(hidden, LIFTS.ruleCitations, { message: 'Z', rule: rule('Z') })).toThrow(
+      expect.objectContaining(internal),
+    );
+    // Even when the check is not one the hidden section could explain.
+    expect(() =>
+      isLifted(hidden, LIFTS.outputValue, { message: 'v', output: { output: 'v' } }),
+    ).toThrow(expect.objectContaining(internal));
+    expect(() => redactedIn(hidden, 'rules')).toThrow(expect.objectContaining(internal));
+    expect(() => redactedIn(hidden, 'exceptions')).toThrow(expect.objectContaining(internal));
+    expect(() => unexplained(hidden)).toThrow(expect.objectContaining(internal));
+    expect(() => liftedChecks(hidden)).toThrow(expect.objectContaining(internal));
+    expect(() => isLifted(hidden, LIFTS.ruleCitations, { message: 'Z', rule: rule('Z') })).toThrow(
+      /hidden sections without a ledger/,
+    );
+  });
+
+  it('without a ledger and nothing redacted, no entry and no lift (round 7)', () => {
+    const hidden = new Set<ProofSection>();
+    for (const section of PROOF_SECTIONS) expect(redactedIn(hidden, section)).toBe(0);
+    expect(isLifted(hidden, LIFTS.ruleCitations, { message: 'Z', rule: rule('Z') })).toBe(false);
     expect(unexplained(hidden)).toEqual([]);
     expect(liftedChecks(hidden)).toEqual([]);
+  });
+
+  it('with a ledger, the redacted count of a section, none outside (round 7)', () => {
+    const hidden = hiddenOf({ exceptions: 3, rules: 1 });
+    expect(redactedIn(hidden, 'exceptions')).toBe(3);
+    expect(redactedIn(hidden, 'rules')).toBe(1);
+    expect(redactedIn(hidden, 'skipped')).toBe(0);
+    expect(redactedIn(hiddenOf({}), 'exceptions')).toBe(0);
   });
 });
 
