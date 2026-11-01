@@ -143,6 +143,22 @@ export function checkNormalRounding(read: RoundingRead, path: string, add: Add):
   }
 }
 
+/**
+ * Internal: reports an increment on a `number` output that is not a scale (a power of ten from
+ * 1 to 10^-20): a binary number cannot be a multiple of `0.05` or `10` in general, so such a
+ * rounding could never be met; it belongs to a `decimal` output. `read` is a valid rounding.
+ */
+export function checkNumberRounding(read: RoundingRead, path: string, add: Add): void {
+  const increment = read.normal?.increment;
+  if (increment === undefined) return;
+  const at = `${path}.increment`;
+  add(
+    at,
+    `${citeName(at)} ${quoteText(increment)} applies to a decimal output only: ` +
+      'a number output rounds to a scale',
+  );
+}
+
 /** Internal: reports a rounding on an output whose type cannot be rounded. */
 export function roundingNotApplicable(path: string, add: Add): void {
   add(path, `${citeName(path)} applies only to a number or decimal output`);

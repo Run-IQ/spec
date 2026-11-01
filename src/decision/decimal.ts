@@ -73,6 +73,13 @@ export const MAX_ROUNDING_SCALE = 20;
  * `"0.05"`, `"10"`. Checked in this order: a decimal string at all, greater than 0, canonical,
  * not finer than 10^-20.
  */
+/**
+ * Internal: the most digits an increment has before its point, as after it
+ * (`MAX_ROUNDING_SCALE`): an increment lies from 10^-20 to below 10^20, so checking a value
+ * against it works on numbers of at most 40 digits.
+ */
+export const MAX_INCREMENT_DIGITS = 20;
+
 export function incrementProblem(value: unknown): string | undefined {
   if (typeof value !== 'string' || !DECIMAL.test(value)) {
     return 'must be a decimal string ("0.05", "10")';
@@ -82,6 +89,10 @@ export function incrementProblem(value: unknown): string | undefined {
   if (canonical !== value) return `must be written ${quoteText(canonical)}`;
   if (decimalPlaces(canonical) > MAX_ROUNDING_SCALE) {
     return `must have at most ${MAX_ROUNDING_SCALE} decimal places`;
+  }
+  const [integer = ''] = canonical.split('.');
+  if (integer.length > MAX_INCREMENT_DIGITS) {
+    return `must have at most ${MAX_INCREMENT_DIGITS} digits before the point`;
   }
   return undefined;
 }
@@ -148,9 +159,22 @@ export function numberToDecimal(n: number): string {
 }
 
 /**
+ * Internal, for tests: the work of `isOnStep` since the start: its steps (one per 15 digits of
+ * the value) and the digits of the numbers each step divides, summed.
+ */
+const stepWork = { steps: 0, digits: 0 };
+
+/** Internal, for tests: a copy of the work of `isOnStep` as it stands. */
+export function stepWorkDone(): { steps: number; digits: number } {
+  return { ...stepWork };
+}
+
+/**
  * Internal: true when the canonical decimal `value` is a multiple of the step of a valid
  * rounding: at most `scale` decimal places, or a whole multiple of `increment`. Exact, for any
- * number of digits; the work is linear in the digits of `value`.
+ * number of digits. The work is linear in the digits of `value`: a valid increment has at most
+ * 40 digits (`MAX_INCREMENT_DIGITS` before its point, `MAX_ROUNDING_SCALE` after), so each step
+ * divides a number of at most 55 digits (the remainder, below the increment, and 15 new digits).
  */
 export function isOnStep(value: string, step: { scale?: number; increment?: string }): boolean {
   const places = decimalPlaces(value);
@@ -164,7 +188,10 @@ export function isOnStep(value: string, step: { scale?: number; increment?: stri
   let remainder = 0n;
   for (let i = 0; i < digits.length; i += 15) {
     const chunk = digits.slice(i, i + 15);
-    remainder = (remainder * 10n ** BigInt(chunk.length) + BigInt(chunk)) % divisor;
+    const dividend = remainder * 10n ** BigInt(chunk.length) + BigInt(chunk);
+    stepWork.steps += 1;
+    stepWork.digits += dividend.toString().length;
+    remainder = dividend % divisor;
   }
   return remainder === 0n;
 }

@@ -247,6 +247,55 @@
       }
     },
     {
+      "description": "A number output rounds to a scale: an increment on it is a power of ten from 1 to 10^-20 (which is that scale); any other increment applies to a decimal output only.",
+      "if": {
+        "type": "object",
+        "required": ["type"],
+        "properties": {
+          "type": {
+            "enum": ["number"]
+          }
+        }
+      },
+      "then": {
+        "properties": {
+          "rounding": {
+            "type": "object",
+            "properties": {
+              "increment": {
+                "type": "string",
+                "pattern": "^(1|0\\.0{0,19}1)$"
+              }
+            }
+          }
+        }
+      }
+    },
+    {
+      "description": "The values of an enum that sets a dimension are dimension values: no empty code system before a colon, no empty code after it.",
+      "if": {
+        "type": "object",
+        "required": ["type", "dimension"],
+        "properties": {
+          "type": {
+            "const": "enum"
+          },
+          "dimension": {}
+        }
+      },
+      "then": {
+        "properties": {
+          "values": {
+            "type": "array",
+            "items": {
+              "type": "string",
+              "pattern": "^(?!:)(?![\\s\\S]*:$)"
+            }
+          }
+        }
+      }
+    },
+    {
       "description": "No rounding on a count: its value is an integer.",
       "if": {
         "type": "object",
@@ -327,7 +376,7 @@
   ],
   "$defs": {
     "rounding": {
-      "description": "A rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 decimal places); at is output (the default) or contribution.",
+      "description": "A rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it: from 10^-20 to below 10^20); at is output (the default) or contribution.",
       "type": "object",
       "required": ["mode"],
       "oneOf": [
@@ -352,7 +401,7 @@
         },
         "increment": {
           "type": "string",
-          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
+          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]{0,19}(\\.[0-9]{0,19}[1-9])?)$"
         },
         "mode": {
           "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]

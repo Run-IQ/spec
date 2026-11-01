@@ -400,6 +400,28 @@
               "rounding": false
             }
           }
+        },
+        {
+          "description": "A number output rounds to a scale: an increment applies to a decimal output only.",
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "const": "number"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rounding": {
+                "properties": {
+                  "increment": false
+                },
+                "type": "object"
+              }
+            }
+          }
         }
       ]
     },
@@ -482,7 +504,7 @@
       "additionalProperties": false
     },
     "rounding": {
-      "description": "A declared rounding in its normal form (normalizeOutputDeclaration): mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 decimal places that is not a power of ten from 1 to 10^-20, which is written as its scale: 0.05, 10); at is contribution or absent (output, the default, is never written).",
+      "description": "A declared rounding in its normal form (normalizeOutputDeclaration): mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it that is not a power of ten from 1 to 10^-20, which is written as its scale: 0.05, 10); at is contribution or absent (output, the default, is never written).",
       "type": "object",
       "required": ["mode"],
       "oneOf": [
@@ -507,7 +529,7 @@
         },
         "increment": {
           "type": "string",
-          "pattern": "^(?!1$)(?!0\\.0*1$)(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
+          "pattern": "^(?!1$)(?!0\\.0*1$)(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]{0,19}(\\.[0-9]{0,19}[1-9])?)$"
         },
         "mode": {
           "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]

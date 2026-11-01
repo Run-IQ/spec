@@ -122,7 +122,7 @@ toCanonicalDecimal('1e3');     // throws SpecError INVALID_DECIMAL: no exponent
 isCanonicalDecimal('12.50');   // false
 ```
 
-A `number` or `decimal` output (not a `count`) can declare `rounding: { scale or increment, mode, at? }`: `scale` decimal places (0 to 20) or `increment` a step (a canonical decimal string greater than 0 with at most 20 decimal places: `"0.05"`, `"10"`), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
+A `number` or `decimal` output (not a `count`) can declare `rounding: { scale or increment, mode, at? }`: `scale` decimal places (0 to 20) or `increment` a step (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it: `"0.05"`, `"10"`; on a `decimal` output only, except a power of ten from 1 to 10^-20, which is a scale), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
 
 A rule reads the outputs computed before it through the reserved variable `$outputs` (`OUTPUTS_VARIABLE`): `$outputs.x` is output `x`. Output names starting with `$` are reserved: a rule `output`, a `shortCircuit` output or a selector `outputs` entry that starts with `$` is refused (`INVALID_RULE`).
 

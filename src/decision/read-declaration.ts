@@ -2,7 +2,7 @@ import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
-import { reservedDimensionNameMessage } from '../rule/dimensions.js';
+import { dimensionValueProblem, reservedDimensionNameMessage } from '../rule/dimensions.js';
 import { readCollectionPath } from '../rule/forEach.js';
 import {
   hasLoneSurrogate,
@@ -13,7 +13,12 @@ import {
   tooLargeMessage,
 } from '../values.js';
 import type { CombineStrategy, OutputDeclaration, OutputType } from './output.js';
-import { checkRounding, isRoundable, roundingNotApplicable } from './rounding.js';
+import {
+  checkNumberRounding,
+  checkRounding,
+  isRoundable,
+  roundingNotApplicable,
+} from './rounding.js';
 import type { OutputRounding } from './rounding.js';
 
 // Internal to `@run-iq/spec`: the one reader of output declarations, shared by
@@ -181,7 +186,11 @@ class Fields {
   values(): string[] | undefined {
     const values = this.members.get('values');
     const at = `${this.path}.values`;
-    if (this.type === 'enum') return enumValues(values, at, this.fail);
+    if (this.type === 'enum') {
+      // The values of an enum that sets a dimension are dimension values (`iso:TG`, never `:x`).
+      const ofDimension = this.members.get('dimension') !== undefined;
+      return enumValues(values, at, ofDimension, this.fail);
+    }
     if (values !== undefined && isOneOf(this.type, OUTPUT_TYPES)) {
       this.fail(at, `${citeName(this.path)}.values applies only to an enum output`);
     }
@@ -197,7 +206,11 @@ class Fields {
     } else if (this.combine === 'count') {
       this.fail(at, `${citeName(at)} does not apply to a count: its value is an integer`);
     } else {
-      return checkRounding(rounding, at, this.fail)?.normal;
+      const checked = checkRounding(rounding, at, this.fail);
+      if (checked !== undefined && this.type === 'number') {
+        checkNumberRounding(checked, at, this.fail);
+      }
+      return checked?.normal;
     }
     return undefined;
   }
@@ -270,7 +283,12 @@ class Fields {
 }
 
 /** The values of an enum, read once and copied, or `undefined` after reporting why not. */
-function enumValues(values: unknown, path: string, fail: Add): string[] | undefined {
+function enumValues(
+  values: unknown,
+  path: string,
+  ofDimension: boolean,
+  fail: Add,
+): string[] | undefined {
   if (values === undefined) {
     fail(path, `${citeName(path)} is required for an enum output: list its allowed strings`);
     return undefined;
@@ -299,6 +317,8 @@ function enumValues(values: unknown, path: string, fail: Add): string[] | undefi
       fail(at, `${citeName(at)} repeats ${quoteText(item)}`);
     } else {
       seen.add(item);
+      const problem = ofDimension ? dimensionValueProblem(item, at) : undefined;
+      if (problem !== undefined) fail(at, problem);
     }
   });
   return seen.size === items.length ? [...seen] : undefined;

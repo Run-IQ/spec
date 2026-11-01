@@ -4,8 +4,9 @@ import { citeName, newSpecError } from '../errors.js';
 import { pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
+import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
-import { ownCopy, withValueBudget } from '../values.js';
+import { hasLoneSurrogate, ownCopy, withValueBudget } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 import { readDeclaration } from './read-declaration.js';
 import type { OutputRounding } from './rounding.js';
@@ -249,7 +250,7 @@ export function validDeclaration(declaration: unknown): OutputDeclaration {
 
 /** Internal: true when `value` is a value of the valid, normal `declaration`. */
 export function matchesValue(value: unknown, declaration: OutputDeclaration): boolean {
-  const { type, combine, values = [], sign } = declaration;
+  const { type, combine, values = [], sign, dimension } = declaration;
   if (combine === 'count') {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
   }
@@ -261,7 +262,7 @@ export function matchesValue(value: unknown, declaration: OutputDeclaration): bo
     case 'boolean':
       return typeof value === 'boolean';
     case 'string':
-      return typeof value === 'string';
+      return typeof value === 'string' && isOutputText(value, dimension);
     case 'enum':
       return typeof value === 'string' && values.includes(value);
     case 'list':
@@ -273,6 +274,16 @@ export function matchesValue(value: unknown, declaration: OutputDeclaration): bo
     case 'dateTime':
       return isInstant(value);
   }
+}
+
+/**
+ * Internal: true when the string `value` can be the value of a string output: no lone UTF-16
+ * surrogate (no JSON text can hold one), and a dimension value (`dimensionValueProblem`: not
+ * empty, no empty system or code around a `:`) when the output sets a `dimension`.
+ */
+export function isOutputText(value: string, dimension: string | undefined): boolean {
+  if (dimension !== undefined) return dimensionValueProblem(value, '') === undefined;
+  return !hasLoneSurrogate(value);
 }
 
 /** True when the number `value` respects `sign` (0 and -0 respect both). */

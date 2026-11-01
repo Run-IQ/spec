@@ -1,4 +1,3 @@
-import { offDeclarationValues } from './output-values.js';
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
@@ -10,6 +9,7 @@ import { expectPlainObject, readFields, requireFields, runCheck, walkJson } from
 import { inputDigestBytes } from '../input/tree.js';
 import { readValidInput } from '../input/validate.js';
 import type { RuleValidationIssue } from '../issues.js';
+import { offDeclarationValues } from './output-values.js';
 import { readUnsignedProof } from './validate.js';
 import { ownCopy, withValueBudget } from '../values.js';
 

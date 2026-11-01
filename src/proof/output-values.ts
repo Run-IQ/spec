@@ -1,5 +1,6 @@
 import { citeName } from '../errors.js';
 import { isCanonicalDecimal, isOnStep, numberToDecimal } from '../decision/decimal.js';
+import { isOutputText } from '../decision/output.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
 import type { JsonValue } from '../canonical.js';
 import type { ProofOutput, ProofStep, UnsignedProof } from './types.js';
@@ -16,8 +17,8 @@ const WITHOUT_VALUE: ReadonlySet<string> = new Set(['max', 'min', 'highestPriori
  *   only when no rule contributed and the strategy has none then (`max`, `min`,
  *   `highestPriority`, `all`). A `decimal` is checked by `nonCanonicalDecimals`;
  * - `output value not rounded as declared: name`: a rounded `number` or `decimal` value is not
- *   on the step (`scale` places, or a multiple of `increment`). A `number` rounded at each
- *   contribution is not checked: the binary sum of rounded numbers is not on the step;
+ *   on the step (`scale` places, or a multiple of `increment`). A `number` `sum` rounded at
+ *   each contribution is not checked: the binary sum of rounded numbers is not on the step;
  * - `contribution does not match its output declaration: name`: an applied contribution, or
  *   its `unrounded` value, is not of the output's type (a boolean for a `count`);
  * - `contribution not rounded as declared: name`: with `at: 'contribution'`, an applied
@@ -25,9 +26,11 @@ const WITHOUT_VALUE: ReadonlySet<string> = new Set(['max', 'min', 'highestPriori
  *
  * What the proof does not carry yet is not checked here (Task 9J adds it to `ProofOutput`):
  * an enum's `values` (an enum value is only checked to be a string), `sign`, `unit`, `empty`
- * (an `all` without contribution may hold `true` or `null`), `per` and `dimension`.
+ * (an `all` without contribution may hold `true` or `null`), `per` and `dimension` (a string
+ * value is checked to hold no lone surrogate, not to be a dimension value).
  *
- * Linear in the size of the proof: the applied list is read once.
+ * Linear in the size of the proof: the applied list is read once, and each value is checked
+ * against its step in time linear in its digits (`isOnStep`).
  */
 export function offDeclarationValues(p: UnsignedProof): string[] {
   const steps = new Map<string, ProofStep[]>();
@@ -63,7 +66,10 @@ export function offDeclarationValues(p: UnsignedProof): string[] {
   return issues;
 }
 
-/** True when `value` has the form of a value of `output` (a decimal is checked elsewhere). */
+/**
+ * True when `value` has the form of a value of `output` (a decimal is checked elsewhere; a
+ * string with a lone surrogate, which `validateProof` refuses first, is refused here too).
+ */
 function hasForm(value: JsonValue, output: ProofOutput): boolean {
   if (output.combine === 'count') {
     return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
@@ -76,6 +82,8 @@ function hasForm(value: JsonValue, output: ProofOutput): boolean {
     case 'boolean':
       return typeof value === 'boolean';
     case 'string':
+      // The proof does not carry `dimension` yet (Task 9J): checked as a plain string.
+      return typeof value === 'string' && isOutputText(value, undefined);
     case 'enum':
       return typeof value === 'string';
     case 'list':
@@ -97,9 +105,15 @@ function contributionHasForm(step: ProofStep, output: ProofOutput): boolean {
   );
 }
 
-/** The output value on the step of its rounding (a number rounded per contribution aside). */
+/**
+ * The output value on the step of its rounding. A `number` sum rounded at each contribution is
+ * not checked: the binary sum of numbers on the step leaves it (`0.1 + 0.2`). Any other value
+ * rounded at each contribution is one of them (`max`, `min`, `highestPriority`) or an exact
+ * decimal sum, so it is on the step.
+ */
 function valueOnStep(value: JsonValue, output: ProofOutput): boolean {
-  if (output.type === 'number' && output.rounding?.at === 'contribution') return true;
+  const { type, combine, rounding } = output;
+  if (type === 'number' && combine === 'sum' && rounding?.at === 'contribution') return true;
   return onStep(value, output);
 }
 

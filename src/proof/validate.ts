@@ -1,8 +1,12 @@
 import { toJsonValue } from '../canonical.js';
-import { COMBINE_STRATEGIES, OUTPUT_TYPES } from '../decision/output.js';
-import { combinationProblem } from '../decision/read-declaration.js';
+import {
+  combinationProblem,
+  COMBINE_STRATEGIES,
+  OUTPUT_TYPES,
+} from '../decision/read-declaration.js';
 import {
   checkNormalRounding,
+  checkNumberRounding,
   checkRounding,
   isRoundable,
   roundingNotApplicable,
@@ -326,7 +330,10 @@ const output: Check = (value, path, add) => {
     add(at, `${citeName(at)} does not apply to a count: its value is an integer`);
   } else {
     const checked = checkRounding(rounding, at, add);
-    if (checked !== undefined) checkNormalRounding(checked, at, add);
+    if (checked !== undefined) {
+      checkNormalRounding(checked, at, add);
+      if (knownType === 'number') checkNumberRounding(checked, at, add);
+    }
     read.copy.rounding = checked?.copy;
   }
   return read.copy;

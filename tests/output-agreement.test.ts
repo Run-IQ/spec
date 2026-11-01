@@ -54,6 +54,9 @@ const INCREMENTS: unknown[] = [
   '0.00000000000000000001',
   '0.000000000000000000001',
   '12345678901234567890123',
+  '99999999999999999999.5',
+  '100000000000000000000',
+  '0.25',
   0.05,
 ];
 const SCALES: unknown[] = [undefined, 0, 2, 20, 21, -1, 1.5, '2'];
@@ -76,10 +79,16 @@ function rounding(pick: <T>(choices: readonly T[]) => T): Record<string, unknown
 }
 
 describe('a rounding: the declaration validator, the proof validator and the schema agree', () => {
-  const proofOf = (value: unknown): unknown =>
+  const proofOf = (value: unknown, type = 'decimal'): unknown =>
     proofWith({
       outputs: {
-        value: { type: 'decimal', combine: 'sum', value: '1', contributors: [], rounding: value },
+        value: {
+          type,
+          combine: 'sum',
+          value: type === 'decimal' ? '1' : 1,
+          contributors: [],
+          rounding: value,
+        },
       },
     });
 
@@ -88,14 +97,20 @@ describe('a rounding: the declaration validator, the proof validator and the sch
     let accepted = 0;
     for (let i = 0; i < 3_000; i++) {
       const value = rounding(pick);
-      const declaration = { type: 'decimal', combine: 'sum', rounding: value };
+      const type = pick(['decimal', 'number']);
+      const declaration = { type, combine: 'sum', rounding: value };
       // A proof takes a valid rounding in its normal form only.
       const declared =
         validateOutputDeclaration(declaration).length === 0 &&
         canonicalize(normalizeOutputDeclaration(loose<OutputDeclaration>(declaration)).rounding) ===
           canonicalize(value);
-      const proved = validateProof(proofOf(value)).issues.length === 0;
-      expect([value, proved, schemaAccepts(proofOf(value))]).toEqual([value, declared, declared]);
+      const proved = validateProof(proofOf(value, type)).issues.length === 0;
+      expect([value, type, proved, schemaAccepts(proofOf(value, type))]).toEqual([
+        value,
+        type,
+        declared,
+        declared,
+      ]);
       if (declared) accepted += 1;
     }
     expect(accepted).toBeGreaterThan(100);
@@ -186,8 +201,27 @@ describe('the new types and strategy in a proof', () => {
 const VALUES: Record<string, unknown[]> = {
   type: ['number', 'decimal', 'boolean', 'string', 'enum', 'list', 'date', 'dateTime', 'x'],
   combine: ['sum', 'max', 'min', 'count', 'all', 'any', 'union', 'highestPriority', 'avg'],
-  values: [undefined, undefined, ['low', 'high'], ['a', 'a'], [], 'low'],
-  rounding: [undefined, undefined, { scale: 2, mode: 'up' }, { increment: '0.1', mode: 'up' }],
+  values: [
+    undefined,
+    undefined,
+    ['low', 'high'],
+    ['a', 'a'],
+    [],
+    'low',
+    ['iso:TG', 'b'],
+    [':x'],
+    ['y:'],
+    [':'],
+  ],
+  rounding: [
+    undefined,
+    undefined,
+    { scale: 2, mode: 'up' },
+    { increment: '0.1', mode: 'up' },
+    { increment: '0.05', mode: 'up' },
+    { increment: '1000', mode: 'up' },
+    { increment: '100000000000000000000', mode: 'up' },
+  ],
   unit: [undefined, undefined, 'XOF', '', ' XOF', 1],
   empty: [undefined, undefined, true, false, 'yes'],
   per: [undefined, undefined, '/items', '/items/*/lines', '/$item', 'x'],

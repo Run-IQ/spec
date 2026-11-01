@@ -160,11 +160,11 @@ describe('verifyProof: rounded values are on the step of their rounding', () => 
       [NOT_ROUNDED],
     ],
     [
-      'a multiple of 1000, as a number',
+      'a multiple of 1000 of 22 digits',
       proofOf({
-        type: 'number',
+        type: 'decimal',
         combine: 'max',
-        value: 2e21,
+        value: '2000000000000000000000',
         rounding: { increment: '1000', mode: 'down' },
       }),
       [],
