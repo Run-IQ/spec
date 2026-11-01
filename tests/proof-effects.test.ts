@@ -9,6 +9,7 @@ describe('an exception affects the decisions it produced only (I3)', () => {
     const trace: Trace = {
       output: { type: 'number', combine: 'sum', status: 'provisional', value: 0 },
       rules: [{ id: 'R', version: 1 }, { id: 'R', version: 2 }, { id: 'X' }],
+      provisional: true,
       skipped: [
         { ruleId: 'R', version: 1, output: 'value', reason: 'INACTIVE_DATE' },
         { ruleId: 'R', version: 2, output: 'value', reason: 'INHIBITED', status: 'provisional' },
@@ -111,7 +112,6 @@ describe('exceptions and the decisions they produced agree (I6)', () => {
     expect(problems(traceProof(skipped))).toEqual([
       // An excluded carrier fires nothing.
       'exception of an excluded carrier: X@1',
-      'short circuit without its carrier applied: X@1',
     ]);
   });
 

@@ -1,7 +1,8 @@
 import { citeName } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
 import { instanceKey } from './output-values.js';
-import { outranks, ruleKey, sameLevel } from './precedence.js';
+import { BEFORE_EXCEPTIONS } from './effects.js';
+import { ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { ProofSkip, UnsignedProof } from './types.js';
 
@@ -11,22 +12,27 @@ import type { ProofSkip, UnsignedProof } from './types.js';
 /** What the exceptions of a proof show of the ties settled among them. */
 export interface Ties {
   /**
-   * The exceptions (their index) of a carrier discarded by an exception precedence conflict
-   * (R15): an inhibition whose carrier is excluded `RULE_CONFLICT`. They produced nothing.
+   * The exceptions (their index) that fired nothing: those of a carrier excluded before the
+   * exceptions ran or `INHIBITED` (refused), and those of a carrier a tie discarded, excluded
+   * `RULE_CONFLICT`, whose record shows what it would have done: an inhibition naming a
+   * carrier whose exception came before (R15), or a short circuit of an output another short
+   * circuit at its stratum, precedence and priority claimed before it.
    */
   discarded: ReadonlySet<number>;
-  /** The outputs two or more short circuits claimed at the top: the output is `conflict`. */
+  /** The outputs a tie of short circuits puts in `conflict` (each item of a per output). */
   shortCircuits: ReadonlySet<string>;
   /**
-   * True when a decision belongs to a rule a discarded carrier with a precedent would have
-   * inhibited: the outputs those rules feed are `conflict`.
+   * True when a decision belongs to a rule a discarded inhibition would have reached: the
+   * outputs those rules feed are `conflict` (D-7).
    */
   reaches(entry: { ruleId: string; subject?: string }): boolean;
   /**
    * In the order of `exceptions`: `exception of an excluded carrier: id@version[ at subject]`
-   * (its carrier excluded, other than as a discarded carrier); for a discarded carrier,
-   * `exception status differs from its carrier's decision` and `discarded carrier without a
-   * precedent` (none of its affected rules is a carrier whose exception came before).
+   * (its carrier excluded before the exceptions ran or `INHIBITED`: it fired nothing); for a
+   * discarded carrier, `exception status differs from its carrier's decision`, and
+   * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
+   * id@version` (a second short circuit of an output at the same stratum, precedence and
+   * priority, its carrier not excluded `RULE_CONFLICT`).
    */
   problems: readonly string[];
 }
@@ -85,68 +91,109 @@ class Scope {
 const segmentsOf = (subject: string | undefined): string[] =>
   subject === undefined ? [] : parsePointer(subject);
 
-/** The ties the exceptions of `p` show, and the problems of its discarded carriers. */
+/** A short circuit that fired: its stratum and where its carrier stands. */
+interface Claim {
+  stratum: number;
+  standing: Standing;
+}
+
+/**
+ * The ties the exceptions of `p` show, and the problems of their carriers. A carrier excluded
+ * before the exceptions ran (`BEFORE_EXCEPTIONS`) or `INHIBITED` fired nothing. One excluded
+ * for its own computation afterwards (`SHORT_CIRCUITED`, `INVALID_PARAMS`, `DOMINATED`, a tie on
+ * its own output, any other reason) fired its exceptions first (core `ExceptionResult`).
+ */
 export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   const excluded = new Map<string, ProofSkip>();
   for (const skip of p.skipped) excluded.set(instanceKey(skip), skip);
   const discarded = new Set<number>();
+  const shortCircuits = new Set<string>();
   const problems: string[] = [];
   const fired = new Scope();
   const tied = new Scope();
+  const claims = new Map<string, Claim[]>();
+  const tiedClaim = (output: string, claim: Claim | undefined): boolean =>
+    claim !== undefined &&
+    (claims.get(output) ?? []).some(
+      (other) => other.stratum === claim.stratum && sameLevel(other.standing, claim.standing),
+    );
   p.exceptions.forEach((exception, index) => {
     const cited = (): string => citeName(instanceKey(exception));
     const skip = excluded.get(instanceKey(exception));
-    if (skip === undefined) {
-      fired.mark(exception);
-      return;
-    }
-    if (skip.reason !== 'RULE_CONFLICT' || exception.kind !== 'inhibit') {
+    const standing = standings.get(ruleKey(exception));
+    const claim = standing === undefined ? undefined : { stratum: exception.stratum, standing };
+    const { output } = exception;
+    if (skip !== undefined && (skip.reason === 'INHIBITED' || BEFORE_EXCEPTIONS.has(skip.reason))) {
       problems.push(`exception of an excluded carrier: ${cited()}`);
+      discarded.add(index);
       return;
     }
-    discarded.add(index);
-    if (exception.status !== skip.status) {
-      problems.push(`exception status differs from its carrier's decision: ${cited()}`);
-    }
-    if (!exception.affected.some((entry) => fired.within(entry))) {
-      problems.push(`discarded carrier without a precedent: ${cited()}`);
+    const conflicted = skip?.reason === 'RULE_CONFLICT';
+    const r15 = exception.kind === 'inhibit' && exception.affected.some((e) => fired.within(e));
+    const lost =
+      exception.kind === 'shortCircuit' && output !== undefined && tiedClaim(output, claim);
+    if (conflicted && (r15 || lost)) {
+      discarded.add(index);
+      if (exception.status !== skip.status) {
+        problems.push(`exception status differs from its carrier's decision: ${cited()}`);
+      }
+      if (r15) {
+        for (const entry of exception.affected) tied.mark(entry);
+      } else if (output !== undefined) {
+        shortCircuits.add(output);
+        if (exception.affected.length > 0) {
+          problems.push(`discarded short circuit affected rules: ${cited()}`);
+        }
+      }
       return;
     }
-    for (const entry of exception.affected) tied.mark(entry);
+    fired.mark(exception);
+    if (exception.kind !== 'shortCircuit' || output === undefined || claim === undefined) return;
+    if (tiedClaim(output, claim)) {
+      problems.push(`short circuits tied without a loser excluded: ${cited()}`);
+    }
+    const list = claims.get(output);
+    if (list === undefined) claims.set(output, [claim]);
+    else list.push(claim);
   });
   return {
     discarded,
-    shortCircuits: shortCircuitTies(p, standings, discarded),
+    shortCircuits,
     reaches: (entry) => tied.covers(entry),
     problems,
   };
 }
 
-/** The outputs on which two or more short circuits stand at the top (stratum, standing). */
-function shortCircuitTies(
-  p: UnsignedProof,
-  standings: Standings,
-  discarded: ReadonlySet<number>,
-): Set<string> {
-  const tops = new Map<string, { stratum: number; standing: Standing; count: number }>();
-  p.exceptions.forEach((exception, index) => {
-    const { output } = exception;
-    if (exception.kind !== 'shortCircuit' || output === undefined || discarded.has(index)) return;
-    const standing = standings.get(ruleKey(exception));
-    if (standing === undefined) return;
-    const top = tops.get(output);
-    const { stratum } = exception;
-    if (
-      top === undefined ||
-      stratum < top.stratum ||
-      (stratum === top.stratum && outranks(standing, top.standing))
-    ) {
-      tops.set(output, { stratum, standing, count: 1 });
-    } else if (stratum === top.stratum && sameLevel(standing, top.standing)) {
-      top.count++;
+/**
+ * Internal: the statuses no source in the proof explains (D-7), each reported once:
+ * - `provisional status without a source in the proof`: a step, exclusion, exception, output
+ *   or item is `provisional`, though no fact read has a provisional assertion
+ *   (`isProvisionalAssertion`: `proposed`, `contested` or `presumed`) and no rule has undeclared
+ *   reads. Every other way to `provisional` (an output read, a carrier, a dominant rule, the
+ *   bounds of an undetermined output) passes on a status that one of these started;
+ * - `conflict status without a tie in the proof`: one is `conflict`, though no exclusion is
+ *   `RULE_CONFLICT` (every tie `onConflict: 'first'` settles excludes its losers so).
+ */
+export function sourceProblems(p: UnsignedProof): string[] {
+  const statuses = [p.applied, p.skipped, p.exceptions, p.outputs, p.items];
+  let provisional = false;
+  let conflict = false;
+  for (const list of statuses) {
+    for (const entry of list) {
+      provisional ||= entry.status === 'provisional';
+      conflict ||= entry.status === 'conflict';
     }
-  });
-  const ties = new Set<string>();
-  for (const [output, top] of tops) if (top.count > 1) ties.add(output);
-  return ties;
+  }
+  const asserted = p.factsRead.some(
+    (fact) =>
+      fact.status === 'proposed' || fact.status === 'contested' || fact.method === 'presumed',
+  );
+  const issues: string[] = [];
+  if (provisional && !asserted && p.readsUndeclared.length === 0) {
+    issues.push('provisional status without a source in the proof');
+  }
+  if (conflict && !p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT')) {
+    issues.push('conflict status without a tie in the proof');
+  }
+  return issues;
 }

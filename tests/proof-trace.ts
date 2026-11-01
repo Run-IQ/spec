@@ -31,6 +31,8 @@ export interface Trace {
   ruleSets?: Entry[];
   /** The strata, by output name: one stratum of every output unless given. */
   strata?: string[][];
+  /** True to read a fact under a provisional assertion: a source of `provisional` (D-7). */
+  provisional?: boolean;
 }
 
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
@@ -52,6 +54,14 @@ function byInstance(a: Entry, b: Entry): number {
     subject(a.subject, b.subject)
   );
 }
+
+/** A fact read under an assertion `proposed` by a person: provisional (D-7). */
+const PROPOSED: Entry = {
+  path: '/proposed',
+  method: 'human',
+  status: 'proposed',
+  assertionDigest: 'c'.repeat(64),
+};
 
 const salt = (section: string, list: Entry[]): Entry[] =>
   list.map((entry, i) => ({ ...entry, salt: unsaltedSalt(section, i) }));
@@ -98,7 +108,7 @@ export function traceProof(trace: Trace): Content {
       'exceptions',
       (trace.exceptions ?? []).map((entry) => ({ version: 1, ...skip, ...entry })),
     ),
-    factsRead: [],
+    factsRead: trace.provisional === true ? salt('factsRead', [PROPOSED]) : [],
     missingFacts: [],
     readsUndeclared: [],
   };

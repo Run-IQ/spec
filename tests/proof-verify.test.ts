@@ -158,7 +158,6 @@ describe('verifyProof: invalid, with a readable issue', () => {
     content.exceptions.push({ ...at, kind: 'inhibit', affected: [] });
     expect(verifyProof(handSealed(content)).issues).toEqual([
       'cited rule not listed: r5@1',
-      'exception of an excluded carrier: r5@1',
       'unsigned',
     ]);
   });

@@ -33,6 +33,7 @@ describe('a substitution produced every later decision of its rules (D-8, D-22)'
       rules,
       skipped: [{ ruleId: 'R', output: 'value', reason: 'DOMINATED' }],
       exceptions: [substitution()],
+      provisional: true,
     };
     expect(problems(traceProof(dominated))).toEqual([]);
     // The status check holds for each of them.
@@ -49,24 +50,97 @@ describe('a substitution produced every later decision of its rules (D-8, D-22)'
       steps: [{ ruleId: 'R', version: 2, contribution: 1, status: 'provisional' }],
       skipped: [{ ruleId: 'R', output: 'value', reason: 'INACTIVE_DATE' }],
       exceptions: [substitution('provisional')],
+      provisional: true,
     };
     trace.output = { ...trace.output, status: 'provisional' };
     expect(problems(traceProof(trace))).toEqual([]);
   });
 
-  it('refuses the exclusions core no longer emits: they are pending ERROR (D-8)', () => {
-    const old: Trace = {
-      output: { type: 'number', combine: 'sum', value: 0 },
-      rules,
-      skipped: [{ ruleId: 'R', output: 'value', reason: 'INVALID_PARAMS' }],
-      exceptions: [substitution()],
-    };
-    expect(problems(traceProof(old))).toEqual(['exclusion core no longer emits: R@1']);
-    for (const reason of ['DSL_ERROR', 'CONDITION_TIMEOUT', 'OUTPUT_MISMATCH', 'INVALID_RULE']) {
-      const skipped = [{ ruleId: 'R', output: 'value', reason }];
-      expect(
-        problems(traceProof({ ...old, rules: [{ id: 'R' }], skipped, exceptions: [] })),
-      ).toEqual(['exclusion core no longer emits: R@1']);
+  it("nor an instance core's filter excluded before (CONDITION_FALSE, …)", () => {
+    for (const reason of ['CONDITION_FALSE', 'DSL_ERROR', 'CONDITION_TIMEOUT', 'DSL_NOT_FOUND']) {
+      const trace: Trace = {
+        output: {
+          type: 'number',
+          combine: 'sum',
+          status: 'provisional',
+          value: 1,
+          contributors: ['R'],
+        },
+        rules,
+        steps: [{ ruleId: 'R', subject: '/e/@b', contribution: 1, status: 'provisional' }],
+        skipped: [{ ruleId: 'R', subject: '/e/@a', output: 'value', reason }],
+        exceptions: [substitution('provisional')],
+        provisional: true,
+      };
+      expect(problems(traceProof(trace))).toEqual([]);
+    }
+  });
+
+  it('a reason D-8 left to plugins, or unknown, is an exclusion of its own evaluation', () => {
+    for (const reason of ['INVALID_PARAMS', 'OUTPUT_MISMATCH', 'CHECKSUM_MISMATCH', 'FUTURE']) {
+      const trace: Trace = {
+        output: { type: 'number', combine: 'sum', value: 0 },
+        rules,
+        skipped: [{ ruleId: 'R', output: 'value', reason }],
+        exceptions: [substitution()],
+      };
+      expect(problems(traceProof(trace))).toEqual([]);
+      const alone = { ...trace, rules: [{ id: 'R' }], exceptions: [] };
+      expect(problems(traceProof(alone))).toEqual([]);
+    }
+  });
+});
+
+describe('a carrier excluded after it fired keeps its exceptions (core ExceptionResult)', () => {
+  /** Y short-circuits `value`; X, its rule short-circuited there, still inhibits T. */
+  const carrier = (reason: string): Trace => ({
+    output: { type: 'number', combine: 'sum', value: 9, contributors: ['Y'] },
+    rules: [{ id: 'T' }, { id: 'X', priority: 1 }, { id: 'Y', priority: 9 }],
+    steps: [{ ruleId: 'Y', contribution: 9 }],
+    skipped: [
+      { ruleId: 'T', output: 'value', reason: 'INHIBITED' },
+      { ruleId: 'X', output: 'value', reason },
+    ],
+    exceptions: [
+      { ruleId: 'Y', kind: 'shortCircuit', output: 'value', affected: [{ ruleId: 'X' }] },
+      { ruleId: 'X', kind: 'inhibit', affected: [{ ruleId: 'T' }] },
+    ],
+  });
+
+  it('SHORT_CIRCUITED, INVALID_PARAMS, DOMINATED: it had fired', () => {
+    expect(problems(traceProof(carrier('SHORT_CIRCUITED')))).toEqual([]);
+    const own = carrier('INVALID_PARAMS');
+    own.exceptions = [{ ruleId: 'X', kind: 'inhibit', affected: [{ ruleId: 'T' }] }];
+    own.steps = [];
+    own.output = { type: 'number', combine: 'sum', value: 0 };
+    own.rules = [{ id: 'T' }, { id: 'X' }];
+    expect(problems(traceProof(own))).toEqual([]);
+    expect(problems(traceProof({ ...own, skipped: dominated(own) }))).toEqual([]);
+  });
+
+  /** The skips of `trace`, X now `DOMINATED`. */
+  function dominated(trace: Trace): NonNullable<Trace['skipped']> {
+    return (trace.skipped ?? []).map((skip) =>
+      skip.ruleId === 'X' ? { ...skip, reason: 'DOMINATED' } : skip,
+    );
+  }
+
+  it('refuses one excluded before the exceptions ran, or inhibited: it fired nothing', () => {
+    for (const reason of ['INHIBITED', 'CONDITION_FALSE', 'INACTIVE_DATE']) {
+      const trace: Trace = {
+        output: { type: 'number', combine: 'sum', value: 0 },
+        rules: [{ id: 'T' }, { id: 'X' }],
+        skipped: [
+          { ruleId: 'T', output: 'value', reason: 'INHIBITED' },
+          { ruleId: 'X', output: 'value', reason },
+        ],
+        exceptions: [{ ruleId: 'X', kind: 'inhibit', affected: [{ ruleId: 'T' }] }],
+      };
+      const expected = ['exception of an excluded carrier: X@1'];
+      // Its inhibition is then not counted.
+      expected.push('inhibited without an exception: T@1');
+      if (reason === 'INHIBITED') expected.push('inhibited without an exception: X@1');
+      expect(problems(traceProof(trace))).toEqual(expected);
     }
   });
 });
@@ -100,26 +174,56 @@ describe('a conflict on an output from a tie the proof shows (D-7)', () => {
   const STRONGER = 'output status stronger than its causes: value';
   const TIE = 'output status weaker than its tie: value';
 
-  /** X and X2 short-circuit `value`; X wins, X2 at `priority`. */
-  const shortCircuits = (status: string, priority = 0): Trace => ({
+  /** X and X2 (priority 5) short-circuit `value`: core keeps X, excludes X2 RULE_CONFLICT. */
+  const shortCircuits = (status: string, recorded = true, priority = 5): Trace => ({
     output: { type: 'number', combine: 'sum', value: 9, contributors: ['X'], status },
-    rules: [{ id: 'X' }, { id: 'X2', priority }],
+    rules: [{ id: 'A' }, { id: 'X', priority: 5 }, { id: 'X2', priority }],
     steps: [{ ruleId: 'X', contribution: 9 }],
+    skipped: [
+      { ruleId: 'A', output: 'value', reason: 'SHORT_CIRCUITED' },
+      { ruleId: 'X2', reason: 'RULE_CONFLICT', status: 'conflict' },
+    ],
     exceptions: [
-      { ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [] },
-      { ruleId: 'X2', kind: 'shortCircuit', output: 'value', affected: [] },
+      { ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [{ ruleId: 'A' }] },
+      ...(recorded
+        ? [
+            {
+              ruleId: 'X2',
+              kind: 'shortCircuit',
+              output: 'value',
+              affected: [],
+              status: 'conflict',
+            },
+          ]
+        : []),
     ],
   });
 
-  it('two short circuits of an output at the top: the output, not the step, in conflict', () => {
+  it('a short circuit tie: the loser excluded and recorded, the output in conflict', () => {
     expect(problems(traceProof(shortCircuits('conflict')))).toEqual([]);
     expect(problems(traceProof(shortCircuits('determined')))).toEqual([TIE]);
+    // The tie must be shown: the loser's short circuit recorded.
+    expect(problems(traceProof(shortCircuits('conflict', false)))).toEqual([STRONGER]);
   });
 
-  it('refuses a conflict no tie causes', () => {
-    const below = shortCircuits('conflict', -1);
-    expect(problems(traceProof(below))).toEqual([STRONGER]);
-    expect(problems(traceProof(shortCircuits('determined', -1)))).toEqual([]);
+  it('refuses a short circuit tie without its loser excluded', () => {
+    const fired: Trace = {
+      ...shortCircuits('conflict'),
+      skipped: [{ ruleId: 'A', output: 'value', reason: 'SHORT_CIRCUITED' }],
+    };
+    fired.exceptions = (fired.exceptions ?? []).map((e) =>
+      e.ruleId === 'X2' ? { ...e, status: 'determined' } : e,
+    );
+    expect(problems(traceProof(fired))).toEqual([
+      STRONGER,
+      'short circuits tied without a loser excluded: X2@1',
+      'conflict status without a tie in the proof',
+    ]);
+  });
+
+  it('refuses a conflict no tie causes: a loser of lower priority is no tie', () => {
+    // X2 fired, its claim not taken, and lost a later tie of its own: no tie on `value`.
+    expect(problems(traceProof(shortCircuits('conflict', true, 4)))).toEqual([STRONGER]);
   });
 
   /** P fired (inhibiting Q); C, processed after it, would inhibit P and T: it is discarded. */
@@ -142,10 +246,11 @@ describe('a conflict on an output from a tie the proof shows (D-7)', () => {
     expect(problems(traceProof(discarded('determined')))).toEqual([TIE]);
   });
 
-  it('refuses a discarded carrier without a precedent it would have inhibited', () => {
+  it('without a precedent, a carrier excluded RULE_CONFLICT had fired: checked so', () => {
     expect(problems(traceProof(discarded('conflict', [{ ruleId: 'T' }])))).toEqual([
       STRONGER,
-      'discarded carrier without a precedent: C@1',
+      'inhibited rule applied: T@1',
+      'affected rule not inhibited by C@1: T',
     ]);
     const trace = discarded('conflict');
     trace.exceptions = (trace.exceptions ?? []).map((e) =>
@@ -155,14 +260,44 @@ describe('a conflict on an output from a tie the proof shows (D-7)', () => {
       "exception status differs from its carrier's decision: C@1",
     ]);
   });
+});
 
-  it('refuses an exception of a carrier excluded otherwise', () => {
-    const trace: Trace = {
-      output: { type: 'number', combine: 'sum', value: 0 },
-      rules: [{ id: 'X' }],
-      skipped: [{ ruleId: 'X', reason: 'CONDITION_FALSE' }],
-      exceptions: [{ ruleId: 'X', kind: 'inhibit', affected: [] }],
+describe('a status needs a source somewhere in the proof (D-7)', () => {
+  const sum = (status: string): Trace => ({
+    output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'], status },
+    rules: [{ id: 'A' }],
+    steps: [{ ruleId: 'A', contribution: 1, status }],
+  });
+
+  it('provisional: a provisional assertion or undeclared reads', () => {
+    expect(problems(traceProof(sum('provisional')))).toEqual([
+      'provisional status without a source in the proof',
+    ]);
+    expect(problems(traceProof({ ...sum('provisional'), provisional: true }))).toEqual([]);
+    const undeclared = traceProof(sum('provisional'));
+    undeclared.readsUndeclared = [{ ruleId: 'A', version: 1, salt: 'a'.repeat(32) }];
+    expect(problems(undeclared)).toEqual([]);
+    // An unsettled output read before passes on a status; it starts none.
+    const earlier: Trace = {
+      ...sum('provisional'),
+      outputs: [{ name: 'u', type: 'number', combine: 'sum', status: 'undetermined' }].map((o) => ({
+        ...o,
+        contributors: [],
+        pending: ['B'],
+      })),
+      rules: [{ id: 'A' }, { id: 'B' }],
+      steps: [{ ruleId: 'A', contribution: 1, status: 'provisional', stratum: 1 }],
+      pending: [{ ruleId: 'B', output: 'u' }],
+      strata: [['u'], ['value']],
     };
-    expect(problems(traceProof(trace))).toEqual(['exception of an excluded carrier: X@1']);
+    expect(problems(traceProof(earlier))).toEqual([
+      'provisional status without a source in the proof',
+    ]);
+  });
+
+  it('conflict: a tie settled somewhere', () => {
+    expect(problems(traceProof(sum('conflict')))).toEqual([
+      'conflict status without a tie in the proof',
+    ]);
   });
 });

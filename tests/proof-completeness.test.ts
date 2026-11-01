@@ -193,9 +193,10 @@ describe('exceptions (D-7): the decisions they affect are at least as strong', (
   });
 
   it('an exception at a subject affects the decisions under it only', () => {
-    const at = (subject: string, status = 'conflict'): Content =>
+    const at = (subject: string, status = 'provisional'): Content =>
       traceProof({
-        output: { type: 'number', combine: 'sum', value: 0, status: 'conflict' },
+        output: { type: 'number', combine: 'sum', value: 0, status: 'provisional' },
+        provisional: true,
         rules: [{ id: 'A' }, { id: 'X' }],
         skipped: [{ ruleId: 'A', subject: '/e/@1', output: 'value', reason: 'INHIBITED', status }],
         exceptions: [
@@ -203,7 +204,7 @@ describe('exceptions (D-7): the decisions they affect are at least as strong', (
             ruleId: 'X',
             kind: 'inhibit',
             affected: [{ ruleId: 'A', subject }],
-            status: 'conflict',
+            status: 'provisional',
           },
         ],
       });
@@ -213,7 +214,7 @@ describe('exceptions (D-7): the decisions they affect are at least as strong', (
       'affected rule not inhibited by X@1: A at /e/@2',
       'inhibited without an exception: A@1 at /e/@1',
     ]);
-    expect(problems(at('/e', 'provisional'))).toEqual([
+    expect(problems(at('/e', 'determined'))).toEqual([
       'output status stronger than its causes: value',
       'decision weaker than the exception that affected it: A@1 at /e/@1',
     ]);

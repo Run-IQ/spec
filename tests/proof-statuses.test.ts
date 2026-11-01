@@ -29,7 +29,7 @@ describe('statuses of contributions and candidates (pre-flight C1, C2)', () => {
       subject,
       output: 'kids',
       reason: 'DOMINATED',
-      status: 'conflict',
+      status: 'provisional',
       stratum: 0,
     });
     const skipped = entries('skipped');

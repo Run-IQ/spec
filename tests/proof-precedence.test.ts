@@ -285,18 +285,21 @@ describe('a status is the strongest of its causes, never stronger (M1, D-7)', ()
     output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'], status },
     rules: [{ id: 'A' }],
     steps: [{ ruleId: 'A', contribution: 1, status: stepStatus }],
+    provisional: true,
   });
 
   it('refuses an output stronger than its contributions and candidates', () => {
     expect(problems(traceProof(sum('provisional', 'provisional')))).toEqual([]);
-    for (const status of ['provisional', 'conflict']) {
-      expect(problems(traceProof(sum(status, 'determined')))).toEqual([
-        'output status stronger than its causes: value',
-      ]);
-    }
-    expect(problems(traceProof(sum('conflict', 'provisional')))).toEqual([
+    expect(problems(traceProof(sum('provisional', 'determined')))).toEqual([
       'output status stronger than its causes: value',
     ]);
+    // No tie anywhere in these proofs: a conflict has no source at all.
+    for (const step of ['determined', 'provisional']) {
+      expect(problems(traceProof(sum('conflict', step)))).toEqual([
+        'output status stronger than its causes: value',
+        'conflict status without a tie in the proof',
+      ]);
+    }
   });
 
   it('an exclusion is a cause', () => {

@@ -40,9 +40,7 @@ export function undecidedRules(p: UnsignedProof): string[] {
  *   than one output (D-21: a rule has one output). The step its short circuit imposed on
  *   another output is the effect of its exception (`imposedSteps`), not one of its decisions;
  * - `tie loser not in conflict: id@version[ at subject]`: an exclusion `RULE_CONFLICT` (a tie
- *   settled by `onConflict: 'first'`) is `conflict` (D-7);
- * - `exclusion core no longer emits: id@version[ at subject]`: an exclusion for a reason D-8
- *   turned into a pending `ERROR` (`INVALID_PARAMS`, `OUTPUT_MISMATCH`, …).
+ *   settled by `onConflict: 'first'`) is `conflict` (D-7).
  */
 export function decisionProblems(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
   const issues: string[] = [];
@@ -68,29 +66,26 @@ export function decisionProblems(p: UnsignedProof, imposed: ReadonlySet<string>)
     if (skip.reason === 'RULE_CONFLICT' && skip.status !== 'conflict') {
       issues.push(`tie loser not in conflict: ${citeName(instanceKey(skip))}`);
     }
-    if (FORMER_EXCLUSIONS.has(skip.reason)) {
-      issues.push(`exclusion core no longer emits: ${citeName(instanceKey(skip))}`);
-    }
   }
   return issues;
 }
 
-/** The reasons of exclusion D-8 turned into a pending `ERROR` with that cause. */
-const FORMER_EXCLUSIONS: ReadonlySet<string> = new Set([
-  'DSL_ERROR',
-  'CONDITION_TIMEOUT',
-  'DSL_NOT_FOUND',
-  'INVALID_PARAMS',
-  'CHECKSUM_MISMATCH',
-  'INVALID_RULE',
-  'OUTPUT_MISMATCH',
-]);
-
-/** The exclusions decided before the exceptions ran: no exception produced them. */
-const BEFORE_EXCEPTIONS: ReadonlySet<string> = new Set([
+/**
+ * The exclusions decided before the exceptions ran: no exception produced them, and a carrier
+ * excluded for one fired nothing. They are those of core's filter (`RuleFilter`: dates, tags,
+ * dimensions, the condition: `CONDITION_FALSE`, and its failures `DSL_NOT_FOUND`,
+ * `CONDITION_TIMEOUT`, `DSL_ERROR`), and `NOT_REQUESTED`. Any other reason, known or not (D-6),
+ * is decided by the rule's own evaluation after the exceptions (D-8: a plugin may still give
+ * `INVALID_PARAMS`, `OUTPUT_MISMATCH`, …).
+ */
+export const BEFORE_EXCEPTIONS: ReadonlySet<string> = new Set([
   'INACTIVE_DATE',
-  'DIMENSION_MISMATCH',
   'TAG_MISMATCH',
+  'DIMENSION_MISMATCH',
+  'DSL_NOT_FOUND',
+  'CONDITION_FALSE',
+  'CONDITION_TIMEOUT',
+  'DSL_ERROR',
   'NOT_REQUESTED',
 ]);
 
