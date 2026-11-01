@@ -1,3 +1,4 @@
+import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
@@ -21,6 +22,7 @@ import type {
 } from '../src/index.js';
 import * as canonicalEntry from '../src/canonical-entry.js';
 import {
+  builtFile,
   fromHex,
   handTree,
   hashWorkOf,
@@ -564,16 +566,28 @@ describe('a fact is a whole value: every leaf at or below its pointer', () => {
     expect(verify(data).facts).toEqual({ '/data': X.data });
   });
 
-  it('a value nested 900 levels deep is rebuilt whole', () => {
-    let deep: JsonValue = 'x';
-    for (let i = 0; i < 900; i++) deep = i % 2 === 0 ? [deep, i] : { k: deep };
-    const input = proofInput({}, { a: deep });
-    const d = discloseFacts(input, SEED, ['/data/a'], []);
-    const result = verify(d, computeInputDigest(input, SEED));
-    expect(result.valid).toBe(true);
-    expect(canonicalize(result.facts['/data/a'])).toBe(canonicalize(deep));
-    expect(Object.keys(result.lists)).toHaveLength(450);
-  });
+  it('a value nested 900 levels deep is rebuilt whole on a small stack (built dist)', () => {
+    // A rebuild that recursed once a level would overflow this stack and refuse the value.
+    const dist = builtFile('index.js');
+    const script = `
+      const s = await import(${JSON.stringify(`file://${dist}`)});
+      let deep = 'x';
+      for (let i = 0; i < 900; i++) deep = i % 2 === 0 ? [deep, i] : { k: deep };
+      const seed = s.deriveInputSeed(new Uint8Array(32).fill(1), 'r1');
+      const input = { data: { a: deep }, meta: { tenantId: 't', dates: {}, tags: [],
+        dimensions: {}, context: {}, assertions: {} } };
+      const d = s.discloseFacts(input, seed, ['/data/a'], []);
+      const r = s.verifyFactDisclosure(d, s.computeInputDigest(input, seed));
+      console.log(JSON.stringify([r.valid, r.issues,
+        r.valid ? s.canonicalize(r.facts['/data/a']) === s.canonicalize(deep) : null,
+        Object.keys(r.lists).length]));`;
+    const out = execFileSync(
+      process.execPath,
+      ['--stack-size=120', '--input-type=module', '-e', script],
+      { encoding: 'utf8' },
+    );
+    expect(JSON.parse(out)).toEqual([true, [], true, 450]);
+  }, 60_000);
 
   it('keys of the prototype stay data', () => {
     // JSON.parse defines `__proto__` as an own key, as a caller's JSON input holds it.
