@@ -564,6 +564,17 @@ describe('a fact is a whole value: every leaf at or below its pointer', () => {
     expect(verify(data).facts).toEqual({ '/data': X.data });
   });
 
+  it('a value nested 900 levels deep is rebuilt whole', () => {
+    let deep: JsonValue = 'x';
+    for (let i = 0; i < 900; i++) deep = i % 2 === 0 ? [deep, i] : { k: deep };
+    const input = proofInput({}, { a: deep });
+    const d = discloseFacts(input, SEED, ['/data/a'], []);
+    const result = verify(d, computeInputDigest(input, SEED));
+    expect(result.valid).toBe(true);
+    expect(canonicalize(result.facts['/data/a'])).toBe(canonicalize(deep));
+    expect(Object.keys(result.lists)).toHaveLength(450);
+  });
+
   it('keys of the prototype stay data', () => {
     // JSON.parse defines `__proto__` as an own key, as a caller's JSON input holds it.
     const data = loose<Record<string, JsonValue>>(

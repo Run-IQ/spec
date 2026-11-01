@@ -5,7 +5,8 @@ import type { InputLeaf } from './tree.js';
 /**
  * Selective disclosure of the facts of a decision input, and proofs of absence (D-14, D-15):
  * the format `run-iq.disclosure/1`, frozen with `run-iq.proof/1`. `discloseFacts` writes one
- * (src/input/disclose.ts), `verifyFactDisclosure` checks one (src/input/verify-disclosure.ts);
+ * (src/input/disclose.ts), `verifyFactDisclosure` checks one (src/input/verify-disclosure.ts,
+ * reading it with src/input/read-disclosure.ts, rebuilding facts with src/input/rebuild-fact.ts);
  * both rest on the types and rules below.
  *
  * A disclosure shows leaves of the salted input tree, each with its index and its audit path,
@@ -26,6 +27,11 @@ import type { InputLeaf } from './tree.js';
  * `C` to its content. Its kind, its value and its `valueSalt` are never shown. Its pointer is:
  * a key of the input can be learnt from a proof about another one, so an input whose keys are
  * themselves private should use opaque keys (ids, not names).
+ *
+ * A disclosure also shows the input's leaf count (`size`, committed by the digest) and the
+ * index of every leaf it shows, neighbours included: its rank among the sorted leaves. A rank
+ * tells how many leaves sort before a pointer: the index of the neighbour after an absent
+ * pointer, for instance, can reveal the length of a list that sorts before it.
  *
  * Every conclusion holds only if the signer sorted the tree honestly: a tree is not checked to
  * be sorted by its digest, and only a replay with the input checks it (D-15). What the shown
