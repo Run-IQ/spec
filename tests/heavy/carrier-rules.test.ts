@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition } from '../../src/index.js';
 import type { RuleDefinition, RuleDefinitionInput, UnsignedProof } from '../../src/index.js';
 import { carrierRuleFindings } from '../../src/proof/carrier-rules.js';
+import { contextOf } from '../../src/proof/consistency.js';
 import { counted } from '../helpers.js';
 import { outputProof } from '../proof-builders.js';
 import { ruleA, unsaltedSalt } from '../proof-cases.js';
@@ -63,19 +64,50 @@ const definitions = new Map<string, RuleDefinition>([
   ],
 ]);
 
-/** The property reads of the decisions of `proof` the carrier checks make; none is found. */
-function readsOf(proof: UnsignedProof): number {
+/**
+ * The property reads of the decisions of `proof` and of `rules` the carrier checks make; none
+ * is found.
+ */
+function readsOf(
+  proof: UnsignedProof,
+  rules: ReadonlyMap<string, RuleDefinition> = definitions,
+): number {
   const counter = { reads: 0 };
   const watched: UnsignedProof = {
     ...proof,
     applied: proof.applied.map((step) => counted(step, counter)),
     pending: proof.pending.map((entry) => counted(entry, counter)),
   };
+  const read = new Map([...rules].map(([key, rule]) => [key, counted(rule, counter)]));
   const found: string[] = [];
-  carrierRuleFindings(watched, definitions, (message) => found.push(message));
+  carrierRuleFindings(watched, read, contextOf(proof), (message) => found.push(message));
   expect(found).toEqual([]);
   return counter.reads;
 }
+
+/**
+ * `k` carrier rules X<i>, each pending once without firing at `/e/<i>` and selecting the tag
+ * `vat` (or T by id, every other one), and `n` steps of T, tagged `vat`, at `/f/<i>`: no step
+ * is in the scope of a carrier.
+ */
+function manyCarriers(k: number, n: number): [UnsignedProof, Map<string, RuleDefinition>] {
+  const proof = hostile(n);
+  proof.pending = Array.from({ length: k }, (_, i) => ({
+    ...proof.pending[0]!,
+    ruleId: `X${pad(i)}`,
+  }));
+  proof.pending = proof.pending.map((entry, i) => ({ ...entry, subject: `/e/${pad(i)}` }));
+  const rules = new Map([['T@1', definition({ ...ruleA, id: 'T', tags: ['vat'] })]]);
+  for (let i = 0; i < k; i++) {
+    const targets = i % 2 === 0 ? { tags: ['vat'] } : { ids: ['T'] };
+    const exceptions = [{ kind: 'inhibit' as const, targets }];
+    rules.set(`X${pad(i)}@1`, definition({ ...ruleA, id: `X${pad(i)}`, exceptions }));
+  }
+  return [proof, rules];
+}
+
+/** The reads of the carrier checks on `manyCarriers(k, n)`. */
+const readsWith = (k: number, n: number): number => readsOf(...manyCarriers(k, n));
 
 describe('the carriers against their rules, on hostile proofs', () => {
   it('20 000 carrier instances and 20 000 target steps: reads linear in their number', () => {
@@ -84,5 +116,16 @@ describe('the carriers against their rules, on hostile proofs', () => {
     expect(once).toBeGreaterThan(10_000);
     expect(twice).toBeLessThanOrEqual(2 * once + 200);
     expect(twice).toBeGreaterThanOrEqual(2 * once - 200);
+  }, 600_000);
+
+  it('4 000 carrier rules and 20 000 target steps: reads linear in their sum', () => {
+    const one = readsWith(1, 20_000);
+    const thousand = readsWith(1_000, 20_000);
+    const many = readsWith(4_000, 20_000);
+    // Each carrier rule costs a few reads (a tag and an id selector differ by a few), whatever
+    // the number of carriers or steps: never one per other rule, nor one per step.
+    expect(Math.abs(many - thousand - 3 * (thousand - one))).toBeLessThanOrEqual(3_000);
+    expect(thousand - one).toBe(readsWith(1_000, 10_000) - readsWith(1, 10_000));
+    expect(thousand - one).toBeLessThan(1_000 * 100);
   }, 600_000);
 });

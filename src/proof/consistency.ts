@@ -12,6 +12,7 @@ import { append, full } from './collect.js';
 import { decisionProblems, exceptionProblems, undecidedRules } from './effects.js';
 import { exceptionOrderProblems, standingsOf } from './precedence.js';
 import type { Standings } from './precedence.js';
+import type { Context } from './combination.js';
 import {
   feedProblems,
   modelProblems,
@@ -83,6 +84,16 @@ const key = (entry: { ruleId: string; version: number }): string =>
   `${entry.ruleId}@${entry.version}`;
 
 /**
+ * Internal: what the checks of `p` share, computed once: its imposed steps (`imposedSteps`),
+ * standings (`standingsOf`) and ties (`tiesOf`). `p` must be a plain-JSON snapshot that
+ * `validateProof` accepts.
+ */
+export function contextOf(p: UnsignedProof): Context {
+  const standings = standingsOf(p);
+  return { imposed: imposedSteps(p), standings, ties: tiesOf(p, standings) };
+}
+
+/**
  * Internal: every way `p` contradicts itself, each reported once, in this order: unlisted
  * citations and rule sets (`citationProblems`), the rule sets (`ruleSetProblems`), the orders
  * and identities (`orderProblems`), the strata (`strataProblems`), rules feeding outputs of a
@@ -91,14 +102,12 @@ const key = (entry: { ruleId: string; version: number }): string =>
  * and items (`outputProblems`), `unrounded` values (`unroundedProblems`), rules with
  * undeclared reads that are determined, rules not decided (`undecidedRules`) and the statuses
  * exceptions impose (`exceptionProblems`). `p` must be a plain-JSON snapshot that `validateProof`
- * accepts.
+ * accepts; `context` is its own (`contextOf`).
  */
-export function inconsistencies(p: UnsignedProof): string[] {
+export function inconsistencies(p: UnsignedProof, context: Context = contextOf(p)): string[] {
   const listed = new Map<string, ProofOutput>();
   for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
-  const imposed = imposedSteps(p);
-  const standings = standingsOf(p);
-  const context = { imposed, standings, ties: tiesOf(p, standings) };
+  const { imposed } = context;
   const checks: (() => string[])[] = [
     () => citationProblems(p, listed),
     () => ruleSetProblems(p),

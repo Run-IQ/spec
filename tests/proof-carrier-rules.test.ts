@@ -118,6 +118,67 @@ describe('given the rules, the targets of a carrier that did not fire wait for i
     expect(issues(inhibited, [...definitions, rule('Y', inhibits(['T']))])).toEqual(['unsigned']);
   });
 
+  it('finds the target through each field a selector names, confirmed on every field', () => {
+    const target = rule('T', { tags: ['vat'], dimensions: { country: 'TG' } });
+    const applied = decided({
+      output: { type: 'number', combine: 'sum', value: 1, contributors: ['T'] },
+      steps: [{ ruleId: 'T', contribution: 1 }],
+    });
+    const selecting = [
+      { ids: ['T'] },
+      { tags: ['b', 'vat'] },
+      { outputs: ['value'] },
+      { models: [ruleA.model] },
+      { dimensions: { country: 'TG' } },
+      { ids: ['U', 'T'], tags: ['vat'], models: [ruleA.model] },
+    ];
+    for (const targets of selecting) {
+      const carrier = rule('X', { exceptions: [{ kind: 'inhibit', targets }] });
+      expect(issues(applied, [target, carrier])).toEqual(refused);
+    }
+    const missing = [
+      { ids: ['U'] },
+      { tags: ['vat'], models: ['OTHER'] },
+      { outputs: ['other'] },
+      { dimensions: { country: 'FR' } },
+      { dimensions: { country: 'TG', regime: 'A' } },
+      { tags: ['vat'], ruleSets: ['pack'] },
+    ];
+    for (const targets of missing) {
+      const carrier = rule('X', { exceptions: [{ kind: 'inhibit', targets }] });
+      expect(issues(applied, [target, carrier])).toEqual(['unsigned']);
+    }
+  });
+
+  /** Y, applied, substituted T at `/e/2`, then T applied there; X pending at `subject`. */
+  const substituted = (subject: string): Trace =>
+    decided({
+      output: { type: 'number', combine: 'sum', value: 2, contributors: ['T', 'Y'] },
+      rules: [{ id: 'T' }, { id: 'X' }, { id: 'Y' }],
+      steps: [
+        { ruleId: 'T', subject: '/e/2', contribution: 1 },
+        { ruleId: 'Y', contribution: 1 },
+      ],
+      pending: [{ ...root, subject }],
+      exceptions: [
+        { ruleId: 'Y', kind: 'substitute', affected: [{ ruleId: 'T', subject: '/e/2' }] },
+      ],
+    });
+  const substitutes = rule('Y', {
+    exceptions: [{ kind: 'substitute', targets: { ids: ['T'] }, params: {} }],
+  });
+
+  it('refuses a target substituted by another: a substitution does not decide it', () => {
+    expect(issues(substituted('/e/2'), [...definitions, substitutes])).toEqual([
+      'unsigned',
+      'target decided as if its carrier were not pending: T@1 at /e/2',
+    ]);
+  });
+
+  it('accepts a target substituted by another outside the waiting scope', () => {
+    expect(issues(substituted('/e/1'), [...definitions, substitutes])).toEqual(['unsigned']);
+  });
+
   it("judges only the target instances in the carrier's scope (D-21)", () => {
     const scoped = (subject: string): Trace =>
       decided({
@@ -173,6 +234,38 @@ describe('given the rules, a carrier that fired records exactly its exceptions',
       'unsigned',
       'carrier exceptions differ from its definition: X@1',
     ]);
+  });
+});
+
+describe('given the rules, a carrier imposing its own step records exactly its exceptions', () => {
+  /** Y short-circuits `value` with its own step (imposed) and records `records`. */
+  const imposing = (records: Entry[]): Trace => ({
+    output: { type: 'number', combine: 'sum', value: 9, contributors: ['Y'] },
+    rules: [{ id: 'Y', priority: 9 }],
+    steps: [{ ruleId: 'Y', contribution: 9 }],
+    exceptions: records,
+  });
+  const definitions = [
+    rule('Y', {
+      priority: 9,
+      exceptions: [
+        { kind: 'shortCircuit', output: 'value', value: 9 },
+        { kind: 'inhibit', targets: { ids: ['Z'] } },
+      ],
+    }),
+  ];
+  const shortCircuit = { ruleId: 'Y', kind: 'shortCircuit', output: 'value', affected: [] };
+  const inhibit = { ruleId: 'Y', kind: 'inhibit', affected: [] };
+  const refused = ['unsigned', 'carrier exceptions differ from its definition: Y@1'];
+
+  it('accepts each exception recorded once', () => {
+    expect(issues(imposing([shortCircuit, inhibit]), definitions)).toEqual(['unsigned']);
+  });
+
+  it('refuses a missing or an extra record', () => {
+    expect(issues(imposing([shortCircuit]), definitions)).toEqual(refused);
+    const extra = { ruleId: 'Y', kind: 'substitute', affected: [] };
+    expect(issues(imposing([shortCircuit, inhibit, extra]), definitions)).toEqual(refused);
   });
 });
 

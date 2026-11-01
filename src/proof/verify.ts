@@ -7,7 +7,8 @@ import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
-import { inconsistencies } from './consistency.js';
+import type { Context } from './combination.js';
+import { contextOf, inconsistencies } from './consistency.js';
 import { instanceKey } from './output-values.js';
 import { contentDigest } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
@@ -104,8 +105,9 @@ function verify(p: unknown, options: unknown): ProofVerification {
   if (contentDigest(proof) !== proof.digest) {
     findings.push({ message: 'digest mismatch', invalid: true });
   }
-  for (const message of inconsistencies(proof)) findings.push({ message, invalid: true });
-  extend(findings, optionFindings(proof, options));
+  const context = contextOf(proof);
+  for (const message of inconsistencies(proof, context)) findings.push({ message, invalid: true });
+  extend(findings, optionFindings(proof, options, context));
 
   const issues = boundMessages(findings.map((finding) => finding.message));
   if (findings.some((finding) => finding.invalid)) return { status: 'invalid', issues };
@@ -118,7 +120,7 @@ function verify(p: unknown, options: unknown): ProofVerification {
  * options problem (`options could not be read: <reason>`, `options.rules could not be read:
  * <reason>`, …), never one of the proof.
  */
-function optionFindings(proof: DecisionProof, options: unknown): Finding[] {
+function optionFindings(proof: DecisionProof, options: unknown, context: Context): Finding[] {
   const unreadable = (subject: string, error: unknown): Finding[] => [
     { message: unreadableMessage(subject, error), invalid: true },
   ];
@@ -151,7 +153,7 @@ function optionFindings(proof: DecisionProof, options: unknown): Finding[] {
   }
   if (rules === undefined) return findings;
   try {
-    extend(findings, ruleFindings(proof, rules));
+    extend(findings, ruleFindings(proof, rules, context));
   } catch (error) {
     extend(findings, unreadable('options.rules', error));
   }
@@ -175,7 +177,7 @@ function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
   return [];
 }
 
-function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
+function ruleFindings(p: DecisionProof, rules: unknown, context: Context): Finding[] {
   if (!Array.isArray(rules)) return [{ message: 'rules must be an array', invalid: true }];
   const findings: Finding[] = [];
   const invalid = (message: string): void => {
@@ -245,6 +247,6 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       invalid(`fired on a rule without exceptions: ${at}`);
     }
   }
-  carrierRuleFindings(p, matched, invalid);
+  carrierRuleFindings(p, matched, context, invalid);
   return findings;
 }
