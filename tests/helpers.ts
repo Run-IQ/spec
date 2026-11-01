@@ -6,6 +6,7 @@ import { expect } from 'vitest';
 import {
   merkleRoot,
   normalizeRuleDefinition,
+  PROOF_SECTIONS,
   proofLeafHashes,
   SpecError,
   validateRuleDefinition,
@@ -15,6 +16,7 @@ import type {
   CivilCalendar,
   JsonValue,
   FactAssertion,
+  ProofCounts,
   ProofInput,
   Referential,
   RuleDefinitionInput,
@@ -374,6 +376,21 @@ export function treeDigestOf(content: object): string {
  * `content` sealed by hand, as a faulty producer would (the digest of its leaves, unchecked,
  * `treeDigestOf`): `sealProof` refuses what `verifyProof` then reports.
  */
-export function handSealed<T extends object>(content: T): T & { digest: string } {
-  return { ...content, digest: treeDigestOf(content) };
+export function handSealed<T extends object>(
+  content: T,
+): T & { counts: ProofCounts; digest: string } {
+  const counted = withCounts(content);
+  return { ...counted, digest: treeDigestOf(counted) };
+}
+
+/** `content` with the `counts` of its sections as they are (D-16), as sealing gives them. */
+export function withCounts<T extends object>(content: T): T & { counts: ProofCounts } {
+  const record = content as Record<string, unknown>;
+  const counts = Object.fromEntries(
+    PROOF_SECTIONS.map((section) => {
+      const list = record[section];
+      return [section, Array.isArray(list) ? list.length : 0];
+    }),
+  ) as ProofCounts;
+  return { ...content, counts };
 }

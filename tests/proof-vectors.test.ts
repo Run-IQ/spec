@@ -71,10 +71,11 @@ describe('the frozen proof-v1 vector (D-14, D-16), recomputed by an independent 
     const header = Object.fromEntries(
       Object.entries(PLAN.proof).filter(([key]) => !isSection(key)),
     );
-    const oldHeader = proofLeafHash({
-      s: 'header',
-      e: { ...header, inputDigest: PLAN.plan.inputDigest },
-    } as ProofLeaf);
+    // The header had no counts then (review of 9K1): proofLeafHash refuses it, by hand.
+    expect(() => proofLeafHash({ s: 'header', e: header } as unknown as ProofLeaf)).toThrow(
+      'invalid proof leaf: e.counts is required',
+    );
+    const oldHeader = leafOf({ s: 'header', e: { ...header, inputDigest: PLAN.plan.inputDigest } });
     expect(hex(oldHeader)).toBe('9552348910ee15465b77128c44bc269725da0641577d7a4a227c4160b20fbba0');
     expect(PLAN.plan.headerLeaf).toBe(hex(oldHeader));
     // Its rule had no priority (Task 9J made it required): the leaf, by node:crypto.
@@ -189,12 +190,17 @@ const saltOf = (section: string, i: number): string =>
 describe('proof-v1 rebuilt from first principles (JCS, sha256, HMAC and RFC 6962 by hand)', () => {
   it('the sealed proof: salts, leaves, root and digest', () => {
     const salted: Record<string, unknown> = { ...PLAN.proof };
+    const counts: Record<string, number> = {};
     for (const section of SECTIONS) {
       salted[section] = (PLAN.proof[section] as object[]).map((e, i) => ({
         ...e,
         salt: saltOf(section, i),
       }));
+      counts[section] = (PLAN.proof[section] as object[]).length;
     }
+    // Sealing adds the counts of the sections to the header.
+    expect(PLAN.counts).toEqual(counts);
+    salted.counts = counts;
     expect({
       rules: saltOf('rules', 0),
       outputs: saltOf('outputs', 0),
@@ -225,6 +231,24 @@ describe('proof-v1 rebuilt from first principles (JCS, sha256, HMAC and RFC 6962
         if (typeof e.redacted !== 'string') expect(e.salt).toBe(saltOf(section, i));
       });
     }
+  });
+
+  it('the values of the first round of 9K1, before the header held counts', () => {
+    expect(vector.sealed.note).toContain('before the header held counts');
+    const salted: Record<string, unknown> = { ...PLAN.proof };
+    for (const section of SECTIONS) {
+      salted[section] = (PLAN.proof[section] as object[]).map((e, i) => ({
+        ...e,
+        salt: saltOf(section, i),
+      }));
+    }
+    const leaves = firstLeaves(salted);
+    expect(hex(leaves[0]!)).toBe(PLAN.round1.headerLeaf);
+    expect(hex(referenceRoot(leaves))).toBe(PLAN.round1.merkleRoot);
+    expect(nodeProofDigest(leaves)).toBe(PLAN.round1.digest);
+    // Only the header leaf changed.
+    expect(leaves.slice(1).map(hex)).toEqual(PLAN.leaves.slice(1));
+    expect(PLAN.round1.headerLeaf).not.toBe(PLAN.leaves[0]);
   });
 
   it("the plan's values, from the reasons the vector records", () => {

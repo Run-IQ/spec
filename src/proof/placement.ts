@@ -5,6 +5,7 @@ import { roundDecimal, roundNumber } from './arithmetic.js';
 import { declarationOf, instanceKey } from './output-values.js';
 import { ruleKey as key } from './precedence.js';
 import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: where the entries of a proof sit (their stratum, the rule set of
 // the output they feed), what they name (models, undeclared reads) and their rounding. Linear in
@@ -37,9 +38,8 @@ export function strataProblems(
 ): string[] {
   const issues: string[] = [];
   const placed = new Set<string>();
-  const outputsHidden = hidden.has('outputs');
   for (const name of p.strata.flat()) {
-    if (!listed.has(name) && !outputsHidden) {
+    if (!listed.has(name) && !isLifted(hidden, LIFTS.strataOutputs)) {
       issues.push(`stratum output unknown: ${citeName(name)}`);
     }
     if (placed.has(name)) issues.push(`stratum output repeated: ${citeName(name)}`);

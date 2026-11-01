@@ -7,6 +7,7 @@ import type { Standing, Standings } from './precedence.js';
 import { firedProblems, pendingCarrierProblems } from './carriers.js';
 import { full } from './collect.js';
 import type { ProofPending, ProofSection, ProofSkip, ProofView } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
 // proof shows them (D-7, R15): they put `conflict` on outputs, not on the winners' steps.
@@ -205,7 +206,7 @@ export function tiesOf(
     fired.mark(exception);
     if (exception.kind !== 'shortCircuit' || output === undefined || claim === undefined) return;
     // The loser's exclusion `RULE_CONFLICT` may be redacted.
-    if (tiedClaim(output, claim) && !hidden.has('skipped')) {
+    if (tiedClaim(output, claim) && !isLifted(hidden, LIFTS.tieLoser)) {
       problems.push(`short circuits tied without a loser excluded: ${cited()}`);
     }
     const list = claims.get(output);
@@ -225,15 +226,19 @@ export function tiesOf(
     }
   }
   // The exceptions of a carrier that fired may be redacted.
-  for (const entry of hidden.has('exceptions') ? [] : p.pending) {
+  for (const entry of p.pending) {
     if (full(problems)) break;
-    if (entry.fired === true && !recorded.has(instanceKey(entry))) {
+    if (
+      entry.fired === true &&
+      !recorded.has(instanceKey(entry)) &&
+      !isLifted(hidden, LIFTS.pendingCarrierFired)
+    ) {
       problems.push(
         `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`,
       );
     }
   }
-  pendingCarrierProblems(p, waiting, problems, hidden.has('pending'));
+  pendingCarrierProblems(p, waiting, problems, () => isLifted(hidden, LIFTS.pendingCarrierChain));
   return {
     discarded,
     losers,
@@ -274,12 +279,16 @@ export function sourceProblems(
       fact.status === 'proposed' || fact.status === 'contested' || fact.method === 'presumed',
   );
   const issues: string[] = [];
-  const sourceHidden = hidden.has('factsRead') || hidden.has('readsUndeclared');
-  if (provisional && !asserted && p.readsUndeclared.length === 0 && !sourceHidden) {
+  if (
+    provisional &&
+    !asserted &&
+    p.readsUndeclared.length === 0 &&
+    !isLifted(hidden, LIFTS.provisionalSource)
+  ) {
     issues.push('provisional status without a source in the proof');
   }
-  const tieHidden = hidden.has('skipped');
-  if (conflict && !tieHidden && !p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT')) {
+  const tie = p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT');
+  if (conflict && !tie && !isLifted(hidden, LIFTS.conflictSource)) {
     issues.push('conflict status without a tie in the proof');
   }
   return issues;

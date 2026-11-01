@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { sealProof, validateProof, verifyProof } from '../src/index.js';
-import type { JsonValue, UnsignedProof } from '../src/index.js';
+import type { JsonValue } from '../src/index.js';
+import type { ProofView } from '../src/proof/types.js';
 import { isOnStep, numberToDecimal } from '../src/decision/decimal.js';
-import { specError } from './helpers.js';
+import { specError, withCounts } from './helpers.js';
 import { outputProof } from './proof-builders.js';
 import type { OutputPart } from './proof-builders.js';
 import { unsalted } from './proof-cases.js';
-import { treeDigestOf } from './helpers.js';
+import { handSealed } from './helpers.js';
 
 /** A proof of one output `value`, fed by `r0` with `contribution` (and `unrounded`). */
 const proofOf = (output: OutputPart, contribution?: JsonValue, unrounded?: JsonValue) =>
@@ -24,15 +25,13 @@ const FORM_ISSUES = new Set([VALUE_OFF, NOT_ROUNDED, CONTRIBUTION_OFF, CONTRIBUT
  * against their declaration; whether a value follows from its contributions is tested in
  * tests/proof-combine.test.ts.
  */
-function issuesOf(p: UnsignedProof): string[] {
-  expect(validateProof({ ...p, digest: 'c'.repeat(64) }).issues).toEqual([]);
-  return verifyProof({ ...p, digest: treeDigestOf(p) }).issues.filter((issue) =>
-    FORM_ISSUES.has(issue),
-  );
+function issuesOf(p: ProofView): string[] {
+  expect(validateProof({ ...withCounts(p), digest: 'c'.repeat(64) }).issues).toEqual([]);
+  return verifyProof(handSealed(p)).issues.filter((issue) => FORM_ISSUES.has(issue));
 }
 
 describe('verifyProof: each output value has the form its declaration gives', () => {
-  const cases: [string, UnsignedProof, string[]][] = [
+  const cases: [string, ProofView, string[]][] = [
     ['a date', proofOf({ type: 'date', combine: 'max', value: '2028-02-29' }, '2028-02-29'), []],
     [
       'an impossible date',
@@ -129,7 +128,7 @@ describe('verifyProof: each output value has the form its declaration gives', ()
 describe('verifyProof: rounded values are on the step of their rounding', () => {
   const scale2 = { scale: 2, mode: 'halfUp' as const };
   const cash = { increment: '0.05', mode: 'halfUp' as const };
-  const cases: [string, UnsignedProof, string[]][] = [
+  const cases: [string, ProofView, string[]][] = [
     [
       'a decimal on scale 2',
       proofOf({ type: 'decimal', combine: 'sum', value: '1.25', rounding: scale2 }),

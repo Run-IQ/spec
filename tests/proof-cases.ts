@@ -59,14 +59,15 @@ export function salted<T extends object>(section: string, entries: T[]): (T & { 
 
 /**
  * `content` (a proof's content, salted) as `sealProof` takes it: each entry of each section
- * without its `salt` (`UnsaltedProof`), `digest` and `signature` kept (sealing drops them).
+ * without its `salt` (`UnsaltedProof`), without `counts` (sealing adds them), `digest` and
+ * `signature` kept (sealing drops them).
  * Members are copied as property descriptors: a getter is copied, not called, so a hostile
  * member reaches `sealProof` as it is. What is not a plain array of plain objects, or holds
  * more than `MAX_JSON_VALUES` entries, is kept.
  */
 export function unsalted(content: object): UnsaltedProof {
   if (!isPlainEntry(content)) return content as unknown as UnsaltedProof;
-  const copy = withoutMember(content, '');
+  const copy = withoutMember(content, 'counts');
   for (const section of PROOF_SECTIONS) {
     const descriptor = Object.getOwnPropertyDescriptor(copy, section);
     const list: unknown = descriptor?.value;
@@ -340,16 +341,28 @@ export function baseContent(): Record<string, unknown> {
   };
 }
 
-export const BASE_PROOF: Readonly<Record<string, unknown>> = Object.freeze({
-  ...baseContent(),
-  digest: hex('d'),
-});
-
 type Proof = Record<string, unknown>;
 
-/** `BASE_PROOF` with its root members replaced by `patch`. */
+/** The `counts` of `proof`: the length of each of its sections that is a list (D-16). */
+export function countsOf(proof: Proof): Record<string, number> {
+  return Object.fromEntries(
+    PROOF_SECTIONS.map((section) => {
+      const list = proof[section];
+      return [section, Array.isArray(list) ? list.length : 0];
+    }),
+  );
+}
+
+export const BASE_PROOF: Readonly<Record<string, unknown>> = Object.freeze(proofWith({}));
+
+/**
+ * `BASE_PROOF` with its root members replaced by `patch`; `counts`, unless `patch` gives it,
+ * are those of the sections it holds then.
+ */
 export function proofWith(patch: Proof): Proof {
-  return { ...baseContent(), digest: hex('d'), ...patch };
+  const proof: Proof = { ...baseContent(), digest: hex('d'), ...patch };
+  if (!Object.hasOwn(patch, 'counts')) proof.counts = countsOf(proof);
+  return proof;
 }
 
 /** `BASE_PROOF` without its root member `key`. */
@@ -497,7 +510,7 @@ export function unsigned(): ProofView {
 }
 
 /** A decision proof none of whose entries is redacted: the tests read its entries. */
-export type PlainProof = ProofView & Pick<DecisionProof, 'digest' | 'signature'>;
+export type PlainProof = ProofView & Pick<DecisionProof, 'counts' | 'digest' | 'signature'>;
 
 export const sealed = (): PlainProof => sealProof(unsalted(unsigned())) as PlainProof;
 export const signed = (): PlainProof => signProof(sealed(), RFC_SECRET, 'executor-1') as PlainProof;

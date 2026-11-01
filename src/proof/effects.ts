@@ -15,15 +15,13 @@ import type {
   ProofStep,
   ProofView,
 } from './types.js';
+import { isLifted, liftedOnSteps, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
 // that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
 // each subject walked once in a trie.
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
-
-/** The sections whose entries decide a rule (`undecidedRules`). */
-const DECIDING: readonly ProofSection[] = ['applied', 'skipped', 'pending', 'exceptions'];
 
 /**
  * Internal: each listed rule that no entry decides (D-8: every rule ends applied, excluded or
@@ -35,7 +33,6 @@ export function undecidedRules(
   p: ProofView,
   hidden: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
-  if (DECIDING.some((section) => hidden.has(section))) return [];
   const decided = new Set<string>();
   for (const list of [p.applied, p.skipped, p.pending, p.exceptions]) {
     for (const entry of list) decided.add(ruleKey(entry));
@@ -46,7 +43,7 @@ export function undecidedRules(
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
     if (!decided.has(key)) issues.push(`rule not decided: ${citeName(key)}`);
   }
-  return issues;
+  return issues.length > 0 && isLifted(hidden, LIFTS.everyRuleDecided) ? [] : issues;
 }
 
 /**
@@ -64,6 +61,15 @@ export function decisionProblems(
   imposed: ReadonlySet<string>,
   hidden: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
+  return liftedOnSteps(hidden, (steps) => decisionsOf(p, imposed, steps), p.applied);
+}
+
+/** `decisionProblems`, the steps of `applied` being `steps`. */
+function decisionsOf(
+  p: ProofView,
+  imposed: ReadonlySet<string>,
+  steps: readonly ProofStep[],
+): string[] {
   const issues: string[] = [];
   const outputs = new Map<string, string>();
   const reported = new Set<string>();
@@ -77,7 +83,6 @@ export function decisionProblems(
       issues.push(`rule feeds two outputs: ${citeName(key)}`);
     }
   };
-  const steps = hidden.has('exceptions') ? [] : p.applied;
   for (const step of steps) {
     if (!imposed.has(imposedKey(step, step.output))) feeds(step, step.output);
   }
@@ -117,6 +122,12 @@ const VERB: Readonly<Record<ProofException['kind'], string>> = {
   substitute: 'substituted',
   shortCircuit: 'short-circuited',
 };
+
+/** The exclusions only an exception explains, and the problem of one that none reached. */
+const UNEXPLAINED: ReadonlyMap<string, string> = new Map([
+  ['INHIBITED', 'inhibited without an exception'],
+  ['SHORT_CIRCUITED', 'short-circuited without an exception'],
+]);
 
 /** The affected entries of one kind (and short-circuited output) that end at a node. */
 interface Group {
@@ -201,10 +212,9 @@ export function exceptionProblems(
   const push = (issue: string): void => {
     if (!full(issues)) issues.push(issue);
   };
-  const firedUnknown = hidden.has('skipped') || hidden.has('exceptions');
-  const producedUnknown = firedUnknown || hidden.has('applied') || hidden.has('pending');
+  const firedUnknown = (): boolean => isLifted(hidden, LIFTS.firedExceptions);
   for (const problem of ties.problems) push(problem);
-  carrierProblems(p, imposed, ties, push, hidden.has('applied'));
+  carrierProblems(p, imposed, ties, push, () => isLifted(hidden, LIFTS.shortCircuitCarrier));
   const tries = new Map<string, Node>();
   p.exceptions.forEach((exception, index) => {
     if (ties.discarded.has(index)) return;
@@ -260,28 +270,27 @@ export function exceptionProblems(
       visit(node);
     }
     const cited = (): string => citeName(instanceKey(decision));
-    if (inhibited && !firedUnknown) push(`inhibited rule applied: ${cited()}`);
+    if (inhibited && !firedUnknown()) push(`inhibited rule applied: ${cited()}`);
     // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
     // short circuit imposed is its carrier's, not a target's.
     const own = 'model' in decision && imposed.has(imposedKey(decision, decision.output));
-    if (!own && decision.stratum < latest && !firedUnknown) {
+    if (!own && decision.stratum < latest && !firedUnknown()) {
       early.push(`decision before the exception that affected it: ${cited()}`);
     }
-    if (!reached && 'status' in decision && !('model' in decision) && !hidden.has('exceptions')) {
-      if (decision.reason === 'INHIBITED') {
-        uncovered.push(`inhibited without an exception: ${cited()}`);
-      }
-      if (decision.reason === 'SHORT_CIRCUITED') {
-        uncovered.push(`short-circuited without an exception: ${cited()}`);
-      }
+    const unexplained =
+      !reached && 'status' in decision && !('model' in decision)
+        ? UNEXPLAINED.get(decision.reason)
+        : undefined;
+    if (unexplained !== undefined && !isLifted(hidden, LIFTS.exclusionException)) {
+      uncovered.push(`${unexplained}: ${cited()}`);
     }
     // A pending decision is undetermined: never weaker.
-    if (reached && 'status' in decision && rankOf(decision.status) < strongest && !firedUnknown) {
+    if (reached && 'status' in decision && rankOf(decision.status) < strongest && !firedUnknown()) {
       weaker.push(`decision weaker than the exception that affected it: ${cited()}`);
     }
   }
   const unproduced: [number, string][] = [];
-  const stack = producedUnknown ? [] : [...tries.values()];
+  const stack = [...tries.values()];
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     for (const child of node.children.values()) stack.push(child);
     for (const group of node.groups.values()) {
@@ -298,7 +307,10 @@ export function exceptionProblems(
   }
   // In the order of the exceptions, then of their affected entries.
   unproduced.sort((a, b) => a[0] - b[0]);
-  for (const [, message] of unproduced) push(message);
+  // The decision an exception produced may be redacted.
+  if (unproduced.length === 0 || !isLifted(hidden, LIFTS.affectedFound)) {
+    for (const [, message] of unproduced) push(message);
+  }
   for (const message of uncovered) push(message);
   for (const message of weaker) push(message);
   for (const message of early) push(message);
@@ -314,7 +326,7 @@ function carrierProblems(
   imposed: ReadonlySet<string>,
   ties: Ties,
   push: (issue: string) => void,
-  stepsHidden: boolean,
+  stepsHidden: () => boolean,
 ): void {
   const steps = new Map<string, ProofStep>();
   for (const step of p.applied) {
@@ -341,9 +353,8 @@ function carrierProblems(
     if (exception.kind !== 'shortCircuit' || output === undefined || carrier !== undefined) {
       return;
     }
-    if (stepsHidden) return;
     // A carrier whose claim on the output another won affected nothing (R18).
-    if (exception.affected.length > 0 || !won.has(output)) {
+    if ((exception.affected.length > 0 || !won.has(output)) && !stepsHidden()) {
       push(`short circuit without its carrier applied: ${cited}`);
     }
   });

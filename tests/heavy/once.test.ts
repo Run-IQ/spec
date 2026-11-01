@@ -27,7 +27,14 @@ import {
 } from '../../src/index.js';
 import type { DecisionProof, JsonValue, ProofInput, RuleDefinitionInput } from '../../src/index.js';
 import { lastValuesSpent, MAX_JSON_VALUES } from '../../src/values.js';
-import { BASE_RULE, countValues, HUMAN_ASSERTION, proofInput, specError } from '../helpers.js';
+import {
+  BASE_RULE,
+  countValues,
+  HUMAN_ASSERTION,
+  proofInput,
+  specError,
+  withCounts,
+} from '../helpers.js';
 import { unsaltedSalt } from '../proof-cases.js';
 import { unsalted } from '../proof-cases.js';
 import type { PlainProof } from '../proof-cases.js';
@@ -193,8 +200,9 @@ describe('a value is counted once: the spend counter', () => {
       },
     ];
     sealProof(unsalted(unsigned));
-    // The digest sealing adds is counted with the content.
-    expect(lastValuesSpent()).toBe(countValues(unsigned) + 1);
+    // The counts (the member and one per section) and the digest sealing adds are counted with
+    // the content.
+    expect(lastValuesSpent()).toBe(countValues(unsigned) + 1 + PROOF_SECTIONS.length + 1);
     const sealed = sealProof(unsalted(unsigned));
     for (const call of [() => validateProof(sealed), () => verifyProof(sealed)]) {
       call();
@@ -298,31 +306,37 @@ describe(`the boundary of ${MAX_JSON_VALUES} values is the same for every functi
     const saltsPast = `Cannot seal the proof: the salts of its ${entries} entries would take it past 10000000 values`;
     expect(specError(() => sealProof(unsalted(sealed))).message).toBe(saltsPast);
     expect(verifyProof(sealed)).toEqual({ status: 'invalid', issues: [tooLarge] });
-    // An unsigned proof of exactly 10M values cannot be sealed: its digest would be one more.
-    // Its salts are counted by sealProof, after it is read.
-    const full = unsignedProof(BASE_RULE, distinct(half), withRepeats(half, room - half + 1));
+    // An unsigned proof of exactly 10M values cannot be sealed: its counts and digest would be
+    // more. Its salts are counted by sealProof, after it is read.
+    const seal = 1 + PROOF_SECTIONS.length + 1;
+    const full = unsignedProof(BASE_RULE, distinct(half), withRepeats(half, room - half + seal));
     expect(countValues(full)).toBe(MAX_JSON_VALUES);
-    expect(validateProof({ ...full, digest: sealed.digest }).issues).toEqual([
+    expect(validateProof({ ...withCounts(full), digest: sealed.digest }).issues).toEqual([
       { path: 'applied[0].contribution', message: tooLarge },
     ]);
-    // Without its salts it fits, with its digest; its salts do not.
-    expect(countValues(unsalted(full))).toBe(MAX_JSON_VALUES - entries);
-    expect(specError(() => sealProof(unsalted(full))).message).toBe(saltsPast);
+    // Without its salts it fits, with its counts and digest; its salts do not.
+    const tight = unsignedProof(
+      BASE_RULE,
+      distinct(half),
+      withRepeats(half, room - half + entries),
+    );
+    expect(countValues(unsalted(tight))).toBe(MAX_JSON_VALUES - seal);
+    expect(specError(() => sealProof(unsalted(tight))).message).toBe(saltsPast);
     // A content past the budget by itself, without salts: the value that passes it is named.
     const over = unsignedProof(
       BASE_RULE,
       distinct(half),
-      withRepeats(half, room - half + 2 + entries),
+      withRepeats(half, room - half + seal + 1 + entries),
     );
     expect(countValues(unsalted(over))).toBe(MAX_JSON_VALUES + 1);
     expect(specError(() => sealProof(unsalted(over))).message).toBe(
       `Cannot seal the proof: ${tooLarge}`,
     );
-    // Exactly at the budget with its digest, without salts: still named by its path.
+    // Exactly at the budget with its counts and digest, without salts: still named by its path.
     const atDigest = unsignedProof(
       BASE_RULE,
       distinct(half),
-      withRepeats(half, room - half + 1 + entries),
+      withRepeats(half, room - half + seal + entries),
     );
     expect(countValues(unsalted(atDigest))).toBe(MAX_JSON_VALUES);
     expect(specError(() => sealProof(unsalted(atDigest))).message).toBe(

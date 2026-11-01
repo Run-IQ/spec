@@ -15,6 +15,7 @@ import { inStandingOrder, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { Ties } from './ties.js';
 import type { ProofSection, ProofSelection, ProofStep } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
 export interface Target {
@@ -44,9 +45,6 @@ export interface Context {
    */
   hidden: ReadonlySet<ProofSection>;
 }
-
-/** The sections whose entries the combination of a target follows from. */
-const COMBINED_SECTIONS: readonly ProofSection[] = ['rules', 'applied', 'exceptions'];
 
 /** The problem of a rule none of whose visible instances has rank 0 (`topOf`). */
 const NO_FIRST = 'no instance at rank 0: ';
@@ -295,8 +293,8 @@ export function combinationProblems(target: Target, context: Context): string[] 
       : undefined;
   // A step, the short circuit that imposed one, or the standing of a rule may be redacted: what
   // follows from all of them is not checked, what the visible ones contradict still is.
-  const partial = COMBINED_SECTIONS.some((section) => context.hidden.has(section));
-  if (!partial && !contributorsMatch(target, top)) {
+  const lifted = (): boolean => isLifted(context.hidden, LIFTS.outputValue);
+  if (!contributorsMatch(target, top) && !lifted()) {
     issues.push(`contributors differ from applied steps: ${cite()}`);
   }
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {
@@ -305,10 +303,26 @@ export function combinationProblems(target: Target, context: Context): string[] 
   if (top !== undefined) {
     append(
       issues,
-      partial ? top.problems.filter((problem) => !problem.startsWith(NO_FIRST)) : top.problems,
+      top.problems.filter((problem) => !problem.startsWith(NO_FIRST) || !lifted()),
     );
   }
-  if (target.status === 'undetermined' || partial) return issues;
+  if (target.status === 'undetermined') return issues;
+  const following = valueProblems(target, context, carrier, top);
+  return following.length > 0 && lifted() ? issues : [...issues, ...following];
+}
+
+/**
+ * The value of a settled target against what its contributions give (`combine`), and the step
+ * a selecting output takes it from.
+ */
+function valueProblems(
+  target: Target,
+  context: Context,
+  carrier: ProofStep | undefined,
+  top: Top | undefined,
+): string[] {
+  const { declaration, cite } = target;
+  const issues: string[] = [];
   const fed =
     carrier !== undefined
       ? [carrier]

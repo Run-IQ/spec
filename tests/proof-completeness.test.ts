@@ -6,6 +6,7 @@ import { outputProof, problems, withEntry, withSection } from './proof-builders.
 import { traceProof } from './proof-trace.js';
 import type { Content, Entry, OutputPart } from './proof-builders.js';
 import { unsalted } from './proof-cases.js';
+import { withCounts } from './helpers.js';
 
 /**
  * A proof of one output `value` fed by `r0`, `r1`… with `contributions` (priority `winner` for
@@ -146,7 +147,7 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
     ['null', null],
   ])('refuses a recorded priority that is %s', (_name, priority) => {
     const content = withEntry('rules', 0, { priority });
-    expect(validateProof({ ...content, digest: '0'.repeat(64) }).issues).toEqual([
+    expect(validateProof({ ...withCounts(content), digest: '0'.repeat(64) }).issues).toEqual([
       { path: 'rules[0].priority', message: 'rules[0].priority must be a finite number' },
     ]);
   });
@@ -164,8 +165,9 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
     content.rules[0]!.priority = 7;
     content.rules[1]!.priority = -3;
     // The tree digest of the content (D-16), by an independent Python implementation of JCS
-    // and of the proof tree (refrozen in Task 9K1, from the sha256 of the canonical text).
-    const FROZEN = '72d3eb51fa1a0320b64d25ba952d0ed6350a88d3f06efa9b13ae3d0ce8ac7ab8';
+    // and of the proof tree (refrozen in Task 9K1, from the sha256 of the canonical text; again
+    // in its review, the header committing to the counts of the sections).
+    const FROZEN = '02a1cd05df7d9be2535e282ba7332cc7f46b600b6555b796286e281fb39fa049';
     expect(sealProof(unsalted(content)).digest).toBe(FROZEN);
     content.rules[1]!.priority = -4;
     expect(sealProof(unsalted(content)).digest).not.toBe(FROZEN);
@@ -182,7 +184,7 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
 
   it('refuses a rule without its priority', () => {
     const content = withEntry('rules', 0, { priority: undefined });
-    expect(validateProof({ ...content, digest: '0'.repeat(64) }).issues).toEqual([
+    expect(validateProof({ ...withCounts(content), digest: '0'.repeat(64) }).issues).toEqual([
       { path: 'rules[0].priority', message: 'rules[0].priority is required' },
     ]);
   });

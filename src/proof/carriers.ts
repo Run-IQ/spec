@@ -126,7 +126,7 @@ export function pendingCarrierProblems(
   p: ProofView,
   waiting: ReadonlyMap<string, ProofPending>,
   problems: string[],
-  carriersHidden = false,
+  carriersHidden: () => boolean = () => false,
 ): void {
   const holds = new Map<ProofPending, Hold | 'open'>();
   const follow = (start: ProofPending): void => {
@@ -165,10 +165,14 @@ export function pendingCarrierProblems(
     if (!holds.has(entry)) follow(entry);
     const hold = holds.get(entry);
     const at = citeName(instanceKey(entry));
-    if (carriersHidden) {
-      // The carrier or the root may be the redacted entry.
-    } else if (hold === 'none') problems.push(`pending carrier without a pending carrier: ${at}`);
-    else if (hold === 'rootless') problems.push(`pending carrier without a root: ${at}`);
+    const problem =
+      hold === 'none'
+        ? `pending carrier without a pending carrier: ${at}`
+        : hold === 'rootless'
+          ? `pending carrier without a root: ${at}`
+          : undefined;
+    // The carrier or the root may be the redacted entry.
+    if (problem !== undefined && !carriersHidden()) problems.push(problem);
     const carrier =
       entry.carrier === undefined ? undefined : waiting.get(instanceKey(entry.carrier));
     if (carrier === undefined) continue;

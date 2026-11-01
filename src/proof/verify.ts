@@ -9,6 +9,7 @@ import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
 import type { Context } from './combination.js';
 import { contextOf, inconsistencies, redactionNotices } from './consistency.js';
+import { isLifted, liftedChecks, LIFTS } from './lifts.js';
 import { instanceKey } from './output-values.js';
 import { proofView } from './redact.js';
 import type { Redactions } from './redact.js';
@@ -133,14 +134,23 @@ function verify(p: unknown, options: unknown): ProofVerification {
     }
   }
   extend(findings, optionFindings(view, proof, options, context, redactions));
+  const lifted = liftedChecks(redactions.hidden);
+  for (const { check, redacted } of lifted) {
+    const message = `check lifted: ${check} (${redacted.join(', ')} redacted)`;
+    findings.push({ message, level: 'notice' });
+  }
 
   const issues = boundMessages(findings.map((finding) => finding.message));
-  const status = findings.some((finding) => finding.level === 'invalid')
-    ? 'invalid'
-    : findings.some((finding) => finding.level === 'warning')
-      ? 'consistent'
-      : 'authentic';
-  return redactions.count > 0 ? { status, issues, redacted: redactions.count } : { status, issues };
+  const trusted = !findings.some((finding) => finding.level === 'warning');
+  if (findings.some((finding) => finding.level === 'invalid')) {
+    return redactions.count > 0
+      ? { status: 'invalid', issues, redacted: redactions.count, lifted }
+      : { status: 'invalid', issues };
+  }
+  if (redactions.count === 0) return { status: trusted ? 'authentic' : 'consistent', issues };
+  // What a redacted entry hides is never checked: never the full verdict (D-16).
+  const status = trusted ? 'authentic-redacted' : 'consistent-redacted';
+  return { status, issues, redacted: redactions.count, lifted };
 }
 
 /**
@@ -277,7 +287,7 @@ function ruleFindings(
   const uncited = [...given.keys()].filter((key) => !cited.has(key));
   if (hiddenRules === 0) {
     for (const key of uncited) invalid(`unexpected rule: ${citeName(key)}`);
-  } else {
+  } else if (isLifted(redactions.hidden, LIFTS.givenRules)) {
     const plural = hiddenRules === 1 ? 'rule' : 'rules';
     findings.push({
       message: `rules check incomplete: ${hiddenRules} redacted ${plural}`,

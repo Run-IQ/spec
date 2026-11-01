@@ -7,6 +7,7 @@ import { instanceKey } from './output-values.js';
 import { inStandingOrder, outranks, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { ProofPending, ProofSection, ProofStep } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: what an output or item owes its trace beyond its value: its
 // completeness (D-7, the table of Task 9M2), the order of its pending rules (D-5), the ranks of
@@ -14,9 +15,6 @@ import type { ProofPending, ProofSection, ProofStep } from './types.js';
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
 const CONFLICT = rankOf('conflict');
-
-/** The sections whose entries are the causes of a status (`causeProblems`). */
-const CAUSE_SECTIONS: readonly ProofSection[] = ['rules', 'applied', 'skipped', 'exceptions'];
 
 /** What feeds one output or item: its steps, its pending rules, its strongest exclusion. */
 export interface Feed {
@@ -93,13 +91,13 @@ export function completenessProblems(
 ): string[] {
   const byTrace = undeterminedByTrace(target, feed, standings);
   if (target.status === 'undetermined') {
-    if (byTrace || hidden.has('pending')) return [];
+    if (byTrace || isLifted(hidden, LIFTS.undeterminedCause)) return [];
     return [`undetermined output without a cause: ${target.cite()}`];
   }
   // An `all` no rule reached is reported by `combinationProblems`.
   const pending = feed.pending.length > 0;
-  if (hidden.has('applied') || hidden.has('rules')) return [];
-  return byTrace && pending ? [`settled output with pending rules: ${target.cite()}`] : [];
+  if (!byTrace || !pending || isLifted(hidden, LIFTS.settledPending)) return [];
+  return [`settled output with pending rules: ${target.cite()}`];
 }
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
@@ -153,7 +151,10 @@ export function rankProblems(
       if (step.rank !== undefined) issues.push(`rank on a step that does not compete: ${cited()}`);
     } else if (step.rank === undefined) {
       issues.push(`rank missing: ${cited()}`);
-    } else if (step.rank >= (instances.get(ruleKey(step)) ?? 0) && !hidden.has('applied')) {
+    } else if (
+      step.rank >= (instances.get(ruleKey(step)) ?? 0) &&
+      !isLifted(hidden, LIFTS.rankRange)
+    ) {
       issues.push(`rank out of range: ${cited()}`);
     }
   }
@@ -187,8 +188,8 @@ export function causeProblems(
   const tie = feed.tie ? CONFLICT : -1;
   if (tie > rank) issues.push(`output status weaker than its tie: ${target.cite()}`);
   const settled = target.status !== 'undetermined';
-  const partial = CAUSE_SECTIONS.some((section) => hidden.has(section));
-  if (settled && !partial && rank > Math.max(0, steps, feed.candidates, tie)) {
+  const stronger = settled && rank > Math.max(0, steps, feed.candidates, tie);
+  if (stronger && !isLifted(hidden, LIFTS.causes)) {
     issues.push(`output status stronger than its causes: ${target.cite()}`);
   }
   return issues;

@@ -10,6 +10,7 @@ import { imposedKey, instanceKey } from './output-values.js';
 import { ruleKey } from './precedence.js';
 import { Scope, stopsCarrier } from './ties.js';
 import type { ProofPending, ProofSkip, ProofStep, ProofView } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the carriers of a proof against the rule definitions `verifyProof`
 // was given (`rules`): which rules each targets (`matchesSelector`, as core resolves targets
@@ -162,8 +163,11 @@ export function carrierRuleFindings(
     if (!selected) invalid(`carrier does not select its target: ${citeName(instanceKey(entry))}`);
   }
   waitingTargets(p, definitions, context.imposed, invalid);
-  if (context.hidden.has('skipped') || context.hidden.has('exceptions')) return;
-  recordedExceptions(p, definitions, context.ties.losers, invalid);
+  // The exception records of a carrier, or its exclusion, may be redacted.
+  const records: string[] = [];
+  recordedExceptions(p, definitions, context.ties.losers, (message) => records.push(message));
+  if (records.length > 0 && isLifted(context.hidden, LIFTS.carrierRecords)) return;
+  for (const message of records) invalid(message);
 }
 
 /**

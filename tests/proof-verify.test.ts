@@ -51,6 +51,13 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it('a rule removed from the proof after sealing', () => {
     const proof = signed();
     proof.rules.pop();
+    // The header commits to the number of rules (D-16).
+    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
+      status: 'invalid',
+      issues: ['counts.rules is 2, rules has 1 entry'],
+    });
+    // Its count changed too: the digest no longer matches.
+    proof.counts.rules = 1;
     expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
       status: 'invalid',
       issues: ['digest mismatch', 'cited rule not listed: r2@2', 'unexpected rule: r2@2'],

@@ -4,6 +4,7 @@ import type { JsonValue } from '../canonical.js';
 import { newSpecError, unreadableMessage } from '../errors.js';
 import { PROOF_SECTIONS } from './types.js';
 import type {
+  ProofCounts,
   DecisionProof,
   ProofInput,
   ProofView,
@@ -170,7 +171,11 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
-  return { ...salted, digest: treeDigest(salted) };
+  const counts = Object.fromEntries(
+    PROOF_SECTIONS.map((section) => [section, salted[section].length]),
+  ) as ProofCounts;
+  const content = { ...salted, counts };
+  return { ...content, digest: treeDigest(content) };
 }
 
 /**

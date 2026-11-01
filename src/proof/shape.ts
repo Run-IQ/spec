@@ -525,7 +525,14 @@ export const SECTION_ENTRY: Readonly<Record<ProofSection, Check>> = entryChecks(
 const UNSALTED_ENTRY = entryChecks(unsalted);
 
 /** The fields of the header (D-16): every field but the ten sections, `digest`, `signature`. */
-const HEADER_FIELDS: Readonly<Record<string, Check>> = {
+/** `counts`: the number of entries of each section, each a safe integer from 0. */
+const COUNTS: Shape = {
+  summary: `{ ${PROOF_SECTIONS.join(', ')} }`,
+  fields: Object.fromEntries(PROOF_SECTIONS.map((section) => [section, stratum])),
+};
+
+/** The fields of the header of a proof before sealing (`UnsaltedProof`): without `counts`. */
+const UNSALTED_HEADER_FIELDS: Readonly<Record<string, Check>> = {
   format: proofFormat,
   requestId: nonEmptyString,
   evaluatedAt,
@@ -538,6 +545,11 @@ const HEADER_FIELDS: Readonly<Record<string, Check>> = {
   strata: listOf(listOf(outputName)),
   requested: listOf(outputName, 'absent requests every output'),
   supersedes: objectOf(SUPERSEDES),
+};
+
+const HEADER_FIELDS: Readonly<Record<string, Check>> = {
+  ...UNSALTED_HEADER_FIELDS,
+  counts: objectOf(COUNTS),
 };
 
 /** The section fields: each a list of entries checked by `entries`. */
@@ -573,7 +585,7 @@ export const UNSIGNED_PROOF: Shape = {
 /** Internal: the content `sealProof` seals: entries without `salt`, none redacted. */
 export const UNSALTED_PROOF: Shape = {
   summary: '',
-  fields: { ...HEADER_FIELDS, ...sectionFields(UNSALTED_ENTRY) },
+  fields: { ...UNSALTED_HEADER_FIELDS, ...sectionFields(UNSALTED_ENTRY) },
   optional: OPTIONAL_HEADER,
   gate: formatGate,
 };

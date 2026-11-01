@@ -6,24 +6,23 @@ import {
   valueMatchesOutputType,
   verifyProof,
 } from '../src/index.js';
-import type { JsonValue, UnsignedProof } from '../src/index.js';
+import type { JsonValue } from '../src/index.js';
+import type { ProofView } from '../src/proof/types.js';
 import { outputProof } from './proof-builders.js';
 import type { OutputPart } from './proof-builders.js';
 import { isOnStep, numberToDecimal, stepWorkDone } from '../src/decision/decimal.js';
 import { unsalted } from './proof-cases.js';
-import { treeDigestOf } from './helpers.js';
+import { handSealed, withCounts } from './helpers.js';
 
 const LONE = String.fromCharCode(0xd800);
 
 /** A proof of one output `value`, fed by one rule per contribution. */
-const proofOf = (output: OutputPart, contributions: JsonValue[] = []): UnsignedProof =>
+const proofOf = (output: OutputPart, contributions: JsonValue[] = []): ProofView =>
   outputProof(output, contributions);
 
 /** What `verifyProof` reports on `p` sealed by hand, past the digest and the signature. */
-function inconsistencies(p: UnsignedProof): string[] {
-  return verifyProof({ ...p, digest: treeDigestOf(p) }).issues.filter(
-    (issue) => issue !== 'unsigned',
-  );
+function inconsistencies(p: ProofView): string[] {
+  return verifyProof(handSealed(p)).issues.filter((issue) => issue !== 'unsigned');
 }
 
 describe('an increment has at most 20 digits before the point, as after it', () => {
@@ -48,8 +47,12 @@ describe('an increment has at most 20 digits before the point, as after it', () 
   it('the proof validator', () => {
     const output = (increment: string) =>
       proofOf({ type: 'decimal', combine: 'sum', value: '0', rounding: { increment, mode: 'up' } });
-    expect(validateProof({ ...output(largest), digest: 'c'.repeat(64) }).issues).toEqual([]);
-    expect(validateProof({ ...output(tooLong), digest: 'c'.repeat(64) }).issues).toEqual([
+    expect(
+      validateProof({ ...withCounts(output(largest)), digest: 'c'.repeat(64) }).issues,
+    ).toEqual([]);
+    expect(
+      validateProof({ ...withCounts(output(tooLong)), digest: 'c'.repeat(64) }).issues,
+    ).toEqual([
       {
         path: 'outputs[0].rounding.increment',
         message: 'outputs[0].rounding.increment must have at most 20 digits before the point',
@@ -105,7 +108,7 @@ describe('a number output rounds to a scale only (a satisfiable rounding)', () =
       value: null,
       rounding: { increment, mode: 'up' },
     });
-    expect(validateProof({ ...proof, digest: 'c'.repeat(64) }).issues).toEqual([
+    expect(validateProof({ ...withCounts(proof), digest: 'c'.repeat(64) }).issues).toEqual([
       {
         path: 'outputs[0].rounding.increment',
         message:

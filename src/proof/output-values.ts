@@ -5,6 +5,7 @@ import type { OutputDeclaration } from '../decision/output.js';
 import type { JsonValue } from '../canonical.js';
 import { extend } from './collect.js';
 import type { ProofBounds, ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 /** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
 export function declarationOf(output: ProofOutput): OutputDeclaration {
@@ -114,7 +115,6 @@ export function offDeclarationValues(
   hidden: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
   const imposed = imposedSteps(p);
-  const imposedUnknown = hidden.has('exceptions');
   const issues: string[] = [];
   for (const { output, held, steps } of fedOutputs(p)) {
     const declaration = declarationOf(output);
@@ -129,7 +129,8 @@ export function offDeclarationValues(
       const form = (value: JsonValue): boolean =>
         asValue
           ? hasForm(value, declaration)
-          : typeof value === 'boolean' || (imposedUnknown && hasForm(value, declaration));
+          : typeof value === 'boolean' ||
+            (hasForm(value, declaration) && isLifted(hidden, LIFTS.countForm));
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
     };
     if (steps.some((step) => !contributionForm(step))) {

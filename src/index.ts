@@ -126,6 +126,8 @@ export { ERROR_CAUSES } from './proof/carriers.js';
 export type { ErrorCause } from './proof/carriers.js';
 export type {
   DecisionProof,
+  LiftedCheck,
+  ProofCounts,
   ProofBounds,
   ProofComponent,
   ProofException,

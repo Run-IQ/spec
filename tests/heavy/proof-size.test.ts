@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { sealProof, verifyProof } from '../../src/index.js';
 import { inconsistencies } from '../../src/proof/consistency.js';
-import { counted, specError } from '../helpers.js';
+import { counted, specError, withCounts } from '../helpers.js';
 import { outputProof, wideProof } from '../proof-builders.js';
 import { unsaltedSalt } from '../proof-cases.js';
 import { unsalted } from '../proof-cases.js';
@@ -135,7 +135,7 @@ describe('proofs as large as the format allows', () => {
     expect(specError(() => sealProof(unsalted(proof))).message).toBe(
       'Cannot seal the proof: factsRead not sorted at 1',
     );
-    const result = verifyProof({ ...proof, digest: '0'.repeat(64) });
+    const result = verifyProof({ ...withCounts(proof), digest: '0'.repeat(64) });
     expect(result.status).toBe('invalid');
     expect(result.issues.length).toBe(101);
     expect(result.issues.slice(0, 3)).toEqual([

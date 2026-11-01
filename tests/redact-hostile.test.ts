@@ -101,7 +101,7 @@ describe('verifyProof on a hostile redacted entry: invalid, named, never thrown'
       );
     }
     const top = watch('proof', watched);
-    expect(verifyProof(top).status).toBe('consistent');
+    expect(verifyProof(top).status).toBe('consistent-redacted');
     const again = [...reads].filter(([, count]) => count !== 1);
     expect(again).toEqual([]);
     expect(reads.get('outputs[0].redacted')).toBe(1);

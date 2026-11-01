@@ -218,6 +218,7 @@ describe('validateProof', () => {
       { path: 'rules[0].ruleSet', message: 'rules[0].ruleSet is required' },
       { path: 'rules[0].priority', message: 'rules[0].priority is required' },
       { path: 'rules[0].salt', message: 'rules[0].salt is required' },
+      { path: 'counts.rules', message: 'counts.rules is 2, rules has 1 entry' },
     ]);
   });
 

@@ -28,6 +28,7 @@ import type {
   ProofStep,
   ProofView,
 } from './types.js';
+import { isLifted, LIFTS } from './lifts.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
 const ORDERED: ReadonlySet<string> = new Set(['number', 'decimal', 'enum', 'date', 'dateTime']);
@@ -322,13 +323,15 @@ export function outputProblems(
   const { hidden } = context;
   const feeds = feedsOf(p, listed, context.ties);
   // The item a stray step or pending rule feeds may be redacted.
-  if (!hidden.has('items')) append(issues, feeds.strays);
+  if (feeds.strays.length === 0 || !isLifted(hidden, LIFTS.itemsOfCollection)) {
+    append(issues, feeds.strays);
+  }
   const targets = targetsOf(p, listed, feeds);
   for (const { target, feed, pending } of targets) {
     append(issues, combinationProblems(target, context));
     // A pending rule of the target may be redacted: its own pending rules are then a superset.
     if (!samePending(pending, feed.pending)) {
-      if (!hidden.has('pending'))
+      if (!isLifted(hidden, LIFTS.outputPending))
         issues.push(`pending differ from pending rules: ${target.cite()}`);
     } else if (!pendingInOrder(pending, feed, context.standings)) {
       issues.push(`pending not in contribution order: ${target.cite()}`);
@@ -403,8 +406,9 @@ function statusProblems(
   }
   // A redacted item may be the strongest.
   for (const [name, output] of listed) {
-    if (output.per === undefined || hidden.has('items')) continue;
-    if (rankOf(output.status) !== (strongest.get(name) ?? 0)) {
+    if (output.per === undefined) continue;
+    const differs = rankOf(output.status) !== (strongest.get(name) ?? 0);
+    if (differs && !isLifted(hidden, LIFTS.perOutputItems)) {
       issues.push(`per output status differs from its items: ${citeName(name)}`);
     }
   }

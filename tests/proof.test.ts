@@ -28,7 +28,7 @@ import {
   TRUSTED,
   unsigned,
 } from './proof-cases.js';
-import { handSealed, specError, treeDigestOf } from './helpers.js';
+import { handSealed, specError, treeDigestOf, withCounts } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 
@@ -173,10 +173,11 @@ describe('sealProof', () => {
   it('sets digest to the tree digest of the unsigned proof (D-16)', () => {
     const proof = sealed();
     // By an independent Python implementation of JCS and of the proof tree.
-    expect(proof.digest).toBe('a1c733e257321b58e80ceb5c980147149668707e0ad5933a6b43a2ba068ee841');
-    expect(proof.digest).toBe(treeDigestOf(unsigned()));
+    // Refrozen in the review of 9K1: the header commits to the counts of the sections.
+    expect(proof.digest).toBe('0fa827f138d1d03dd8e66f28398f4287bfa7a8b97df0e440ecb0d1dc2d241d2d');
+    expect(proof.digest).toBe(treeDigestOf(withCounts(unsigned())));
     expect(proof.digest).not.toBe(sha256Hex(canonicalize(unsigned())));
-    expect(proof).toEqual({ ...unsigned(), digest: proof.digest });
+    expect(proof).toEqual({ ...withCounts(unsigned()), digest: proof.digest });
   });
 
   it('is deterministic, whatever the key order', () => {

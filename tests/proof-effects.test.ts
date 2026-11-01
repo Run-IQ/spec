@@ -3,6 +3,7 @@ import { validateProof } from '../src/index.js';
 import { problems } from './proof-builders.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { withCounts } from './helpers.js';
 
 describe('an exception affects the decisions it produced only (I3)', () => {
   it('an inhibition reaches the inhibited version, not one excluded before', () => {
@@ -168,7 +169,8 @@ describe('exceptions and the decisions they produced agree (I6)', () => {
     const without = { ...exception };
     delete without.output;
     const issues = (entry: Record<string, unknown>) =>
-      validateProof({ ...content, exceptions: [entry], digest: '0'.repeat(64) }).issues;
+      validateProof({ ...withCounts({ ...content, exceptions: [entry] }), digest: '0'.repeat(64) })
+        .issues;
     expect(issues(without)).toEqual([
       {
         path: 'exceptions[0].output',

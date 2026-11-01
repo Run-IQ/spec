@@ -10,7 +10,7 @@ import type { ProofView } from '../src/proof/types.js';
 import { specError } from './helpers.js';
 import { baseContent, entries, salted, unsaltedSalt } from './proof-cases.js';
 import { unsalted } from './proof-cases.js';
-import { treeDigestOf } from './helpers.js';
+import { handSealed } from './helpers.js';
 
 const hex = (c: string): string => c.repeat(64);
 
@@ -22,7 +22,7 @@ export type Entry = Record<string, unknown>;
  * signature; `sealProof` refuses it with the first one, or seals it when there is none.
  */
 export function problems(content: Content): string[] {
-  const proof = { ...content, digest: treeDigestOf(content) };
+  const proof = handSealed(content);
   expect(validateProof(proof).issues).toEqual([]);
   const found = verifyProof(proof).issues.filter((issue) => issue !== 'unsigned');
   // The cast lets a hand-built value reach sealProof, which checks it.

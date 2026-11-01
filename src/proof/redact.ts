@@ -2,6 +2,8 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { newSpecError, reasonOf } from '../errors.js';
 import { sizedDigest } from '../merkle.js';
 import { typeName, withValueBudget } from '../values.js';
+import { hiddenSections } from './lifts.js';
+import type { HiddenSections } from './lifts.js';
 import { isRedacted, packedLeafHashes } from './tree.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { DecisionProof, ProofSection, ProofView, UnsignedProof } from './types.js';
@@ -11,8 +13,8 @@ import { readDecisionProof } from './validate.js';
 export interface Redactions {
   /** The number of redacted entries. */
   count: number;
-  /** The sections that have a redacted entry. */
-  hidden: ReadonlySet<ProofSection>;
+  /** The sections that have a redacted entry, recording the checks they lift (`isLifted`). */
+  hidden: HiddenSections;
   /** The number of redacted entries of each section that has one. */
   bySection: ReadonlyMap<ProofSection, number>;
   /**
@@ -60,7 +62,7 @@ export function proofView(p: UnsignedProof): { view: ProofView; redactions: Reda
   }
   return {
     view: view as unknown as ProofView,
-    redactions: { count, hidden, bySection, positions },
+    redactions: { count, hidden: hiddenSections(hidden), bySection, positions },
   };
 }
 

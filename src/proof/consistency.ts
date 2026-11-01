@@ -23,7 +23,8 @@ import {
 import { citeItem, outputProblems } from './statuses.js';
 import { sourceProblems, tiesOf } from './ties.js';
 import { PROOF_SECTIONS } from './types.js';
-import type { ProofOutput, ProofSection, ProofView } from './types.js';
+import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
+import { isLifted, liftedOnSteps, LIFTS } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
 // `signProof` and `verifyProof` check it. Every check is linear in the size of the proof: each
@@ -275,10 +276,12 @@ export function citationProblems(
   const issues: string[] = [];
   forEachUnresolved(p, listed, {
     rule: (cited) => {
-      if (!hidden.has('rules')) issues.push(`cited rule not listed: ${cited}`);
+      if (!isLifted(hidden, LIFTS.ruleCitations)) issues.push(`cited rule not listed: ${cited}`);
     },
     output: (cited) => {
-      if (!hidden.has('outputs')) issues.push(`cited output not listed: ${cited}`);
+      if (!isLifted(hidden, LIFTS.outputCitations)) {
+        issues.push(`cited output not listed: ${cited}`);
+      }
     },
     stop: () => full(issues),
   });
@@ -382,7 +385,7 @@ export function orderProblems(
       sortProblems<(typeof list)[number]>(list, byInstance, (i) => `${section} not sorted at ${i}`),
     );
   }
-  push(decidedTwice(p, imposed, hidden.has('exceptions')));
+  push(liftedOnSteps(hidden, (steps) => decidedTwice(p, imposed, steps), p.applied));
   push(exceptionOrderProblems(p, standings));
   push(
     sortProblems(
@@ -411,20 +414,21 @@ export function orderProblems(
       (i) => `duplicate missing fact: ${citeName(p.missingFacts[i]?.path ?? '')}`,
     ),
   );
-  push(requestedProblems(p, listed, hidden.has('outputs')));
+  push(requestedProblems(p, listed, () => isLifted(hidden, LIFTS.requestedOutputs)));
   push(innerOrderProblems(p));
   return issues;
 }
 
 /**
- * One rule instance decided twice across `applied`, `skipped` and `pending`. While `exceptions`
- * has a redacted entry (`stepsUnknown`), any step may be one a hidden short circuit imposed:
- * steps are then not counted as decisions.
+ * One rule instance decided twice across `steps` (those of `applied`), `skipped` and `pending`.
  */
-function decidedTwice(p: ProofView, imposed: ReadonlySet<string>, stepsUnknown: boolean): string[] {
+function decidedTwice(
+  p: ProofView,
+  imposed: ReadonlySet<string>,
+  steps: readonly ProofStep[],
+): string[] {
   const issues: string[] = [];
   const decided = new Map<string, { whole: boolean; subjects: Set<string> }>();
-  const steps = stepsUnknown ? [] : p.applied;
   for (const entry of [...steps, ...p.skipped, ...p.pending]) {
     if (full(issues)) break;
     // The step a short circuit imposed is the effect of an exception, not a decision.
@@ -453,10 +457,11 @@ function decidedTwice(p: ProofView, imposed: ReadonlySet<string>, stepsUnknown: 
 function requestedProblems(
   p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
-  outputsHidden: boolean,
+  outputsHidden: () => boolean,
 ): string[] {
   const requested = p.requested ?? [];
-  const absent = outputsHidden ? [] : requested.filter((name) => !listed.has(name));
+  const missing = requested.filter((name) => !listed.has(name));
+  const absent = missing.length > 0 && outputsHidden() ? [] : missing;
   return [
     ...sortProblems(
       requested,

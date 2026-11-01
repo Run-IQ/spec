@@ -207,9 +207,15 @@ const LEAF: Shape = {
   optional: ['i'],
 };
 
-/** The values sealing adds to a proof whose root members are `members`: its `digest`. */
+/** The values `counts` holds: the member and one count per section. */
+const COUNTS_VALUES = 1 + PROOF_SECTIONS.length;
+
+/**
+ * The values sealing adds to a proof whose root members are `members`: its `counts` (never
+ * among them: the content sealed has none) and its `digest`.
+ */
 function digestReserve(members: ReadonlyMap<string, unknown>): number {
-  return members.has('digest') ? 0 : 1;
+  return COUNTS_VALUES + (members.has('digest') ? 0 : 1);
 }
 
 /**
@@ -248,6 +254,7 @@ function collect(
     }
     const read = checkObject(value, '', shape, add, ignored, reserve);
     checkUniqueRules(read?.copy.rules, add);
+    checkCounts(read?.copy, add);
     checkRepeatedLeaves(read?.copy, add);
     return { issues: issues.toArray(), snapshot: read?.copy };
   } catch (error) {
@@ -282,6 +289,24 @@ function checkUniqueRules(rules: unknown, add: Add): void {
     if (seen.has(key)) add(`rules[${i}]`, `rules[${i}] repeats ${citeName(key)}`);
     seen.add(key);
   });
+}
+
+/**
+ * Validator-only: a section whose number of entries, redacted ones counted, is not the one
+ * `counts` commits to (D-16): an entry moved to another section, redacted or not, or added or
+ * removed. Read on the copy.
+ */
+function checkCounts(content: Record<string, unknown> | undefined, add: Add): void {
+  const counts = content?.counts;
+  if (!isPlainObject(counts)) return;
+  for (const section of PROOF_SECTIONS) {
+    const list = content?.[section];
+    const count = counts[section];
+    if (!Array.isArray(list) || typeof count !== 'number' || count === list.length) continue;
+    const entries = list.length === 1 ? 'entry' : 'entries';
+    const at = `counts.${section}`;
+    add(at, `${at} is ${count}, ${section} has ${list.length} ${entries}`);
+  }
 }
 
 /**

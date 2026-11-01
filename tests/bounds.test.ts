@@ -46,6 +46,7 @@ import {
   loose,
   proofInput,
   specError,
+  withCounts,
 } from './helpers.js';
 import { outputProof } from './proof-builders.js';
 import { unsalted } from './proof-cases.js';
@@ -80,8 +81,11 @@ function claiming(length: number, holeAt?: number): unknown[] {
   });
 }
 
-/** A consistent proof with no rule, output nor step: each list under test is its only content. */
-const PROOF = outputProof({ type: 'number', combine: 'sum', value: 0 });
+/**
+ * A consistent proof with no rule, output nor step, with its `counts`: each list under test is
+ * its only content.
+ */
+const PROOF = withCounts(outputProof({ type: 'number', combine: 'sum', value: 0 }));
 /** A secret seed: what a salted proof is sealed under. */
 const SALTED = new Uint8Array(32).fill(7);
 PROOF.outputs = [];

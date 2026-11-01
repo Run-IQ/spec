@@ -265,4 +265,23 @@ describe('every leaf is the sha256 of its canonical text, short or long', () => 
     const leaf = { s: 'applied', i: 10, e: step(contribution) } as const;
     expect(hex(proofLeafHash(leaf as never))).toBe(reference(leaf));
   });
+
+  // A short text with control characters and neither quote nor backslash: the fast path still
+  // escapes it (review of 9K1, M1). The reference is JSON.stringify, as RFC 8785 writes strings.
+  it.each(['a\nb', '\u0001\u001f', 'tab\there', '\b\f\r', '\u0000', 'x\u007f\u2028é😀'])(
+    'a short sourceRef %j',
+    (sourceRef) => {
+      const rule = { id: 'R1', version: 1, checksum: 'ab'.repeat(32), ruleSet: 'local' };
+      const leaf = {
+        s: 'rules',
+        i: 0,
+        e: { ...rule, priority: 0, sourceRef, salt: 'a'.repeat(32) },
+      };
+      const text =
+        `{"e":{"checksum":"${rule.checksum}","id":"R1","priority":0,"ruleSet":"local",` +
+        `"salt":"${'a'.repeat(32)}","sourceRef":${JSON.stringify(sourceRef)},"version":1},` +
+        `"i":0,"s":"rules"}`;
+      expect(hex(proofLeafHash(leaf as never))).toBe(hex(nodeSha256(new Uint8Array([0]), T, text)));
+    },
+  );
 });

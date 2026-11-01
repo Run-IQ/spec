@@ -1,6 +1,6 @@
 {
   "format": "run-iq.proof/1",
-  "description": "Frozen vectors of the proof tree (D-14, D-16), from the plan (Task 9K1), recomputed by this file's generator (Python stdlib only). T = utf8('run-iq.proof/1') || 0x00. Header leaf = sha256(0x00 || T || utf8(JCS({ s: 'header', e: H }))), H the proof without digest, signature and the ten sections. Entry leaf = sha256(0x00 || T || utf8(JCS({ s: section, i: index, e: salted entry }))), sections in the order rules, outputs, items, applied, skipped, pending, exceptions, factsRead, missingFacts, readsUndeclared; a redacted entry { redacted } gives its hash as it is. Salt of entry i of section s = first 16 bytes of HMAC-SHA256(seed, utf8('proof:' + s + ':' + i)), hex. merkleRoot = RFC 6962 hash of the leaves; digest = sha256(0x02 || T || uint64be(leafCount) || merkleRoot).",
+  "description": "Frozen vectors of the proof tree (D-14, D-16), from the plan (Task 9K1), recomputed by this file's generator (Python stdlib only). T = utf8('run-iq.proof/1') || 0x00. Header leaf = sha256(0x00 || T || utf8(JCS({ s: 'header', e: H }))), H the proof without digest, signature and the ten sections, holding counts (the length of each section, redacted entries counted). Entry leaf = sha256(0x00 || T || utf8(JCS({ s: section, i: index, e: salted entry }))), sections in the order rules, outputs, items, applied, skipped, pending, exceptions, factsRead, missingFacts, readsUndeclared; a redacted entry { redacted } gives its hash as it is. Salt of entry i of section s = first 16 bytes of HMAC-SHA256(seed, utf8('proof:' + s + ':' + i)), hex. merkleRoot = RFC 6962 hash of the leaves; digest = sha256(0x02 || T || uint64be(leafCount) || merkleRoot).",
   "seed": "f9b972f50267915261e884526c8553bdf4a353eb2e4e9e78ee65716aeceaacfb",
   "sealed": {
     "proof": {
@@ -70,15 +70,32 @@
       "outputs/0": "411126e7422e4ed1e28b10394cb63e4e",
       "applied/0": "650dd718f4a92c013cb0ea073039dff3"
     },
+    "counts": {
+      "rules": 1,
+      "outputs": 1,
+      "items": 0,
+      "applied": 1,
+      "skipped": 0,
+      "pending": 0,
+      "exceptions": 0,
+      "factsRead": 0,
+      "missingFacts": 0,
+      "readsUndeclared": 0
+    },
     "leaves": [
-      "6a522a369b704793673676b2ba8decce7d4c739db15066065544b9afde74bf85",
+      "8afb81c07ea4067c15d2020df6b6d23871a92f25411bba48bc0e08c805f650aa",
       "8fa32abe30293993f81b1ca473ac4c52861a743464ada648d94bf7b21dc6fc85",
       "deae2a8e2ed38a9d36c5e4ee765229806ffdd32ebfebcbe5046a585bef7923f8",
       "58f27d7ef5824335c14a073a5495679ea869de798baf9b17b98e0cd663c882ce"
     ],
     "leafCount": 4,
-    "merkleRoot": "03caacf22a00266524fd170fe8e2f1a8cb16eb6d1d189e2b54dc67b011f8c622",
-    "digest": "b4aa4310c91558e68890c2d242053829b41f09194e94de8b860f6431c7b5cb34",
+    "merkleRoot": "edfbff2c7179435bf978db2871f0137b7fdb2476804c0e63b267abc0648d80fe",
+    "digest": "acfaa494f781e65df2c0b70a29d440f462427f4e46cc91c66b23a45e0e88f2e3",
+    "round1": {
+      "headerLeaf": "6a522a369b704793673676b2ba8decce7d4c739db15066065544b9afde74bf85",
+      "merkleRoot": "03caacf22a00266524fd170fe8e2f1a8cb16eb6d1d189e2b54dc67b011f8c622",
+      "digest": "b4aa4310c91558e68890c2d242053829b41f09194e94de8b860f6431c7b5cb34"
+    },
     "plan": {
       "inputDigest": "ed75157664fd1dd502ac3953e8f69fa41e74d56da05af625085c68f8b8089148",
       "headerLeaf": "9552348910ee15465b77128c44bc269725da0641577d7a4a227c4160b20fbba0",
@@ -92,7 +109,7 @@
       "ruleLeaf": "cb99c513b2a1722a75de92bb56fb658c097ff85012af65abddc9efd4478abe1f",
       "merkleRoot": "34e56aff10f280f71329210a6b7feaa259fba62bec6271614f71f8d504af4ca6"
     },
-    "note": "The proof sealed by sealProof(proof, seed). 'plan' rebuilds the values the plan gave (header leaf 95523489..., rule leaf cb99c513..., digest 34e56aff...): its header leaf was computed with the input digest of input-v1 before Task 9H2 (round 3), its rule without the priority Task 9J made required, and its digest is the bare merkleRoot, before the digest committed to the leaf count (Task 9H1 review). The salts and the leaves of outputs/0 and applied/0 are the plan's; the header leaf, the rule leaf and the digest are recomputed for the current format."
+    "note": "The proof sealed by sealProof(proof, seed). 'plan' rebuilds the values the plan gave (header leaf 95523489..., rule leaf cb99c513..., digest 34e56aff...): its header leaf was computed with the input digest of input-v1 before Task 9H2 (round 3), its rule without the priority Task 9J made required, and its digest is the bare merkleRoot, before the digest committed to the leaf count (Task 9H1 review). The salts and the leaves of outputs/0 and applied/0 are the plan's; the header leaf, the rule leaf and the digest are recomputed for the current format. 'round1' gives the header leaf, root and digest of the first round of 9K1, before the header held counts (its review, I2: a redacted entry moved from the end of a section to the start of the next, empty, kept the leaves and the digest)."
   },
   "redacted": {
     "proof": {
@@ -303,10 +320,22 @@
         }
       ],
       "readsUndeclared": [],
-      "requested": ["list", "value"]
+      "requested": ["list", "value"],
+      "counts": {
+        "rules": 12,
+        "outputs": 2,
+        "items": 0,
+        "applied": 3,
+        "skipped": 0,
+        "pending": 0,
+        "exceptions": 0,
+        "factsRead": 2,
+        "missingFacts": 1,
+        "readsUndeclared": 0
+      }
     },
     "leaves": [
-      "8cde6dde3e0b4b041b03043ffd69c9dfa5fef33afb21cf2f22c3815939b35848",
+      "32fe2f6b2f116d4491da18347ffa597ea00d8a695ff605ade1c71dcf2bcecd62",
       "da1475e9336ddf0a58538b13ac222a862179413ae4f724f420bd32d1dfd73c91",
       "c125d77ffc6e42da4ec3faf2cab8827e7f78ffa8725513f1cd84a0a7302aa29a",
       "0ae062a68cda166d8bd52f710b494aa7fb62e535ea1c4dc47dec7edd168659f5",
@@ -329,8 +358,8 @@
       "4ad223fb7d11f66281e124a4cf48e0cf334dd5c37df840aab9c22b13cd9d8e7d"
     ],
     "leafCount": 21,
-    "merkleRoot": "cf233982f707fdd53b13bd3bb87639f675d3c912075db39fb50dc6d7716fe5b4",
-    "digest": "0faca0f921ecf7d5c4ae4a97c3d2c29de65b3c7da5478ac4b882cd18e3357995",
+    "merkleRoot": "fd09b4fa1036bd9c0b42fec2884c77f392063503bf09101e4546579ab64b7ac7",
+    "digest": "7bfdaf5aa05e46565ab3573eb62d2dd599ceecc9a515463d49e84049fe25f600",
     "note": "A salted proof with escapes, astral characters, non-integer numbers, nested lists, twelve rules (index 10 after 9) and a redacted missing fact: its leaves and digest only (it is not a consistent decision)."
   }
 }

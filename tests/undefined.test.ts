@@ -21,7 +21,15 @@ import type {
   RuleDefinitionInput,
   UnsignedProof,
 } from '../src/index.js';
-import { BASE_RULE, HUMAN_ASSERTION, proofInput, specError, ueReferential } from './helpers.js';
+import type { ProofView } from '../src/proof/types.js';
+import {
+  BASE_RULE,
+  HUMAN_ASSERTION,
+  proofInput,
+  specError,
+  ueReferential,
+  withCounts,
+} from './helpers.js';
 import { outputProof } from './proof-builders.js';
 import { unsalted } from './proof-cases.js';
 
@@ -156,12 +164,12 @@ describe('rules', () => {
 
 describe('proofs', () => {
   /** A proof of one `object` output, fed by `r0` with `{ a: 1 }`. */
-  const unsigned = (): UnsignedProof =>
+  const unsigned = (): ProofView =>
     outputProof({ type: 'object', combine: 'highestPriority', value: { a: 1 } }, [{ a: 1 }]);
 
   /** Asserts that validateProof and sealProof refuse `proof` with `message` at `path`. */
   function expectProofRefused(proof: unknown, path: string): void {
-    const sealed = { ...(proof as object), digest: 'c'.repeat(64) };
+    const sealed = { ...withCounts(proof as object), digest: 'c'.repeat(64) };
     expect(validateProof(sealed).issues).toEqual([{ path, message: notJson(path) }]);
     expect(specError(() => sealProof(unsalted(proof as UnsignedProof))).message).toBe(
       `Cannot seal the proof: ${notJson(path)}`,
@@ -212,7 +220,9 @@ describe('proofs', () => {
       supersedes: undefined,
       requested: undefined,
     };
-    expect(validateProof({ ...withUndefined, digest: 'c'.repeat(64) }).issues).toEqual([]);
+    expect(validateProof({ ...withCounts(withUndefined), digest: 'c'.repeat(64) }).issues).toEqual(
+      [],
+    );
     const sealed = sealProof(unsalted(fromJavaScript<UnsignedProof>(withUndefined)));
     expect(sealed.digest).toBe(sealProof(unsalted(p)).digest);
   });

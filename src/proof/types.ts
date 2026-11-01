@@ -328,7 +328,16 @@ export interface ProofHeader {
   requested?: string[];
   /** The proof this one replaces, and why, as a code (`correction`). */
   supersedes?: { digest: string; reason: string };
+  /**
+   * The number of entries of each section, redacted ones counted, as sealing found them
+   * (`sealProof`). The header commits to them (D-16): an entry cannot be moved from one section
+   * to the next without changing the digest, even redacted.
+   */
+  counts: ProofCounts;
 }
+
+/** The number of entries of each section of a proof (`ProofHeader.counts`). */
+export type ProofCounts = Record<ProofSection, number>;
 
 /**
  * The content of a decision proof, before sealing. The format is closed: no other key is
@@ -368,9 +377,10 @@ export type Unsalted<T extends { salt: string }> = Omit<T, 'salt'>;
 
 /**
  * The content `sealProof` seals (D-14, D-16): an unsigned proof whose entries carry no `salt`
- * yet (sealing derives each from the seed and the entry's place) and none is redacted.
+ * yet (sealing derives each from the seed and the entry's place) and none is redacted, without
+ * `counts` (sealing adds them).
  */
-export interface UnsaltedProof extends ProofHeader {
+export interface UnsaltedProof extends Omit<ProofHeader, 'counts'> {
   rules: Unsalted<ProofRuleRef>[];
   outputs: Unsalted<ProofOutput>[];
   items: Unsalted<ProofItem>[];
@@ -387,7 +397,7 @@ export interface UnsaltedProof extends ProofHeader {
  * Internal: what the consistency checks read of a proof: its header and the entries of its
  * sections that are not redacted, each section in its order (`proofView`).
  */
-export interface ProofView extends ProofHeader {
+export interface ProofView extends Omit<ProofHeader, 'counts'> {
   rules: ProofRuleRef[];
   outputs: ProofOutput[];
   items: ProofItem[];
@@ -416,17 +426,36 @@ export interface DecisionProof extends UnsignedProof {
  * - `authentic`: consistent, and signed by a trusted key;
  * - `consistent`: the digest matches the content, but nothing proves who produced it
  *   (unsigned, or signed by a key that is not trusted);
+ * - `authentic-redacted`, `consistent-redacted`: the same, for a proof with a redacted entry.
+ *   What a redacted entry hides is never checked (its leaf hash is all the proof shows, D-16),
+ *   so such a proof proves its visible entries only, and the checks a redaction kept from
+ *   being made are named (`ProofVerification.lifted`). Never the full verdict;
  * - `invalid`: malformed, altered, or contradicted by the rules given.
  */
-export type ProofStatus = 'authentic' | 'consistent' | 'invalid';
+export type ProofStatus =
+  'authentic' | 'authentic-redacted' | 'consistent' | 'consistent-redacted' | 'invalid';
+
+/**
+ * A check of `verifyProof` that a redaction kept from being made: it found a problem that a
+ * redacted entry of one of the sections `redacted` could explain.
+ */
+export interface LiftedCheck {
+  /** The check, in words (`output value from its contributions`). */
+  check: string;
+  /** The sections, among those the check reads, that have a redacted entry. */
+  redacted: ProofSection[];
+}
 
 /**
  * The result of `verifyProof`: its status, every reason it is not `authentic` and what it could
- * not check (redacted entries), and the number of entries redacted when there is one.
+ * not check (redacted entries, lifted checks); with a redacted entry, their number and the
+ * checks lifted.
  */
 export interface ProofVerification {
   status: ProofStatus;
   issues: string[];
   /** The number of redacted entries; absent when there is none. */
   redacted?: number;
+  /** The checks the redacted entries lifted, possibly none; absent when there is none. */
+  lifted?: LiftedCheck[];
 }
