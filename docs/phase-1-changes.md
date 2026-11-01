@@ -8,20 +8,20 @@ The study note behind each change is [studies/phase-1.md](studies/phase-1.md).
 
 The new line is published under the `next` dist-tag; `latest` stays on the 0.x versions.
 
-| Package | Before | Now |
-|---|---|---|
-| `@run-iq/spec` | (new) | `1.0.0-next.0` |
-| `@run-iq/core` | `0.2.8` | `1.0.0-next.0` |
+| Package                  | Before  | Now            |
+| ------------------------ | ------- | -------------- |
+| `@run-iq/spec`           | (new)   | `1.0.0-next.0` |
+| `@run-iq/core`           | `0.2.8` | `1.0.0-next.0` |
 | `@run-iq/context-engine` | `0.2.1` | `1.0.0-next.0` |
-| `@run-iq/dg` | `0.1.2` | `1.0.0-next.0` |
-| `@run-iq/rule-registry` | `0.1.1` | `1.0.0-next.0` |
-| `@run-iq/policy-bridge` | `0.1.0` | `1.0.0-next.0` |
-| `@run-iq/dsl-jsonlogic` | `0.1.4` | `0.2.0-next.0` |
-| `@run-iq/plugin-sdk` | `0.2.7` | `0.3.0-next.0` |
-| `@run-iq/plugin-fiscal` | `0.4.0` | `0.5.0-next.0` |
-| `@run-iq/cli` | `0.1.2` | `0.2.0-next.0` |
-| `@run-iq/server` | `0.1.4` | `0.2.0-next.0` |
-| `@run-iq/mcp-server` | `0.3.2` | `0.4.0-next.0` |
+| `@run-iq/dg`             | `0.1.2` | `1.0.0-next.0` |
+| `@run-iq/rule-registry`  | `0.1.1` | `1.0.0-next.0` |
+| `@run-iq/policy-bridge`  | `0.1.0` | `1.0.0-next.0` |
+| `@run-iq/dsl-jsonlogic`  | `0.1.4` | `0.2.0-next.0` |
+| `@run-iq/plugin-sdk`     | `0.2.7` | `0.3.0-next.0` |
+| `@run-iq/plugin-fiscal`  | `0.4.0` | `0.5.0-next.0` |
+| `@run-iq/cli`            | `0.1.2` | `0.2.0-next.0` |
+| `@run-iq/server`         | `0.1.4` | `0.2.0-next.0` |
+| `@run-iq/mcp-server`     | `0.3.2` | `0.4.0-next.0` |
 
 The packages of the `next` line depend on each other with `^1.0.0-next.0`, `^0.2.0-next.0` and so on. Do not mix them with the 0.x line.
 
@@ -111,10 +111,10 @@ If you persist audit events:
 
 The tools report a rule spec refuses instead of failing the whole call:
 
-| Tool | Result for such a rule |
-|---|---|
-| `validate_rules` | That rule's entry lists `Invalid rule: <reason>`; the other rules are reported normally |
-| `inspect_rule` | `checksumMatch: false`, `valid: false`, and a new `ruleErrors` array with the reason |
+| Tool                             | Result for such a rule                                                                                                                                      |
+| -------------------------------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `validate_rules`                 | That rule's entry lists `Invalid rule: <reason>`; the other rules are reported normally                                                                     |
+| `inspect_rule`                   | `checksumMatch: false`, `valid: false`, and a new `ruleErrors` array with the reason                                                                        |
 | `create_checksum`, `create_rule` | `isError: true` with the JSON body `{ "error": "Invalid rule: <reason>" }`, the shape `evaluate` already used. They used to return the SDK's raw error text |
 
 `create_checksum` with `params` that have no canonical JSON form (`NaN`, for example) returns `isError: true` with `{ "error": "Invalid params: <reason>" }`.

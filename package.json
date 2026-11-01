@@ -51,8 +51,8 @@
     "test:heavy": "vitest run --project heavy --no-file-parallelism --maxWorkers=1",
     "bench": "npm run build && node bench/input.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "lint": "eslint src/ tests/ bench/ --ext .ts,.mjs && prettier --check src/ tests/ schema/ bench/",
-    "lint:fix": "eslint src/ tests/ bench/ --ext .ts,.mjs --fix && prettier --write src/ tests/ bench/"
+    "lint": "eslint src/ tests/ bench/ --ext .ts,.mjs && prettier --check src/ tests/ schema/ bench/ docs/",
+    "lint:fix": "eslint src/ tests/ bench/ --ext .ts,.mjs --fix && prettier --write src/ tests/ schema/ bench/ docs/"
   },
   "keywords": [
     "run-iq",

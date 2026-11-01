@@ -8,25 +8,26 @@ Date : 2026-10-30. Lecture seule : aucun dépôt modifié. Dossiers locaux : `sp
 
 Dépôts GitHub : tous publics sauf `plugin-fiscal` (privé). Les paquets sur GitHub Packages sont tous `private` (visibilité).
 
-| Dossier / paquet | Local | GitHub Packages | npm public | `publishConfig` | `.npmrc` |
-|---|---|---|---|---|---|
-| core | 0.2.8 | 0.2.7, 0.2.8 | 0.1.1 à 0.2.5 | oui | scope GHP |
-| plugin-sdk | 0.2.7 | 0.2.5 à 0.2.7 | 0.1.0 à 0.2.5 | non | scope GHP |
-| dsl-jsonlogic | 0.1.4 | 0.1.3, 0.1.4 | 0.1.0 à 0.1.3 | non | scope GHP |
-| plugin-fiscal | 0.4.0 | 0.3.1 à 0.3.3, 0.4.0 | 0.1.0 à 0.3.0 | oui | scope GHP |
-| mcp-server | 0.2.8 | 0.2.8, **0.3.0** | 0.1.0 à 0.2.6 | non | scope GHP |
-| decision-graph (`@run-iq/dg`) | 0.1.2 | 0.1.1, 0.1.2 | aucune | oui | scope GHP |
-| context-engine | 0.2.1 | 0.2.1 | aucune | oui | scope GHP |
-| rule-registry | 0.1.1 | 0.1.1 | aucune | oui | scope GHP |
-| policy-engine | 0.1.0 | 0.1.0 | aucune | non | scope GHP |
-| policy-dsl | 0.1.0 | 0.1.0 | aucune | non | scope GHP |
-| policy-graph | 0.1.0 | 0.1.0 | aucune | non | scope GHP |
-| policy-bridge | 0.1.0 | 0.1.0 | **0.1.0** | non | **`access=public` seul** (pas de scope GHP) |
-| cli | 0.1.2 | **absent** | 0.1.0, 0.1.1 | non | scope GHP |
-| server | 0.1.4 | **absent** | 0.1.0, 0.1.1 | non | scope GHP |
-| web-platform | 0.3.4 | n/a (privé) | n/a | n/a | aucun |
+| Dossier / paquet              | Local | GitHub Packages      | npm public    | `publishConfig` | `.npmrc`                                    |
+| ----------------------------- | ----- | -------------------- | ------------- | --------------- | ------------------------------------------- |
+| core                          | 0.2.8 | 0.2.7, 0.2.8         | 0.1.1 à 0.2.5 | oui             | scope GHP                                   |
+| plugin-sdk                    | 0.2.7 | 0.2.5 à 0.2.7        | 0.1.0 à 0.2.5 | non             | scope GHP                                   |
+| dsl-jsonlogic                 | 0.1.4 | 0.1.3, 0.1.4         | 0.1.0 à 0.1.3 | non             | scope GHP                                   |
+| plugin-fiscal                 | 0.4.0 | 0.3.1 à 0.3.3, 0.4.0 | 0.1.0 à 0.3.0 | oui             | scope GHP                                   |
+| mcp-server                    | 0.2.8 | 0.2.8, **0.3.0**     | 0.1.0 à 0.2.6 | non             | scope GHP                                   |
+| decision-graph (`@run-iq/dg`) | 0.1.2 | 0.1.1, 0.1.2         | aucune        | oui             | scope GHP                                   |
+| context-engine                | 0.2.1 | 0.2.1                | aucune        | oui             | scope GHP                                   |
+| rule-registry                 | 0.1.1 | 0.1.1                | aucune        | oui             | scope GHP                                   |
+| policy-engine                 | 0.1.0 | 0.1.0                | aucune        | non             | scope GHP                                   |
+| policy-dsl                    | 0.1.0 | 0.1.0                | aucune        | non             | scope GHP                                   |
+| policy-graph                  | 0.1.0 | 0.1.0                | aucune        | non             | scope GHP                                   |
+| policy-bridge                 | 0.1.0 | 0.1.0                | **0.1.0**     | non             | **`access=public` seul** (pas de scope GHP) |
+| cli                           | 0.1.2 | **absent**           | 0.1.0, 0.1.1  | non             | scope GHP                                   |
+| server                        | 0.1.4 | **absent**           | 0.1.0, 0.1.1  | non             | scope GHP                                   |
+| web-platform                  | 0.3.4 | n/a (privé)          | n/a           | n/a             | aucun                                       |
 
 Constats :
+
 - Seuls 5 paquets ont `publishConfig` ; la cible (Global Constraints) l'exige dans chaque `package.json` publié. Verdict : **adapter** (ajouter aux 9 manquants).
 - `policy-bridge` : `.npmrc` sans scope et déjà présent sur npm public (0.1.0). Verdict : **adapter** `.npmrc` ; déprécier la 0.1.0 npm est une action distante, à valider (voir §6).
 - npm public contient d'anciennes versions de core, plugin-sdk, dsl-jsonlogic, plugin-fiscal (code source-disponible/propriétaire pour ce dernier), mcp-server, cli, server, policy-bridge. La décision « GitHub Packages seulement » est déjà prise ; le retrait de npm n'est pas faisable (dépublier) au-delà de 72 h : la voie réaliste est `npm deprecate`, action distante soumise à confirmation.
@@ -55,24 +56,24 @@ Constats :
 
 ## 4. Licences
 
-| Paquet | LICENSE actuel | champ `license` | Cible | Écart |
-|---|---|---|---|---|
-| core | BSL 1.1 | SEE LICENSE | BSL | aucun |
-| decision-graph | BSL 1.1 | SEE LICENSE | BSL | aucun |
-| rule-registry | BSL 1.1 | SEE LICENSE | BSL | aucun |
-| context-engine | BSL 1.1 | SEE LICENSE | **MIT** | **BSL → MIT** |
-| plugin-sdk | MIT | MIT | MIT | aucun |
-| dsl-jsonlogic | MIT | MIT | MIT | aucun |
-| cli | MIT | MIT | MIT | aucun |
-| mcp-server | MIT (master) | MIT | MIT | aucun sur master ; la branche passe en BSL (écart) |
-| web-platform | aucun | absent | MIT | **ajouter** |
-| plugin-fiscal | Run-IQ Source-Available License v1.0 | SEE LICENSE | propriétaire | à reconfirmer (« source-available » ≠ propriétaire) |
-| server | MIT | MIT | **BSL** | **MIT → BSL** |
-| policy-engine | **fichier absent** | BSL-1.1 | BSL | ajouter LICENSE |
-| policy-bridge | **fichier absent** | BSL-1.1 | BSL | ajouter LICENSE |
-| policy-dsl | **fichier absent** | MIT | **MIT** | ajouter LICENSE |
-| policy-graph | **fichier absent** | MIT | MIT | ajouter LICENSE |
-| spec, integration-tests | n'existent pas | | MIT | à créer |
+| Paquet                  | LICENSE actuel                       | champ `license` | Cible        | Écart                                               |
+| ----------------------- | ------------------------------------ | --------------- | ------------ | --------------------------------------------------- |
+| core                    | BSL 1.1                              | SEE LICENSE     | BSL          | aucun                                               |
+| decision-graph          | BSL 1.1                              | SEE LICENSE     | BSL          | aucun                                               |
+| rule-registry           | BSL 1.1                              | SEE LICENSE     | BSL          | aucun                                               |
+| context-engine          | BSL 1.1                              | SEE LICENSE     | **MIT**      | **BSL → MIT**                                       |
+| plugin-sdk              | MIT                                  | MIT             | MIT          | aucun                                               |
+| dsl-jsonlogic           | MIT                                  | MIT             | MIT          | aucun                                               |
+| cli                     | MIT                                  | MIT             | MIT          | aucun                                               |
+| mcp-server              | MIT (master)                         | MIT             | MIT          | aucun sur master ; la branche passe en BSL (écart)  |
+| web-platform            | aucun                                | absent          | MIT          | **ajouter**                                         |
+| plugin-fiscal           | Run-IQ Source-Available License v1.0 | SEE LICENSE     | propriétaire | à reconfirmer (« source-available » ≠ propriétaire) |
+| server                  | MIT                                  | MIT             | **BSL**      | **MIT → BSL**                                       |
+| policy-engine           | **fichier absent**                   | BSL-1.1         | BSL          | ajouter LICENSE                                     |
+| policy-bridge           | **fichier absent**                   | BSL-1.1         | BSL          | ajouter LICENSE                                     |
+| policy-dsl              | **fichier absent**                   | MIT             | **MIT**      | ajouter LICENSE                                     |
+| policy-graph            | **fichier absent**                   | MIT             | MIT          | ajouter LICENSE                                     |
+| spec, integration-tests | n'existent pas                       |                 | MIT          | à créer                                             |
 
 Changements de licence existants à valider : `context-engine` BSL → MIT (relicencier une version déjà publiée sur GHP : ne vaut que pour les versions futures) et `server` MIT → BSL (la 0.1.x npm publique restera MIT). Verdict : **adapter** selon la cible, sur confirmation.
 
