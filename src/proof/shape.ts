@@ -330,8 +330,7 @@ const SKIP: Shape = {
 
 const PENDING: Shape = {
   summary:
-    '{ ruleId, version, subject?, output?, reason, detail, missing, conditionHeld?, ' +
-    'stratum, salt }',
+    '{ ruleId, version, subject?, output?, reason, detail, missing, fired?, ' + 'stratum, salt }',
   fields: {
     ruleId: citedRule,
     version,
@@ -340,11 +339,11 @@ const PENDING: Shape = {
     reason: nonEmptyString,
     detail: nonEmptyString,
     missing: listOf(contextPointer),
-    conditionHeld: boolean,
+    fired: boolean,
     stratum,
     salt,
   },
-  optional: ['subject', 'output', 'conditionHeld'],
+  optional: ['subject', 'output', 'fired'],
 };
 
 const AFFECTED: Shape = {

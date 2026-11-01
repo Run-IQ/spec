@@ -67,6 +67,31 @@ function summed(n: number): UnsignedProof {
   return proof;
 }
 
+/**
+ * `n` rules `c<i>` pending on one output, each PENDING_CARRIER behind the next, the last
+ * pending UNDETERMINED: a chain of `n` pending carriers down to its root.
+ */
+function carriers(n: number): UnsignedProof {
+  const ids = Array.from({ length: n }, (_, i) => `c${pad(i)}`);
+  const proof = outputProof({ type: 'number', combine: 'sum' });
+  proof.outputs[0]!.status = 'undetermined';
+  proof.outputs[0]!.pending = ids;
+  proof.rules = ids.map(rule);
+  proof.pending = ids.map((ruleId, i) => ({
+    ruleId,
+    version: 1,
+    output: 'value',
+    ...(i + 1 < n
+      ? { reason: 'PENDING_CARRIER', detail: `carrier ${ids[i + 1]!}@1 is pending` }
+      : { reason: 'UNDETERMINED', detail: 'missing /a' }),
+    missing: [],
+    ...(i === 0 ? {} : { fired: false }),
+    stratum: 0,
+    salt,
+  }));
+  return proof;
+}
+
 /** The property reads of the lists of `proof` that `inconsistencies` makes; none is found. */
 function readsOf(proof: UnsignedProof): number {
   const counter = { reads: 0 };
@@ -84,6 +109,7 @@ function readsOf(proof: UnsignedProof): number {
       affected: counted(exception.affected, counter),
     })),
     factsRead: counted(proof.factsRead, counter),
+    pending: counted(proof.pending, counter),
   };
   expect(inconsistencies(watched)).toEqual([]);
   return counter.reads;
@@ -129,6 +155,12 @@ describe('proofs as large as the format allows', () => {
     const proof = sealProof(summed(250_000));
     expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
     expectLinear(summed, 125_000);
+  }, 600_000);
+
+  it('a chain of 100 000 pending carriers: sealed and verified, in linear work', () => {
+    const proof = sealProof(carriers(100_000));
+    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expectLinear(carriers, 50_000);
   }, 600_000);
 
   it('80 000 steps: verified in work linear in their number', () => {

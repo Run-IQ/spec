@@ -46,7 +46,7 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  *   cited names (`citedNameProblem`: no `$` output, no `local:`); subjects are subjects
  *   (`isSubject`); pending `missing` pointers are pointers of the evaluation
  *   context, and fact paths pointers to an input fact (`contextToInputPointer`); a pending
- *   entry's `conditionHeld`, when present, is a boolean (whether its rule carries exceptions,
+ *   entry's `fired`, when present, is a boolean (whether its rule carries exceptions,
  *   which it must then carry, only the rules' definitions say: `verifyProof` with `rules`);
  * - an output carries its declaration in its normal form, checked as an output declaration
  *   (`validateOutputDeclaration`); its `status` is an output status, while the status of a

@@ -217,12 +217,15 @@ export interface ProofPending {
   detail: string;
   missing: JsonPointer[];
   /**
-   * For a rule that carries exceptions, and only for one: whether its condition held (R18). A
-   * pending carrier whose condition held fired its exceptions, though its own computation
-   * failed; one whose condition did not hold, or is not known to, fired nothing, and the rules
-   * it would have affected are pending `PENDING_CARRIER` (D-8).
+   * For a rule that carries exceptions, and only for one: whether this carrier fired its
+   * exceptions (R18: its condition held, and it was not pending `PENDING_CARRIER`), though its
+   * own computation failed. One that did not fire has its targets pending `PENDING_CARRIER`
+   * (D-8), each naming it in `detail` (`carrier id@version[ at subject] is pending`). Fixed by
+   * the reason for some (`firedOf`): `true` for `PENDING_DOMINANT` and the causes
+   * `INVALID_PARAMS`, `MODEL_ERROR`; `false` for `PENDING_CARRIER` and the causes of a failed
+   * or never reached condition.
    */
-  conditionHeld?: boolean;
+  fired?: boolean;
   stratum: number;
   salt: string;
 }

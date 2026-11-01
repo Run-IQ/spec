@@ -4,7 +4,7 @@ import { instanceKey } from './output-values.js';
 import { BEFORE_EXCEPTIONS } from './effects.js';
 import { ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
-import { full } from './collect.js';
+import { firedProblems, pendingCarrierProblems } from './carriers.js';
 import type { ProofPending, ProofSkip, UnsignedProof } from './types.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
@@ -28,15 +28,16 @@ export interface Ties {
    */
   reaches(entry: { ruleId: string; subject?: string }): boolean;
   /**
-   * In the order of `exceptions`: `exception of an excluded carrier: id@version[ at subject]`
+   * First `fired contradicts its reason: id@version[ at subject]` (`firedProblems`). Then, in
+   * the order of `exceptions`: `exception of an excluded carrier: id@version[ at subject]`
    * (its carrier excluded for a reason that stops it: it fired nothing), `exception of a pending
-   * carrier` (its `conditionHeld` false), `pending carrier without conditionHeld`; for a
+   * carrier` (its `fired` false), `pending carrier without fired`; for a
    * discarded carrier, `exception status differs from its carrier's decision`, and
    * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
    * id@version` (a second short circuit of an output at the same stratum, precedence and
-   * priority, its carrier not excluded `RULE_CONFLICT`); then `pending carrier without a
-   * pending carrier: id@version` (`PENDING_CARRIER` while no pending entry has `conditionHeld`
-   * false).
+   * priority, its carrier not excluded `RULE_CONFLICT`); then, in the order of `pending`,
+   * `pending carrier without a pending carrier` and `pending carrier without a root`
+   * (`pendingCarrierProblems`).
    */
   problems: readonly string[];
 }
@@ -113,11 +114,10 @@ function stopsCarrier(reason: string): boolean {
 /**
  * The ties the exceptions of `p` show, and the problems of their carriers. A carrier excluded
  * for a reason that stops it (`stopsCarrier`) fired nothing. A pending one fired exactly when
- * its condition held (`conditionHeld`, R18): neither its reason nor the cause of its error says
- * so, an undetermined model, an output mismatch or an ambiguous order coming before or after
- * the condition. One excluded for its own computation afterwards
- * (`SHORT_CIRCUITED`, `INVALID_PARAMS`, `DOMINATED`, a tie on its own output, any other
- * reason) fired its exceptions first (core `ExceptionResult`).
+ * its entry says so (`fired`, R18; fixed by its reason for some, `firedProblems`). One
+ * excluded for its own computation afterwards (`SHORT_CIRCUITED`, `INVALID_PARAMS`,
+ * `DOMINATED`, a tie on its own output, any other reason) fired its exceptions first (core
+ * `ExceptionResult`).
  */
 export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   const excluded = new Map<string, ProofSkip>();
@@ -127,6 +127,7 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   const discarded = new Set<number>();
   const shortCircuits = new Set<string>();
   const problems: string[] = [];
+  firedProblems(p, problems);
   const fired = new Scope();
   const tied = new Scope();
   const claims = new Map<string, Claim[]>();
@@ -147,10 +148,10 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
       return;
     }
     const pending = waiting.get(instanceKey(exception));
-    if (pending !== undefined && pending.conditionHeld !== true) {
+    if (pending !== undefined && pending.fired !== true) {
       problems.push(
-        pending.conditionHeld === undefined
-          ? `pending carrier without conditionHeld: ${cited()}`
+        pending.fired === undefined
+          ? `pending carrier without fired: ${cited()}`
           : `exception of a pending carrier: ${cited()}`,
       );
       discarded.add(index);
@@ -184,28 +185,13 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     if (list === undefined) claims.set(output, [claim]);
     else list.push(claim);
   });
-  appendPendingCarriers(p, problems);
+  pendingCarrierProblems(p, waiting, problems);
   return {
     discarded,
     shortCircuits,
     reaches: (entry) => tied.covers(entry),
     problems,
   };
-}
-
-/**
- * `pending carrier without a pending carrier: id@version[ at subject]`: a rule pending
- * `PENDING_CARRIER` though no carrier in the proof is pending with its condition not held
- * (`conditionHeld: false`, D-8).
- */
-function appendPendingCarriers(p: UnsignedProof, problems: string[]): void {
-  if (p.pending.some((entry) => entry.conditionHeld === false)) return;
-  for (const entry of p.pending) {
-    if (full(problems)) return;
-    if (entry.reason === 'PENDING_CARRIER') {
-      problems.push(`pending carrier without a pending carrier: ${citeName(instanceKey(entry))}`);
-    }
-  }
 }
 
 /**

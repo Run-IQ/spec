@@ -63,9 +63,9 @@ interface Finding {
  *    id@version`, `duplicate rule: id@version`, `rule invalid: rules[i]: <reason>`, and, for a
  *    rule whose checksum matches, `rule priority mismatch: id@version` when the priority the
  *    proof records is not that of the definition (`-0` and `0` are the same priority). Then,
- *    in the order of `pending`, for a given rule: `conditionHeld missing: id@version[ at
+ *    in the order of `pending`, for a given rule: `fired missing: id@version[ at
  *    subject]` on a pending entry of a rule whose definition carries exceptions, and
- *    `conditionHeld on a rule without exceptions: …` on one of a rule that carries none (R18).
+ *    `fired on a rule without exceptions: …` on one of a rule that carries none (R18).
  *
  * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
  * `invalid` too, rather than being ignored.
@@ -224,16 +224,16 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   for (const key of given.keys()) {
     if (!cited.has(key)) invalid(`unexpected rule: ${citeName(key)}`);
   }
-  // `conditionHeld` is on the pending entries of the rules that carry exceptions, only (R18):
+  // `fired` is on the pending entries of the rules that carry exceptions, only (R18):
   // only their definitions say which rules those are.
   for (const entry of p.pending) {
     const key = `${entry.ruleId}@${entry.version}`;
     if (!given.has(key)) continue;
     const at = citeName(instanceKey(entry));
-    if (carriers.has(key) && entry.conditionHeld === undefined) {
-      invalid(`conditionHeld missing: ${at}`);
-    } else if (!carriers.has(key) && entry.conditionHeld !== undefined) {
-      invalid(`conditionHeld on a rule without exceptions: ${at}`);
+    if (carriers.has(key) && entry.fired === undefined) {
+      invalid(`fired missing: ${at}`);
+    } else if (!carriers.has(key) && entry.fired !== undefined) {
+      invalid(`fired on a rule without exceptions: ${at}`);
     }
   }
   return findings;
