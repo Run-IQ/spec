@@ -296,10 +296,10 @@ const SITES: {
       traceProof({
         output: { type: 'decimal', combine: 'sum', per: '/e', status: 'determined' },
         rules: [{ id: 'A' }],
-        skipped: [{ ruleId: 'A', output: 'value', reason: 'CONDITION_FALSE' }],
+        steps: [{ ruleId: 'A', contribution: '1', subject: '/e/@1' }],
       }),
     unrelated: 'factsRead',
-    message: 'exclusion feeds no item: A@1',
+    message: 'step feeds no item: A@1 at /e/@1',
   },
   {
     site: 'carrier-rules: the exception records of a carrier against its definition',
@@ -508,7 +508,7 @@ const LIFT_CASES: {
   {
     check: 'items of their collection',
     content: () => SITES[7]!.content(),
-    message: 'exclusion feeds no item: A@1',
+    message: 'step feeds no item: A@1 at /e/@1',
     lifting: 'items',
     unrelated: 'factsRead',
   },

@@ -2,7 +2,7 @@ import type { JsonValue } from '../canonical.js';
 import { OUTPUT_STATUSES } from '../decision/status.js';
 import type { OutputStatus } from '../decision/status.js';
 import { citeName } from '../errors.js';
-import { parsePointer } from '../path/pointer.js';
+import { formatPointer, parsePointer } from '../path/pointer.js';
 import { append } from './collect.js';
 import { combinationProblems, comparator, SELECTING } from './combination.js';
 import type { Context, Target } from './combination.js';
@@ -29,6 +29,7 @@ import type {
   ProofView,
 } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import type { OutputIdentity } from './lifts.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
 const ORDERED: ReadonlySet<string> = new Set(['number', 'decimal', 'enum', 'date', 'dateTime']);
@@ -142,7 +143,11 @@ interface Feeds {
   outputs: Map<string, Feed>;
   items: Map<ProofItem, Feed>;
   /** `step feeds no item`, `pending rule feeds no item`, in trace order. */
-  strays: string[];
+  /**
+   * The steps, pending rules and exclusions of a per output that feed no item, with the item
+   * that would feed them (its output and element) when one could.
+   */
+  strays: Stray[];
 }
 
 function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
@@ -160,7 +165,7 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     // A repeated item is reported by `orderProblems`; only the first is fed.
     if (trie.add(item.subject, feed)) items.set(item, feed);
   }
-  const strays: string[] = [];
+  const strays: Stray[] = [];
   const route = (
     entry: ProofStep | ProofPending,
     output: string,
@@ -171,7 +176,11 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     const trie = tries.get(output);
     if (trie === undefined) return undefined;
     const feed = entry.subject === undefined ? undefined : trie.deepest(entry.subject);
-    if (feed === undefined) strays.push(`${what} feeds no item: ${citeName(instanceKey(entry))}`);
+    if (feed === undefined) {
+      const message = `${what} feeds no item: ${citeName(instanceKey(entry))}`;
+      const item = elementOf(listed.get(output)?.per, entry.subject);
+      strays.push(item === undefined ? { message } : { message, output: { output, item } });
+    }
     return feed;
   };
   for (const step of p.applied) {
@@ -192,7 +201,8 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     // A per output is fed by instances (D-21): an exclusion without subject is grouped.
     const perOutput = skip.output !== undefined && tries.has(skip.output);
     if (perOutput && skip.subject === undefined && skip.instances === undefined) {
-      strays.push(`exclusion feeds no item: ${citeName(instanceKey(skip))}`);
+      // Grouped (instances aside): no item, visible or not, would feed it.
+      strays.push({ message: `exclusion feeds no item: ${citeName(instanceKey(skip))}` });
     }
     exclude(skip, outputs, tries, ties.reaches(skip));
   }
@@ -323,16 +333,28 @@ export function outputProblems(
   const { hidden } = context;
   const feeds = feedsOf(p, listed, context.ties);
   // The item a stray step or pending rule feeds may be redacted.
-  if (feeds.strays.length === 0 || !isLifted(hidden, LIFTS.itemsOfCollection)) {
-    append(issues, feeds.strays);
+  for (const { message, output } of feeds.strays) {
+    if (output === undefined || !isLifted(hidden, LIFTS.itemsOfCollection, { message, output })) {
+      issues.push(message);
+    }
   }
   const targets = targetsOf(p, listed, feeds);
   for (const { target, feed, pending } of targets) {
     append(issues, combinationProblems(target, context));
     // A pending rule of the target may be redacted: its own pending rules are then a superset.
     if (!samePending(pending, feed.pending)) {
-      if (!isLifted(hidden, LIFTS.outputPending))
-        issues.push(`pending differ from pending rules: ${target.cite()}`);
+      const message = `pending differ from pending rules: ${target.cite()}`;
+      if (
+        !pendingHidden(pending, feed.pending, (id) =>
+          isLifted(hidden, LIFTS.outputPending, {
+            message,
+            rule: { id },
+            output: { output: target.place.output },
+          }),
+        )
+      ) {
+        issues.push(message);
+      }
     } else if (!pendingInOrder(pending, feed, context.standings)) {
       issues.push(`pending not in contribution order: ${target.cite()}`);
     }
@@ -341,6 +363,41 @@ export function outputProblems(
   }
   append(issues, statusProblems(p, listed, feeds, targets, hidden));
   return issues;
+}
+
+/** A stray (`Feeds`): its message, and the item that would feed it, if any could. */
+interface Stray {
+  message: string;
+  output?: OutputIdentity;
+}
+
+/**
+ * The item of a per collection `per` that would contain `subject`: the element of the
+ * collection it is under, or `undefined` when it is under none (no item could feed it).
+ */
+function elementOf(per: string | undefined, subject: string | undefined): string | undefined {
+  if (per === undefined || subject === undefined) return undefined;
+  const depth = parsePointer(per).length + 1;
+  const segments = parsePointer(subject);
+  if (segments.length < depth) return undefined;
+  const element = formatPointer(segments.slice(0, depth));
+  return inCollection(per, element) ? element : undefined;
+}
+
+/**
+ * True when the pending rules a target lists (`named`) are those that feed it (`fed`) and
+ * more, each listed once, and `hidden` is true for each rule more (a hidden pending entry of
+ * it): the pending entries that would make them equal may be hidden.
+ */
+function pendingHidden(
+  named: readonly string[],
+  fed: readonly string[],
+  hidden: (id: string) => boolean,
+): boolean {
+  const listed = new Set(named);
+  if (listed.size !== named.length || fed.some((id) => !listed.has(id))) return false;
+  const found = new Set(fed);
+  return named.filter((id) => !found.has(id)).every(hidden);
 }
 
 interface Fed {
@@ -369,6 +426,7 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
           declaration,
           steps: direct.steps,
           whole: true,
+          place: { output: name },
         },
         feed: direct,
         pending: output.pending,
@@ -384,6 +442,7 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
         declaration,
         steps: feed.steps,
         whole: false,
+        place: { output: name, item: item.subject },
       };
       fed.push({ target, feed, pending: item.pending });
     }
@@ -409,7 +468,8 @@ function statusProblems(
     if (output.per === undefined) continue;
     const differs = rankOf(output.status) !== (strongest.get(name) ?? 0);
     const message = `per output status differs from its items: ${citeName(name)}`;
-    if (differs && !isLifted(hidden, LIFTS.perOutputItems, { message })) {
+    const item = { output: name };
+    if (differs && !isLifted(hidden, LIFTS.perOutputItems, { message, output: item })) {
       issues.push(message);
     }
   }

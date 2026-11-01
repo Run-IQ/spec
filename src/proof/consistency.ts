@@ -24,7 +24,8 @@ import { citeItem, outputProblems } from './statuses.js';
 import { sourceProblems, tiesOf } from './ties.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
-import { isLifted, liftedOnSteps, LIFTS, overrunProblems } from './lifts.js';
+import { isLifted, liftedOnSteps, LIFTS, unexplained } from './lifts.js';
+import type { RuleIdentity } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
 // `signProof` and `verifyProof` check it. Every check is linear in the size of the proof: each
@@ -157,8 +158,8 @@ export function inconsistencies(
     () => decisionProblems(p, imposed, hidden),
     () => exceptionProblems(p, imposed, context.ties, hidden),
     () => sourceProblems(p, hidden),
-    // Last: the problems of a bounded check that lifted more than the redactions explain.
-    () => overrunProblems(hidden),
+    // Last: every problem lifted, when the redacted entries cannot explain them all.
+    () => unexplained(hidden),
   ];
   // Each problem once, in the order found, up to what `verifyProof` lists.
   const issues: string[] = [];
@@ -185,8 +186,8 @@ function listedOutputs(p: ProofView): Map<string, ProofOutput> {
 
 /** What `forEachUnresolved` reports: a rule or an output cited and not listed (cited). */
 interface Unresolved {
-  rule: (cited: string) => void;
-  output: (cited: string) => void;
+  rule: (cited: string, rule: RuleIdentity) => void;
+  output: (cited: string, name: string) => void;
   stop: () => boolean;
 }
 
@@ -211,11 +212,13 @@ function forEachUnresolved(
   for (const section of sections) {
     for (const entry of section) {
       if (report.stop()) return;
-      if (!keys.has(key(entry))) report.rule(citeName(key(entry)));
+      if (!keys.has(key(entry))) {
+        report.rule(citeName(key(entry)), { id: entry.ruleId, version: entry.version });
+      }
     }
   }
   const cite = (id: string): void => {
-    if (!ids.has(id) && !report.stop()) report.rule(citeName(id));
+    if (!ids.has(id) && !report.stop()) report.rule(citeName(id), { id });
   };
   for (const entry of [...p.outputs, ...p.items]) {
     for (const id of entry.contributors) cite(id);
@@ -224,7 +227,9 @@ function forEachUnresolved(
   }
   for (const exception of p.exceptions) for (const { ruleId } of exception.affected) cite(ruleId);
   const output = (name: string | undefined): void => {
-    if (name !== undefined && !listed.has(name) && !report.stop()) report.output(citeName(name));
+    if (name !== undefined && !listed.has(name) && !report.stop()) {
+      report.output(citeName(name), name);
+    }
   };
   for (const item of p.items) output(item.output);
   for (const step of p.applied) output(step.output);
@@ -249,15 +254,14 @@ export function citationProblems(
 ): string[] {
   const issues: string[] = [];
   forEachUnresolved(p, listed, {
-    rule: (cited) => {
-      // One rule entry is one rule: cited with or without its version, the unit is its id.
+    rule: (cited, rule) => {
+      // A rules entry of that rule: `id@version`, or any version when cited by id.
       const message = `cited rule not listed: ${cited}`;
-      const unit = cited.includes('@') ? cited.slice(0, cited.lastIndexOf('@')) : cited;
-      if (!isLifted(hidden, LIFTS.ruleCitations, { message, unit })) issues.push(message);
+      if (!isLifted(hidden, LIFTS.ruleCitations, { message, rule })) issues.push(message);
     },
-    output: (cited) => {
+    output: (cited, name) => {
       const message = `cited output not listed: ${cited}`;
-      if (!isLifted(hidden, LIFTS.outputCitations, { message })) {
+      if (!isLifted(hidden, LIFTS.outputCitations, { message, output: { output: name } })) {
         issues.push(message);
       }
     },
@@ -393,8 +397,8 @@ export function orderProblems(
     ),
   );
   push(
-    requestedProblems(p, listed, (message) =>
-      isLifted(hidden, LIFTS.requestedOutputs, { message }),
+    requestedProblems(p, listed, (message, name) =>
+      isLifted(hidden, LIFTS.requestedOutputs, { message, output: { output: name } }),
     ),
   );
   push(innerOrderProblems(p));
@@ -439,11 +443,12 @@ function decidedTwice(
 function requestedProblems(
   p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
-  outputsHidden: (message: string) => boolean,
+  outputsHidden: (message: string, name: string) => boolean,
 ): string[] {
   const requested = p.requested ?? [];
   const absent = requested.filter(
-    (name) => !listed.has(name) && !outputsHidden(`requested output absent: ${citeName(name)}`),
+    (name) =>
+      !listed.has(name) && !outputsHidden(`requested output absent: ${citeName(name)}`, name),
   );
   return [
     ...sortProblems(

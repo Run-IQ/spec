@@ -16,6 +16,7 @@ import type { Standing, Standings } from './precedence.js';
 import type { Ties } from './ties.js';
 import type { ProofSection, ProofSelection, ProofStep } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import type { OutputIdentity } from './lifts.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
 export interface Target {
@@ -30,6 +31,8 @@ export interface Target {
   steps: readonly ProofStep[];
   /** True for an output without `per`: the instances of a rule compete for it by rank. */
   whole: boolean;
+  /** What a step feeding it carries: its output, and its item's subject for an item. */
+  place: OutputIdentity;
 }
 
 /** What the combination of a target is checked against: the proof's imposed steps, standings. */
@@ -293,9 +296,9 @@ export function combinationProblems(target: Target, context: Context): string[] 
       : undefined;
   // A step, the short circuit that imposed one, or the standing of a rule may be redacted: what
   // follows from all of them is not checked, what the visible ones contradict still is.
-  // One step feeds one target: the unit of the problems, bounded by the steps redacted.
+  // A hidden step feeds this target: what it carries.
   const lifted = (message: string): boolean =>
-    isLifted(context.hidden, LIFTS.outputValue, { message, unit: cite() });
+    isLifted(context.hidden, LIFTS.outputValue, { message, output: target.place });
   const differ = `contributors differ from applied steps: ${cite()}`;
   if (!contributorsMatch(target, top) && !lifted(differ)) issues.push(differ);
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {

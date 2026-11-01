@@ -91,14 +91,18 @@ export function completenessProblems(
 ): string[] {
   const byTrace = undeterminedByTrace(target, feed, standings);
   if (target.status === 'undetermined') {
-    if (byTrace || isLifted(hidden, LIFTS.undeterminedCause)) return [];
-    return [`undetermined output without a cause: ${target.cite()}`];
+    if (byTrace) return [];
+    // A pending entry of its output, grouped or not.
+    const message = `undetermined output without a cause: ${target.cite()}`;
+    const output = { output: target.place.output };
+    return isLifted(hidden, LIFTS.undeterminedCause, { message, output }) ? [] : [message];
   }
   // An `all` no rule reached is reported by `combinationProblems`.
   const pending = feed.pending.length > 0;
   if (!byTrace || !pending) return [];
   const message = `settled output with pending rules: ${target.cite()}`;
-  return isLifted(hidden, LIFTS.settledPending, { message }) ? [] : [message];
+  const output = target.place;
+  return isLifted(hidden, LIFTS.settledPending, { message, output }) ? [] : [message];
 }
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
@@ -152,11 +156,11 @@ export function rankProblems(
       if (step.rank !== undefined) issues.push(`rank on a step that does not compete: ${cited()}`);
     } else if (step.rank === undefined) {
       issues.push(`rank missing: ${cited()}`);
-    } else if (
-      step.rank >= (instances.get(ruleKey(step)) ?? 0) &&
-      !isLifted(hidden, LIFTS.rankRange)
-    ) {
-      issues.push(`rank out of range: ${cited()}`);
+    } else if (step.rank >= (instances.get(ruleKey(step)) ?? 0)) {
+      // Another instance of the rule, hidden.
+      const message = `rank out of range: ${cited()}`;
+      const rule = { id: step.ruleId, version: step.version };
+      if (!isLifted(hidden, LIFTS.rankRange, { message, rule })) issues.push(message);
     }
   }
   return issues;
@@ -191,7 +195,7 @@ export function causeProblems(
   const settled = target.status !== 'undetermined';
   const stronger = settled && rank > Math.max(0, steps, feed.candidates, tie);
   const message = `output status stronger than its causes: ${target.cite()}`;
-  if (stronger && !isLifted(hidden, LIFTS.causes, { message })) {
+  if (stronger && !isLifted(hidden, LIFTS.causes, { message, output: target.place })) {
     issues.push(message);
   }
   return issues;

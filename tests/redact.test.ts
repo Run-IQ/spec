@@ -488,6 +488,25 @@ describe('verifyProof(p, { rules }) on a redacted proof', () => {
     });
   });
 
+  it('counts the redacted rules only, not the other redacted entries', () => {
+    const redacted = hiding(signed(salty(unsigned())), ['rules', 1], ['skipped', 0]);
+    const result = verifyProof(redacted, { trustedKeys: TRUSTED, rules: [ruleA, ruleB] });
+    expect(result.status).toBe('consistent-redacted');
+    expect(result.issues).toContain('rules check incomplete: 1 redacted rule');
+  });
+
+  it('a rule given and not shown is a hidden rules entry of that version (round 4)', () => {
+    // The hidden rule is r2@2, which the proof cites; r2@1, given, would need a second one.
+    const other: RuleDefinitionInput = { ...ruleB, version: 1 };
+    const redacted = hiding(signed(salty(unsigned())), ['rules', 1]);
+    const result = verifyProof(redacted, { trustedKeys: TRUSTED, rules: [ruleA, other] });
+    expect(result.status).toBe('invalid');
+    expect(result.issues).toEqual(
+      expect.arrayContaining(['cited rule not listed: r2@2', 'unexpected rule: r2@1']),
+    );
+    expect(result.lifted).toEqual([]);
+  });
+
   it('refuses more or fewer rules than the proof holds', () => {
     const redacted = hiding(signed(salty(unsigned())), ['rules', 1]);
     expect(verifyProof(redacted, { rules: [ruleA] })).toMatchObject({

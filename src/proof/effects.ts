@@ -16,6 +16,7 @@ import type {
   ProofView,
 } from './types.js';
 import { isLifted, liftedOnSteps, LIFTS } from './lifts.js';
+import type { RuleIdentity } from './lifts.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
 // that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
@@ -40,11 +41,17 @@ export function undecidedRules(
   const issues: string[] = [];
   for (const rule of p.rules) {
     if (full(issues)) break;
-    const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
-    if (!decided.has(key)) issues.push(`rule not decided: ${citeName(key)}`);
+    const id = qualifyName(rule.ruleSet, rule.id);
+    const key = `${id}@${rule.version}`;
+    if (decided.has(key)) continue;
+    // A hidden decision of that rule.
+    const message = `rule not decided: ${citeName(key)}`;
+    const identity = { id, version: rule.version };
+    if (!isLifted(hidden, LIFTS.everyRuleDecided, { message, rule: identity })) {
+      issues.push(message);
+    }
   }
-  // One entry decides one rule: the unit of the problems, bounded by the entries redacted.
-  return issues.filter((message) => !isLifted(hidden, LIFTS.everyRuleDecided, { message }));
+  return issues;
 }
 
 /**
@@ -213,10 +220,13 @@ export function exceptionProblems(
   const push = (issue: string): void => {
     if (!full(issues)) issues.push(issue);
   };
-  const firedUnknown = (): boolean => isLifted(hidden, LIFTS.firedExceptions);
+  // Unless what fired may be hidden: report `message` then.
+  const report = (add: (message: string) => void, message: string): void => {
+    if (!isLifted(hidden, LIFTS.firedExceptions, { message })) add(message);
+  };
   for (const problem of ties.problems) push(problem);
-  carrierProblems(p, imposed, ties, push, (message) =>
-    isLifted(hidden, LIFTS.shortCircuitCarrier, { message }),
+  carrierProblems(p, imposed, ties, push, (message, rule) =>
+    isLifted(hidden, LIFTS.shortCircuitCarrier, { message, rule }),
   );
   const tries = new Map<string, Node>();
   p.exceptions.forEach((exception, index) => {
@@ -273,23 +283,30 @@ export function exceptionProblems(
       visit(node);
     }
     const cited = (): string => citeName(instanceKey(decision));
-    if (inhibited && !firedUnknown()) push(`inhibited rule applied: ${cited()}`);
+    if (inhibited) report(push, `inhibited rule applied: ${cited()}`);
     // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
     // short circuit imposed is its carrier's, not a target's.
     const own = 'model' in decision && imposed.has(imposedKey(decision, decision.output));
-    if (!own && decision.stratum < latest && !firedUnknown()) {
-      early.push(`decision before the exception that affected it: ${cited()}`);
+    if (!own && decision.stratum < latest) {
+      report(
+        (message) => early.push(message),
+        `decision before the exception that affected it: ${cited()}`,
+      );
     }
     const unexplained =
       !reached && 'status' in decision && !('model' in decision)
         ? UNEXPLAINED.get(decision.reason)
         : undefined;
-    if (unexplained !== undefined && !isLifted(hidden, LIFTS.exclusionException)) {
-      uncovered.push(`${unexplained}: ${cited()}`);
+    if (unexplained !== undefined) {
+      const message = `${unexplained}: ${cited()}`;
+      if (!isLifted(hidden, LIFTS.exclusionException, { message })) uncovered.push(message);
     }
     // A pending decision is undetermined: never weaker.
-    if (reached && 'status' in decision && rankOf(decision.status) < strongest && !firedUnknown()) {
-      weaker.push(`decision weaker than the exception that affected it: ${cited()}`);
+    if (reached && 'status' in decision && rankOf(decision.status) < strongest) {
+      report(
+        (message) => weaker.push(message),
+        `decision weaker than the exception that affected it: ${cited()}`,
+      );
     }
   }
   const unproduced: [number, string][] = [];
@@ -311,8 +328,8 @@ export function exceptionProblems(
   // In the order of the exceptions, then of their affected entries.
   unproduced.sort((a, b) => a[0] - b[0]);
   // The decision an exception produced may be redacted.
-  if (unproduced.length === 0 || !isLifted(hidden, LIFTS.affectedFound)) {
-    for (const [, message] of unproduced) push(message);
+  for (const [, message] of unproduced) {
+    if (!isLifted(hidden, LIFTS.affectedFound, { message })) push(message);
   }
   for (const message of uncovered) push(message);
   for (const message of weaker) push(message);
@@ -329,7 +346,7 @@ function carrierProblems(
   imposed: ReadonlySet<string>,
   ties: Ties,
   push: (issue: string) => void,
-  stepsHidden: (message: string) => boolean,
+  stepsHidden: (message: string, carrier: RuleIdentity) => boolean,
 ): void {
   const steps = new Map<string, ProofStep>();
   for (const step of p.applied) {
@@ -357,9 +374,11 @@ function carrierProblems(
       return;
     }
     // A carrier whose claim on the output another won affected nothing (R18).
+    if (exception.affected.length === 0 && won.has(output)) return;
+    // A hidden step of the carrier instance.
     const missing = `short circuit without its carrier applied: ${cited}`;
-    if ((exception.affected.length > 0 || !won.has(output)) && !stepsHidden(missing)) {
-      push(missing);
-    }
+    const { ruleId: id, version, subject } = exception;
+    const rule = subject === undefined ? { id, version } : { id, version, subject };
+    if (!stepsHidden(missing, rule)) push(missing);
   });
 }

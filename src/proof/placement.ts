@@ -41,7 +41,8 @@ export function strataProblems(
   for (const name of p.strata.flat()) {
     if (!listed.has(name)) {
       const message = `stratum output unknown: ${citeName(name)}`;
-      if (!isLifted(hidden, LIFTS.strataOutputs, { message })) issues.push(message);
+      const output = { output: name };
+      if (!isLifted(hidden, LIFTS.strataOutputs, { message, output })) issues.push(message);
     }
     if (placed.has(name)) issues.push(`stratum output repeated: ${citeName(name)}`);
     placed.add(name);

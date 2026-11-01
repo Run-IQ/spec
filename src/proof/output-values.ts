@@ -133,6 +133,7 @@ export function offDeclarationValues(
             (hasForm(value, declaration) &&
               isLifted(hidden, LIFTS.countForm, {
                 message: `contribution does not match its output declaration: ${cited}`,
+                output: { output: output.name },
               }));
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
     };

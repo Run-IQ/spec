@@ -11,6 +11,7 @@ import { ruleKey } from './precedence.js';
 import { Scope, stopsCarrier } from './ties.js';
 import type { ProofPending, ProofSkip, ProofStep, ProofView } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import type { RuleIdentity } from './lifts.js';
 
 // Internal to `@run-iq/spec`: the carriers of a proof against the rule definitions `verifyProof`
 // was given (`rules`): which rules each targets (`matchesSelector`, as core resolves targets
@@ -164,11 +165,10 @@ export function carrierRuleFindings(
   }
   waitingTargets(p, definitions, context.imposed, invalid);
   // The exception records of a carrier, or its exclusion, may be redacted.
-  const records: string[] = [];
-  recordedExceptions(p, definitions, context.ties.losers, (message) => records.push(message));
-  for (const message of records) {
-    if (!isLifted(context.hidden, LIFTS.carrierRecords, { message })) invalid(message);
-  }
+  // A hidden record or exclusion of that carrier instance.
+  recordedExceptions(p, definitions, context.ties.losers, (message, rule) => {
+    if (!isLifted(context.hidden, LIFTS.carrierRecords, { message, rule })) invalid(message);
+  });
 }
 
 /**
@@ -395,7 +395,7 @@ function recordedExceptions(
   p: ProofView,
   definitions: ReadonlyMap<string, RuleDefinition>,
   losers: ReadonlySet<string>,
-  invalid: (message: string) => void,
+  invalid: (message: string, carrier: RuleIdentity) => void,
 ): void {
   const records = new Map<string, string[]>();
   for (const exception of p.exceptions) {
@@ -428,6 +428,9 @@ function recordedExceptions(
     const same = losers.has(key)
       ? recorded.length === 1 && defined.includes(recorded[0] ?? '')
       : recorded.length === defined.length && recorded.every((s, i) => s === defined[i]);
-    if (!same) invalid(`carrier exceptions differ from its definition: ${citeName(key)}`);
+    if (same) continue;
+    const { ruleId: id, version, subject } = instance;
+    const carrier = subject === undefined ? { id, version } : { id, version, subject };
+    invalid(`carrier exceptions differ from its definition: ${citeName(key)}`, carrier);
   }
 }

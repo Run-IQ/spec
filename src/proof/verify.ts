@@ -9,7 +9,8 @@ import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
 import type { Context } from './combination.js';
 import { contextOf, inconsistencies } from './consistency.js';
-import { isLifted, liftedChecks, LIFTS, overrunProblems } from './lifts.js';
+import { isLifted, liftedChecks, LIFTS, unexplained } from './lifts.js';
+import type { RuleIdentity } from './lifts.js';
 import { instanceKey } from './output-values.js';
 import { proofView } from './redact.js';
 import type { Redactions } from './redact.js';
@@ -131,8 +132,8 @@ function verify(p: unknown, options: unknown): ProofVerification {
     }
   }
   extend(findings, optionFindings(view, proof, options, context, redactions));
-  // The checks with the rules given that lifted more problems than the redactions explain.
-  for (const message of overrunProblems(redactions.hidden)) findings.push(invalidFinding(message));
+  // Every problem lifted, when the redacted entries cannot explain them all with the rules given.
+  for (const message of unexplained(redactions.hidden)) findings.push(invalidFinding(message));
   const lifted = liftedChecks(redactions.hidden);
   for (const { check, redacted } of lifted) {
     const message = `check lifted: ${check} (${redacted.join(', ')} redacted)`;
@@ -238,6 +239,7 @@ function ruleFindings(
   const priorities = new Map<string, number>();
   const carriers = new Set<string>();
   const definitions = new Map<string, RuleDefinition>();
+  const identities = new Map<string, RuleIdentity>();
   items.forEach((rule, i) => {
     let key: string;
     let checksum: string;
@@ -255,6 +257,7 @@ function ruleFindings(
       priority = definition.priority;
       if ((definition.exceptions ?? []).length > 0) carriers.add(key);
       if (!definitions.has(key)) definitions.set(key, definition);
+      identities.set(key, { id, version: definition.version });
     } catch (error) {
       invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
       return;
@@ -283,10 +286,11 @@ function ruleFindings(
   // A rule given that the proof does not show may be one of its redacted rules: those are
   // compared by number (D-16).
   const hiddenRules = redactions.bySection.get('rules') ?? 0;
-  const uncited = [...given.keys()].filter((key) => !cited.has(key));
+  // The keys of `given`, with their rules.
+  const uncited = [...identities].filter(([key]) => !cited.has(key));
   if (hiddenRules === 0) {
-    for (const key of uncited) invalid(`unexpected rule: ${citeName(key)}`);
-  } else if (isLifted(redactions.hidden, LIFTS.givenRules)) {
+    for (const [key] of uncited) invalid(`unexpected rule: ${citeName(key)}`);
+  } else {
     const plural = hiddenRules === 1 ? 'rule' : 'rules';
     findings.push({
       message: `rules check incomplete: ${hiddenRules} redacted ${plural}`,
@@ -296,8 +300,15 @@ function ruleFindings(
       invalid(
         `unexpected rules: ${uncited.length} given, not in the proof (${hiddenRules} redacted)`,
       );
-    } else if (uncited.length < hiddenRules) {
-      invalid(`rules missing: ${hiddenRules - uncited.length} redacted, not given`);
+    } else {
+      // Each a hidden rules entry of that rule, one each.
+      for (const [key, rule] of uncited) {
+        const message = `unexpected rule: ${citeName(key)}`;
+        if (!isLifted(redactions.hidden, LIFTS.givenRules, { message, rule })) invalid(message);
+      }
+      if (uncited.length < hiddenRules) {
+        invalid(`rules missing: ${hiddenRules - uncited.length} redacted, not given`);
+      }
     }
   }
   // `fired` is on the pending entries of the rules that carry exceptions, only (R18):

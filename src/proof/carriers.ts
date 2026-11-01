@@ -126,7 +126,7 @@ export function pendingCarrierProblems(
   p: ProofView,
   waiting: ReadonlyMap<string, ProofPending>,
   problems: string[],
-  carriersHidden: () => boolean = () => false,
+  carriersHidden: (message: string) => boolean = () => false,
 ): void {
   const holds = new Map<ProofPending, Hold | 'open'>();
   const follow = (start: ProofPending): void => {
@@ -172,7 +172,7 @@ export function pendingCarrierProblems(
           ? `pending carrier without a root: ${at}`
           : undefined;
     // The carrier or the root may be the redacted entry.
-    if (problem !== undefined && !carriersHidden()) problems.push(problem);
+    if (problem !== undefined && !carriersHidden(problem)) problems.push(problem);
     const carrier =
       entry.carrier === undefined ? undefined : waiting.get(instanceKey(entry.carrier));
     if (carrier === undefined) continue;
