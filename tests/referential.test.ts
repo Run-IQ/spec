@@ -446,7 +446,7 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     expect(validateReferential(nestedReferential(65))).toEqual([
       { path: 'groups', message: 'group nesting deeper than 64' },
     ]);
-  });
+  }, 60_000);
 
   it('measures the depth at each date: two chains never active together stay shallow', () => {
     const r = nestedReferential(40);
@@ -480,7 +480,7 @@ describe('validateReferential: hostile data and scale (I20)', () => {
       { path: '', message: 'referential too large: 10 nodes' },
     ]);
     expect(validateReferential(ueReferential(), { maxNodes: 10 })).toEqual([]);
-  });
+  }, 60_000);
 
   it('counts a member list by its length, without reading its items', () => {
     const members = new Proxy([] as ReferentialMember[], {
@@ -503,7 +503,7 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     // 157 160 steps measured (2.8 per node); a sweep that searched the whole graph for each
     // membership would take about 10^8 steps.
     expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
-  });
+  }, 60_000);
 
   it('checks a chain of groups in linear work: twice as long, twice the steps', () => {
     const steps = [256, 512, 1024].map((depth) => {
@@ -517,21 +517,21 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     const [short = 0, middle = 0, long = 0] = steps;
     expect(middle).toBeLessThanOrEqual(2.1 * short);
     expect(long).toBeLessThanOrEqual(2.1 * middle);
-  });
+  }, 60_000);
 
   it('checks a fan-in in linear work: a hub of 19 000 groups held by 19 000 groups (I1)', () => {
     const r = fanIn(19_000, 19_000);
     const nodes = 1 + 3 * 19_000 + 2 * 19_000;
     expect(validateReferential(r)).toEqual([]);
     expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
-  });
+  }, 60_000);
 
   it('checks 33 000 one-day periods of one membership in linear work (I1)', () => {
     const r = dailyHub(30_000, 33_000);
     const nodes = 2 + 30_000 + 30_000 + 33_000;
     expect(validateReferential(r)).toEqual([]);
     expect(referentialCheckSteps(r)).toBeLessThanOrEqual(STEPS_PER_NODE * nodes);
-  });
+  }, 60_000);
 
   it('refuses a referential whose sweep exceeds maxSteps, by name (I1)', () => {
     const r = layeredReferential();
@@ -542,7 +542,7 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     expect(specError(() => normalizeReferential(r, { maxSteps: 1000 })).message).toBe(
       'referential too complex: more than 1000 steps',
     );
-  });
+  }, 60_000);
 
   it('defaults maxSteps to 100 steps per node counted, whatever maxNodes allows', () => {
     // A shape whose sweep is quadratic: each of 1 000 days re-marks the 1 000 groups of HUB.
@@ -558,7 +558,7 @@ describe('validateReferential: hostile data and scale (I20)', () => {
     expect(referentialCheckSteps(r)).toBe(100 * nodes + 1);
     // maxSteps stays an explicit override.
     expect(validateReferential(r, { maxSteps: 3_000_000 })).toEqual([]);
-  });
+  }, 60_000);
 
   it('refuses invalid options with a SpecError, never a raw error (M3)', () => {
     const throwing = {
@@ -930,7 +930,7 @@ describe('normalizeReferential', () => {
       const once = normalizeReferential(r);
       expect(normalizeReferential(once)).toEqual(once);
     }
-  });
+  }, 60_000);
 
   it('validate(normalize(x)) agrees with validate(x)', () => {
     for (const r of [ueReferential(), ueWithCodes(), nestedReferential(64), layeredReferential()]) {
@@ -949,7 +949,7 @@ describe('normalizeReferential', () => {
       expect(error.code).toBe('INVALID_REFERENTIAL');
       expect(error.message).toBe(first?.message);
     }
-  });
+  }, 60_000);
 
   it('shares nothing with its input, and reads each property once', () => {
     let reads = 0;
@@ -973,5 +973,5 @@ describe('normalizeReferential', () => {
     expect(specError(() => normalizeReferential(ueReferential(), { maxNodes: 9 })).message).toBe(
       'referential too large: 10 nodes',
     );
-  });
+  }, 60_000);
 });

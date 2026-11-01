@@ -7,9 +7,9 @@ import {
   inputLeafHash,
   UNSALTED_SEED,
   validateProofInput,
-} from '../src/index.js';
-import type { ProofInput } from '../src/index.js';
-import { hex, nodeHmac, nodeInputDigest, referenceRoot, specError } from './helpers.js';
+} from '../../src/index.js';
+import type { ProofInput } from '../../src/index.js';
+import { hex, nodeHmac, nodeInputDigest, referenceRoot, specError } from '../helpers.js';
 
 /**
  * Values whose canonical text is longer than a JavaScript string can be (V8: 2^29 - 24 code

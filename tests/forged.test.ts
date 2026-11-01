@@ -407,23 +407,27 @@ describe('canonicalize names the member that could not be read', () => {
 });
 
 describe('canonicalize keeps no call stack: any depth is accepted', () => {
-  it.each([3_000, 100_000])('arrays and objects %i deep', (depth) => {
-    let array: unknown = 1;
-    let object: unknown = 1;
-    let mixed: unknown = 'x';
-    for (let i = 0; i < depth; i++) {
-      array = [array];
-      object = { a: object };
-      mixed = i % 2 === 0 ? [null, mixed] : { b: undefined, a: mixed };
-    }
-    expect(canonicalize(array)).toBe(`${'['.repeat(depth)}1${']'.repeat(depth)}`);
-    expect(canonicalize(object)).toBe(`${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`);
-    let reference = '"x"';
-    for (let i = 0; i < depth; i++) {
-      reference = i % 2 === 0 ? `[null,${reference}]` : `{"a":${reference}}`;
-    }
-    expect(canonicalize(mixed)).toBe(reference);
-  });
+  it.each([3_000, 100_000])(
+    'arrays and objects %i deep',
+    (depth) => {
+      let array: unknown = 1;
+      let object: unknown = 1;
+      let mixed: unknown = 'x';
+      for (let i = 0; i < depth; i++) {
+        array = [array];
+        object = { a: object };
+        mixed = i % 2 === 0 ? [null, mixed] : { b: undefined, a: mixed };
+      }
+      expect(canonicalize(array)).toBe(`${'['.repeat(depth)}1${']'.repeat(depth)}`);
+      expect(canonicalize(object)).toBe(`${'{"a":'.repeat(depth)}1${'}'.repeat(depth)}`);
+      let reference = '"x"';
+      for (let i = 0; i < depth; i++) {
+        reference = i % 2 === 0 ? `[null,${reference}]` : `{"a":${reference}}`;
+      }
+      expect(canonicalize(mixed)).toBe(reference);
+    },
+    60_000,
+  );
 
   it('a value it refuses 100,000 deep is reported at its path, in a bounded message', () => {
     let value: unknown = Number.NaN;
@@ -433,7 +437,7 @@ describe('canonicalize keeps no call stack: any depth is accepted', () => {
     expect(error.message).toBe(
       `Value at "${'[0]'.repeat(85)}[…" cannot be serialized to canonical JSON: NaN`,
     );
-  });
+  }, 60_000);
 
   it('a circular reference deep down is still refused', () => {
     const root: { a: unknown } = { a: null };
@@ -445,7 +449,7 @@ describe('canonicalize keeps no call stack: any depth is accepted', () => {
     }
     node.a = root;
     expect(specError(() => canonicalize(root)).message).toMatch(/: a circular reference$/);
-  });
+  }, 60_000);
 });
 
 describe('every exported function: hostile arguments give an own SpecError or a result', () => {

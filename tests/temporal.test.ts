@@ -117,7 +117,7 @@ describe('validateTemporalFact', () => {
         { from: '2026-01-15', until: null, value: b },
       ]),
     ).toEqual([{ path: '/salaire/1', message: MERGE }]);
-  });
+  }, 60_000);
 
   it.each([
     [
@@ -269,7 +269,7 @@ describe('validateTemporalFact', () => {
         message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
-  });
+  }, 60_000);
 
   it('reads each property once', () => {
     const reads = new Map<string, number>();

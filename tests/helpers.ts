@@ -10,6 +10,7 @@ import {
 } from '../src/index.js';
 import { canonicalSha256Hex, isCanonicalText } from '../src/canonical.js';
 import { hashWorkDone } from '../src/stream.js';
+import { MAX_JSON_VALUES } from '../src/values.js';
 import type {
   CivilCalendar,
   JsonValue,
@@ -417,4 +418,26 @@ export function leafBytes(leaf: InputLeaf): { pointerBytes: number; contentBytes
     pointerBytes: Buffer.byteLength(leaf.pointer, 'utf8'),
     contentBytes: Buffer.byteLength(canonicalize(content), 'utf8'),
   };
+}
+
+/** The longest list at `/data/a`: every input holds `data`, `meta`, its six members and `a`. */
+export const LONGEST_DATA_LIST = MAX_JSON_VALUES - 9;
+
+/** The leaf hash of D-15, by `node:crypto`: what `inputLeafHash` must give. */
+export function nodeLeafHash(leaf: InputLeaf): Uint8Array {
+  const content: JsonValue[] = [leaf.pointer, leaf.kind];
+  if (leaf.kind === 'value') content.push(leaf.value ?? null);
+  if (leaf.kind === 'array') content.push(leaf.length ?? 0);
+  return nodeSha256(
+    Uint8Array.of(0),
+    'run-iq.input/1',
+    Uint8Array.of(0),
+    fromHex(leaf.salt),
+    canonicalize(content),
+  );
+}
+
+/** `value` typed as what a JavaScript caller may pass. */
+export function loose<T>(value: unknown): T {
+  return value as T;
 }

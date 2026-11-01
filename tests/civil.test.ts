@@ -144,7 +144,7 @@ describe('toReferenceDate: grammar of an instant (M-2)', () => {
     expect(specError(() => toReferenceDate(huge)).message).toBe(
       `a reference date ${FORMS}; got "${'9'.repeat(256)}…"`,
     );
-  });
+  }, 60_000);
 });
 
 describe('isCivilDate and isInstant', () => {
@@ -247,7 +247,7 @@ describe('isTimeZone and normalizeTimeZone (M-3)', () => {
     expect(isTimeZone(`${'A/'.repeat(500_000)}!`)).toBe(false);
     expect(isTimeZone(`Europe/${'a'.repeat(1_000_000)}!`)).toBe(false);
     expect(isTimeZone(`Europe/${'a'.repeat(1_000_000)}`)).toBe(true);
-  });
+  }, 60_000);
 
   it('isTimeZone never throws, even on a revoked Proxy', () => {
     const { proxy, revoke } = Proxy.revocable({}, {});

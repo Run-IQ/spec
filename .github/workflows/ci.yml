@@ -29,3 +29,6 @@ jobs:
       - run: npm run lint
       - run: npm test
       - run: npm run build
+      # The scale limits, one file at a time (minutes, gigabytes), after the fast suite and the
+      # build (the 10M-leaf test runs the built entry).
+      - run: npm run test:heavy

@@ -3,7 +3,7 @@ import { isSubject } from '../path/subject.js';
 import { dimensionValueProblem, isUnnamable } from '../rule/dimensions.js';
 import { citedNameProblem } from '../rule/ruleSet.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
-import { MAX_INPUT_LEAF_TEXT, MAX_JSON_VALUES } from '../values.js';
+import { MAX_INPUT_LEAF_TEXT, MAX_JSON_DEPTH, MAX_JSON_VALUES } from '../values.js';
 import { assertionKeyProblem, DATE_FORMS } from './assertions.js';
 import type { JsonScalar } from './leaves.js';
 import { ASSERTION_METHODS, ASSERTION_STATUSES } from './types.js';
@@ -103,7 +103,8 @@ const FIELD_VALUES: Readonly<Record<string, (value: JsonScalar) => string | unde
 /**
  * The place of the leaf whose pointer has `segments`, or why no valid input has a leaf there:
  * - `/data`: an empty object; `/data/<key>/…` below it, any kind, except under a key starting
- *   with `$` (reserved, D-3);
+ *   with `$` (reserved, D-3), at most `MAX_JSON_DEPTH` (1000) levels below `/data`, a list at
+ *   that very depth empty;
  * - `/meta` is never a leaf (it always holds its six members), nor anything but them;
  * - `/meta/tenantId`: a non-empty string;
  * - `/meta/dates`: an empty object; `/meta/dates/<name>`: a civil date or an instant, `name`
@@ -112,7 +113,7 @@ const FIELD_VALUES: Readonly<Record<string, (value: JsonScalar) => string | unde
  * - `/meta/dimensions`: an empty object; `/meta/dimensions/<name>` (named as a date is): a
  *   dimension value, or a list of at least two; `/meta/dimensions/<name>/<index>`: a dimension
  *   value;
- * - `/meta/context`: an empty object; anything below it, any kind;
+ * - `/meta/context`: an empty object; anything below it, any kind, as deep as below `/data`;
  * - `/meta/assertions`: an empty object; `/meta/assertions/<key>` is never a leaf (an assertion
  *   holds `by`, `method`, `at` and `status`), `key` as `assertionKeyProblem` accepts it;
  *   `/meta/assertions/<key>/<field>`: a value of that field (`source` is never a leaf: it holds
@@ -124,7 +125,7 @@ export function leafPlace(segments: readonly string[]): LeafPlace | string {
   if (head === 'data') {
     if (part === undefined) return place(['object'], '/data');
     if (part.startsWith('$')) return 'a root key of /data starting with "$" is reserved';
-    return place(['value', 'array', 'object'], '/data', segments.length - 1, any);
+    return freePlace('/data', segments.length - 1);
   }
   if (head !== 'meta') return 'it is not below /data or /meta';
   if (part === undefined) return '/meta always holds its six members, so it is never a leaf';
@@ -157,7 +158,7 @@ export function leafPlace(segments: readonly string[]): LeafPlace | string {
       return sub === undefined ? place(['value'], partPointer, depth, value) : 'below a string';
     }
     case 'context':
-      return place(['value', 'array', 'object'], partPointer, depth, any);
+      return freePlace(partPointer, depth);
     default:
       return assertionPlace(segments.slice(2), partPointer, depth);
   }
@@ -186,6 +187,20 @@ function assertionPlace(
   return sub === undefined
     ? place(['value'], partPointer, depth, FIELD_VALUES[field] ?? any)
     : 'a field of an assertion is a scalar';
+}
+
+/**
+ * A place `depth` levels below `root` (`/data` or `/meta/context`), where any JSON is: at most
+ * `MAX_JSON_DEPTH` levels below it, as `validateProofInput` counts them (a leaf deeper sits in a
+ * container past the limit), and a list at that very depth holds nothing (its elements would
+ * be one level deeper).
+ */
+function freePlace(root: string, depth: number): LeafPlace | string {
+  if (depth > MAX_JSON_DEPTH) {
+    return `it is nested deeper than ${MAX_JSON_DEPTH} levels below ${root}`;
+  }
+  const at = place(['value', 'array', 'object'], root, depth, any);
+  return depth === MAX_JSON_DEPTH ? { ...at, maxLength: 0 } : at;
 }
 
 /** Why `name` names no date or dimension, or `undefined`. */

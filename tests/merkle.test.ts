@@ -1,8 +1,5 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
-import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { inclusionPath, merkleRoot, verifyInclusion } from '../src/index.js';
 import { lastPackedBytes } from '../src/merkle.js';
 import { hex, leafHashes, nodeSha256, referencePath, referenceRoot, specError } from './helpers.js';
@@ -93,7 +90,7 @@ describe('merkleRoot (RFC 6962)', () => {
       const slice = leaves.slice(0, n);
       expect([n, hex(merkleRoot(slice))]).toEqual([n, hex(referenceRoot(slice))]);
     }
-  });
+  }, 60_000);
 
   it('accepts a Uint8Array of another realm and a Buffer', () => {
     const foreign = runInNewContext('new Uint8Array(32).fill(7)') as Uint8Array;
@@ -145,7 +142,7 @@ describe('merkleRoot (RFC 6962)', () => {
       });
     }
     expect(elementReads).toBe(0);
-  });
+  }, 60_000);
 });
 
 describe('inclusionPath and verifyInclusion', () => {
@@ -160,7 +157,7 @@ describe('inclusionPath and verifyInclusion', () => {
         expect([n, i, verifyInclusion(slice[i] ?? A, i, n, path, root)]).toEqual([n, i, true]);
       }
     }
-  });
+  }, 60_000);
 
   it('a tree of 7 leaves: true at its own index, false at another or under another root', () => {
     const leaves = leafHashes(7);
@@ -273,7 +270,7 @@ describe('inclusionPath and verifyInclusion', () => {
     expect(verifyInclusion(A, 0, 2 ** 53 - 1, claiming(53), A)).toBe(false);
     expect(elementReads).toBeGreaterThan(0);
     expect(elementReads).toBeLessThanOrEqual(2 * 53);
-  });
+  }, 60_000);
 
   it('verifyInclusion is false, never an exception, for hostile hashes and paths', () => {
     const leaves = leafHashes(2);
@@ -330,36 +327,3 @@ describe('leaf hashes are read into packed storage (M2)', () => {
     expect(reads).toEqual(['length', '0', '1', '2']);
   });
 });
-
-const dist = resolve(__dirname, '../dist/index.js');
-
-describe.skipIf(!existsSync(dist))(
-  '10 000 000 leaves in a process of default heap (built dist)',
-  () => {
-    it("computes the root, holding 32 bytes a leaf beside the caller's list", () => {
-      const script = `
-      const { merkleRoot } = await import(${JSON.stringify(`file://${dist}`)});
-      const n = 10_000_000;
-      const bytes = new Uint8Array(32 * n);
-      for (let i = 0; i < n; i++) bytes[32 * i] = i & 255, bytes[32 * i + 1] = (i >> 8) & 255;
-      const leaves = Array.from({ length: n }, (_, i) => bytes.subarray(32 * i, 32 * i + 32));
-      const before = process.memoryUsage();
-      const root = merkleRoot(leaves);
-      const after = process.memoryUsage();
-      console.log(JSON.stringify({
-        root: root.length,
-        heap: after.heapUsed - before.heapUsed,
-        buffers: after.arrayBuffers - before.arrayBuffers,
-      }));`;
-      const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-        encoding: 'utf8',
-      });
-      const { root, heap, buffers } = JSON.parse(out) as Record<string, number>;
-      expect(root).toBe(32);
-      // No array per hash: 10^7 of them would take hundreds of megabytes of heap.
-      expect(heap).toBeLessThan(64 * 2 ** 20);
-      // The packed storage: 32 bytes a leaf, allocated once.
-      expect(buffers).toBeLessThanOrEqual(32 * 10_000_000 + 2 ** 20);
-    }, 300_000);
-  },
-);

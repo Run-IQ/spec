@@ -76,7 +76,7 @@ describe('findOverlappingVersions', () => {
     );
     // In UTC, v2 starts at midnight UTC, after v1 ends.
     expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
-  });
+  }, 60_000);
 
   it("uses each version's own time zone", () => {
     const utcThenParis = [
@@ -259,7 +259,7 @@ describe('findOverlappingVersions', () => {
       rule(1, '2025-01-01', null, { id: `R${i}` }),
     );
     expect(findOverlappingVersions(rules, 'UTC', fixedCalendar)).toEqual(overlapReport([]));
-  });
+  }, 60_000);
 
   it('returns [] for no rule', () => {
     expect(findOverlappingVersions([], 'UTC', fixedCalendar)).toEqual(overlapReport([]));

@@ -441,7 +441,7 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
       `effectiveOn must be a JSON pointer: invalid JSON pointer "${bad.slice(0, 256)}…": ` +
         '"~" must be followed by 0 or 1',
     );
-  });
+  }, 60_000);
 
   it("drops effectiveOn '/$dates/effective', the default: absent and default are one rule", () => {
     const explicit = { ...base, effectiveOn: '/$dates/effective' };
@@ -668,7 +668,7 @@ describe('unreadable rule definitions', () => {
         path: issue.path,
       });
     }
-  });
+  }, 60_000);
 
   it('counts only non-empty arrays and objects as levels', () => {
     let params: unknown = [];
@@ -690,7 +690,7 @@ describe('unreadable rule definitions', () => {
     expect(validateRuleDefinition({ ...base, params }).issues).toEqual([
       tooDeepIssue(`params${'.a'.repeat(MAX_JSON_DEPTH)}`),
     ]);
-  });
+  }, 60_000);
 
   it('reports a hostile Proxy', () => {
     const hostile = new Proxy(

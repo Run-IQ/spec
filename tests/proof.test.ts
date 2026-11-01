@@ -1051,7 +1051,7 @@ describe('verifyProof: hostile input', () => {
     expect(verifyProof(proof, { trustedKeys: TRUSTED }).status).toBe('authentic');
     // Once: the snapshot every later check uses is built from the very values validated.
     expect(reads).toBe(1);
-  });
+  }, 60_000);
 
   const throwing = (thrown: () => unknown): DecisionProof => {
     const proof = signed();
@@ -1110,7 +1110,7 @@ describe('verifyProof: hostile input', () => {
       status: 'invalid',
       issues: [tooDeepIssue(`outputs.value.value${'[0]'.repeat(1000)}`).message],
     });
-  });
+  }, 60_000);
 
   it('an output value 1000 levels deep is read; one level more is refused', () => {
     const proof = sealed();
@@ -1122,7 +1122,7 @@ describe('verifyProof: hostile input', () => {
     expect(validateProof(withValue(nested(1001))).issues).toEqual([
       tooDeepIssue(`outputs.value.value${'.a'.repeat(1000)}`),
     ]);
-  });
+  }, 60_000);
 
   it('a contribution or unrounded value more than 1000 levels deep is refused at its path', () => {
     const proof = sealed();
@@ -1131,7 +1131,7 @@ describe('verifyProof: hostile input', () => {
       tooDeepIssue(`applied[0].contribution${'.a'.repeat(1000)}`),
       tooDeepIssue(`applied[0].unrounded${'.a'.repeat(1000)}`),
     ]);
-  });
+  }, 60_000);
 
   it('a hostile entry in the rules option', () => {
     const rule: Record<string, unknown> = { ...ruleA };

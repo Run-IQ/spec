@@ -20,16 +20,16 @@ import {
   validateRuleDefinition,
   verifyProof,
   verifyRuleChecksum,
-} from '../src/index.js';
+} from '../../src/index.js';
 import type {
   DecisionProof,
   JsonValue,
   ProofInput,
   RuleDefinitionInput,
   UnsignedProof,
-} from '../src/index.js';
-import { lastValuesSpent, MAX_JSON_VALUES } from '../src/values.js';
-import { BASE_RULE, countValues, HUMAN_ASSERTION, proofInput, specError } from './helpers.js';
+} from '../../src/index.js';
+import { lastValuesSpent, MAX_JSON_VALUES } from '../../src/values.js';
+import { BASE_RULE, countValues, HUMAN_ASSERTION, proofInput, specError } from '../helpers.js';
 
 /** A rule with every part the readers walk: free-form values, lists, specs, exceptions. */
 const RICH_RULE: RuleDefinitionInput = {

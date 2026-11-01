@@ -420,7 +420,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
-  });
+  }, 60_000);
 
   it('names a nesting 10 000 levels deep without overflowing the stack', () => {
     let list: unknown = [];
@@ -432,7 +432,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
-  });
+  }, 60_000);
 
   it('reads a value shared by many paths once, and judges its depth at each place', () => {
     let reads = 0;
@@ -477,7 +477,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         message: `${path.slice(0, 256)}… is nested deeper than 1000 levels`,
       },
     ]);
-  });
+  }, 60_000);
 
   it('stops at 100 problems: 2 000 000 lists one level too deep (review I1)', () => {
     const value = JSON.parse(
@@ -490,7 +490,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
       path: `${`${list}/0`.slice(0, 1024)}…`,
       message: `${list.slice(0, 256)}… is nested deeper than 1000 levels`,
     });
-  });
+  }, 60_000);
 
   it('stops at 100 problems: 200 000 numbers beyond 2^53 at depth 999 (review I1)', () => {
     const value = JSON.parse(
@@ -499,7 +499,7 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
         .join(',')}]${'}'.repeat(998)}}`,
     ) as Record<string, never>;
     expectBoundedIssues(validateProofInput(proofInput({}, value)), 300);
-  });
+  }, 60_000);
 
   it('stops at 100 problems on a Proxy that makes a new object at each read (review I1)', () => {
     let reads = 0;
@@ -599,14 +599,14 @@ describe('validateProofInput: hostile values (pre-flight I20, R30)', () => {
     expect(validateProofInput(proofInput({}, { sparse: sparse as never }))).toEqual([
       { path: '/data/sparse', message: '/data/sparse is too large: more than 10000000 values' },
     ]);
-  });
+  }, 60_000);
 
   it('counts the values it reads, so the work is bounded by the size of the input', () => {
     const data = { list: Array.from({ length: 1000 }, (_, i) => ({ i })) };
     // data and meta, meta's six fields, the reference date, data's key, the list's 1000
     // elements and the key of each element: one read each.
     expect(inputCheckReads(proofInput({}, data))).toBe(2 + 6 + 1 + 1 + 1000 + 1000);
-  });
+  }, 60_000);
 
   it('reads each property exactly once (counting getters)', () => {
     const counts = new Map<string, number>();

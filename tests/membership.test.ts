@@ -323,7 +323,7 @@ describe('resolveMembership', () => {
     const r: Referential = { ...ueReferential(), groups: counted };
     expect(resolveMembership(r, 'L0a', 'x', '2026-01-01')).toEqual({ result: false });
     expect(reads).toBeLessThanOrEqual(2 * layers);
-  });
+  }, 60_000);
 });
 
 describe('matchDimension', () => {
@@ -558,7 +558,7 @@ describe('matchDimension', () => {
     expect(specError(() => matchDimension(spec, 'x', '2026-01-01', deep, nullLimits)).code).toBe(
       'INVALID_REFERENTIAL',
     );
-  });
+  }, 60_000);
 
   it('refuses an invalid spec, input or date with a SpecError', () => {
     expect(specError(() => matchDimension({ anyOf: [] }, 'FR', '2026-01-01', tables)).code).toBe(

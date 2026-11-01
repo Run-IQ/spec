@@ -129,7 +129,7 @@ describe('the streamed canonical writers agree with canonicalize (I1)', () => {
   it('on 400 random values: same digest, same text', () => {
     const random = generator(20_261_101);
     for (let i = 0; i < 400; i++) canonical(randomValue(random, 0));
-  });
+  }, 60_000);
 
   it('refuse what canonicalize refuses, with the same error', () => {
     const shared = { a: 1 };

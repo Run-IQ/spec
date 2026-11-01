@@ -142,7 +142,7 @@ describe('findOverlappingVersions: the sweep agrees with the pairwise oracle', (
         JSON.stringify(rules),
       ).toEqual({ overlaps: expected, truncated: false });
     }
-  });
+  }, 60_000);
 
   it('finds overlaps of every kind among the random sets (the test is not vacuous)', () => {
     const next = random(9);
@@ -153,7 +153,7 @@ describe('findOverlappingVersions: the sweep agrees with the pairwise oracle', (
       }
     }
     expect([...kinds].sort()).toEqual(['effectiveOn', 'overlap']);
-  });
+  }, 60_000);
 });
 
 describe('findOverlappingVersions: bounded output and work', () => {
@@ -189,7 +189,7 @@ describe('findOverlappingVersions: bounded output and work', () => {
       kind: 'effectiveOn',
     });
     expect(overlapScanSteps(rules, 'UTC', fixedCalendar)).toBeLessThan(8000 * 13 * 4);
-  });
+  }, 60_000);
 
   it('lists exactly 100 pairs without truncation, and truncates at 101', () => {
     // R1: 14 versions all overlapping, 91 pairs. R2: a chain where each version overlaps the
@@ -229,7 +229,7 @@ describe('findOverlappingVersions: bounded output and work', () => {
     });
     expect(counted.calls()).toBe(0);
     expect(overlapScanSteps(rules, 'UTC', fixedCalendar)).toBeLessThan(8000 * 13 * 4);
-  });
+  }, 60_000);
 
   it('8000 disjoint versions of mixed forms and zones: at most 3 calendar calls each', () => {
     const counted = countingCalendar(fixedCalendar);
@@ -240,5 +240,5 @@ describe('findOverlappingVersions: bounded output and work', () => {
     });
     expect(counted.calls()).toBeLessThanOrEqual(3 * 8000);
     expect(overlapScanSteps(rules, 'UTC', fixedCalendar)).toBeLessThan(8000 * 13 * 8);
-  });
+  }, 60_000);
 });

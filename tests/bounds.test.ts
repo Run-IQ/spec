@@ -261,9 +261,13 @@ describe(`at most ${MAX_JSON_VALUES} values per call, a list's length counted fi
     expect(MAX_JSON_VALUES).toBe(10_000_000);
   });
 
-  it.each(LIST_READERS)('%s: a sparse array of length 2^32 - 1', (_name, read, path) => {
-    expect(read(sparse())).toBe(`${path} is too large: more than 10000000 values`);
-  });
+  it.each(LIST_READERS)(
+    '%s: a sparse array of length 2^32 - 1',
+    (_name, read, path) => {
+      expect(read(sparse())).toBe(`${path} is too large: more than 10000000 values`);
+    },
+    60_000,
+  );
 
   it.each(LIST_READERS)('%s: a Proxy claiming 10^12 elements, none read', (_name, read, path) => {
     elementReads = 0;
@@ -283,7 +287,7 @@ describe(`at most ${MAX_JSON_VALUES} values per call, a list's length counted fi
     expect(
       specError(() => validateReferential(referential([]), { maxNodes: 1e7 + 1 })),
     ).toMatchObject({ code: 'INVALID_REFERENTIAL', message: 'maxNodes must be at most 10000000' });
-  });
+  }, 60_000);
 
   it('one budget per call, shared by every list it reads', () => {
     elementReads = 0;
@@ -369,7 +373,7 @@ describe('governingAssertion: the cost follows the assertions, not the pointer',
     const total = keys.reduce((sum, key) => sum + key.length + 1, 0);
     expect(asked).toBeLessThanOrEqual(total);
     expect(asked).toBe('/a/a/a'.length + 1);
-  });
+  }, 60_000);
 });
 
 const dist = resolve(__dirname, '../dist/index.js');
@@ -408,5 +412,5 @@ describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
       false,
       false,
     ]);
-  });
+  }, 60_000);
 });

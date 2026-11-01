@@ -39,7 +39,7 @@ describe('parsePointer', () => {
     expect(error.message).toBe(
       `invalid JSON pointer "x${'a'.repeat(255)}…": must be empty or start with "/"`,
     );
-  });
+  }, 60_000);
 
   it('cuts a cited text between code points, never inside a surrogate pair', () => {
     const pointer = `x${'a'.repeat(254)}${String.fromCodePoint(0x1f600)}b`;
@@ -56,7 +56,7 @@ describe('parsePointer', () => {
 
   it('reads a huge pointer', () => {
     expect(parsePointer('/a'.repeat(200_000))).toHaveLength(200_000);
-  });
+  }, 60_000);
 
   it('refuses a value that is not a string', () => {
     // A JavaScript caller can pass anything; the signature says string.

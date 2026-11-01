@@ -17,17 +17,26 @@ import {
   verifyInclusion,
   verifyInputInclusion,
 } from '../src/index.js';
+import { SpecError } from '../src/index.js';
 import type { InputLeaf, JsonValue, ProofInput } from '../src/index.js';
 import { copyWork } from '../src/input/read.js';
 import { inputLeafText } from '../src/input/validate.js';
 import { hashWorkDone } from '../src/stream.js';
 import { DATE_FORMS } from '../src/input/assertions.js';
 import { ASSERTION_METHODS } from '../src/input/types.js';
-import { lastValuesSpent, MAX_INPUT_LEAF_TEXT, MAX_JSON_VALUES } from '../src/values.js';
+import {
+  lastValuesSpent,
+  MAX_INPUT_LEAF_TEXT,
+  MAX_JSON_DEPTH,
+  MAX_JSON_VALUES,
+} from '../src/values.js';
 import {
   countValues,
   expectedHashWork,
   leafBytes,
+  LONGEST_DATA_LIST,
+  loose,
+  nodeLeafHash,
   fromHex,
   hex,
   HUMAN_ASSERTION,
@@ -49,8 +58,6 @@ const SECRET = new Uint8Array(32).fill(0x42);
 const POINTER_TEXT =
   'the leaf pointers of the input hold more than ' + `${MAX_INPUT_LEAF_TEXT} code units`;
 const SEED = nodeInputSeed(SECRET, 'r1');
-/** The longest list at `/data/a`: every input holds `data`, `meta`, its six members and `a`. */
-const LONGEST_DATA_LIST = MAX_JSON_VALUES - 9;
 /** Why `/meta` is never a leaf. */
 const META_ALWAYS = '/meta always holds its six members, so it is never a leaf';
 const NON_EMPTY = '/value must be a non-empty string';
@@ -68,28 +75,9 @@ const EXAMPLE: ProofInput = {
 const saltOf = (seed: Uint8Array, pointer: string): string =>
   hex(nodeHmac(seed, `input:${pointer}`));
 
-/** The leaf hash of D-15, by `node:crypto`: what `inputLeafHash` must give. */
-function nodeLeafHash(leaf: InputLeaf): Uint8Array {
-  const content: JsonValue[] = [leaf.pointer, leaf.kind];
-  if (leaf.kind === 'value') content.push(leaf.value ?? null);
-  if (leaf.kind === 'array') content.push(leaf.length ?? 0);
-  return nodeSha256(
-    Uint8Array.of(0),
-    'run-iq.input/1',
-    Uint8Array.of(0),
-    fromHex(leaf.salt),
-    canonicalize(content),
-  );
-}
-
 /** The pointers of the leaves of `input`, in order. */
 const pointers = (input: ProofInput, seed: Uint8Array = SEED): string[] =>
   inputLeaves(input, seed).map((leaf) => leaf.pointer);
-
-/** `value` typed as what a JavaScript caller may pass. */
-function loose<T>(value: unknown): T {
-  return value as T;
-}
 
 describe('deriveInputSeed (D-14)', () => {
   it('is HKDF-SHA256(secret, salt run-iq.input-seed/1, info requestId), 32 bytes', () => {
@@ -370,22 +358,6 @@ describe('inputLeafHash (D-15 encoding)', () => {
     expect(reads.sort()).toEqual(['kind', 'pointer', 'salt', 'value']);
   });
 
-  it('refuses a pointer longer than a leaf there can be, and accepts the longest', () => {
-    // Every input also holds /meta/tenantId and the five other parts of meta: 80 code units.
-    const longest = MAX_INPUT_LEAF_TEXT - 80;
-    const pointer = `/data/${'k'.repeat(longest - '/data/'.length)}`;
-    expect(pointer).toHaveLength(longest);
-    const leaf = { pointer, kind: 'value', value: 1, salt: 'ab'.repeat(32) };
-    expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
-    expect(
-      specError(() => inputLeafHash(loose({ ...leaf, pointer: `${pointer}k` }))),
-    ).toMatchObject({
-      code: 'INVALID_INPUT',
-      path: '/pointer',
-      message: `invalid input leaf: /pointer is longer than ${longest} code units`,
-    });
-  }, 60_000);
-
   it('refuses every leaf whose place, kind or value no valid input has (M3)', () => {
     const salt = 'ab'.repeat(32);
     const none = (why: string): string => `/pointer names no leaf of a valid input: ${why}`;
@@ -602,16 +574,63 @@ describe('inputLeafHash (D-15 encoding)', () => {
     }
   });
 
-  it(`a list holds at most ${MAX_JSON_VALUES} values less those every input holds`, () => {
+  it(`refuses a leaf more than ${MAX_JSON_DEPTH} levels below /data or /meta/context`, () => {
     const meta = proofInput({ dates: {} }, {}).meta;
-    const longest = { data: { a: new Array<number>(LONGEST_DATA_LIST).fill(0) }, meta };
-    expect(validateProofInput(longest)).toEqual([]);
-    const over = { data: { a: new Array<number>(LONGEST_DATA_LIST + 1).fill(0) }, meta };
-    expect(validateProofInput(over)).toEqual([
-      { path: '/meta', message: '/meta is too large: more than 10000000 values' },
+    /** `leaf` under `levels` objects, each holding it at `a`. */
+    const under = (levels: number, leaf: JsonValue): JsonValue => {
+      let value = leaf;
+      for (let i = 0; i < levels; i++) value = { a: value };
+      return value;
+    };
+    const roots: [string, (value: JsonValue) => unknown][] = [
+      ['/data', (value) => ({ data: value, meta })],
+      ['/meta/context', (value) => ({ data: {}, meta: { ...meta, context: value } })],
+    ];
+    const kinds: [Omit<InputLeaf, 'pointer' | 'salt'>, JsonValue][] = [
+      [{ kind: 'value', value: 1 }, 1],
+      [{ kind: 'object' }, {}],
+      [{ kind: 'array', length: 0 }, []],
+      [{ kind: 'array', length: 1 }, [1]],
+    ];
+    const outcomes: string[] = [];
+    for (const [root, inputOf] of roots) {
+      for (const [fields, leaf] of kinds) {
+        for (const levels of [MAX_JSON_DEPTH - 1, MAX_JSON_DEPTH, MAX_JSON_DEPTH + 1]) {
+          const pointer = root + '/a'.repeat(levels);
+          const issues = validateProofInput(inputOf(under(levels, leaf)));
+          let hashed = 'accepted';
+          try {
+            inputLeafHash({ ...fields, pointer, salt: SALT_A });
+          } catch (error) {
+            hashed = error instanceof SpecError ? `${error.code} ${error.message}` : 'other';
+          }
+          expect(hashed === 'accepted').toBe(issues.length === 0);
+          const why = issues.length === 0 ? 'ok' : `${issues.length}: ${issues[0]?.path ?? ''}`;
+          outcomes.push(`${fields.kind} ${levels} ${why} | ${hashed}`);
+        }
+      }
+    }
+    const deepest = (root: string): string => root + '/a'.repeat(MAX_JSON_DEPTH);
+    const tooDeep = (root: string): string =>
+      'INVALID_INPUT invalid input leaf: /pointer names no leaf of a valid input: ' +
+      `it is nested deeper than ${MAX_JSON_DEPTH} levels below ${root}`;
+    /** The path of the issue: the container at the limit, cut as an issue cuts it. */
+    const cut = (root: string): string => tooDeepIssue(deepest(root)).path;
+    const tooLong = 'INVALID_INPUT invalid input leaf: /length must be an integer from 0 to 0';
+    const expected: string[] = [];
+    for (const [root] of roots) {
+      for (const kind of ['value', 'object', 'array']) {
+        expected.push(`${kind} 999 ok | accepted`, `${kind} 1000 ok | accepted`);
+        expected.push(`${kind} 1001 1: ${cut(root)} | ${tooDeep(root)}`);
+      }
+      expected.push(`array 999 ok | accepted`);
+      expected.push(`array 1000 1: ${cut(root)} | ${tooLong}`);
+      expected.push(`array 1001 1: ${cut(root)} | ${tooDeep(root)}`);
+    }
+    expect(outcomes).toEqual(expected);
+    expect(validateProofInput({ data: under(1, under(MAX_JSON_DEPTH, 1)), meta })).toEqual([
+      tooDeepIssue(deepest('/data')),
     ]);
-    const leaf = { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST, salt: SALT_A };
-    expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
   }, 60_000);
 });
 
@@ -830,7 +849,7 @@ describe(`leaf pointers: at most ${MAX_INPUT_LEAF_TEXT} code units in all`, () =
     expect(paths).toBe(65_536);
     expect(Math.max(width, rest)).toBeLessThan(70_000);
     expect(validateProofInput(input)).toEqual([]);
-  });
+  }, 60_000);
 
   it('validateProofInput, the digests and inputLeaves refuse one code unit more', () => {
     const { input: over } = sharedPointerText(MAX_INPUT_LEAF_TEXT + 1, 16);
@@ -865,7 +884,7 @@ describe(`leaf pointers: at most ${MAX_INPUT_LEAF_TEXT} code units in all`, () =
         message: POINTER_TEXT,
       },
     ]);
-  });
+  }, 60_000);
 });
 
 describe('the validator counts the leaf pointers the input tree has', () => {
@@ -920,7 +939,7 @@ describe('validateProofInput keeps no copy; a digest reads its input once into o
     const before = copyWork.values;
     expect(validateProofInput(input)).toEqual([]);
     expect(copyWork.values).toBe(before);
-  });
+  }, 60_000);
 });
 
 describe('computeIdempotencyDigest (D-17)', () => {

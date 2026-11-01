@@ -90,7 +90,8 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
  * alone (its siblings, their order and their share of the budgets are not known here):
  * - `pointer` is a JSON pointer below `/data` or `/meta` naming a place that holds a leaf in
  *   some valid input (`/meta` itself, `/meta/foo`, `/data/$x`, an assertion, anything below a
- *   string of `meta`: never), at most `MAX_INPUT_LEAF_TEXT` less the shortest pointers of the
+ *   string of `meta`, anything more than `MAX_JSON_DEPTH` (1000) levels below `/data` or
+ *   `/meta/context`: never; a list exactly 1000 levels below them holds nothing), at most `MAX_INPUT_LEAF_TEXT` less the shortest pointers of the
  *   other parts of an input (`/data`, `/meta/tenantId`, `/meta/dates`, `/meta/tags`,
  *   `/meta/dimensions`, `/meta/context`, `/meta/assertions`) code units;
  * - `kind` is one a leaf there has (`/data` and an empty part of `meta`: `object`; `/meta/tags`:

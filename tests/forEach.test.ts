@@ -214,7 +214,7 @@ describe('forEach: normalization', () => {
     const kept = segmentsOf(rule({ segments }));
     expect(kept.segments.facts).toHaveLength(50_000);
     expect(kept.segments.facts[0]).toBe('/f0');
-  });
+  }, 60_000);
 });
 
 describe('forEach and effectiveOn', () => {

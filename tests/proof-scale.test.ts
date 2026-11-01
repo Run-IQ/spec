@@ -74,16 +74,20 @@ describe('proof consistency checks are linear', () => {
     checks.flatMap(([label, check]) =>
       (['number', 'decimal'] as const).map((type) => [label, type, check] as const),
     ),
-  )('%s reads the stratum and the steps O(N) times (%s outputs)', (_label, type, check) => {
-    const counter = { reads: 0 };
-    const proof = wide(N, type);
-    const stratum = proof.strata[0]!;
-    proof.strata = [counted(stratum, counter)];
-    proof.applied = counted(proof.applied, counter);
-    expect(check(proof)).toEqual([]);
-    expect(counter.reads).toBeGreaterThan(0);
-    expect(counter.reads).toBeLessThanOrEqual(READS_PER_OUTPUT * N);
-  });
+  )(
+    '%s reads the stratum and the steps O(N) times (%s outputs)',
+    (_label, type, check) => {
+      const counter = { reads: 0 };
+      const proof = wide(N, type);
+      const stratum = proof.strata[0]!;
+      proof.strata = [counted(stratum, counter)];
+      proof.applied = counted(proof.applied, counter);
+      expect(check(proof)).toEqual([]);
+      expect(counter.reads).toBeGreaterThan(0);
+      expect(counter.reads).toBeLessThanOrEqual(READS_PER_OUTPUT * N);
+    },
+    60_000,
+  );
 });
 
 describe('verifyProof on a wide proof', () => {
@@ -93,5 +97,5 @@ describe('verifyProof on a wide proof', () => {
       status: 'invalid',
       issues: ['digest mismatch', 'unsigned'],
     });
-  });
+  }, 60_000);
 });

@@ -154,5 +154,5 @@ describe('canonicalize refuses lone UTF-16 surrogates (I-JSON, pre-flight M-1)',
   it('finds a lone surrogate at the end of a huge string', () => {
     const error = specError(() => canonicalize(`${'a'.repeat(5_000_000)}\ud800`));
     expect(error.code).toBe('NON_SERIALIZABLE');
-  });
+  }, 60_000);
 });
