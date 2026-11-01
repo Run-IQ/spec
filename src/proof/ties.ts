@@ -110,13 +110,38 @@ function stopsCarrier(reason: string): boolean {
 }
 
 /**
- * True when a carrier pending for `entry` still fired its exceptions: pending `ERROR` on its
- * own parameters (`INVALID_PARAMS: …`, R18, D-8). Pending otherwise (`UNDETERMINED`: its
- * condition unknown; `ERROR` on its condition or its output, `OUTPUT_MISMATCH: …`; any other
- * reason), it fired nothing and the rules it would have affected are pending `PENDING_CARRIER`.
+ * The causes of a pending `ERROR` (`<CAUSE>: <message>`, D-8) after which the carrier fired:
+ * its condition held, and its own computation failed (R18). Every other cause, known or not,
+ * failed before the condition held, or stops a carrier:
+ *
+ * - fired, its condition true and its own computation failing: `INVALID_PARAMS`,
+ *   `MODEL_ERROR`, `INVALID_ORDER_VALUE`;
+ * - fired nothing, the condition's evaluation failing: `DSL_ERROR`, `TIMEOUT`, `DSL_NOT_FOUND`;
+ * - fired nothing, the rule refused before its condition: `CHECKSUM_MISMATCH`, `INVALID_RULE`,
+ *   `TEMPORAL_OVERLAP`; its instances not formed: `NOT_A_COLLECTION`;
+ * - stopped at the exception stage (core `ExceptionResult`): `OUTPUT_MISMATCH`;
+ * - fired nothing: any other cause, not known to follow a true condition.
+ */
+const FIRING_CAUSES: ReadonlySet<string> = new Set([
+  'INVALID_PARAMS',
+  'MODEL_ERROR',
+  'INVALID_ORDER_VALUE',
+]);
+
+/**
+ * True when a carrier pending for `entry` still fired its exceptions (R18: a carrier whose
+ * condition is true fires them even when its own computation fails): pending `ERROR` with a
+ * cause of `FIRING_CAUSES`; `AMBIGUOUS_ORDER` (D-21: the tie bears only on its contribution to
+ * that output); `PENDING_DOMINANT` (dominance runs after the exceptions, D-22). Pending
+ * otherwise (`UNDETERMINED`: its condition unknown; `PENDING_CARRIER`: a pending carrier would
+ * have reached it; another cause; any other reason), it fired nothing, and the rules it would
+ * have affected are pending `PENDING_CARRIER`.
  */
 function pendingFired(entry: ProofPending): boolean {
-  return entry.reason === 'ERROR' && entry.detail.startsWith('INVALID_PARAMS:');
+  if (entry.reason === 'AMBIGUOUS_ORDER' || entry.reason === 'PENDING_DOMINANT') return true;
+  if (entry.reason !== 'ERROR') return false;
+  const colon = entry.detail.indexOf(':');
+  return colon > 0 && FIRING_CAUSES.has(entry.detail.slice(0, colon));
 }
 
 /**
