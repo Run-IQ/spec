@@ -22,7 +22,8 @@ const inhibits = (ids: string[]): Partial<RuleDefinitionInput> => ({
 
 /** What `verifyProof` with `definitions` finds in the proof of `trace`, sealed by hand. */
 function issues(trace: Trace, definitions: RuleDefinitionInput[]): string[] {
-  const content = traceProof({ ...trace, rules: trace.rules.map((r) => ({ ...r, priority: 1 })) });
+  const rules = trace.rules.map((r) => ({ ...r, priority: r.priority ?? 1 }));
+  const content = traceProof({ ...trace, rules });
   const byId = new Map(definitions.map((definition) => [definition.id, definition]));
   const listed = (content.rules as Entry[]).map((ref) => ({
     ...ref,
@@ -171,6 +172,72 @@ describe('given the rules, a carrier that fired records exactly its exceptions',
     expect(issues(fired(['inhibit', 'inhibit']), [both])).toEqual([
       'unsigned',
       'carrier exceptions differ from its definition: X@1',
+    ]);
+  });
+});
+
+describe('given the rules, an excluded carrier that fired records exactly its exceptions', () => {
+  const definitions = [rule('Y', inhibits(['Z']))];
+  /** Y excluded for `reason`, recording `records` inhibitions affecting nothing. */
+  const excluded = (reason: string, records: number): Trace => ({
+    output: { type: 'number', combine: 'sum', value: 0 },
+    rules: [{ id: 'Y' }],
+    skipped: [{ ruleId: 'Y', output: 'value', reason }],
+    exceptions: Array.from({ length: records }, () => ({
+      ruleId: 'Y',
+      kind: 'inhibit',
+      affected: [],
+    })),
+  });
+  const refused = ['unsigned', 'carrier exceptions differ from its definition: Y@1'];
+
+  it('one excluded after its exceptions ran fired them all', () => {
+    for (const reason of ['INVALID_PARAMS', 'DOMINATED', 'LATER_REASON']) {
+      expect(issues(excluded(reason, 1), definitions)).toEqual(['unsigned']);
+      expect(issues(excluded(reason, 0), definitions)).toEqual(refused);
+      expect(issues(excluded(reason, 2), definitions)).toEqual(refused);
+    }
+  });
+
+  it('one excluded before them fired nothing: it records nothing', () => {
+    expect(issues(excluded('CONDITION_FALSE', 0), definitions)).toEqual(['unsigned']);
+  });
+
+  /** P (priority 5) inhibited Q; C, after it, would inhibit P and T: discarded (R15). */
+  const tie: Trace = {
+    output: { type: 'number', combine: 'sum', value: 1, contributors: ['T'], status: 'conflict' },
+    rules: [{ id: 'C', priority: 1 }, { id: 'P', priority: 5 }, { id: 'Q' }, { id: 'T' }],
+    steps: [{ ruleId: 'T', contribution: 1, status: 'conflict' }],
+    skipped: [
+      { ruleId: 'C', reason: 'RULE_CONFLICT', status: 'conflict' },
+      { ruleId: 'Q', output: 'value', reason: 'INHIBITED' },
+    ],
+    exceptions: [
+      { ruleId: 'P', kind: 'inhibit', affected: [{ ruleId: 'Q' }] },
+      {
+        ruleId: 'C',
+        kind: 'inhibit',
+        affected: [{ ruleId: 'P' }, { ruleId: 'T' }],
+        status: 'conflict',
+      },
+    ],
+  };
+  const others = [rule('P', { priority: 5, ...inhibits(['Q']) }), rule('Q'), rule('T')];
+
+  it('a tie loser records its tie record only, of a kind it carries', () => {
+    const carries = rule('C', {
+      exceptions: [
+        { kind: 'inhibit', targets: { ids: ['P', 'T'] } },
+        { kind: 'substitute', targets: { ids: ['T'] }, params: {} },
+      ],
+    });
+    expect(issues(tie, [carries, ...others])).toEqual(['unsigned']);
+    const substitutes = rule('C', {
+      exceptions: [{ kind: 'substitute', targets: { ids: ['P', 'T'] }, params: {} }],
+    });
+    expect(issues(tie, [substitutes, ...others])).toEqual([
+      'unsigned',
+      'carrier exceptions differ from its definition: C@1',
     ]);
   });
 });

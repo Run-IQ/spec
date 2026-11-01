@@ -21,6 +21,8 @@ export interface Ties {
    * circuit at its stratum, precedence and priority claimed before it.
    */
   discarded: ReadonlySet<number>;
+  /** The carriers (their instance key) a tie discarded: their tie record is their only one. */
+  losers: ReadonlySet<string>;
   /** The outputs a tie of short circuits puts in `conflict` (each item of a per output). */
   shortCircuits: ReadonlySet<string>;
   /**
@@ -36,7 +38,9 @@ export interface Ties {
    * discarded carrier, `exception status differs from its carrier's decision`, and
    * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
    * id@version` (a second short circuit of an output at the same stratum, precedence and
-   * priority, its carrier not excluded `RULE_CONFLICT`); then, in the order of `pending`,
+   * priority, its carrier not excluded `RULE_CONFLICT`); then, in the order of the losers,
+   * `tie loser recorded other exceptions: id@version[ at subject]` (a carrier a tie discarded
+   * records its tie record only: it fired nothing else); then, in the order of `pending`,
    * `pending carrier fired without its exceptions: id@version[ at subject]` (its `fired` is
    * true, and no exception of its instance is recorded: a carrier that fired records each of
    * its exceptions, `affected` possibly empty); then, in the order of `pending`, `pending
@@ -58,7 +62,7 @@ interface Node {
 const newNode = (): Node => ({ children: new Map(), marked: false, below: false });
 
 /** Marked rule instances, by rule id and subject; the queries are by subject prefix. */
-class Scope {
+export class Scope {
   private readonly roots = new Map<string, Node>();
 
   mark(entry: { ruleId: string; subject?: string }): void {
@@ -111,7 +115,7 @@ interface Claim {
  * the exceptions ran, and `INHIBITED` and `OUTPUT_MISMATCH` at the exception stage
  * (`RULE_CONFLICT` stops one too: a discarded carrier, `tiesOf`).
  */
-function stopsCarrier(reason: string): boolean {
+export function stopsCarrier(reason: string): boolean {
   return reason === 'INHIBITED' || reason === 'OUTPUT_MISMATCH' || BEFORE_EXCEPTIONS.has(reason);
 }
 
@@ -129,6 +133,7 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   const waiting = new Map<string, ProofPending>();
   for (const entry of p.pending) waiting.set(instanceKey(entry), entry);
   const discarded = new Set<number>();
+  const losers = new Set<string>();
   const shortCircuits = new Set<string>();
   const problems: string[] = [];
   firedProblems(p, problems);
@@ -167,6 +172,7 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
       exception.kind === 'shortCircuit' && output !== undefined && tiedClaim(output, claim);
     if (conflicted && (r15 || lost)) {
       discarded.add(index);
+      losers.add(instanceKey(exception));
       if (exception.status !== skip.status) {
         problems.push(`exception status differs from its carrier's decision: ${cited()}`);
       }
@@ -189,8 +195,18 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     if (list === undefined) claims.set(output, [claim]);
     else list.push(claim);
   });
-  const recorded = new Set<string>();
-  for (const exception of p.exceptions) recorded.add(instanceKey(exception));
+  const recorded = new Map<string, number>();
+  for (const exception of p.exceptions) {
+    const key = instanceKey(exception);
+    recorded.set(key, (recorded.get(key) ?? 0) + 1);
+  }
+  // A tie loser fired nothing: its tie record is its only one (one decision, one proof).
+  for (const key of losers) {
+    if (full(problems)) break;
+    if ((recorded.get(key) ?? 0) > 1) {
+      problems.push(`tie loser recorded other exceptions: ${citeName(key)}`);
+    }
+  }
   for (const entry of p.pending) {
     if (full(problems)) break;
     if (entry.fired === true && !recorded.has(instanceKey(entry))) {
@@ -202,6 +218,7 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   pendingCarrierProblems(p, waiting, problems);
   return {
     discarded,
+    losers,
     shortCircuits,
     reaches: (entry) => tied.covers(entry),
     problems,

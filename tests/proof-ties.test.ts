@@ -246,6 +246,20 @@ describe('a conflict on an output from a tie the proof shows (D-7)', () => {
     expect(problems(traceProof(discarded('determined')))).toEqual([TIE]);
   });
 
+  it('a tie loser records its tie, nothing else: it fired nothing', () => {
+    const extra = { ruleId: 'C', kind: 'substitute', affected: [], status: 'conflict' };
+    const trace = discarded('conflict');
+    // C after P: the exception order (precedence, priority) puts C's records last.
+    trace.exceptions = [...(trace.exceptions ?? []), extra];
+    expect(problems(traceProof(trace))).toEqual(['tie loser recorded other exceptions: C@1']);
+    const loser = shortCircuits('conflict');
+    loser.exceptions = [
+      ...(loser.exceptions ?? []),
+      { ruleId: 'X2', kind: 'inhibit', affected: [], status: 'conflict' },
+    ];
+    expect(problems(traceProof(loser))).toEqual(['tie loser recorded other exceptions: X2@1']);
+  });
+
   it('without a precedent, a carrier excluded RULE_CONFLICT had fired: checked so', () => {
     expect(problems(traceProof(discarded('conflict', [{ ruleId: 'T' }])))).toEqual([
       STRONGER,
