@@ -1,5 +1,8 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
+  DISCLOSURE_FORMAT,
+  discloseFacts,
+  verifyFactDisclosure,
   computeIdempotencyDigest,
   computeInputDigest,
   deriveInputSeed,
@@ -33,6 +36,11 @@ import {
   validateRuleDefinition,
 } from '../src/index.js';
 import type {
+  AbsenceProof,
+  DisclosedLeaf,
+  FactDisclosure,
+  FactDisclosureVerification,
+  JsonPointer,
   InputLeaf,
   ProofInput,
   ForEach,
@@ -322,6 +330,51 @@ describe('the input tree (Task 9H1)', () => {
     >();
     expectTypeOf(computeIdempotencyDigest).toEqualTypeOf<
       (request: { input: ProofInput; options: { [k: string]: JsonValue } }) => string
+    >();
+  });
+});
+
+describe('fact disclosure types (Task 9H2)', () => {
+  it('has the shapes of the shared names', () => {
+    expectTypeOf<typeof DISCLOSURE_FORMAT>().toEqualTypeOf<'run-iq.disclosure/1'>();
+    expectTypeOf<DisclosedLeaf>().toEqualTypeOf<{
+      pointer: JsonPointer;
+      kind: 'value' | 'array' | 'object';
+      value?: JsonValue;
+      length?: number;
+      salt: string;
+      index: number;
+      path: string[];
+    }>();
+    expectTypeOf<AbsenceProof>().toEqualTypeOf<{
+      pointer: JsonPointer;
+      before?: DisclosedLeaf;
+      after?: DisclosedLeaf;
+    }>();
+    expectTypeOf<FactDisclosure>().toEqualTypeOf<{
+      format: 'run-iq.disclosure/1';
+      inputDigest: string;
+      size: number;
+      facts: DisclosedLeaf[];
+      absent: AbsenceProof[];
+    }>();
+    expectTypeOf<FactDisclosureVerification>().toEqualTypeOf<{
+      valid: boolean;
+      issues: string[];
+      facts: Record<JsonPointer, JsonValue>;
+      lists: Record<JsonPointer, number>;
+      absent: JsonPointer[];
+    }>();
+    expectTypeOf(discloseFacts).toEqualTypeOf<
+      (
+        input: ProofInput,
+        seed: Uint8Array,
+        present: readonly JsonPointer[],
+        absent: readonly JsonPointer[],
+      ) => FactDisclosure
+    >();
+    expectTypeOf(verifyFactDisclosure).toEqualTypeOf<
+      (d: unknown, inputDigest: string) => FactDisclosureVerification
     >();
   });
 });

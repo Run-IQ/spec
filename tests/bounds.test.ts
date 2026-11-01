@@ -382,13 +382,16 @@ describe('governingAssertion: the cost follows the assertions, not the pointer',
 });
 
 describe('under a 1 GB heap (built dist)', () => {
-  it('a sparse array of length 2^32 - 1 gives the named error, the process exits 0', () => {
+  it('a sparse array of length 2^32 - 1 gives the named problem, the process exits 0', () => {
     const dist = builtFile('index.js');
     const script = `
       const s = await import(${JSON.stringify(`file://${dist}`)});
       const sp = () => { const a = []; a.length = 2 ** 32 - 1; return a; };
       const base = { id: 'r1', version: 1, model: 'm', priority: 1, effectiveFrom: '2025-01-01' };
       const message = (f) => { try { f(); return 'no error'; } catch (e) { return e.message; } };
+      const seed = s.deriveInputSeed(new Uint8Array(32).fill(1), 'r1');
+      const input = { data: { a: 1 }, meta: { tenantId: 't', dates: {}, tags: [], dimensions: {},
+        context: {}, assertions: {} } };
       console.log(JSON.stringify([
         s.validateRuleDefinition({ ...base, params: sp() }).errors[0],
         message(() => s.normalizeRuleDefinition({ ...base, params: sp() })),
@@ -399,6 +402,12 @@ describe('under a 1 GB heap (built dist)', () => {
         message(() => s.merkleRoot(sp())),
         s.verifyInclusion(new Uint8Array(32), 0, 2, sp(), new Uint8Array(32)),
         s.verifyInputInclusion('0'.repeat(64), 2, 0, new Uint8Array(32), sp()),
+        s.verifyFactDisclosure({ format: 'run-iq.disclosure/1', inputDigest: '0'.repeat(64),
+          size: 1, facts: [], absent: sp() }, '0'.repeat(64)).issues[0],
+        s.verifyFactDisclosure({ format: 'run-iq.disclosure/1', inputDigest: '0'.repeat(64),
+          size: 10000000, facts: sp(), absent: [] }, '0'.repeat(64)).issues[0],
+        message(() => s.discloseFacts(input, seed, sp(), [])),
+        message(() => s.discloseFacts(input, seed, [], sp())),
       ]));`;
     const out = execFileSync(
       process.execPath,
@@ -415,6 +424,10 @@ describe('under a 1 GB heap (built dist)', () => {
       'leaf hashes is too large: more than 10000000 values',
       false,
       false,
+      '/absent is too large: more than 10000000 values',
+      '/facts holds 4294967295 leaves, more than the size of the tree (10000000)',
+      'present is too large: more than 10000000 values',
+      'absent is too large: more than 10000000 values',
     ]);
   }, 60_000);
 });

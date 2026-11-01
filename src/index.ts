@@ -19,8 +19,10 @@
  * `computeAssertionDigest`) and temporal facts (`TemporalValue`, `validateTemporalFact`); the
  * input tree (`computeInputDigest`, a salted RFC 6962 Merkle root committed with its leaf
  * count: `deriveInputSeed`, `UNSALTED_SEED`, `inputLeaves`, `inputLeafHash`,
- * `verifyInputInclusion`), the Merkle trees it rests on (`merkleRoot`, `inclusionPath`,
- * `verifyInclusion`) and the idempotency digest of a request
+ * `verifyInputInclusion`), the disclosure of some of its facts and the proof that others are
+ * absent (`discloseFacts`, `verifyFactDisclosure`, which agrees with
+ * `schema/fact-disclosure.schema.json`; `DISCLOSURE_FORMAT`), the Merkle trees it rests on
+ * (`merkleRoot`, `inclusionPath`, `verifyInclusion`) and the idempotency digest of a request
  * (`computeIdempotencyDigest`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
@@ -131,6 +133,13 @@ export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
 export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
 export { INPUT_TREE_TAG, inputLeafHash, inputLeaves, verifyInputInclusion } from './input/tree.js';
 export type { InputLeaf } from './input/tree.js';
+export { DISCLOSURE_FORMAT, discloseFacts, verifyFactDisclosure } from './input/disclosure.js';
+export type {
+  AbsenceProof,
+  DisclosedLeaf,
+  FactDisclosure,
+  FactDisclosureVerification,
+} from './input/disclosure.js';
 export type {
   AssertionMethod,
   AssertionStatus,

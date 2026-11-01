@@ -103,17 +103,43 @@ export class PackedHashes {
    * the end of a level goes up unchanged): afterwards the buffer holds no meaningful hash.
    */
   root(): Uint8Array {
+    return this.pathsAndRoot([]).root;
+  }
+
+  /**
+   * The audit path of the hash at `index` (below `length`), from the bottom of the tree up.
+   * Afterwards the buffer holds no meaningful hash.
+   */
+  path(index: number): Uint8Array[] {
+    return this.pathsAndRoot([index]).paths[0] ?? [];
+  }
+
+  /**
+   * The audit paths of the hashes at `indices` (each below `length`), from the bottom of the
+   * tree up, and the RFC 6962 root, in one pass by levels: at each level the sibling of each node
+   * on the way up is copied out (the last node of an odd level has none: it goes up unchanged),
+   * then the level is hashed into the next, in place. So k paths cost the n - 1 node hashes of
+   * the root, never k times them. Afterwards the buffer holds no meaningful hash.
+   */
+  pathsAndRoot(indices: readonly number[]): { paths: Uint8Array[][]; root: Uint8Array } {
     const hashInto = createHasherInto();
+    const paths = indices.map((): Uint8Array[] => []);
     if (this.count === 0) {
       const empty = new Uint8Array(HASH_BYTES);
       hashInto(empty);
-      return empty;
+      return { paths, root: empty };
     }
     const node = new Uint8Array(1 + 2 * HASH_BYTES);
     node[0] = 1;
     const at = (i: number): Uint8Array => this.bytes.subarray(i * HASH_BYTES, (i + 1) * HASH_BYTES);
+    const positions = [...indices];
     let width = this.count;
     while (width > 1) {
+      positions.forEach((position, k) => {
+        const sibling = position % 2 === 1 ? position - 1 : position + 1;
+        if (sibling < width) paths[k]?.push(at(sibling).slice());
+        positions[k] = Math.floor(position / 2);
+      });
       let next = 0;
       for (let i = 0; i < width; i += 2) {
         if (i + 1 < width) {
@@ -128,40 +154,7 @@ export class PackedHashes {
       }
       width = next;
     }
-    return at(0).slice();
-  }
-
-  /**
-   * The audit path of the hash at `index` (below `length`), from the bottom of the tree up,
-   * computed in place by levels as `root` is: at each level the sibling of the node on the way
-   * up is copied out (the last node of an odd level has none: it goes up unchanged), then the
-   * level is hashed into the next. Afterwards the buffer holds no meaningful hash.
-   */
-  path(index: number): Uint8Array[] {
-    const hashInto = createHasherInto();
-    const node = new Uint8Array(1 + 2 * HASH_BYTES);
-    node[0] = 1;
-    const at = (i: number): Uint8Array => this.bytes.subarray(i * HASH_BYTES, (i + 1) * HASH_BYTES);
-    const path: Uint8Array[] = [];
-    let width = this.count;
-    let position = index;
-    while (width > 1) {
-      const sibling = position % 2 === 1 ? position - 1 : position + 1;
-      if (sibling < width) path.push(at(sibling).slice());
-      let next = 0;
-      for (let i = 0; i < width; i += 2) {
-        if (i + 1 < width) {
-          node.set(this.bytes.subarray(i * HASH_BYTES, (i + 2) * HASH_BYTES), 1);
-          hashInto(at(next), node);
-        } else {
-          at(next).set(at(i));
-        }
-        next += 1;
-      }
-      width = next;
-      position = Math.floor(position / 2);
-    }
-    return path;
+    return { paths, root: at(0).slice() };
   }
 }
 
@@ -262,6 +255,14 @@ export function rootFromPath(
     current = left ? hash(NODE_PREFIX, sibling, current) : hash(NODE_PREFIX, current, sibling);
   });
   return current;
+}
+
+/**
+ * Internal: the number of hashes in the audit path of the leaf at `index` of a tree of `size`
+ * leaves (both safe integers, `index` below `size`): at most 53, 24 for 10 000 000 leaves.
+ */
+export function auditPathLength(index: number, size: number): number {
+  return auditSteps(index, size).length;
 }
 
 /**

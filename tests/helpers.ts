@@ -459,3 +459,42 @@ export function builtFile(file: string): string {
   }
   return path;
 }
+
+/** A JSON copy of `value`: what a verifier receives over the wire. */
+export function jsonCopy<T>(value: T): T {
+  return JSON.parse(JSON.stringify(value)) as T;
+}
+
+/** A leaf of a tree built by hand: its content, before its salt. */
+export type TreeLeaf = Omit<InputLeaf, 'salt'>;
+
+/** A disclosed leaf of a tree built by hand: an input leaf, its index and its audit path. */
+export interface HandLeaf extends InputLeaf {
+  index: number;
+  path: string[];
+}
+
+/**
+ * A tree of input leaves built by hand, in the order given (sorted or not: it may be a tree no
+ * honest signer builds), each salted under `seed` as D-14 salts it. Gives its digest (D-15, by
+ * `node:crypto`) and each leaf as a disclosure carries it (`leaf(i)`).
+ */
+export function handTree(
+  contents: readonly TreeLeaf[],
+  seed: Uint8Array,
+): { digest: string; size: number; leaf: (index: number) => HandLeaf } {
+  const leaves: InputLeaf[] = contents.map((content) => ({
+    ...content,
+    salt: hex(nodeHmac(seed, `input:${content.pointer}`)),
+  }));
+  const hashes = leaves.map(nodeLeafHash);
+  return {
+    digest: nodeInputDigest(hashes.length, referenceRoot(hashes)),
+    size: hashes.length,
+    leaf: (index) => {
+      const leaf = leaves[index];
+      if (leaf === undefined) throw new RangeError(`no leaf ${index}`);
+      return { ...leaf, index, path: referencePath(hashes, index).map(hex) };
+    },
+  };
+}

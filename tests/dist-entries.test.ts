@@ -7,6 +7,7 @@ import type { CivilCalendar } from '../src/index.js';
 import { builtFile, fixedCalendar, ueReferential, overlapReport } from './helpers.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
+import disclosures from './vectors/disclosure-v1.json';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Each test fails without the build, saying
@@ -107,6 +108,17 @@ type Entry = {
   ) => boolean;
   computeInputDigest: (input: object, seed: Uint8Array) => string;
   computeIdempotencyDigest: (request: object) => string;
+  DISCLOSURE_FORMAT: string;
+  discloseFacts: (
+    input: object,
+    seed: Uint8Array,
+    present: readonly string[],
+    absent: readonly string[],
+  ) => unknown;
+  verifyFactDisclosure: (
+    d: unknown,
+    inputDigest: string,
+  ) => { valid: boolean; issues: string[]; absent: string[] };
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -396,6 +408,35 @@ describe('built entries: one SpecError identity', () => {
             '"context":{},"dates":{},"dimensions":{},"tags":[],"tenantId":"t"}},"options":{}}',
         ),
       );
+    }
+  });
+
+  it('every built entry discloses facts as the frozen disclosure vectors say', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const inputs: Record<string, { input: object; secret: string; requestId: string }> = {
+      'input-v1.json': vector,
+      'input-v2.json': second,
+    };
+    for (const entry of entries) {
+      expect(entry.DISCLOSURE_FORMAT).toBe('run-iq.disclosure/1');
+      for (const c of disclosures.cases) {
+        const source = inputs[c.input];
+        if (source === undefined) throw new Error(`no input ${c.input}`);
+        const secret = new Uint8Array(Buffer.from(source.secret, 'hex'));
+        const seed = entry.deriveInputSeed(secret, source.requestId);
+        expect(entry.discloseFacts(source.input, seed, c.present, c.absent)).toEqual(c.disclosure);
+        const digest = entry.computeInputDigest(source.input, seed);
+        expect(entry.verifyFactDisclosure(c.disclosure, digest)).toMatchObject({
+          valid: true,
+          issues: [],
+          absent: c.disclosure.absent.map((a) => a.pointer),
+        });
+      }
     }
   });
 

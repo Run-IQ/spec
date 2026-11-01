@@ -200,10 +200,14 @@ function writeContent(out: TextOut, content: LeafContent): void {
 }
 
 /**
- * The hash of a leaf from its content and its raw salt (D-15), written into `out`, through the
- * shared hash stream (`withSha256`): the content is hashed as it is written.
+ * Internal: the hash of a leaf from its content and its raw salt (D-15), written into `out`,
+ * through the shared hash stream (`withSha256`): the content is hashed as it is written.
  */
-function createLeafHasher(): (out: Uint8Array, content: LeafContent, salt: Uint8Array) => void {
+export function createLeafHasher(): (
+  out: Uint8Array,
+  content: LeafContent,
+  salt: Uint8Array,
+) => void {
   return (out, content, salt) => {
     const hash = withSha256((stream) => {
       stream.bytes(LEAF_PREFIX);

@@ -30,7 +30,8 @@
     "./schema/rule-definition.schema.json": "./schema/rule-definition.schema.json",
     "./schema/decision-proof.schema.json": "./schema/decision-proof.schema.json",
     "./schema/referential.schema.json": "./schema/referential.schema.json",
-    "./schema/proof-input.schema.json": "./schema/proof-input.schema.json"
+    "./schema/proof-input.schema.json": "./schema/proof-input.schema.json",
+    "./schema/fact-disclosure.schema.json": "./schema/fact-disclosure.schema.json"
   },
   "typesVersions": {
     "*": {

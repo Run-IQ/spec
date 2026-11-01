@@ -90,8 +90,14 @@ function readSegments(segments: readonly string[]): unknown[] {
  * `SpecError` (`INVALID_PATH`) for an invalid pointer.
  */
 export function comparePointers(a: JsonPointer, b: JsonPointer): number {
-  const left = parsePointer(a);
-  const right = parsePointer(b);
+  return compareSegments(parsePointer(a), parsePointer(b));
+}
+
+/**
+ * Internal: the order of `comparePointers` on decoded segments: compared one by one in UTF-16
+ * code units, a prefix before its descendants. Returns -1, 0 or 1.
+ */
+export function compareSegments(left: readonly string[], right: readonly string[]): number {
   for (let i = 0; ; i++) {
     const x = left[i];
     const y = right[i];

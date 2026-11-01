@@ -1,0 +1,154 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/Run-IQ/spec/schema/fact-disclosure.schema.json",
+  "title": "Run-IQ fact disclosure",
+  "description": "A disclosure of some facts of a decision input, and proofs that some pointers are absent from it (run-iq.disclosure/1), as discloseFacts from @run-iq/spec writes it and verifyFactDisclosure reads it. Each disclosed leaf of the salted input tree carries its index among the leaves sorted by decoded JSON pointer segments and its RFC 6962 audit path. Checks NOT expressible in JSON Schema, made only by verifyFactDisclosure: each audit path holds exactly the hashes of the audit path of its leaf (index below size, path length that of (index, size)); not more facts than leaves (size); each leaf names a place where a valid input has a leaf, its kind and value fit that place (as inputLeafHash checks it); no pointer holds a lone UTF-16 surrogate; facts by increasing index and absences by increasing pointer, each once; inputDigest is the digest verified against; each leaf is in that tree at its index; each absence framed by its neighbour leaves (adjacent, the second not inside the pointer; the first leaf alone before it, the last alone after it, a scalar above it alone; none only in the empty tree); the disclosed leaves contradict neither each other nor an absence. An absence assumes a tree sorted honestly by its signer: only a replay with the input checks it.",
+  "type": "object",
+  "required": ["format", "inputDigest", "size", "facts", "absent"],
+  "additionalProperties": false,
+  "properties": {
+    "format": {
+      "const": "run-iq.disclosure/1"
+    },
+    "inputDigest": {
+      "$ref": "#/$defs/hash"
+    },
+    "size": {
+      "description": "The number of leaves of the input tree, which the input digest commits to.",
+      "type": "integer",
+      "minimum": 0,
+      "maximum": 10000000
+    },
+    "facts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/disclosedLeaf"
+      }
+    },
+    "absent": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["pointer"],
+        "additionalProperties": false,
+        "properties": {
+          "pointer": {
+            "description": "Any JSON pointer (RFC 6901).",
+            "type": "string",
+            "pattern": "^(/([^~/]|~[01])*)*$"
+          },
+          "before": {
+            "$ref": "#/$defs/disclosedLeaf"
+          },
+          "after": {
+            "$ref": "#/$defs/disclosedLeaf"
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "hash": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "disclosedLeaf": {
+      "type": "object",
+      "required": ["pointer", "kind", "salt", "index", "path"],
+      "additionalProperties": false,
+      "properties": {
+        "pointer": {
+          "description": "A JSON pointer below /data or /meta.",
+          "type": "string",
+          "pattern": "^/(data|meta)(/([^~/]|~[01])*)*$"
+        },
+        "kind": {
+          "enum": ["value", "array", "object"]
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "number"
+            },
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "length": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "salt": {
+          "$ref": "#/$defs/hash"
+        },
+        "index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "path": {
+          "type": "array",
+          "maxItems": 24,
+          "items": {
+            "$ref": "#/$defs/hash"
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "value"
+              }
+            }
+          },
+          "then": {
+            "required": ["value"],
+            "properties": {
+              "value": true,
+              "length": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "array"
+              }
+            }
+          },
+          "then": {
+            "required": ["length"],
+            "properties": {
+              "length": true,
+              "value": false
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "kind": {
+                "const": "object"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "value": false,
+              "length": false
+            }
+          }
+        }
+      ]
+    }
+  }
+}

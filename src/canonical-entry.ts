@@ -106,6 +106,13 @@ export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
 export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
 export { INPUT_TREE_TAG, inputLeafHash, inputLeaves, verifyInputInclusion } from './input/tree.js';
 export type { InputLeaf } from './input/tree.js';
+export { DISCLOSURE_FORMAT, discloseFacts, verifyFactDisclosure } from './input/disclosure.js';
+export type {
+  AbsenceProof,
+  DisclosedLeaf,
+  FactDisclosure,
+  FactDisclosureVerification,
+} from './input/disclosure.js';
 export type {
   AssertionMethod,
   AssertionStatus,
