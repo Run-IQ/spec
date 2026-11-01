@@ -296,9 +296,15 @@ export function combinationProblems(target: Target, context: Context): string[] 
       : undefined;
   // A step, the short circuit that imposed one, or the standing of a rule may be redacted: what
   // follows from all of them is not checked, what the visible ones contradict still is.
-  // A hidden step feeds this target: what it carries.
+  // A hidden step feeds this target: what it carries. A standing is read by a
+  // `highestPriority` only.
+  const standing = declaration.combine === 'highestPriority';
   const lifted = (message: string): boolean =>
-    isLifted(context.hidden, LIFTS.outputValue, { message, output: target.place });
+    isLifted(context.hidden, LIFTS.outputValue, {
+      message,
+      output: target.place,
+      ...(standing ? {} : { as: { rules: 'none' } }),
+    });
   const differ = `contributors differ from applied steps: ${cite()}`;
   if (!contributorsMatch(target, top) && !lifted(differ)) issues.push(differ);
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {

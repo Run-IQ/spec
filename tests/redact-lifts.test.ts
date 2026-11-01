@@ -445,7 +445,22 @@ const LIFT_CASES: {
   },
   {
     check: 'settled output without pending rules',
-    content: () => SITES[5]!.content(),
+    // The standings of a highestPriority: A does not outrank B, unless a hidden rules entry is
+    // A's or B's (a sum reads no standing: SITES[5] is lifted by nothing).
+    content: () =>
+      traceProof({
+        output: {
+          type: 'number',
+          combine: 'highestPriority',
+          value: 1,
+          contributors: ['A'],
+          pending: ['B'],
+          selected: { ruleId: 'A' },
+        },
+        rules: [{ id: 'A' }, { id: 'B' }],
+        steps: [{ ruleId: 'A', contribution: 1 }],
+        pending: [{ ruleId: 'B', output: 'value', reason: 'UNDETERMINED', detail: 'x' }],
+      }),
     message: 'settled output with pending rules: value',
     lifting: 'rules',
     unrelated: 'factsRead',
@@ -781,14 +796,29 @@ const BOUNDED: {
   },
   {
     check: 'settled output without pending rules',
+    // An `any` without a `true`: a hidden decisive step would settle it (a sum, nothing would).
     content: () =>
       traceProof({
-        output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'], pending: ['B'] },
-        outputs: [other({ value: 1, contributors: ['C'], pending: ['D'] })],
+        output: {
+          type: 'boolean',
+          combine: 'any',
+          value: false,
+          contributors: ['A'],
+          pending: ['B'],
+        },
+        outputs: [
+          other({
+            type: 'boolean',
+            combine: 'any',
+            value: false,
+            contributors: ['C'],
+            pending: ['D'],
+          }),
+        ],
         rules: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }],
         steps: [
-          { ruleId: 'A', contribution: 1 },
-          { ruleId: 'C', contribution: 1, output: 'other' },
+          { ruleId: 'A', contribution: false },
+          { ruleId: 'C', contribution: false, output: 'other' },
         ],
         pending: [
           { ruleId: 'B', output: 'value', reason: 'UNDETERMINED', detail: 'x' },

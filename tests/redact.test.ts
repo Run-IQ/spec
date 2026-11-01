@@ -195,12 +195,12 @@ describe('what a redaction hides (pre-flight C5)', () => {
       issues: [
         'redacted entries: 4',
         'unsigned',
-        'check lifted: output status no stronger than its causes (rules, applied redacted)',
+        'check lifted: output status no stronger than its causes (applied redacted)',
         'check lifted: provisional status has a source (readsUndeclared redacted)',
       ],
       redacted: 4,
       lifted: [
-        { check: 'output status no stronger than its causes', redacted: ['rules', 'applied'] },
+        { check: 'output status no stronger than its causes', redacted: ['applied'] },
         { check: 'provisional status has a source', redacted: ['readsUndeclared'] },
       ],
     });

@@ -167,7 +167,8 @@ export function carrierRuleFindings(
   // The exception records of a carrier, or its exclusion, may be redacted.
   // A hidden record or exclusion of that carrier instance.
   recordedExceptions(p, definitions, context.ties.losers, (message, rule) => {
-    if (!isLifted(context.hidden, LIFTS.carrierRecords, { message, rule })) invalid(message);
+    const ties = context.ties.uncertain;
+    if (!isLifted(context.hidden, LIFTS.carrierRecords, { message, rule, ties })) invalid(message);
   });
 }
 

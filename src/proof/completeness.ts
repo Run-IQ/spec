@@ -102,7 +102,16 @@ export function completenessProblems(
   if (!byTrace || !pending) return [];
   const message = `settled output with pending rules: ${target.cite()}`;
   const output = target.place;
-  return isLifted(hidden, LIFTS.settledPending, { message, output }) ? [] : [message];
+  // A standing settles a `highestPriority` only (`outranksPending`), a step an `any`, an `all`
+  // (decisive) or a `highestPriority` (its winner): nothing hidden settles another.
+  const { combine } = target.declaration;
+  const as =
+    combine === 'highestPriority'
+      ? {}
+      : combine === 'any' || combine === 'all'
+        ? { as: { rules: 'none' as const } }
+        : { as: { rules: 'none' as const, applied: 'none' as const } };
+  return isLifted(hidden, LIFTS.settledPending, { message, output, ...as }) ? [] : [message];
 }
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
@@ -181,6 +190,7 @@ export function causeProblems(
   target: Target,
   feed: Feed,
   hidden: ReadonlySet<ProofSection> = new Set(),
+  ties: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
   const issues: string[] = [];
   const rank = rankOf(target.status);
@@ -191,11 +201,15 @@ export function causeProblems(
     issues.push(`output status weaker than its candidates: ${target.cite()}`);
   }
   const tie = feed.tie ? CONFLICT : -1;
-  if (tie > rank) issues.push(`output status weaker than its tie: ${target.cite()}`);
+  if (tie > rank) {
+    // The tie may be the visible part's alone: a hidden entry may undo it (`ties`).
+    const message = `output status weaker than its tie: ${target.cite()}`;
+    if (!isLifted(hidden, LIFTS.tieStatus, { message, ties })) issues.push(message);
+  }
   const settled = target.status !== 'undetermined';
   const stronger = settled && rank > Math.max(0, steps, feed.candidates, tie);
   const message = `output status stronger than its causes: ${target.cite()}`;
-  if (stronger && !isLifted(hidden, LIFTS.causes, { message, output: target.place })) {
+  if (stronger && !isLifted(hidden, LIFTS.causes, { message, output: target.place, ties })) {
     issues.push(message);
   }
   return issues;

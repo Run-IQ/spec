@@ -23,7 +23,6 @@ import type {
   ProofOutput,
   ProofPending,
   ProofSelection,
-  ProofSection,
   ProofSkip,
   ProofStep,
   ProofView,
@@ -361,7 +360,7 @@ export function outputProblems(
     append(issues, completenessProblems(target, feed, context.standings, hidden));
     append(issues, rankProblems(target, hidden));
   }
-  append(issues, statusProblems(p, listed, feeds, targets, hidden));
+  append(issues, statusProblems(p, listed, feeds, targets, context));
   return issues;
 }
 
@@ -455,8 +454,9 @@ function statusProblems(
   listed: ReadonlyMap<string, ProofOutput>,
   feeds: Feeds,
   targets: readonly Fed[],
-  hidden: ReadonlySet<ProofSection>,
+  context: Context,
 ): string[] {
+  const { hidden } = context;
   const issues: string[] = [];
   const strongest = new Map<string, number>();
   for (const item of p.items) {
@@ -473,6 +473,8 @@ function statusProblems(
       issues.push(message);
     }
   }
-  for (const { target, feed } of targets) append(issues, causeProblems(target, feed, hidden));
+  for (const { target, feed } of targets) {
+    append(issues, causeProblems(target, feed, hidden, context.ties.uncertain));
+  }
   return issues;
 }

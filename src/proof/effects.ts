@@ -16,7 +16,7 @@ import type {
   ProofView,
 } from './types.js';
 import { isLifted, liftedOnSteps, LIFTS } from './lifts.js';
-import type { RuleIdentity } from './lifts.js';
+import type { Problem, RuleIdentity } from './lifts.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
 // that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
@@ -220,14 +220,20 @@ export function exceptionProblems(
   const push = (issue: string): void => {
     if (!full(issues)) issues.push(issue);
   };
+  const { uncertain } = ties;
   // Unless what fired may be hidden: report `message` then.
   const report = (add: (message: string) => void, message: string): void => {
-    if (!isLifted(hidden, LIFTS.firedExceptions, { message })) add(message);
+    if (!isLifted(hidden, LIFTS.firedExceptions, { message, ties: uncertain })) add(message);
   };
   for (const problem of ties.problems) push(problem);
-  carrierProblems(p, imposed, ties, push, (message, rule) =>
-    isLifted(hidden, LIFTS.shortCircuitCarrier, { message, rule }),
-  );
+  carrierProblems(p, imposed, ties, {
+    status: (message, rule) => {
+      if (!isLifted(hidden, LIFTS.carrierStatus, { message, rule })) push(message);
+    },
+    missing: (problem) => {
+      if (!isLifted(hidden, LIFTS.shortCircuitCarrier, problem)) push(problem.message);
+    },
+  });
   const tries = new Map<string, Node>();
   p.exceptions.forEach((exception, index) => {
     if (ties.discarded.has(index)) return;
@@ -299,7 +305,9 @@ export function exceptionProblems(
         : undefined;
     if (unexplained !== undefined) {
       const message = `${unexplained}: ${cited()}`;
-      if (!isLifted(hidden, LIFTS.exclusionException, { message })) uncovered.push(message);
+      if (!isLifted(hidden, LIFTS.exclusionException, { message, ties: uncertain })) {
+        uncovered.push(message);
+      }
     }
     // A pending decision is undetermined: never weaker.
     if (reached && 'status' in decision && rankOf(decision.status) < strongest) {
@@ -329,7 +337,7 @@ export function exceptionProblems(
   unproduced.sort((a, b) => a[0] - b[0]);
   // The decision an exception produced may be redacted.
   for (const [, message] of unproduced) {
-    if (!isLifted(hidden, LIFTS.affectedFound, { message })) push(message);
+    if (!isLifted(hidden, LIFTS.affectedFound, { message, ties: uncertain })) push(message);
   }
   for (const message of uncovered) push(message);
   for (const message of weaker) push(message);
@@ -337,16 +345,24 @@ export function exceptionProblems(
   return issues;
 }
 
+/** What `carrierProblems` found: a status, with the carrier instance; a carrier missing. */
+interface CarrierFound {
+  status: (message: string, rule: RuleIdentity) => void;
+  missing: (problem: Problem<'output' | 'both' | 'tie'>) => void;
+}
+
 /**
- * The status of each exception against its carrier's step, and the carriers of short circuits
- * (not reported missing while `applied` has a redacted entry, `stepsHidden`).
+ * The status of each exception against its carrier's step (its instance's: a hidden short
+ * circuit of that instance may make the step found the one it imposed, `carrierStatus`), and
+ * the carriers of short circuits (`shortCircuitCarrier`: a hidden step of the carrier instance
+ * on the output; when the exception affected nothing, any step imposed on the output, or the
+ * short circuit that imposed it, the winner's; or the ties, which may have discarded it).
  */
 function carrierProblems(
   p: ProofView,
   imposed: ReadonlySet<string>,
   ties: Ties,
-  push: (issue: string) => void,
-  stepsHidden: (message: string, carrier: RuleIdentity) => boolean,
+  found: CarrierFound,
 ): void {
   const steps = new Map<string, ProofStep>();
   for (const step of p.applied) {
@@ -363,22 +379,27 @@ function carrierProblems(
     if (ties.discarded.has(index)) return;
     const cited = citeName(instanceKey(exception));
     const { output } = exception;
+    const { ruleId: id, version, subject } = exception;
+    const rule: RuleIdentity = subject === undefined ? { id, version } : { id, version, subject };
     const carrier =
       exception.kind === 'shortCircuit' && output !== undefined
         ? steps.get(imposedKey(exception, output))
         : steps.get(instanceKey(exception));
     if (carrier !== undefined && carrier.status !== exception.status) {
-      push(`exception status differs from its carrier's decision: ${cited}`);
+      found.status(`exception status differs from its carrier's decision: ${cited}`, rule);
     }
     if (exception.kind !== 'shortCircuit' || output === undefined || carrier !== undefined) {
       return;
     }
     // A carrier whose claim on the output another won affected nothing (R18).
-    if (exception.affected.length === 0 && won.has(output)) return;
-    // A hidden step of the carrier instance.
-    const missing = `short circuit without its carrier applied: ${cited}`;
-    const { ruleId: id, version, subject } = exception;
-    const rule = subject === undefined ? { id, version } : { id, version, subject };
-    if (!stepsHidden(missing, rule)) push(missing);
+    const unaffected = exception.affected.length === 0;
+    if (unaffected && won.has(output)) return;
+    found.missing({
+      message: `short circuit without its carrier applied: ${cited}`,
+      rule,
+      output: { output },
+      ties: ties.uncertain,
+      as: unaffected ? { applied: 'output' } : { exceptions: 'none' },
+    });
   });
 }

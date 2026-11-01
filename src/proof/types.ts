@@ -442,7 +442,7 @@ export type ProofStatus =
 export interface LiftedCheck {
   /** The check, in words (`output value from its contributions`). */
   check: string;
-  /** The sections, among those the check reads, that have a redacted entry. */
+  /** The sections whose redacted entries could explain a problem it found. */
   redacted: ProofSection[];
 }
 

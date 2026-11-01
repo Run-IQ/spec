@@ -49,6 +49,34 @@ export interface Ties {
    * after its target` and `pending carrier out of scope` (`pendingCarrierProblems`).
    */
   problems: readonly string[];
+  /**
+   * The sections whose redacted entries may change these ties (empty when none may): `rules`
+   * (the standings that tie two short circuits), `skipped` (an exclusion `RULE_CONFLICT`) and
+   * `exceptions` (one fired before), while an exception and an exclusion `RULE_CONFLICT` may
+   * be in the proof (`tieInputs`). A problem computed from them is free there (`Problem.ties`).
+   */
+  uncertain: ReadonlySet<ProofSection>;
+}
+
+/**
+ * The sections of `hidden` whose redacted entries may change the ties of `p` (`Ties.uncertain`).
+ * A carrier is discarded only by an exclusion `RULE_CONFLICT` in a proof that holds together
+ * (one that stops it, or a pending entry without `fired: true`, is a problem of its own): no
+ * tie while `skipped` shows none and has no redacted entry, nor without an exception. The
+ * standings tie short circuits only.
+ */
+export function tieInputs(p: ProofView, hidden: ReadonlySet<ProofSection>): Set<ProofSection> {
+  const uncertain = new Set<ProofSection>();
+  const conflicts =
+    hidden.has('skipped') || p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT');
+  const exceptions = hidden.has('exceptions') || p.exceptions.length > 0;
+  if (!conflicts || !exceptions) return uncertain;
+  const shortCircuits =
+    hidden.has('exceptions') || p.exceptions.some((exception) => exception.kind === 'shortCircuit');
+  if (shortCircuits && hidden.has('rules')) uncertain.add('rules');
+  if (hidden.has('skipped')) uncertain.add('skipped');
+  if (hidden.has('exceptions')) uncertain.add('exceptions');
+  return uncertain;
 }
 
 /** A node of the subjects of one rule; the root is the rule without subject. */
@@ -153,6 +181,11 @@ export function tiesOf(
   const losers = new Set<string>();
   const shortCircuits = new Set<string>();
   const problems: string[] = [];
+  const uncertain = tieInputs(p, hidden);
+  // A problem of who lost: the ties may be hidden.
+  const tieProblem = (message: string): void => {
+    if (!isLifted(hidden, LIFTS.tieRecords, { message, ties: uncertain })) problems.push(message);
+  };
   firedProblems(p, problems);
   const fired = new Scope();
   const tied = new Scope();
@@ -191,14 +224,14 @@ export function tiesOf(
       discarded.add(index);
       losers.add(instanceKey(exception));
       if (exception.status !== skip.status) {
-        problems.push(`exception status differs from its carrier's decision: ${cited()}`);
+        tieProblem(`exception status differs from its carrier's decision: ${cited()}`);
       }
       if (r15) {
         for (const entry of exception.affected) tied.mark(entry);
       } else if (output !== undefined) {
         shortCircuits.add(output);
         if (exception.affected.length > 0) {
-          problems.push(`discarded short circuit affected rules: ${cited()}`);
+          tieProblem(`discarded short circuit affected rules: ${cited()}`);
         }
       }
       return;
@@ -208,7 +241,7 @@ export function tiesOf(
     // The loser's exclusion `RULE_CONFLICT` may be redacted.
     if (tiedClaim(output, claim)) {
       const message = `short circuits tied without a loser excluded: ${cited()}`;
-      if (!isLifted(hidden, LIFTS.tieLoser, { message })) problems.push(message);
+      if (!isLifted(hidden, LIFTS.tieLoser, { message, ties: uncertain })) problems.push(message);
     }
     const list = claims.get(output);
     if (list === undefined) claims.set(output, [claim]);
@@ -223,7 +256,7 @@ export function tiesOf(
   for (const key of losers) {
     if (full(problems)) break;
     if ((recorded.get(key) ?? 0) > 1) {
-      problems.push(`tie loser recorded other exceptions: ${citeName(key)}`);
+      tieProblem(`tie loser recorded other exceptions: ${citeName(key)}`);
     }
   }
   // The exceptions of a carrier that fired may be redacted.
@@ -245,6 +278,7 @@ export function tiesOf(
     shortCircuits,
     reaches: (entry) => tied.covers(entry),
     problems,
+    uncertain,
   };
 }
 

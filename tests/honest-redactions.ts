@@ -12,7 +12,12 @@ const SEED = fromHex('f9b972f50267915261e884526c8553bdf4a353eb2e4e9e78ee65716aec
 
 /** `content` sealed with a secret seed. */
 export function honestProof(content: object): DecisionProof {
-  return sealProof({ ...unsalted(content), inputSalted: true } as UnsaltedProof, SEED);
+  return sealedAsGiven(unsalted(content));
+}
+
+/** `content`, already without salts, sealed with a secret seed. */
+export function sealedAsGiven(content: object): DecisionProof {
+  return sealProof({ ...content, inputSalted: true } as UnsaltedProof, SEED);
 }
 
 /** The places of the entries of `proof`, section by section. */
@@ -59,5 +64,13 @@ export function* randomSubsets(n: number, count: number, seed: number): Generato
       state = (state * 1103515245 + 12345) & 0x7fffffff;
       return state % 3 === 0;
     });
+  }
+}
+
+/** Each subset of one place of `n`, then each of two. */
+export function* singlesAndPairs(n: number): Generator<boolean[]> {
+  for (let i = 0; i < n; i++) yield Array.from({ length: n }, (_, k) => k === i);
+  for (let i = 0; i < n; i++) {
+    for (let j = i + 1; j < n; j++) yield Array.from({ length: n }, (_, k) => k === i || k === j);
   }
 }
