@@ -6,6 +6,7 @@ import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { extend } from './collect.js';
+import { carrierRuleFindings } from './carrier-rules.js';
 import { inconsistencies } from './consistency.js';
 import { instanceKey } from './output-values.js';
 import { contentDigest } from './digest.js';
@@ -65,7 +66,10 @@ interface Finding {
  *    proof records is not that of the definition (`-0` and `0` are the same priority). Then,
  *    in the order of `pending`, for a given rule: `fired missing: id@version[ at
  *    subject]` on a pending entry of a rule whose definition carries exceptions, and
- *    `fired on a rule without exceptions: …` on one of a rule that carries none (R18).
+ *    `fired on a rule without exceptions: …` on one of a rule that carries none (R18). Then
+ *    the carriers against their definitions (`carrierRuleFindings`): `carrier does not select
+ *    its target`, `target decided as if its carrier were not pending`, `carrier exceptions
+ *    differ from its definition`.
  *
  * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
  * `invalid` too, rather than being ignored.
@@ -183,6 +187,7 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   const given = new Map<string, string>();
   const priorities = new Map<string, number>();
   const carriers = new Set<string>();
+  const definitions = new Map<string, RuleDefinition>();
   items.forEach((rule, i) => {
     let key: string;
     let checksum: string;
@@ -199,6 +204,7 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       checksum = sha256Hex(payload);
       priority = definition.priority;
       if ((definition.exceptions ?? []).length > 0) carriers.add(key);
+      if (!definitions.has(key)) definitions.set(key, definition);
     } catch (error) {
       invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
       return;
@@ -211,10 +217,13 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   });
 
   const cited = new Set<string>();
+  const matched = new Map<string, RuleDefinition>();
   for (const ref of p.rules) {
     const key = `${qualifyName(ref.ruleSet, ref.id)}@${ref.version}`;
     cited.add(key);
     const checksum = given.get(key);
+    const definition = definitions.get(key);
+    if (checksum === ref.checksum && definition !== undefined) matched.set(key, definition);
     if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);
     else if (checksum !== ref.checksum) invalid(`rule checksum mismatch: ${citeName(key)}`);
     else if (priorities.get(key) !== ref.priority) {
@@ -236,5 +245,6 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       invalid(`fired on a rule without exceptions: ${at}`);
     }
   }
+  carrierRuleFindings(p, matched, invalid);
   return findings;
 }

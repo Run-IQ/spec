@@ -8,6 +8,17 @@ import { ruleA } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
 
+/** An output of a later stratum, with nothing in it. */
+const LATER: Entry = {
+  name: 'later',
+  type: 'number',
+  combine: 'sum',
+  value: 0,
+  status: 'determined',
+  contributors: [],
+  pending: [],
+};
+
 /** X inhibits T; X is decided by `decision` (a skip or a pending entry of X). */
 function inhibition(decision: { skipped?: Trace['skipped']; pending?: Trace['pending'] }): Trace {
   return {
@@ -50,8 +61,8 @@ const FREE: [string, string][] = [
   ['ERROR', 'OUTPUT_MISMATCH: value is NaN'],
   ['AMBIGUOUS_ORDER', 'tie on orderBy'],
   ['ERROR', 'INVALID_ORDER_VALUE: /e/1/n'],
-  ['ERROR', 'INVALID_GROUP_VALUE: /g'],
   ['ERROR', 'TZDATA_UNKNOWN: Europe/X'],
+  ['ERROR', 'FUEL_EXHAUSTED: 1000 steps'],
   ['LATER_REASON', 'x'],
 ];
 const FIRED: [string, string][] = [
@@ -67,6 +78,7 @@ const UNFIRED: [string, string][] = [
   ['ERROR', 'INVALID_RULE: x'],
   ['ERROR', 'TEMPORAL_OVERLAP: x'],
   ['ERROR', 'NOT_A_COLLECTION: /x'],
+  ['ERROR', 'INVALID_GROUP_VALUE: /g'],
 ];
 
 describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
@@ -99,6 +111,7 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
   it('refuses a target held by a pending carrier that fired', () => {
     for (const [reason, detail] of FREE) {
       expect(problems(traceProof(holder(reason, detail, true)))).toEqual([
+        'pending carrier fired without its exceptions: X@1',
         'pending carrier without a pending carrier: T@1',
       ]);
     }
@@ -121,6 +134,7 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
       ]);
       expect(problems(traceProof(holder(reason, detail, true)))).toEqual([
         'fired contradicts its reason: X@1',
+        'pending carrier fired without its exceptions: X@1',
         'pending carrier without a pending carrier: T@1',
       ]);
     }
@@ -131,6 +145,58 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
     expect(problems(traceProof(trace))).toEqual([
       'fired contradicts its reason: X@1',
       'pending carrier without a pending carrier: X@1',
+    ]);
+  });
+
+  it('a pending carrier that fired records its exceptions, affected possibly empty', () => {
+    const fired = (exceptions: Entry[]): Trace => ({
+      output: { type: 'number', combine: 'sum', value: 0 },
+      rules: [{ id: 'X' }],
+      pending: [{ ruleId: 'X', reason: 'UNDETERMINED', detail: 'missing /a', fired: true }],
+      exceptions,
+    });
+    expect(problems(traceProof(fired([{ ruleId: 'X', kind: 'inhibit', affected: [] }])))).toEqual(
+      [],
+    );
+    expect(problems(traceProof(fired([])))).toEqual([
+      'pending carrier fired without its exceptions: X@1',
+    ]);
+    // Its records are its own instance's: another instance's do not count.
+    const elsewhere = fired([{ ruleId: 'X', subject: '/e/1', kind: 'inhibit', affected: [] }]);
+    expect(problems(traceProof(elsewhere))).toEqual([
+      'pending carrier fired without its exceptions: X@1',
+    ]);
+  });
+
+  it('refuses a decision of a stratum before the exception that affected it', () => {
+    const strata = (carrier: number, target: number): Trace => ({
+      ...inhibition({
+        pending: [
+          { ruleId: 'X', reason: 'UNDETERMINED', detail: 'x', fired: true, stratum: carrier },
+        ],
+      }),
+      skipped: [{ ruleId: 'T', output: 'value', reason: 'INHIBITED', stratum: target }],
+      exceptions: [{ ruleId: 'X', kind: 'inhibit', affected: [{ ruleId: 'T' }], stratum: carrier }],
+      outputs: [LATER],
+      strata: [['value'], ['later']],
+    });
+    expect(problems(traceProof({ ...strata(0, 0), strata: [['later', 'value']] }))).toEqual([]);
+    expect(problems(traceProof({ ...strata(1, 0) }))).toEqual([
+      'decision before the exception that affected it: T@1',
+    ]);
+    // A substitution reaches every later decision of its target, and a pending one too.
+    const pendingTarget: Trace = {
+      ...strata(1, 0),
+      output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ['T'] },
+      skipped: [],
+      pending: [
+        { ruleId: 'T', output: 'value', reason: 'UNDETERMINED', detail: 'x', stratum: 0 },
+        { ruleId: 'X', reason: 'UNDETERMINED', detail: 'x', fired: true, stratum: 1 },
+      ],
+      exceptions: [{ ruleId: 'X', kind: 'substitute', affected: [{ ruleId: 'T' }], stratum: 1 }],
+    };
+    expect(problems(traceProof(pendingTarget))).toEqual([
+      'decision before the exception that affected it: T@1',
     ]);
   });
 
@@ -148,24 +214,30 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
     const flipped = traceProof(holder('UNDETERMINED', 'missing /a', true));
     expect(verifyProof({ ...sealed, pending: flipped.pending }).issues).toEqual([
       'digest mismatch',
+      'pending carrier fired without its exceptions: X@1',
       'pending carrier without a pending carrier: T@1',
       'unsigned',
     ]);
   });
 });
 
-/** `entries`, pending on the output `value` (PENDING_CARRIER unless they say otherwise). */
+/**
+ * `entries`, pending on the output `value` unless `output: undefined` (PENDING_CARRIER unless
+ * they say otherwise).
+ */
 function chain(entries: Entry[]): Trace {
   const ids = [...new Set(entries.map((entry) => String(entry.ruleId)))].sort();
+  const pending = entries.map((entry) => {
+    const full: Entry = { output: 'value', reason: 'PENDING_CARRIER', detail: 'x', ...entry };
+    // `output: undefined` leaves the entry without an output.
+    if (full.output === undefined) delete full.output;
+    return full;
+  });
+  const feeding = ids.filter((id) => pending.some((e) => e.ruleId === id && 'output' in e));
   return {
-    output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ids },
+    output: { type: 'number', combine: 'sum', status: 'undetermined', pending: feeding },
     rules: ids.map((id) => ({ id })),
-    pending: entries.map((entry) => ({
-      output: 'value',
-      reason: 'PENDING_CARRIER',
-      detail: 'x',
-      ...entry,
-    })),
+    pending,
   };
 }
 const root = { reason: 'UNDETERMINED', detail: 'missing /p', fired: false };
@@ -225,8 +297,42 @@ describe('PENDING_CARRIER: a chain of pending carriers down to one that did not 
     expect(named({ ruleId: 'X', version: 2 }, root)).toEqual(refused);
     // X says nothing of its exceptions: not a carrier of the proof.
     expect(named(of('X'), { reason: 'UNDETERMINED', detail: 'x' })).toEqual(refused);
-    expect(named(of('X'), { ...root, fired: true })).toEqual(refused);
+    expect(named(of('X'), { ...root, fired: true })).toEqual([
+      'pending carrier fired without its exceptions: X@1',
+      ...refused,
+    ]);
     expect(named(of('X'), root)).toEqual([]);
+  });
+
+  it('refuses a pending carrier of a stratum after its target (carrierAfterTarget)', () => {
+    const placed = (target: number, carrier: number): Trace => ({
+      ...chain([
+        { ruleId: 'T', carrier: of('X'), stratum: target },
+        { ruleId: 'X', ...root, output: undefined, stratum: carrier },
+      ]),
+      outputs: [LATER],
+      // T's output `value` sits in T's stratum.
+      strata: target === 0 ? [['value'], ['later']] : [['later'], ['value']],
+    });
+    expect(problems(traceProof(placed(1, 0)))).toEqual([]);
+    expect(problems(traceProof(placed(0, 1)))).toEqual(['pending carrier after its target: T@1']);
+  });
+
+  it("refuses a pending carrier out of its target's scope (D-21)", () => {
+    const scoped = (target: string | undefined, carrier: string | undefined): string[] => {
+      const t: Entry = { ruleId: 'T', carrier: of('X', carrier) };
+      const x: Entry = { ruleId: 'X', ...root, output: undefined };
+      if (target !== undefined) t.subject = target;
+      if (carrier !== undefined) x.subject = carrier;
+      return problems(traceProof(chain([t, x])));
+    };
+    expect(scoped(undefined, '/e/1')).toEqual([]);
+    expect(scoped('/e/1', undefined)).toEqual([]);
+    expect(scoped('/e/1', '/e/1')).toEqual([]);
+    expect(scoped('/e/1/k/2', '/e/1')).toEqual([]);
+    expect(scoped('/e/1', '/e/1/k/2')).toEqual([]);
+    expect(scoped('/e/1', '/e/2')).toEqual(['pending carrier out of scope: T@1 at /e/1']);
+    expect(scoped('/e/1', '/e/10')).toEqual(['pending carrier out of scope: T@1 at /e/1']);
   });
 
   it('refuses a pending carrier as its own source, or in a cycle (g1 A, A0, A2, A3)', () => {
@@ -306,6 +412,8 @@ describe('given the rules, fired is on the pending entries of carriers only', ()
     expect(verifyProof(sealed(none, false), { rules: none }).issues).toEqual([
       'unsigned',
       'fired on a rule without exceptions: X@1',
+      // X carries no exception: it selects nothing.
+      'carrier does not select its target: T@1',
     ]);
     expect(verifyProof(sealed(honest), { rules: honest }).issues).toEqual([
       'pending carrier without a pending carrier: T@1',

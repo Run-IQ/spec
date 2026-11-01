@@ -63,6 +63,7 @@ export const VALID_PROOFS: [string, unknown][] = [
     'INVALID_ORDER_VALUE',
     'INVALID_GROUP_VALUE',
     'TZDATA_UNKNOWN',
+    'FUEL_EXHAUSTED',
   ].map((cause): [string, unknown] => [
     `an ERROR caused by ${cause}`,
     entryWith('pending', 0, { reason: 'ERROR', detail: `${cause}: x:y` }),

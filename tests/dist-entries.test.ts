@@ -156,6 +156,7 @@ const CAUSES = [
   'INVALID_ORDER_VALUE',
   'INVALID_GROUP_VALUE',
   'TZDATA_UNKNOWN',
+  'FUEL_EXHAUSTED',
 ];
 
 describe('built entries: one SpecError identity', () => {

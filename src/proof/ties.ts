@@ -5,6 +5,7 @@ import { BEFORE_EXCEPTIONS } from './effects.js';
 import { ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import { firedProblems, pendingCarrierProblems } from './carriers.js';
+import { full } from './collect.js';
 import type { ProofPending, ProofSkip, UnsignedProof } from './types.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
@@ -36,8 +37,11 @@ export interface Ties {
    * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
    * id@version` (a second short circuit of an output at the same stratum, precedence and
    * priority, its carrier not excluded `RULE_CONFLICT`); then, in the order of `pending`,
-   * `pending carrier without a pending carrier` and `pending carrier without a root`
-   * (`pendingCarrierProblems`).
+   * `pending carrier fired without its exceptions: id@version[ at subject]` (its `fired` is
+   * true, and no exception of its instance is recorded: a carrier that fired records each of
+   * its exceptions, `affected` possibly empty); then, in the order of `pending`, `pending
+   * carrier without a pending carrier`, `pending carrier without a root`, `pending carrier
+   * after its target` and `pending carrier out of scope` (`pendingCarrierProblems`).
    */
   problems: readonly string[];
 }
@@ -185,6 +189,16 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     if (list === undefined) claims.set(output, [claim]);
     else list.push(claim);
   });
+  const recorded = new Set<string>();
+  for (const exception of p.exceptions) recorded.add(instanceKey(exception));
+  for (const entry of p.pending) {
+    if (full(problems)) break;
+    if (entry.fired === true && !recorded.has(instanceKey(entry))) {
+      problems.push(
+        `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`,
+      );
+    }
+  }
   pendingCarrierProblems(p, waiting, problems);
   return {
     discarded,

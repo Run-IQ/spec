@@ -179,6 +179,18 @@ describe('a value is counted once: the spend counter', () => {
   it('proofs: read once each, the seal counted before it is added', () => {
     const rule = { ...RICH_RULE, id: 'r1', version: 1 };
     const unsigned = unsignedProof(rule, { a: [1, 2] }, { a: [1, 2] });
+    // Applied, the rule fired the one exception it carries: its record, affecting nothing.
+    unsigned.exceptions = [
+      {
+        ruleId: 'r1',
+        version: 1,
+        kind: 'substitute',
+        affected: [],
+        status: 'determined',
+        stratum: 0,
+        salt: unsaltedSalt('exceptions', 0),
+      },
+    ];
     sealProof(unsigned);
     // The digest sealing adds is counted with the content.
     expect(lastValuesSpent()).toBe(countValues(unsigned) + 1);

@@ -110,9 +110,11 @@ interface Group {
 interface Node {
   children: Map<string, Node>;
   groups: Map<string, Group>;
+  /** The latest stratum of the exceptions whose affected entries end here (-1: none). */
+  latest: number;
 }
 
-const newNode = (): Node => ({ children: new Map(), groups: new Map() });
+const newNode = (): Node => ({ children: new Map(), groups: new Map(), latest: -1 });
 
 type Decision = ProofStep | ProofSkip | ProofPending;
 
@@ -155,7 +157,10 @@ function groupOf(decision: Decision, imposed: ReadonlySet<string>): string[] {
  * - `inhibited without an exception`, `short-circuited without an exception: id@version[ at
  *   subject]`: an exclusion no exception of that kind reaches;
  * - `decision weaker than the exception that affected it: id@version[ at subject]`: a
- *   decision an exception produced is weaker than it (D-7).
+ *   decision an exception produced is weaker than it (D-7);
+ * - `decision before the exception that affected it: id@version[ at subject]`: a decision of
+ *   a rule an exception affects, at its subject or under it, of a stratum before the
+ *   exception's (a carrier never runs after its target: core `carrierAfterTarget`).
  */
 export function exceptionProblems(
   p: UnsignedProof,
@@ -190,10 +195,12 @@ export function exceptionProblems(
       group.rank = Math.max(group.rank, rankOf(exception.status));
       group.entries.push([index, affected]);
       node.groups.set(kind, group);
+      node.latest = Math.max(node.latest, exception.stratum);
     }
   });
   const weaker: string[] = [];
   const uncovered: string[] = [];
+  const early: string[] = [];
   const decisions: Decision[] = [...p.applied, ...p.skipped, ...p.pending];
   for (const decision of decisions) {
     if (full(issues)) break;
@@ -201,7 +208,9 @@ export function exceptionProblems(
     let strongest = -1;
     let reached = false;
     let inhibited = false;
+    let latest = -1;
     const visit = (node: Node): void => {
+      latest = Math.max(latest, node.latest);
       for (const kind of kinds) {
         const group = node.groups.get(kind);
         if (group === undefined) continue;
@@ -220,6 +229,12 @@ export function exceptionProblems(
     }
     const cited = (): string => citeName(instanceKey(decision));
     if (inhibited) push(`inhibited rule applied: ${cited()}`);
+    // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
+    // short circuit imposed is its carrier's, not a target's.
+    const own = 'model' in decision && imposed.has(imposedKey(decision, decision.output));
+    if (!own && decision.stratum < latest) {
+      early.push(`decision before the exception that affected it: ${cited()}`);
+    }
     if (!reached && 'status' in decision && !('model' in decision)) {
       if (decision.reason === 'INHIBITED') {
         uncovered.push(`inhibited without an exception: ${cited()}`);
@@ -254,6 +269,7 @@ export function exceptionProblems(
   for (const [, message] of unproduced) push(message);
   for (const message of uncovered) push(message);
   for (const message of weaker) push(message);
+  for (const message of early) push(message);
   return issues;
 }
 

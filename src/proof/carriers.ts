@@ -1,4 +1,6 @@
 import { citeName } from '../errors.js';
+import { subjectContains } from '../path/subject.js';
+import type { Subject } from '../path/subject.js';
 import { full } from './collect.js';
 import { instanceKey } from './output-values.js';
 import type { ProofPending, UnsignedProof } from './types.js';
@@ -26,6 +28,8 @@ export const ERROR_CAUSES = Object.freeze([
   'INVALID_ORDER_VALUE',
   'INVALID_GROUP_VALUE',
   'TZDATA_UNKNOWN',
+  // Reserved for the fuel of a sandboxed DSL (plan, phase 3): proof/1 does not change.
+  'FUEL_EXHAUSTED',
 ] as const);
 
 /** One cause of `ERROR_CAUSES`. */
@@ -51,7 +55,8 @@ const FIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>(['INVALID_PARAMS'
 /**
  * The causes of a pending `ERROR` after which a carrier did not fire: its condition failed
  * (`DSL_ERROR`, `TIMEOUT`, `DSL_NOT_FOUND`) or was never reached (`CHECKSUM_MISMATCH`,
- * `INVALID_RULE`, `TEMPORAL_OVERLAP`; `NOT_A_COLLECTION`, its instances not formed).
+ * `INVALID_RULE`, `TEMPORAL_OVERLAP`; `NOT_A_COLLECTION` and `INVALID_GROUP_VALUE`, its
+ * instances not formed, D-2).
  */
 const UNFIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>([
   'DSL_ERROR',
@@ -61,6 +66,7 @@ const UNFIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>([
   'INVALID_RULE',
   'TEMPORAL_OVERLAP',
   'NOT_A_COLLECTION',
+  'INVALID_GROUP_VALUE',
 ]);
 
 /**
@@ -69,9 +75,9 @@ const UNFIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>([
  * `FIRING_CAUSES`, `false` for `PENDING_CARRIER` (a pending carrier would have reached it: it
  * fired nothing) and the causes of `UNFIRING_CAUSES`. `undefined` when the entry alone says it:
  * `UNDETERMINED`, `AMBIGUOUS_ORDER`, the causes `OUTPUT_MISMATCH`, `INVALID_ORDER_VALUE`,
- * `INVALID_GROUP_VALUE` and `TZDATA_UNKNOWN` each come before or after the condition (D-33,
- * D-9, D-21: a model or a condition reads them), and a reason not known here (D-6: reasons
- * are open) may come from either side, which only its producer knows.
+ * `TZDATA_UNKNOWN` and `FUEL_EXHAUSTED` each come before or after the condition (D-33, D-9,
+ * D-21: a model or a sandboxed condition reaches them), and a reason not known here (D-6:
+ * reasons are open) may come from either side, which only its producer knows.
  */
 function firedOf(entry: ProofPending): boolean | undefined {
   if (entry.reason === 'PENDING_DOMINANT') return true;
@@ -108,7 +114,9 @@ type Hold = 'root' | 'none' | 'rootless';
  * (`pending carrier without a pending carrier: id@version[ at subject]` otherwise). A carrier
  * itself pending `PENDING_CARRIER` holds nothing by itself: following the carriers named, the
  * chain ends at a carrier pending for another reason, never on itself or in a cycle
- * (`pending carrier without a root`). Each entry is followed once: linear in `pending`.
+ * (`pending carrier without a root`). A carrier never runs after its target, nor out of its
+ * scope (D-21: one subject contains the other, or one has none): `pending carrier after its
+ * target`, `pending carrier out of scope`. Each entry is followed once: linear in `pending`.
  */
 export function pendingCarrierProblems(
   p: UnsignedProof,
@@ -154,5 +162,21 @@ export function pendingCarrierProblems(
     const at = citeName(instanceKey(entry));
     if (hold === 'none') problems.push(`pending carrier without a pending carrier: ${at}`);
     else if (hold === 'rootless') problems.push(`pending carrier without a root: ${at}`);
+    const carrier =
+      entry.carrier === undefined ? undefined : waiting.get(instanceKey(entry.carrier));
+    if (carrier === undefined) continue;
+    if (carrier.stratum > entry.stratum) problems.push(`pending carrier after its target: ${at}`);
+    if (!inScope(carrier.subject, entry.subject)) {
+      problems.push(`pending carrier out of scope: ${at}`);
+    }
   }
+}
+
+/**
+ * True when a carrier at `carrier` may reach a target at `target` (D-21): one has no subject,
+ * or one contains the other.
+ */
+export function inScope(carrier: Subject | undefined, target: Subject | undefined): boolean {
+  if (carrier === undefined || target === undefined) return true;
+  return subjectContains(carrier, target) || subjectContains(target, carrier);
 }
