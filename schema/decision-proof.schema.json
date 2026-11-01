@@ -205,10 +205,20 @@
       "required": ["type", "combine", "value", "contributors"],
       "properties": {
         "type": {
-          "enum": ["number", "boolean", "string", "enum", "list", "object", "decimal"]
+          "enum": [
+            "number",
+            "boolean",
+            "string",
+            "enum",
+            "list",
+            "object",
+            "decimal",
+            "date",
+            "dateTime"
+          ]
         },
         "combine": {
-          "enum": ["sum", "max", "min", "highestPriority", "union", "all", "any"]
+          "enum": ["sum", "max", "min", "highestPriority", "union", "all", "any", "count"]
         },
         "value": {
           "description": "Any JSON value, null included."
@@ -229,7 +239,7 @@
         "required": ["type"],
         "properties": {
           "type": {
-            "enum": ["boolean", "string", "enum", "list", "object"]
+            "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
           }
         }
       },
@@ -318,14 +328,32 @@
       "additionalProperties": false
     },
     "rounding": {
-      "description": "A declared rounding: scale decimal places (0 to 20) in mode; at is output (the default) or contribution.",
+      "description": "A declared rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a multiple of that step: a canonical decimal string greater than 0 with at most 20 decimal places, such as 0.05 or 10); at is output (the default) or contribution.",
       "type": "object",
-      "required": ["scale", "mode"],
+      "required": ["mode"],
+      "oneOf": [
+        {
+          "required": ["scale"],
+          "properties": {
+            "scale": {}
+          }
+        },
+        {
+          "required": ["increment"],
+          "properties": {
+            "increment": {}
+          }
+        }
+      ],
       "properties": {
         "scale": {
           "type": "integer",
           "minimum": 0,
           "maximum": 20
+        },
+        "increment": {
+          "type": "string",
+          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]*(\\.[0-9]{0,19}[1-9])?)$"
         },
         "mode": {
           "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]

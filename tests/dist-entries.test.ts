@@ -34,6 +34,13 @@ type Entry = {
     options?: { trustedKeys?: Record<string, string> },
   ) => { status: string; issues: string[] };
   OUTPUTS_VARIABLE: string;
+  OUTPUT_STATUSES: readonly string[];
+  joinStatus: (a: string, b: string) => string;
+  compareOutputValues: (a: unknown, b: unknown, d: object) => number;
+  emptyOutput: (d: object) => { value?: unknown; status: string };
+  sameDeclaration: (a: object, b: object) => boolean;
+  normalizeOutputDeclaration: (d: object) => object;
+  contributionMatchesDeclaration: (v: unknown, d: object) => boolean;
   isCanonicalDecimal: (text: string) => boolean;
   PROOF_FORMATS: readonly string[];
   ENGINE_VARIABLES: readonly string[];
@@ -225,6 +232,44 @@ describe('built entries: one SpecError identity', () => {
       expect(entry.toCanonicalDecimal('0012.50')).toBe('12.5');
       expect(() => entry.toCanonicalDecimal('1e3')).toThrow(
         expect.objectContaining({ code: 'INVALID_DECIMAL' }),
+      );
+    }
+  });
+
+  it('every built entry exports the output statuses and declaration functions', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const risk = { type: 'enum', combine: 'max', values: ['limited', 'high'] };
+    for (const entry of entries) {
+      expect(entry.OUTPUT_STATUSES).toEqual([
+        'determined',
+        'provisional',
+        'conflict',
+        'undetermined',
+      ]);
+      expect(entry.joinStatus('provisional', 'conflict')).toBe('conflict');
+      expect(entry.compareOutputValues('high', 'limited', risk)).toBe(1);
+      expect(entry.emptyOutput({ type: 'boolean', combine: 'all' })).toEqual({
+        status: 'undetermined',
+      });
+      const all = { type: 'boolean', combine: 'all' };
+      expect(entry.sameDeclaration({ ...all, empty: false }, all)).toBe(true);
+      expect(
+        entry.normalizeOutputDeclaration({
+          type: 'decimal',
+          combine: 'sum',
+          rounding: { increment: '0.01', mode: 'up' },
+        }),
+      ).toEqual({ type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'up' } });
+      expect(entry.contributionMatchesDeclaration(true, { type: 'number', combine: 'count' })).toBe(
+        true,
+      );
+      expect(() => entry.joinStatus('final', 'determined')).toThrow(
+        expect.objectContaining({ code: 'INVALID_PROOF' }),
       );
     }
   });

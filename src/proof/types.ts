@@ -1,5 +1,6 @@
 import type { JsonValue } from '../canonical.js';
-import type { CombineStrategy, OutputRounding, OutputType } from '../decision/output.js';
+import type { CombineStrategy, OutputType } from '../decision/output.js';
+import type { OutputRounding } from '../decision/rounding.js';
 import type { RuleException } from '../rule/exceptions.js';
 
 /** The format a decision proof declares in `format`. */

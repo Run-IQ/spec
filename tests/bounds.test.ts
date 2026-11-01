@@ -14,6 +14,11 @@ import {
   normalizeRuleDefinition,
   sealProof,
   UNSALTED_SEED,
+  compareOutputValues,
+  contributionMatchesDeclaration,
+  emptyOutput,
+  normalizeOutputDeclaration,
+  sameDeclaration,
   validateOutputDeclaration,
   validateProof,
   validateProofInput,
@@ -36,6 +41,7 @@ import {
   builtFile,
   fixedCalendar,
   HUMAN_ASSERTION,
+  loose,
   proofInput,
   specError,
 } from './helpers.js';
@@ -103,6 +109,21 @@ function asHashes(list: unknown): Uint8Array[] {
   const short = Array.isArray(list) && list.length < 10;
   return (short ? list.map(() => new Uint8Array(32)) : list) as Uint8Array[];
 }
+
+/** An enum output declaration whose `values` is `list`: a hostile list where a valid one goes. */
+function enumOf(list: unknown): OutputDeclaration {
+  return loose<OutputDeclaration>({ type: 'enum', combine: 'max', values: list });
+}
+
+/** Every function that takes an output declaration and throws for one it refuses. */
+const DECLARATION_READERS: [string, (declaration: OutputDeclaration) => unknown][] = [
+  ['valueMatchesOutputType', (d) => valueMatchesOutputType('a', d)],
+  ['contributionMatchesDeclaration', (d) => contributionMatchesDeclaration('a', d)],
+  ['emptyOutput', emptyOutput],
+  ['normalizeOutputDeclaration', normalizeOutputDeclaration],
+  ['sameDeclaration', (d) => sameDeclaration(d, d)],
+  ['compareOutputValues', (d) => compareOutputValues('a', 'a', d)],
+];
 
 /**
  * Each walk of a caller list, and the path its named problem cites. The casts pass a hostile
@@ -247,18 +268,11 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
         ?.message,
     'output.values',
   ],
-  [
-    'valueMatchesOutputType values',
-    (list) =>
-      specError(() =>
-        valueMatchesOutputType('a', {
-          type: 'enum',
-          combine: 'highestPriority',
-          values: list,
-        } as OutputDeclaration),
-      ).message,
-    'output declaration.values',
-  ],
+  ...DECLARATION_READERS.map(([name, call]): [string, (list: unknown) => unknown, string] => [
+    `${name} values`,
+    (list) => specError(() => call(enumOf(list))).message,
+    'invalid output declaration: output.values',
+  ]),
 ];
 
 describe(`at most ${MAX_JSON_VALUES} values per call, a list's length counted first`, () => {

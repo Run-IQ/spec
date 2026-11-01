@@ -15,18 +15,38 @@ import type {
   RoundingMode,
 } from '../src/index.js';
 
-const TYPES: OutputType[] = ['number', 'boolean', 'string', 'enum', 'list', 'object', 'decimal'];
-const COMBINES: CombineStrategy[] = ['sum', 'max', 'min', 'highestPriority', 'union', 'all', 'any'];
+const TYPES: OutputType[] = [
+  'number',
+  'boolean',
+  'string',
+  'enum',
+  'list',
+  'object',
+  'decimal',
+  'date',
+  'dateTime',
+];
+const COMBINES: CombineStrategy[] = [
+  'sum',
+  'max',
+  'min',
+  'highestPriority',
+  'union',
+  'all',
+  'any',
+  'count',
+];
 
 /** The admitted combinations, written out in full: the reference the validator must match. */
 const ADMITTED: Record<CombineStrategy, OutputType[]> = {
   sum: ['number', 'decimal'],
-  max: ['number', 'decimal'],
-  min: ['number', 'decimal'],
+  max: ['number', 'decimal', 'enum', 'date', 'dateTime'],
+  min: ['number', 'decimal', 'enum', 'date', 'dateTime'],
+  count: ['number'],
+  union: ['list'],
   all: ['boolean'],
   any: ['boolean'],
-  union: ['list'],
-  highestPriority: ['number', 'boolean', 'string', 'enum', 'list', 'object', 'decimal'],
+  highestPriority: TYPES,
 };
 
 /** A declaration of `type`, with the `values` an enum needs. */
@@ -59,6 +79,33 @@ describe('defaults', () => {
 });
 
 describe('validateOutputDeclaration: combinations', () => {
+  it('walks the 9 types by the 8 strategies: 72 cases, 25 admitted', () => {
+    const admitted = COMBINES.flatMap((combine) =>
+      TYPES.filter(
+        (type) => validateOutputDeclaration(declaration(type, combine)).length === 0,
+      ).map((type) => `${combine}/${type}`),
+    );
+    expect(admitted).toEqual([
+      'sum/number',
+      'sum/decimal',
+      'max/number',
+      'max/enum',
+      'max/decimal',
+      'max/date',
+      'max/dateTime',
+      'min/number',
+      'min/enum',
+      'min/decimal',
+      'min/date',
+      'min/dateTime',
+      ...TYPES.map((type) => `highestPriority/${type}`),
+      'union/list',
+      'all/boolean',
+      'any/boolean',
+      'count/number',
+    ]);
+  });
+
   const cases = COMBINES.flatMap((combine) =>
     TYPES.map((type) => [combine, type, ADMITTED[combine].includes(type)] as const),
   );
@@ -104,7 +151,9 @@ describe('validateOutputDeclaration: shape', () => {
       expect(validateOutputDeclaration(value)).toEqual([
         {
           path: 'output',
-          message: 'output must be an object { type, combine, values?, rounding? }',
+          message:
+            'output must be an object ' +
+            '{ type, combine, values?, rounding?, unit?, empty?, per?, dimension?, sign? }',
         },
       ]);
     }
@@ -114,11 +163,14 @@ describe('validateOutputDeclaration: shape', () => {
     expect(validateOutputDeclaration({ type: 'money', combine: 'avg' })).toEqual([
       {
         path: 'output.type',
-        message: 'output.type must be one of number, boolean, string, enum, list, object, decimal',
+        message:
+          'output.type must be one of ' +
+          'number, boolean, string, enum, list, object, decimal, date, dateTime',
       },
       {
         path: 'output.combine',
-        message: 'output.combine must be one of sum, max, min, highestPriority, union, all, any',
+        message:
+          'output.combine must be one of sum, max, min, highestPriority, union, all, any, count',
       },
     ]);
   });
@@ -131,8 +183,8 @@ describe('validateOutputDeclaration: shape', () => {
   });
 
   it('refuses an unknown key', () => {
-    expect(validateOutputDeclaration({ type: 'number', combine: 'sum', unit: 'XOF' })).toEqual([
-      { path: 'output.unit', message: 'output has an unknown key "unit"' },
+    expect(validateOutputDeclaration({ type: 'number', combine: 'sum', currency: 'XOF' })).toEqual([
+      { path: 'output.currency', message: 'output has an unknown key "currency"' },
     ]);
   });
 });
@@ -270,16 +322,21 @@ describe('validateOutputDeclaration: decimal', () => {
     expect(validateOutputDeclaration({ type: 'decimal', combine })).toEqual([]);
   });
 
-  it.each(['union', 'all', 'any'] as const)('refuses combine %s, naming the path', (combine) => {
-    expect(validateOutputDeclaration({ type: 'decimal', combine }, 'models.TAX.output')).toEqual([
-      {
-        path: 'models.TAX.output.combine',
-        message:
-          `models.TAX.output.combine "${combine}" cannot combine a decimal output: ` +
-          `it applies to ${combine === 'union' ? 'list' : 'boolean'}`,
-      },
-    ]);
-  });
+  const APPLIES_TO = { union: 'list', all: 'boolean', any: 'boolean', count: 'number' } as const;
+
+  it.each(['union', 'all', 'any', 'count'] as const)(
+    'refuses combine %s, naming the path',
+    (combine) => {
+      expect(validateOutputDeclaration({ type: 'decimal', combine }, 'models.TAX.output')).toEqual([
+        {
+          path: 'models.TAX.output.combine',
+          message:
+            `models.TAX.output.combine "${combine}" cannot combine a decimal output: ` +
+            `it applies to ${APPLIES_TO[combine]}`,
+        },
+      ]);
+    },
+  );
 });
 
 describe('validateOutputDeclaration: rounding', () => {
@@ -303,7 +360,7 @@ describe('validateOutputDeclaration: rounding', () => {
     expect(validateOutputDeclaration({ type, combine: 'sum', rounding })).toEqual([]);
   });
 
-  it.each(['boolean', 'string', 'enum', 'list', 'object'] as const)(
+  it.each(['boolean', 'string', 'enum', 'list', 'object', 'date', 'dateTime'] as const)(
     'is refused on a %s output',
     (type) => {
       expect(validateOutputDeclaration(withRounding({ scale: 2, mode: 'halfUp' }, type))).toEqual([
@@ -355,17 +412,17 @@ describe('validateOutputDeclaration: rounding', () => {
     ]);
   });
 
-  it('requires scale and mode', () => {
+  it('requires scale or increment, and mode', () => {
     expect(validateOutputDeclaration(withRounding({}))).toEqual([
-      { path: 'output.rounding.scale', message: 'output.rounding.scale is required' },
+      { path: 'output.rounding', message: 'output.rounding needs scale or increment' },
       { path: 'output.rounding.mode', message: 'output.rounding.mode is required' },
     ]);
   });
 
   it('takes a member whose value is undefined as absent, known or not', () => {
-    expect(validateOutputDeclaration({ type: 'number', combine: 'sum', unit: undefined })).toEqual(
-      [],
-    );
+    expect(
+      validateOutputDeclaration({ type: 'number', combine: 'sum', currency: undefined }),
+    ).toEqual([]);
     expect(
       validateOutputDeclaration(withRounding({ scale: 2, mode: 'up', precision: undefined })),
     ).toEqual([]);
@@ -387,7 +444,7 @@ describe('validateOutputDeclaration: rounding', () => {
       expect(validateOutputDeclaration(withRounding(rounding))).toEqual([
         {
           path: 'output.rounding',
-          message: 'output.rounding must be an object { scale, mode, at? }',
+          message: 'output.rounding must be an object { scale or increment, mode, at? }',
         },
       ]);
     }

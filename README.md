@@ -91,10 +91,25 @@ A rule contributes to one named output. Its calculation model declares the outpu
 import { validateOutputDeclaration } from '@run-iq/spec';
 
 validateOutputDeclaration({ type: 'list', combine: 'sum' });
-// [ { path: 'output.combine', message: 'output.combine "sum" cannot combine a list output: it applies to number' } ]
+// [ { path: 'output.combine', message: 'output.combine "sum" cannot combine a list output: it applies to number, decimal' } ]
 ```
 
-The types are `number`, `boolean`, `string`, `enum` (with its `values`), `list`, `object` and `decimal`. `sum`, `max` and `min` combine numbers and decimals, `all` and `any` booleans, `union` lists, and `highestPriority` any type. An undeclared output is a number, summed (`DEFAULT_OUTPUT_DECLARATION`).
+The types are `number`, `boolean`, `string`, `enum` (with its `values`, ranked in their order), `list`, `object`, `decimal`, `date` (a civil date, `2028-02-29`) and `dateTime` (a canonical instant, `2026-01-01T00:00:00.000Z`). `sum` combines numbers and decimals; `max` and `min` numbers, decimals, enums, dates and instants; `count` counts the contributions that are `true` into a number; `all` and `any` combine booleans, `union` lists, and `highestPriority` any type. An undeclared output is a number, summed (`DEFAULT_OUTPUT_DECLARATION`).
+
+A declaration may also carry `unit` (a `number` or `decimal` output: `"XOF"`), `empty: true` (an `all` that no rule reached is then `true` instead of undetermined), `sign` (`nonNegative` or `nonPositive`, a `sum` only), `per` (one value per element of a collection, a pointer such as `/foyers/*/personnes`) or `dimension` (a `string` or `enum` output that sets a dimension for the rules after it); `per` and `dimension` are exclusive. A declaration that cannot be satisfied is refused, never accepted silently.
+
+```js
+import { compareOutputValues, emptyOutput, normalizeOutputDeclaration, sameDeclaration } from '@run-iq/spec';
+
+const risk = { type: 'enum', combine: 'max', values: ['minimal', 'limited', 'high', 'prohibited'] };
+compareOutputValues('high', 'limited', risk);     // 1
+emptyOutput({ type: 'boolean', combine: 'all' }); // { status: 'undetermined' }
+normalizeOutputDeclaration({ type: 'decimal', combine: 'sum', rounding: { increment: '0.01', mode: 'up' } });
+// { type: 'decimal', combine: 'sum', rounding: { scale: 2, mode: 'up' } }
+sameDeclaration({ type: 'number', combine: 'sum', unit: 'XOF' }, { type: 'number', combine: 'sum', unit: 'EUR' }); // false
+```
+
+`normalizeOutputDeclaration` gives the one written form of a declaration (`empty: false` and `at: 'output'` are dropped; an increment that is a power of ten from 1 to 10^-20 becomes a `scale`); `sameDeclaration` compares by it. `contributionMatchesDeclaration` checks one rule's contribution (a boolean for a `count`), `valueMatchesOutputType` an output's value. `emptyOutput` is the output no contribution reached: `0`, `"0"`, `[]`, `false`, no value for `max`, `min` and `highestPriority`, and an undetermined `all` unless it declares `empty: true`. Each throws `INVALID_RULE` for a declaration `validateOutputDeclaration` refuses. An output's status is one of `OUTPUT_STATUSES` (`determined`, `provisional`, `conflict`, `undetermined`, from the weakest to the strongest); `joinStatus` gives the stronger of two.
 
 A `number` is a binary floating-point value. For an amount, declare `decimal`: its value is an exact decimal written as a canonical string, with no exponent, no trailing zero and no `-0` (`"1234.5"`). The conversion is textual, for any number of digits:
 
@@ -107,7 +122,7 @@ toCanonicalDecimal('1e3');     // throws SpecError INVALID_DECIMAL: no exponent
 isCanonicalDecimal('12.50');   // false
 ```
 
-A `number` or `decimal` output can declare `rounding: { scale, mode, at? }`: `scale` decimal places (0 to 20), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
+A `number` or `decimal` output (not a `count`) can declare `rounding: { scale or increment, mode, at? }`: `scale` decimal places (0 to 20) or `increment` a step (a canonical decimal string greater than 0 with at most 20 decimal places: `"0.05"`, `"10"`), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
 
 A rule reads the outputs computed before it through the reserved variable `$outputs` (`OUTPUTS_VARIABLE`): `$outputs.x` is output `x`. Output names starting with `$` are reserved: a rule `output`, a `shortCircuit` output or a selector `outputs` entry that starts with `$` is refused (`INVALID_RULE`).
 

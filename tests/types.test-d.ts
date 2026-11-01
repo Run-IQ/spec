@@ -1,5 +1,13 @@
 import { describe, expectTypeOf, it } from 'vitest';
 import {
+  compareOutputValues,
+  contributionMatchesDeclaration,
+  emptyOutput,
+  joinStatus,
+  normalizeOutputDeclaration,
+  OUTPUT_STATUSES,
+  sameDeclaration,
+  valueMatchesOutputType,
   DISCLOSURE_FORMAT,
   discloseFacts,
   verifyFactDisclosure,
@@ -55,8 +63,10 @@ import type {
   VersionOverlap,
   VersionOverlapReport,
   JsonValue,
+  CombineStrategy,
   OutputDeclaration,
   OutputRounding,
+  OutputStatus,
   OutputType,
   ProofException,
   ProofOutput,
@@ -221,7 +231,8 @@ describe('decimal outputs, rounding and strata (9A)', () => {
       'halfUp' | 'halfDown' | 'halfEven' | 'up' | 'down' | 'ceiling' | 'floor'
     >();
     expectTypeOf<OutputRounding>().toEqualTypeOf<{
-      scale: number;
+      scale?: number;
+      increment?: string;
       mode: RoundingMode;
       at?: 'output' | 'contribution';
     }>();
@@ -399,6 +410,54 @@ describe('fact disclosure types (Task 9H2)', () => {
     >();
     expectTypeOf(verifyFactDisclosure).toEqualTypeOf<
       (d: unknown, inputDigest: string) => FactDisclosureVerification
+    >();
+  });
+});
+
+describe('complete output declarations (9I)', () => {
+  it('adds dates, count, unit, empty, per, dimension and sign', () => {
+    expectTypeOf<OutputType>().toEqualTypeOf<
+      'number' | 'boolean' | 'string' | 'enum' | 'list' | 'object' | 'decimal' | 'date' | 'dateTime'
+    >();
+    expectTypeOf<CombineStrategy>().toEqualTypeOf<
+      'sum' | 'max' | 'min' | 'highestPriority' | 'union' | 'all' | 'any' | 'count'
+    >();
+    expectTypeOf<OutputDeclaration>().toEqualTypeOf<{
+      type: OutputType;
+      combine: CombineStrategy;
+      values?: string[];
+      rounding?: OutputRounding;
+      unit?: string;
+      empty?: boolean;
+      per?: string;
+      dimension?: string;
+      sign?: 'nonNegative' | 'nonPositive';
+    }>();
+  });
+
+  it('types the statuses and the functions over declarations', () => {
+    expectTypeOf<OutputStatus>().toEqualTypeOf<
+      'determined' | 'provisional' | 'conflict' | 'undetermined'
+    >();
+    expectTypeOf(OUTPUT_STATUSES).toEqualTypeOf<readonly OutputStatus[]>();
+    expectTypeOf(joinStatus).toEqualTypeOf<(a: OutputStatus, b: OutputStatus) => OutputStatus>();
+    expectTypeOf(contributionMatchesDeclaration).toEqualTypeOf<
+      (v: JsonValue, d: OutputDeclaration) => boolean
+    >();
+    expectTypeOf(valueMatchesOutputType).toEqualTypeOf<
+      (v: JsonValue, d: OutputDeclaration) => boolean
+    >();
+    expectTypeOf(emptyOutput).toEqualTypeOf<
+      (d: OutputDeclaration) => { value?: JsonValue; status: OutputStatus }
+    >();
+    expectTypeOf(compareOutputValues).toEqualTypeOf<
+      (a: JsonValue, b: JsonValue, d: OutputDeclaration) => -1 | 0 | 1
+    >();
+    expectTypeOf(sameDeclaration).toEqualTypeOf<
+      (a: OutputDeclaration, b: OutputDeclaration) => boolean
+    >();
+    expectTypeOf(normalizeOutputDeclaration).toEqualTypeOf<
+      (d: OutputDeclaration) => OutputDeclaration
     >();
   });
 });

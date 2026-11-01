@@ -29,7 +29,7 @@ import type {
 import * as canonicalEntry from '../src/canonical-entry.js';
 import { isOwnError } from '../src/errors.js';
 import * as api from '../src/index.js';
-import { BASE_RULE, fixedCalendar, proofInput, specError } from './helpers.js';
+import { BASE_RULE, fixedCalendar, loose, proofInput, specError } from './helpers.js';
 
 /** 1.2 million characters a message must never carry raw: newlines and quotes. */
 const HUGE = 'q\n"'.repeat(400_000);
@@ -347,39 +347,57 @@ describe('every read of caller input at the API boundary is guarded', () => {
   });
 
   it('valueMatchesOutputType: a declaration that cannot be read or is not one', () => {
-    const declaration = (value: unknown): OutputDeclaration => value as OutputDeclaration;
+    const declaration = (value: unknown): OutputDeclaration => loose<OutputDeclaration>(value);
+    const refusal = (value: unknown): { message: string; path: string | undefined } => {
+      const error = specError(() => valueMatchesOutputType('a', declaration(value)));
+      expect(error.code).toBe('INVALID_RULE');
+      return { message: error.message, path: error.path };
+    };
     const getter = {
-      combine: 'first',
+      combine: 'max',
       get type(): never {
         throw forged();
       },
     };
-    expect(specError(() => valueMatchesOutputType(1, declaration(getter)))).toMatchObject({
-      code: 'INVALID_RULE',
-      message: `output declaration could not be read: ${REASON}`,
-    });
+    const unreadable = {
+      message: `invalid output declaration: output could not be read: ${REASON}`,
+      path: 'output',
+    };
+    expect(refusal(getter)).toEqual(unreadable);
     const values = new Proxy([], {
       get(): never {
         throw forged();
       },
     });
-    expect(
-      specError(() => valueMatchesOutputType('a', declaration({ type: 'enum', values }))).message,
-    ).toBe(`output declaration could not be read: ${REASON}`);
+    expect(refusal({ type: 'enum', combine: 'max', values })).toEqual(unreadable);
     for (const value of [null, undefined, 'number']) {
-      expect(specError(() => valueMatchesOutputType(1, declaration(value))).message).toBe(
-        'an output declaration must be an object { type, … }',
-      );
+      expect(refusal(value)).toEqual({
+        message:
+          'invalid output declaration: output must be an object ' +
+          '{ type, combine, values?, rounding?, unit?, empty?, per?, dimension?, sign? }',
+        path: 'output',
+      });
     }
-    expect(specError(() => valueMatchesOutputType(1, declaration({ type: 'x' }))).message).toBe(
-      'output type must be one of number, boolean, string, enum, list, object, decimal',
-    );
+    expect(refusal(revokedProxy())).toEqual({
+      message:
+        'invalid output declaration: output could not be read: ' +
+        "Cannot perform 'IsArray' on a proxy that has been revoked",
+      path: 'output',
+    });
+    expect(refusal({ type: 'x', combine: 'max' })).toEqual({
+      message:
+        'invalid output declaration: output.type must be one of ' +
+        'number, boolean, string, enum, list, object, decimal, date, dateTime',
+      path: 'output.type',
+    });
+    expect(refusal({ type: 'enum', combine: 'max', values: 'a' })).toEqual({
+      message: 'invalid output declaration: output.values must be an array of non-empty strings',
+      path: 'output.values',
+    });
+    expect(refusal({ type: 'enum', values: ['a'] }).path).toBe('output.combine');
     expect(
-      specError(() => valueMatchesOutputType('a', declaration({ type: 'enum', values: 'a' })))
-        .message,
-    ).toBe('the values of an enum output must be an array');
-    expect(valueMatchesOutputType('a', declaration({ type: 'enum', values: ['a'] }))).toBe(true);
-    expect(valueMatchesOutputType('a', declaration({ type: 'enum' }))).toBe(false);
+      valueMatchesOutputType('a', declaration({ type: 'enum', combine: 'max', values: ['a'] })),
+    ).toBe(true);
   });
 });
 
@@ -477,7 +495,7 @@ describe('every exported function: hostile arguments give an own SpecError or a 
   }
 
   it('covers every exported function', () => {
-    expect(functions.size).toBe(64);
+    expect(functions.size).toBe(70);
   });
 
   it.each([...functions.keys()])('%s', (name) => {

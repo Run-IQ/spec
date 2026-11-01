@@ -1,11 +1,6 @@
 import { toJsonValue } from '../canonical.js';
-import {
-  checkRounding,
-  COMBINE_STRATEGIES,
-  isRoundable,
-  OUTPUT_TYPES,
-  roundingNotApplicable,
-} from '../decision/output.js';
+import { COMBINE_STRATEGIES, OUTPUT_TYPES } from '../decision/output.js';
+import { checkRounding, isRoundable, roundingNotApplicable } from '../decision/rounding.js';
 import {
   citeName,
   describeError,
@@ -311,7 +306,7 @@ const output: Check = (value, path, add) => {
   const type = read.members.get('type');
   if (OUTPUT_TYPES.some((t) => t === type) && !isRoundable(type)) {
     roundingNotApplicable(`${path}.rounding`, add);
-  } else read.copy.rounding = checkRounding(rounding, `${path}.rounding`, add);
+  } else read.copy.rounding = checkRounding(rounding, `${path}.rounding`, add)?.copy;
   return read.copy;
 };
 

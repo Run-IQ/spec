@@ -62,3 +62,66 @@ function isArray(value: unknown): boolean {
     return false;
   }
 }
+
+/** Internal: the largest rounding scale, and the finest increment's number of decimal places. */
+export const MAX_ROUNDING_SCALE = 20;
+
+/**
+ * Internal: what is wrong with `value` as a rounding increment, the text that follows its name
+ * in a message, or `undefined` for a valid one. An increment is a decimal string greater than 0,
+ * in canonical form (`isCanonicalDecimal`), with at most `MAX_ROUNDING_SCALE` decimal places:
+ * `"0.05"`, `"10"`. Checked in this order: a decimal string at all, greater than 0, canonical,
+ * not finer than 10^-20.
+ */
+export function incrementProblem(value: unknown): string | undefined {
+  if (typeof value !== 'string' || !DECIMAL.test(value)) {
+    return 'must be a decimal string ("0.05", "10")';
+  }
+  const canonical = toCanonicalDecimal(value);
+  if (canonical === '0' || canonical.startsWith('-')) return 'must be greater than 0';
+  if (canonical !== value) return `must be written ${quoteText(canonical)}`;
+  if (decimalPlaces(canonical) > MAX_ROUNDING_SCALE) {
+    return `must have at most ${MAX_ROUNDING_SCALE} decimal places`;
+  }
+  return undefined;
+}
+
+/**
+ * Internal: the scale an increment means when it is a power of ten from `1` (scale 0) to
+ * `0.00000000000000000001` (scale 20): rounding to 10^-n is rounding to n places. `undefined`
+ * for any other increment (`"0.05"`, `"10"`). `increment` is a valid increment.
+ */
+export function scaleOfIncrement(increment: string): number | undefined {
+  if (increment === '1') return 0;
+  return /^0\.0*1$/.test(increment) ? decimalPlaces(increment) : undefined;
+}
+
+/**
+ * Internal: -1, 0 or 1 as the canonical decimal `a` is less than, equal to or greater than the
+ * canonical decimal `b`, exactly, for any number of digits (`"9"` before `"10"`).
+ */
+export function compareCanonicalDecimals(a: string, b: string): -1 | 0 | 1 {
+  const negative = a.startsWith('-');
+  if (negative !== b.startsWith('-')) return negative ? -1 : 1;
+  const order = compareMagnitudes(negative ? a.slice(1) : a, negative ? b.slice(1) : b);
+  if (!negative || order === 0) return order;
+  return order < 0 ? 1 : -1;
+}
+
+/** -1, 0 or 1 comparing two canonical decimals without sign. */
+function compareMagnitudes(a: string, b: string): -1 | 0 | 1 {
+  const [aInteger = '', aFraction = ''] = a.split('.');
+  const [bInteger = '', bFraction = ''] = b.split('.');
+  // Without leading zeros, the longer integer part is the greater.
+  if (aInteger.length !== bInteger.length) return aInteger.length < bInteger.length ? -1 : 1;
+  if (aInteger !== bInteger) return aInteger < bInteger ? -1 : 1;
+  // Fractions compare digit by digit; a missing digit is a zero, and no fraction ends in one.
+  if (aFraction === bFraction) return 0;
+  return aFraction < bFraction ? -1 : 1;
+}
+
+/** The number of digits after the point of a decimal written in text. */
+function decimalPlaces(text: string): number {
+  const point = text.indexOf('.');
+  return point < 0 ? 0 : text.length - point - 1;
+}

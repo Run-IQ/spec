@@ -1,59 +1,76 @@
+import { canonicalize } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
-import { isReservedName } from '../reserved.js';
-import { IssueList, pathArgumentIssue } from '../issues.js';
+import { citeName, newSpecError } from '../errors.js';
+import { pathArgumentIssue } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { isPlainObject, readList, spendValues, tooLargeMessage } from '../values.js';
+import { isReservedName } from '../reserved.js';
+import { isCivilDate, isInstant } from '../time/civil.js';
+import { ownCopy, withValueBudget } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
+import { readDeclaration } from './read-declaration.js';
+import type { OutputRounding } from './rounding.js';
+import type { OutputStatus } from './status.js';
 
 /**
- * What an output holds. An `enum` output holds one of the strings its declaration lists. A
- * `decimal` output holds an exact decimal as a canonical string (`isCanonicalDecimal`:
- * `"1234.5"`), never a JavaScript number; a `number` output holds a binary floating-point
- * number, so an amount is declared `decimal`.
+ * What an output holds. An `enum` output holds one of the strings its declaration lists, ranked
+ * in their order. A `decimal` output holds an exact decimal as a canonical string
+ * (`isCanonicalDecimal`: `"1234.5"`), never a JavaScript number; a `number` output holds a
+ * binary floating-point number, so an amount is declared `decimal`. A `date` output holds a civil
+ * date (`isCivilDate`: `"2028-02-29"`), a `dateTime` output an instant in its canonical form
+ * (`isInstant`: `"2026-01-01T00:00:00.000Z"`).
  */
-export type OutputType = 'number' | 'boolean' | 'string' | 'enum' | 'list' | 'object' | 'decimal';
+export type OutputType =
+  'number' | 'boolean' | 'string' | 'enum' | 'list' | 'object' | 'decimal' | 'date' | 'dateTime';
 
 /**
  * How the contributions of several rules to one output become its value:
- * - `sum`, `max`, `min`: numbers and decimals;
+ * - `sum`: numbers and decimals;
+ * - `max`, `min`: numbers, decimals, enums (by rank), dates and instants (in time);
+ * - `count`: a number, the count of the contributions that are `true` (each contribution is a
+ *   boolean, `contributionMatchesDeclaration`);
  * - `all`, `any`: booleans (logical AND, OR);
  * - `union`: lists;
  * - `highestPriority`: any type; the contribution of the rule with the highest priority.
  */
-export type CombineStrategy = 'sum' | 'max' | 'min' | 'highestPriority' | 'union' | 'all' | 'any';
+export type CombineStrategy =
+  'sum' | 'max' | 'min' | 'highestPriority' | 'union' | 'all' | 'any' | 'count';
 
 /**
- * How a value is rounded to `scale` decimal places:
- * - `halfUp`, `halfDown`, `halfEven`: to the nearest, a tie going away from zero, toward zero,
- *   or to the even neighbour;
- * - `up`, `down`: away from zero, toward zero;
- * - `ceiling`, `floor`: toward positive infinity, toward negative infinity.
- */
-export type RoundingMode = 'halfUp' | 'halfDown' | 'halfEven' | 'up' | 'down' | 'ceiling' | 'floor';
-
-/**
- * The rounding an output declares: `scale` decimal places (an integer from 0 to 20) in `mode`.
- * `at` says what is rounded: the combined value (`output`, the default) or each contribution
- * before they combine (`contribution`, as some schedules round line by line).
- */
-export interface OutputRounding {
-  scale: number;
-  mode: RoundingMode;
-  at?: 'output' | 'contribution';
-}
-
-/**
- * The type of an output and how its contributions combine; `values` lists an enum's strings,
- * `rounding` rounds a number or decimal output.
+ * The type of an output and how its contributions combine. Each optional field has one written
+ * form: `normalizeOutputDeclaration` gives it, `sameDeclaration` compares by it.
  */
 export interface OutputDeclaration {
   type: OutputType;
   combine: CombineStrategy;
   /** Required for an `enum` output, absent otherwise: distinct non-empty strings, at least one. */
   values?: string[];
-  /** Allowed on a `number` or `decimal` output only. */
+  /** Allowed on a `number` or `decimal` output only, never on a `count`. */
   rounding?: OutputRounding;
+  /**
+   * The unit of a `number` or `decimal` output (`"XOF"`, `"m²"`): a non-empty string without
+   * white space around it. Two declarations that differ by unit are not the same (D-9).
+   */
+  unit?: string;
+  /**
+   * Allowed on an `all` output only: `true` makes an `all` that no rule reached `true` and
+   * determined; absent (the normal form of `false`), it is undetermined (`emptyOutput`).
+   */
+  empty?: boolean;
+  /**
+   * One value per element of a collection: a pointer into the input data with `*` segments, as
+   * `forEach.path` (the same refusals). Exclusive with `dimension`.
+   */
+  per?: string;
+  /**
+   * The dimension this `string` or `enum` output sets for the rules after it (D-19): a
+   * dimension name (not empty, not `-`, not starting with `$`). Exclusive with `per`.
+   */
+  dimension?: string;
+  /**
+   * Allowed on a `sum` only: every contribution, so the sum, is at least 0 (`nonNegative`) or at
+   * most 0 (`nonPositive`). Absent: no constraint.
+   */
+  sign?: 'nonNegative' | 'nonPositive';
 }
 
 /** The output a rule contributes to when it names none. */
@@ -78,79 +95,35 @@ export function reservedOutputNameMessage(path: string): string {
   return `${citeName(path)} must not start with "$": output names starting with "$" are reserved`;
 }
 
+export { COMBINE_STRATEGIES, OUTPUT_TYPES } from './read-declaration.js';
+
 /** The declaration of an output nobody declares: a number, summed. Frozen. */
 export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = Object.freeze({
   type: 'number',
   combine: 'sum',
 });
 
-/** Every output type, in documentation order. Internal: not exported from the package. */
-export const OUTPUT_TYPES: readonly OutputType[] = [
-  'number',
-  'boolean',
-  'string',
-  'enum',
-  'list',
-  'object',
-  'decimal',
-];
-
-/** The output types each strategy can combine. */
-const COMBINABLE: Readonly<Record<CombineStrategy, readonly OutputType[]>> = {
-  sum: ['number', 'decimal'],
-  max: ['number', 'decimal'],
-  min: ['number', 'decimal'],
-  highestPriority: OUTPUT_TYPES,
-  union: ['list'],
-  all: ['boolean'],
-  any: ['boolean'],
-};
-
-/** Every combine strategy, in documentation order. Internal: not exported from the package. */
-export const COMBINE_STRATEGIES: readonly CombineStrategy[] = [
-  'sum',
-  'max',
-  'min',
-  'highestPriority',
-  'union',
-  'all',
-  'any',
-];
-const KEYS = new Set(['type', 'combine', 'values', 'rounding']);
-
-/** Every rounding mode, in documentation order. */
-const ROUNDING_MODES: readonly RoundingMode[] = [
-  'halfUp',
-  'halfDown',
-  'halfEven',
-  'up',
-  'down',
-  'ceiling',
-  'floor',
-];
-const ROUNDING_TARGETS: readonly NonNullable<OutputRounding['at']>[] = ['output', 'contribution'];
-const ROUNDING_KEYS = new Set(['scale', 'mode', 'at']);
-/** The output types a rounding applies to. */
-const ROUNDABLE: readonly OutputType[] = ['number', 'decimal'];
-/** The largest rounding scale. */
-const MAX_SCALE = 20;
-
 /**
  * Checks an output declaration without throwing and reports every problem found, each with
  * its path under `path` (`output.combine`, `output.values[2]`):
- * - `type` and `combine` must be known, and `combine` must apply to `type` (`sum`, `max` and
- *   `min` to `number` and `decimal`; `all` and `any` to `boolean`; `union` to `list`;
- *   `highestPriority` to every type);
+ * - `type` and `combine` must be known, and `combine` must apply to `type` (`sum` to `number`
+ *   and `decimal`; `max` and `min` to `number`, `decimal`, `enum`, `date` and `dateTime`;
+ *   `count` to `number`; `all` and `any` to `boolean`; `union` to `list`; `highestPriority` to
+ *   every type);
  * - `values` is required for an `enum` (a non-empty array of distinct non-empty strings) and
  *   refused for any other type;
- * - `rounding` is allowed on a `number` or `decimal` output only, and is
- *   `{ scale, mode, at? }`: `scale` an integer from 0 to 20, `mode` a `RoundingMode`, `at`
- *   `output` or `contribution`; no other key;
- * - no other key is allowed.
+ * - `rounding` is allowed on a `number` or `decimal` output only, never on a `count`, and is
+ *   `{ scale or increment, mode, at? }` (`OutputRounding`); no other key;
+ * - `unit` (a `number` or `decimal` output), `empty` (an `all`), `sign` (a `sum`), `per` and
+ *   `dimension` (a `string` or `enum`) as `OutputDeclaration` says; `per` and `dimension` are
+ *   exclusive;
+ * - no other key is allowed. A member whose value is `undefined` is absent, known or not.
+ *
+ * A text the declaration holds (an enum value, `unit`, `per`, `dimension`) with a lone UTF-16
+ * surrogate is refused: it has no canonical form.
  *
  * A value that cannot be read (a getter or a Proxy trap that throws, at any depth) gives the
- * single issue `<path> could not be read: <reason>` at `path` (`<path> is too deeply nested`
- * when reading it overflows the call stack).
+ * single issue `<path> could not be read: <reason>` at `path`.
  *
  * Lists at most 100 problems, in the order found, then one last issue `further problems not
  * listed (limit 100)`; a path or message longer than 1024 code units is cut there, then `…`
@@ -162,171 +135,129 @@ export function validateOutputDeclaration(
 ): RuleValidationIssue[] {
   const at: unknown = path;
   if (typeof at !== 'string') return [pathArgumentIssue(at)];
-  try {
-    return declarationIssues(declaration, path);
-  } catch (error) {
-    return [{ path, message: unreadableMessage(path, error) }];
-  }
-}
-
-function declarationIssues(declaration: unknown, path: string): RuleValidationIssue[] {
-  const issues = new IssueList();
-  const add = (at: string, message: string): void => {
-    issues.add(at, message);
-  };
-
-  if (!isPlainObject(declaration)) {
-    add(path, `${citeName(path)} must be an object { type, combine, values?, rounding? }`);
-    return issues.toArray();
-  }
-  for (const key of Object.keys(declaration)) {
-    // A member whose value is `undefined` is absent, known or not.
-    if (!KEYS.has(key) && declaration[key] !== undefined) {
-      add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
-    }
-  }
-
-  const { type, combine, values, rounding } = declaration;
-  const knownType = isOneOf(type, OUTPUT_TYPES);
-  if (!knownType) {
-    add(`${path}.type`, `${citeName(path)}.type must be one of ${OUTPUT_TYPES.join(', ')}`);
-  }
-  if (!isOneOf(combine, COMBINE_STRATEGIES)) {
-    add(
-      `${path}.combine`,
-      `${citeName(path)}.combine must be one of ${COMBINE_STRATEGIES.join(', ')}`,
-    );
-  } else if (knownType && !COMBINABLE[combine].includes(type)) {
-    add(
-      `${path}.combine`,
-      `${citeName(path)}.combine ${quoteText(combine)} cannot combine a ${type} output: ` +
-        `it applies to ${COMBINABLE[combine].join(', ')}`,
-    );
-  }
-
-  if (type === 'enum') {
-    checkEnumValues(values, `${path}.values`, add);
-  } else if (knownType && values !== undefined) {
-    add(`${path}.values`, `${citeName(path)}.values applies only to an enum output`);
-  }
-
-  if (rounding !== undefined) {
-    if (knownType && !ROUNDABLE.includes(type)) roundingNotApplicable(`${path}.rounding`, add);
-    else checkRounding(rounding, `${path}.rounding`, add);
-  }
-  return issues.toArray();
+  return withValueBudget(() => readDeclaration(declaration, path).issues);
 }
 
 /**
- * Internal: checks a rounding `{ scale, mode, at? }` at `path`, for an output declaration and
- * for the outputs of a proof alike. A key whose value is `undefined` is absent, known or not;
- * any other unknown key is refused. Each member is read once, after being counted
- * (`spendValues`). Returns the copy of the known members read (`undefined` when `rounding` is
- * not an object, or has too many members to read).
+ * The normal form of an output declaration: a plain copy, its members read once, where
+ * `empty: false`, `rounding.at: 'output'` and `undefined` members are absent and an increment
+ * that is a power of ten from 1 to 10^-20 is written as its `scale` (`OutputRounding`). Every
+ * other member is kept as written (the order of enum `values` ranks them). Two declarations
+ * with the same meaning have the same normal form, so the same canonical text and checksum.
+ *
+ * Throws `SpecError` (`INVALID_RULE`, `invalid output declaration: <first problem>`, the
+ * problem's path as `path`) for a declaration `validateOutputDeclaration` refuses.
  */
-export function checkRounding(
-  rounding: unknown,
-  path: string,
-  add: (path: string, message: string) => void,
-): Record<string, unknown> | undefined {
-  if (!isPlainObject(rounding)) {
-    add(path, `${citeName(path)} must be an object { scale, mode, at? }`);
-    return undefined;
-  }
-  const keys = Object.keys(rounding);
-  if (!spendValues(keys.length)) {
-    add(path, tooLargeMessage(path));
-    return undefined;
-  }
-  const members = new Map<string, unknown>(keys.map((key) => [key, rounding[key]]));
-  for (const [key, member] of members) {
-    if (member !== undefined && !ROUNDING_KEYS.has(key)) {
-      add(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
-    }
-  }
-  const scale = members.get('scale');
-  const mode = members.get('mode');
-  const at = members.get('at');
-  if (scale === undefined) add(`${path}.scale`, `${citeName(path)}.scale is required`);
-  else if (!isScale(scale)) {
-    add(`${path}.scale`, `${citeName(path)}.scale must be an integer from 0 to ${MAX_SCALE}`);
-  }
-  if (mode === undefined) add(`${path}.mode`, `${citeName(path)}.mode is required`);
-  else if (!isOneOf(mode, ROUNDING_MODES)) {
-    add(`${path}.mode`, `${citeName(path)}.mode must be one of ${ROUNDING_MODES.join(', ')}`);
-  }
-  if (at !== undefined && !isOneOf(at, ROUNDING_TARGETS)) {
-    add(`${path}.at`, `${citeName(path)}.at must be one of ${ROUNDING_TARGETS.join(', ')}`);
-  }
-  const copy: Record<string, unknown> = { scale, mode };
-  if (at !== undefined) copy.at = at;
-  return copy;
+export function normalizeOutputDeclaration(declaration: OutputDeclaration): OutputDeclaration {
+  return withValueBudget(() => validDeclaration(declaration));
 }
 
-/** Internal: reports a rounding on an output whose type cannot be rounded. */
-export function roundingNotApplicable(
-  path: string,
-  add: (path: string, message: string) => void,
-): void {
-  add(path, `${citeName(path)} applies only to a number or decimal output`);
-}
-
-/** Internal: true for an output type a rounding applies to. */
-export function isRoundable(type: unknown): boolean {
-  return ROUNDABLE.some((item) => item === type);
-}
-
-function isScale(value: unknown): boolean {
-  return (
-    typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= MAX_SCALE
-  );
-}
-
-function checkEnumValues(
-  values: unknown,
-  path: string,
-  add: (path: string, message: string) => void,
-): void {
-  if (values === undefined) {
-    add(path, `${citeName(path)} is required for an enum output: list its allowed strings`);
-    return;
-  }
-  if (!Array.isArray(values)) {
-    add(path, `${citeName(path)} must be an array of non-empty strings`);
-    return;
-  }
-  const items = readList(values, path);
-  if (!Array.isArray(items)) {
-    add(items.path, items.message);
-    return;
-  }
-  if (items.length === 0) {
-    add(path, `${citeName(path)} must not be empty: an enum output needs at least one value`);
-    return;
-  }
-  const seen = new Set<string>();
-  items.forEach((item, i) => {
-    if (typeof item !== 'string' || item === '') {
-      add(`${path}[${i}]`, `${citeName(path)}[${i}] must be a non-empty string`);
-    } else if (seen.has(item)) {
-      add(`${path}[${i}]`, `${citeName(path)}[${i}] repeats ${quoteText(item)}`);
-    } else {
-      seen.add(item);
-    }
+/**
+ * True when two declarations have the same normal form (`normalizeOutputDeclaration`): rules
+ * that feed one output must agree on it, unit included (D-9).
+ *
+ * Throws `SpecError` (`INVALID_RULE`) for a declaration `validateOutputDeclaration` refuses.
+ */
+export function sameDeclaration(a: OutputDeclaration, b: OutputDeclaration): boolean {
+  return withValueBudget(() => {
+    const first = validDeclaration(a);
+    const second = validDeclaration(b);
+    return ownCopy(() => canonicalize(first) === canonicalize(second));
   });
 }
 
 /**
- * True when `value` has the type `declaration` gives: a finite number, a boolean, a string,
- * one of the listed `values` for an enum, an array for a list (any items), an object that is
- * neither an array nor `null` for an object, or a canonical decimal string for a decimal
- * (`isCanonicalDecimal`: `"12.5"`, not `"12.50"`, `"-0"`, `"1e3"` nor the number `12.5`).
+ * True when `value` is a value of the output `declaration` declares: a finite number, a
+ * boolean, a string, one of the listed `values` for an enum, an array for a list (any items),
+ * an object that is neither an array nor `null` for an object, a canonical decimal string for a
+ * decimal (`isCanonicalDecimal`: `"12.5"`, not `"12.50"`, `"-0"`, `"1e3"` nor the number
+ * `12.5`), a civil date for a date (`isCivilDate`), a canonical instant for a dateTime
+ * (`isInstant`). The combined value of a `count` is a non-negative safe integer; a declared
+ * `sign` bounds a number or decimal at 0. A value that cannot be inspected (a revoked Proxy)
+ * matches no type.
+ *
+ * Throws `SpecError` (`INVALID_RULE`) for a declaration `validateOutputDeclaration` refuses.
  */
 export function valueMatchesOutputType(value: JsonValue, declaration: OutputDeclaration): boolean {
-  const { type, values } = readDeclaration(declaration);
+  return matchesValue(
+    value,
+    withValueBudget(() => validDeclaration(declaration)),
+  );
+}
+
+/**
+ * True when `value` may be one rule's contribution to the output `declaration` declares: a
+ * boolean for a `count` (the contributions that are `true` are counted), otherwise a value of
+ * the output (`valueMatchesOutputType`), its `sign` included.
+ *
+ * Throws `SpecError` (`INVALID_RULE`) for a declaration `validateOutputDeclaration` refuses.
+ */
+export function contributionMatchesDeclaration(
+  value: JsonValue,
+  declaration: OutputDeclaration,
+): boolean {
+  const normal = withValueBudget(() => validDeclaration(declaration));
+  return normal.combine === 'count' ? typeof value === 'boolean' : matchesValue(value, normal);
+}
+
+/**
+ * The output no contribution reached (gap-hunt X-4): the identity of its strategy, determined
+ * (`sum` 0, `"0"` for a decimal; `count` 0; `union` `[]`; `any` `false`); for `all`, `true`
+ * and determined when it declares `empty: true`, otherwise no value and `undetermined` (a
+ * check that examined nothing is not passed); for `max`, `min` and `highestPriority`, no value
+ * (the `value` member is absent, never `null`) and determined. A fresh object each call.
+ *
+ * Throws `SpecError` (`INVALID_RULE`) for a declaration `validateOutputDeclaration` refuses.
+ */
+export function emptyOutput(declaration: OutputDeclaration): {
+  value?: JsonValue;
+  status: OutputStatus;
+} {
+  const { type, combine, empty } = withValueBudget(() => validDeclaration(declaration));
+  switch (combine) {
+    case 'sum':
+      return { value: type === 'decimal' ? '0' : 0, status: 'determined' };
+    case 'count':
+      return { value: 0, status: 'determined' };
+    case 'union':
+      return { value: [], status: 'determined' };
+    case 'any':
+      return { value: false, status: 'determined' };
+    case 'all':
+      return empty === true ? { value: true, status: 'determined' } : { status: 'undetermined' };
+    case 'max':
+    case 'min':
+    case 'highestPriority':
+      return { status: 'determined' };
+  }
+}
+
+/**
+ * Internal: the normal form of `declaration`, read once and counted in the current budget, or
+ * throws `SpecError` (`INVALID_RULE`, `invalid output declaration: <first problem>`, the
+ * problem's path as `path`).
+ */
+export function validDeclaration(declaration: unknown): OutputDeclaration {
+  const { issues, normal } = readDeclaration(declaration, 'output');
+  const [first] = issues;
+  if (first !== undefined || normal === undefined) {
+    const message = first?.message ?? 'unreadable';
+    throw newSpecError('INVALID_RULE', `invalid output declaration: ${message}`, first?.path);
+  }
+  return normal;
+}
+
+/** Internal: true when `value` is a value of the valid, normal `declaration`. */
+export function matchesValue(value: unknown, declaration: OutputDeclaration): boolean {
+  const { type, combine, values = [], sign } = declaration;
+  if (combine === 'count') {
+    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  }
   switch (type) {
     case 'number':
-      return typeof value === 'number' && Number.isFinite(value);
+      return typeof value === 'number' && Number.isFinite(value) && numberHasSign(value, sign);
+    case 'decimal':
+      return typeof value === 'string' && isCanonicalDecimal(value) && decimalHasSign(value, sign);
     case 'boolean':
       return typeof value === 'boolean';
     case 'string':
@@ -334,42 +265,33 @@ export function valueMatchesOutputType(value: JsonValue, declaration: OutputDecl
     case 'enum':
       return typeof value === 'string' && values.includes(value);
     case 'list':
-      return Array.isArray(value);
+      return isArray(value);
     case 'object':
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
-    case 'decimal':
-      return typeof value === 'string' && isCanonicalDecimal(value);
+      return typeof value === 'object' && value !== null && !isArray(value);
+    case 'date':
+      return isCivilDate(value);
+    case 'dateTime':
+      return isInstant(value);
   }
 }
 
-/**
- * The `type` and the enum `values` of a declaration, read once. Throws `SpecError`
- * (`INVALID_RULE`) for a declaration that is not an object, an unknown `type`, enum `values`
- * that are not an array, or a declaration that cannot be read (a getter or a Proxy trap that
- * throws): never a raw error.
- */
-function readDeclaration(declaration: unknown): { type: OutputType; values: readonly unknown[] } {
-  if (typeof declaration !== 'object' || declaration === null) {
-    throw newSpecError('INVALID_RULE', 'an output declaration must be an object { type, … }');
-  }
+/** True when the number `value` respects `sign` (0 and -0 respect both). */
+function numberHasSign(value: number, sign: OutputDeclaration['sign']): boolean {
+  if (sign === 'nonNegative') return value >= 0;
+  return sign === 'nonPositive' ? value <= 0 : true;
+}
+
+/** True when the canonical decimal `value` respects `sign` (`"0"` respects both). */
+function decimalHasSign(value: string, sign: OutputDeclaration['sign']): boolean {
+  if (sign === 'nonNegative') return !value.startsWith('-');
+  return sign === 'nonPositive' ? value === '0' || value.startsWith('-') : true;
+}
+
+/** `Array.isArray`, false when it throws (a revoked Proxy is no JSON value). */
+function isArray(value: unknown): boolean {
   try {
-    const { type, values } = declaration as { type?: unknown; values?: unknown };
-    if (!isOneOf(type, OUTPUT_TYPES)) {
-      throw newSpecError('INVALID_RULE', `output type must be one of ${OUTPUT_TYPES.join(', ')}`);
-    }
-    if (type !== 'enum' || values === undefined) return { type, values: [] };
-    if (!Array.isArray(values)) {
-      throw newSpecError('INVALID_RULE', 'the values of an enum output must be an array');
-    }
-    const items = readList(values, 'output declaration.values');
-    if (!Array.isArray(items)) throw newSpecError('INVALID_RULE', items.message);
-    return { type, values: items };
-  } catch (error) {
-    if (isOwnError(error)) throw error;
-    throw newSpecError('INVALID_RULE', unreadableMessage('output declaration', error));
+    return Array.isArray(value);
+  } catch {
+    return false;
   }
-}
-
-function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
-  return allowed.some((item) => item === value);
 }

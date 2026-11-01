@@ -300,13 +300,15 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'an output of an unknown type',
     proofWith({ outputs: { value: { ...output, type: 'money' } } }),
     'outputs.value.type',
-    'outputs.value.type must be one of number, boolean, string, enum, list, object, decimal',
+    'outputs.value.type must be one of ' +
+      'number, boolean, string, enum, list, object, decimal, date, dateTime',
   ],
   [
     'an output with an unknown strategy',
     proofWith({ outputs: { value: { ...output, combine: 'avg' } } }),
     'outputs.value.combine',
-    'outputs.value.combine must be one of sum, max, min, highestPriority, union, all, any',
+    'outputs.value.combine must be one of ' +
+      'sum, max, min, highestPriority, union, all, any, count',
   ],
   [
     'an output without value',
@@ -494,7 +496,7 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'a rounding that is not an object',
     proofWith({ outputs: { value: { ...output, rounding: 2 } } }),
     'outputs.value.rounding',
-    'outputs.value.rounding must be an object { scale, mode, at? }',
+    'outputs.value.rounding must be an object { scale or increment, mode, at? }',
   ],
   [
     'a rounding on a boolean output',

@@ -2,8 +2,10 @@
  * @run-iq/spec: the canonical form of a Run-IQ rule, its checksum and its fingerprint, the
  * stored and executable forms of a rule, and its validator (`validateRuleDefinition`, which
  * agrees with `schema/rule-definition.schema.json`); the rule exception format
- * (`RuleException`, `matchesSelector`), the output declarations (`OutputDeclaration`) and
- * exact decimals (`isCanonicalDecimal`, `toCanonicalDecimal`); the decision proof format
+ * (`RuleException`, `matchesSelector`), the output declarations (`OutputDeclaration`,
+ * `normalizeOutputDeclaration`, `sameDeclaration`, `emptyOutput`, `compareOutputValues`), their
+ * statuses (`OutputStatus`, `joinStatus`) and exact decimals (`isCanonicalDecimal`,
+ * `toCanonicalDecimal`); the decision proof format
  * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
  * `schema/decision-proof.schema.json`; `PROOF_FORMATS`); JSON pointers (`parsePointer`,
  * `comparePointers`), subjects (`isSubject`, `subjectContains`) and the reserved `$` names
@@ -100,19 +102,21 @@ export { fromStoredRecord, toExecutableRule, toStoredPayload } from './rule/conv
 export { validateRuleDefinition } from './rule/validate.js';
 export type { RuleValidationIssue } from './rule/validate.js';
 export {
+  contributionMatchesDeclaration,
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
+  emptyOutput,
+  normalizeOutputDeclaration,
   OUTPUTS_VARIABLE,
+  sameDeclaration,
   validateOutputDeclaration,
   valueMatchesOutputType,
 } from './decision/output.js';
-export type {
-  CombineStrategy,
-  OutputDeclaration,
-  OutputRounding,
-  OutputType,
-  RoundingMode,
-} from './decision/output.js';
+export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export type { OutputRounding, RoundingMode } from './decision/rounding.js';
+export { joinStatus, OUTPUT_STATUSES } from './decision/status.js';
+export type { OutputStatus } from './decision/status.js';
+export { compareOutputValues } from './decision/compare.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';

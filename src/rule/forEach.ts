@@ -173,6 +173,15 @@ function readPath(value: JsonValue | undefined, fail: Add): number | undefined {
     fail(at, `${citeName(at)} is required: the JSON pointer to the collection`);
     return undefined;
   }
+  return readCollectionPath(value, at, fail);
+}
+
+/**
+ * Internal: the number of levels of `value` as a pointer to a collection, `forEach.path` or an
+ * output's `per` (the same refusals, worded with `at`), or `undefined` after reporting why not:
+ * see `ForEach` for what such a pointer is.
+ */
+export function readCollectionPath(value: unknown, at: string, fail: Add): number | undefined {
   const segments = pointerSegments(value, at, fail);
   if (segments === undefined) return undefined;
   const problem = pathProblem(segments);
@@ -402,11 +411,7 @@ function readFacts(value: JsonValue | undefined, at: string, fail: Add): string[
 }
 
 /** The decoded segments of a pointer, or `undefined` after reporting why it is not one. */
-function pointerSegments(
-  value: JsonValue | undefined,
-  at: string,
-  fail: Add,
-): string[] | undefined {
+function pointerSegments(value: unknown, at: string, fail: Add): string[] | undefined {
   if (typeof value !== 'string') {
     fail(at, `${citeName(at)} must be a JSON pointer: got a value of type ${typeName(value)}`);
     return undefined;

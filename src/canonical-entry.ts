@@ -73,19 +73,21 @@ export type { StoredRuleRecord } from './rule/stored.js';
 export { validateRuleDefinition } from './rule/validate.js';
 export type { RuleValidationIssue } from './rule/validate.js';
 export {
+  contributionMatchesDeclaration,
   DEFAULT_OUTPUT,
   DEFAULT_OUTPUT_DECLARATION,
+  emptyOutput,
+  normalizeOutputDeclaration,
   OUTPUTS_VARIABLE,
+  sameDeclaration,
   validateOutputDeclaration,
   valueMatchesOutputType,
 } from './decision/output.js';
-export type {
-  CombineStrategy,
-  OutputDeclaration,
-  OutputRounding,
-  OutputType,
-  RoundingMode,
-} from './decision/output.js';
+export type { CombineStrategy, OutputDeclaration, OutputType } from './decision/output.js';
+export type { OutputRounding, RoundingMode } from './decision/rounding.js';
+export { joinStatus, OUTPUT_STATUSES } from './decision/status.js';
+export type { OutputStatus } from './decision/status.js';
+export { compareOutputValues } from './decision/compare.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';
