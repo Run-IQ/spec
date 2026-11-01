@@ -95,14 +95,21 @@ export function baseContent(): Record<string, unknown> {
     requested: ['kids', 'social:aid', 'value', 'vat:level'],
     supersedes: { digest: hex('9'), reason: 'correction' },
     rules: salted('rules', [
-      { id: 'k', version: 1, checksum: hex('2'), ruleSet: 'local' },
-      { id: 'r1', version: 1, checksum: hex('b'), ruleSet: 'local', sourceRef: 'art. 1' },
-      { id: 'r2', version: 2, checksum: hex('c'), ruleSet: 'local' },
-      { id: 'x', version: 1, checksum: hex('3'), ruleSet: 'local' },
-      { id: 'R1', version: 1, checksum: hex('6'), ruleSet: 'social' },
-      { id: 'R1', version: 1, checksum: hex('7'), ruleSet: 'vat' },
-      { id: 'R2', version: 1, checksum: hex('8'), ruleSet: 'vat' },
-      { id: 'R2', version: 2, checksum: hex('0'), ruleSet: 'vat' },
+      { id: 'k', version: 1, checksum: hex('2'), ruleSet: 'local', priority: 0 },
+      {
+        id: 'r1',
+        version: 1,
+        checksum: hex('b'),
+        ruleSet: 'local',
+        priority: 0,
+        sourceRef: 'art. 1',
+      },
+      { id: 'r2', version: 2, checksum: hex('c'), ruleSet: 'local', priority: 0 },
+      { id: 'x', version: 1, checksum: hex('3'), ruleSet: 'local', priority: 0 },
+      { id: 'R1', version: 1, checksum: hex('6'), ruleSet: 'social', priority: 0 },
+      { id: 'R1', version: 1, checksum: hex('7'), ruleSet: 'vat', priority: 0 },
+      { id: 'R2', version: 1, checksum: hex('8'), ruleSet: 'vat', priority: 0 },
+      { id: 'R2', version: 2, checksum: hex('0'), ruleSet: 'vat', priority: 0 },
     ]),
     outputs: salted('outputs', [
       {
@@ -388,9 +395,16 @@ export function unsigned(): UnsignedProof {
         version: 1,
         checksum: computeRuleChecksum(ruleA),
         ruleSet: 'local',
+        priority: ruleA.priority,
         sourceRef: 'art. 1',
       },
-      { id: 'r2', version: 2, checksum: computeRuleChecksum(ruleB), ruleSet: 'local' },
+      {
+        id: 'r2',
+        version: 2,
+        checksum: computeRuleChecksum(ruleB),
+        ruleSet: 'local',
+        priority: ruleB.priority,
+      },
     ]),
     outputs: salted('outputs', [
       {

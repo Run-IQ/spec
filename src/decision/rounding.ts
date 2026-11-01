@@ -138,7 +138,8 @@ export function checkNormalRounding(read: RoundingRead, path: string, add: Add):
   if (typeof increment === 'string' && normal.scale !== undefined) {
     add(
       `${path}.increment`,
-      `${citeName(path)}.increment ${quoteText(increment)} must be written as scale ${normal.scale}`,
+      `${citeName(path)}.increment ${quoteText(increment)} ` +
+        `must be written as scale ${normal.scale}`,
     );
   }
 }

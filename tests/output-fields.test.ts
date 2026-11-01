@@ -272,7 +272,8 @@ describe('dimension', () => {
       {
         path: 'output.dimension',
         message:
-          'output.dimension must not start with "$": dimension names starting with "$" are reserved',
+          'output.dimension must not start with "$": ' +
+          'dimension names starting with "$" are reserved',
       },
       { path: 'output', message: 'output: per and dimension are exclusive' },
     ]);

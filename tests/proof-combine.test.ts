@@ -52,7 +52,13 @@ function proofOf({ output, contributions = [], shortCircuit = false }: Case): En
     strata: [['value']],
     rules: salted(
       'rules',
-      sorted.map((id) => ({ id, version: 1, checksum: 'b'.repeat(64), ruleSet: 'local' })),
+      sorted.map((id) => ({
+        id,
+        version: 1,
+        checksum: 'b'.repeat(64),
+        ruleSet: 'local',
+        priority: 0,
+      })),
     ),
     outputs: salted('outputs', [
       { name: 'value', status: 'determined', contributors: ids, pending: [], ...output },

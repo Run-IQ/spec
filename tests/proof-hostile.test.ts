@@ -214,6 +214,7 @@ describe('validateProof', () => {
       { path: 'rules[0].version', message: 'rules[0].version is required' },
       { path: 'rules[0].checksum', message: 'rules[0].checksum is required' },
       { path: 'rules[0].ruleSet', message: 'rules[0].ruleSet is required' },
+      { path: 'rules[0].priority', message: 'rules[0].priority is required' },
       { path: 'rules[0].salt', message: 'rules[0].salt is required' },
     ]);
   });

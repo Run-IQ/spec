@@ -30,6 +30,13 @@ export const SETTLED: readonly string[] = OUTPUT_STATUSES.filter(
 const SUBJECT_FORM =
   'a JSON pointer whose ! segments are !group=<value> or !segment=<from>..<until>';
 
+/** A rule's priority, as its definition gives it: a finite number. */
+export const priority = scalarCheck((value, path, add) => {
+  if (typeof value !== 'number' || !Number.isFinite(value)) {
+    add(path, `${citeName(path)} must be a finite number`);
+  }
+});
+
 export const version = scalarCheck((value, path, add) => {
   if (!isRuleVersion(value)) add(path, `${citeName(path)} must be a positive integer`);
 });

@@ -96,6 +96,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
         version: 1,
         checksum: computeRuleChecksum(rule),
         ruleSet: 'local',
+        priority: rule.priority,
         salt: unsaltedSalt('rules', 0),
       },
     ],

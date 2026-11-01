@@ -420,6 +420,18 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     'rules[0].id must not contain ":": a rule id is qualified by its rule set',
   ],
   [
+    'a rule without priority',
+    entryWith('rules', 0, { priority: undefined }),
+    'rules[0].priority',
+    'rules[0].priority is required',
+  ],
+  [
+    'a rule with a priority in text',
+    entryWith('rules', 0, { priority: '5000' }),
+    'rules[0].priority',
+    'rules[0].priority must be a finite number',
+  ],
+  [
     'a rule with a fractional version',
     entryWith('rules', 0, { version: 1.5 }),
     'rules[0].version',
@@ -434,8 +446,8 @@ export const VALIDATOR_ONLY_PROOFS: [string, unknown, string, string][] = [
     'a rule listed twice in its rule set',
     proofWith({
       rules: [
-        { id: 'R1', version: 1, checksum: hex('b'), ruleSet: 'vat', salt },
-        { id: 'R1', version: 1, checksum: hex('c'), ruleSet: 'vat', salt },
+        { id: 'R1', version: 1, checksum: hex('b'), ruleSet: 'vat', priority: 0, salt },
+        { id: 'R1', version: 1, checksum: hex('c'), ruleSet: 'vat', priority: 0, salt },
       ],
     }),
     'rules[1]',

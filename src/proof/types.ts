@@ -63,6 +63,13 @@ export interface ProofRuleRef {
   checksum: string;
   /** The rule set it belongs to: `local`, or a pack listed in `ruleSets`. */
   ruleSet: string;
+  /**
+   * Its priority, as its definition gives it (a finite number): what decides a
+   * `highestPriority` output, and whether its winner outranks the rules still pending for it
+   * (the completeness table of Task 9M2). `verifyProof` given `rules` checks it is the
+   * definition's.
+   */
+  priority: number;
   sourceRef?: string;
   /** 16 bytes in lowercase hex (D-14): every section entry carries one. */
   salt: string;

@@ -3,6 +3,7 @@ import { OUTPUT_STATUSES } from '../decision/status.js';
 import type { OutputStatus } from '../decision/status.js';
 import { citeName } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
+import { qualifyName } from '../rule/ruleSet.js';
 import { combinationProblems, comparator, SELECTING } from './combination.js';
 import type { Target } from './combination.js';
 import { declarationOf, instanceKey } from './output-values.js';
@@ -229,22 +230,26 @@ function inCollection(per: string, subject: string): boolean {
   );
 }
 
+/** The priority of each listed rule, by qualified id and version (`id@version`). */
+export type Priorities = ReadonlyMap<string, number>;
+
 /**
  * The completeness of an output or item (D-7, the table of Task 9M2): a pending rule that feeds
  * it makes it `undetermined`, except an `any` with a `true` contribution, an `all` with a
- * `false` one, and a `highestPriority` whose winner outranks every pending rule (its priorities
- * are in the rule definitions: `verifyProof` checks it when given them, `priorityProblems`). An
- * `undetermined` one has a cause: a pending rule, or, for an `all` no rule reached without
- * `empty`, its own emptiness (`emptyOutput`).
+ * `false` one, and a `highestPriority` whose winner (the step `selected` names) has a priority
+ * strictly above that of every pending rule feeding it (the priorities the proof records in
+ * `rules`; an unknown one never outranks). An `undetermined` one has a cause: a pending rule,
+ * or, for an `all` no rule reached without `empty`, its own emptiness (`emptyOutput`).
  */
-function completenessProblems(target: Target, feed: Feed): string[] {
+function completenessProblems(target: Target, feed: Feed, priorities: Priorities): string[] {
   const { combine, empty } = target.declaration;
   const pending = feed.pending.length > 0;
   if (target.status === 'undetermined') {
     const emptyAll = combine === 'all' && feed.steps.length === 0 && empty !== true;
     return pending || emptyAll ? [] : [`undetermined output without a cause: ${target.cite()}`];
   }
-  if (!pending || combine === 'highestPriority') return [];
+  if (!pending) return [];
+  if (combine === 'highestPriority' && outranksPending(target, feed, priorities)) return [];
   const decisive = combine === 'any' ? true : combine === 'all' ? false : undefined;
   if (decisive !== undefined && feed.steps.some((step) => step.contribution === decisive)) {
     return [];
@@ -252,39 +257,23 @@ function completenessProblems(target: Target, feed: Feed): string[] {
   return [`settled output with pending rules: ${target.cite()}`];
 }
 
-/**
- * Internal, for `verifyProof` given the rule definitions: each settled `highestPriority` output
- * or item that a pending rule feeds whose priority (`priorityOf`, by qualified id and version)
- * is not strictly below that of its winner, the rule of `selected` (`settled output with
- * pending rules: name`). A rule whose priority is unknown is not compared.
- */
-export function priorityProblems(
-  p: UnsignedProof,
-  priorityOf: (ruleId: string, version: number) => number | undefined,
-): string[] {
-  const listed = new Map<string, ProofOutput>();
-  for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
-  const issues: string[] = [];
-  const feeds = feedsOf(p, listed);
-  for (const { target, feed } of targetsOf(p, listed, feeds)) {
-    const { selected } = target;
-    if (target.declaration.combine !== 'highestPriority' || target.status === 'undetermined') {
-      continue;
-    }
-    if (selected === undefined || feed.pending.length === 0) continue;
-    const winner = feed.steps.find(
-      (step) => step.ruleId === selected.ruleId && step.subject === selected.subject,
-    );
-    const top = winner === undefined ? undefined : priorityOf(winner.ruleId, winner.version);
-    if (top === undefined) continue;
-    const outranked = feed.waiting.some((entry) => {
-      const priority = priorityOf(entry.ruleId, entry.version);
-      return priority !== undefined && priority >= top;
-    });
-    if (outranked) issues.push(`settled output with pending rules: ${target.cite()}`);
-  }
-  return issues;
+/** True when the winner of `target` has a known priority above every pending rule's. */
+function outranksPending(target: Target, feed: Feed, priorities: Priorities): boolean {
+  const { selected } = target;
+  if (selected === undefined) return false;
+  const winner = feed.steps.find(
+    (step) => step.ruleId === selected.ruleId && step.subject === selected.subject,
+  );
+  const top = winner === undefined ? undefined : priorities.get(instanceRule(winner));
+  if (top === undefined) return false;
+  return feed.waiting.every((entry) => {
+    const priority = priorities.get(instanceRule(entry));
+    return priority !== undefined && priority < top;
+  });
 }
+
+const instanceRule = (entry: { ruleId: string; version: number }): string =>
+  `${entry.ruleId}@${entry.version}`;
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
 function samePending(named: readonly string[], pending: readonly string[]): boolean {
@@ -314,6 +303,10 @@ export function outputProblems(
   imposed: ReadonlySet<string>,
 ): string[] {
   const issues: string[] = [];
+  const priorities = new Map<string, number>();
+  for (const rule of p.rules) {
+    priorities.set(`${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`, rule.priority);
+  }
   const nonPer = new Set<string>();
   for (const [name, output] of listed) {
     const cited = (): string => citeName(name);
@@ -351,7 +344,7 @@ export function outputProblems(
     if (!samePending(pending, feed.pending)) {
       issues.push(`pending differ from pending rules: ${target.cite()}`);
     }
-    issues.push(...completenessProblems(target, feed));
+    issues.push(...completenessProblems(target, feed, priorities));
   }
   issues.push(...statusProblems(p, listed, feeds, targets));
   return issues;

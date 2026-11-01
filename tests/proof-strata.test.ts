@@ -126,7 +126,14 @@ describe('strata, decimals and rounding in a proof', () => {
     [
       'a skip beyond the strata',
       (p: UnsignedProof) => {
-        p.rules.push({ id: 'r3', version: 1, checksum: 'b'.repeat(64), ruleSet: 'local', salt });
+        p.rules.push({
+          id: 'r3',
+          version: 1,
+          checksum: 'b'.repeat(64),
+          ruleSet: 'local',
+          priority: 0,
+          salt,
+        });
         p.skipped.push({
           ruleId: 'r3',
           version: 1,
@@ -160,7 +167,14 @@ describe('strata, decimals and rounding in a proof', () => {
     [
       'a skip whose output is in another stratum',
       (p: UnsignedProof) => {
-        p.rules.push({ id: 'r3', version: 1, checksum: 'b'.repeat(64), ruleSet: 'local', salt });
+        p.rules.push({
+          id: 'r3',
+          version: 1,
+          checksum: 'b'.repeat(64),
+          ruleSet: 'local',
+          priority: 0,
+          salt,
+        });
         p.skipped.push({
           ruleId: 'r3',
           version: 1,

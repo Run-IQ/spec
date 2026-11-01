@@ -1,18 +1,26 @@
 import { describe, expect, it } from 'vitest';
-import { computeRuleChecksum, sealProof, verifyProof } from '../src/index.js';
+import { computeRuleChecksum, sealProof, validateProof, verifyProof } from '../src/index.js';
 import type { JsonValue, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
 import { entries, ruleA, unsaltedSalt } from './proof-cases.js';
 import { outputProof, problems, withEntry, withSection } from './proof-builders.js';
 import type { Content, Entry, OutputPart } from './proof-builders.js';
 
 /**
- * A proof of one output `value` fed by `r0`, `r1`… with `contributions`, and one rule `w@1`
- * pending for it (a missing fact).
+ * A proof of one output `value` fed by `r0`, `r1`… with `contributions` (priority `winner` for
+ * `r0`, 0 for the others), and one rule `w@1` of priority `waiting` pending for it (a missing
+ * fact).
  */
-function withPending(output: OutputPart, contributions: JsonValue[]): Content {
+function withPending(
+  output: OutputPart,
+  contributions: JsonValue[],
+  winner = 0,
+  waiting = 0,
+): Content {
   const proof: Content = { ...outputProof({ ...output, pending: ['w'] }, contributions) };
-  const rules = proof.rules as Entry[];
-  const w = { id: 'w', version: 1, checksum: 'b'.repeat(64), ruleSet: 'local' };
+  const rules = (proof.rules as Entry[]).map((rule, i) =>
+    i === 0 ? { ...rule, priority: winner } : rule,
+  );
+  const w = { id: 'w', version: 1, checksum: 'b'.repeat(64), ruleSet: 'local', priority: waiting };
   proof.rules = [...rules, w].map((rule, i) => ({ ...rule, salt: unsaltedSalt('rules', i) }));
   proof.pending = [
     {
@@ -75,34 +83,102 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
   });
 
   it('a highestPriority is settled only when its winner outranks every pending rule', () => {
-    const content = withPending(
-      { type: 'number', combine: 'highestPriority', value: 1, selected: { ruleId: 'r0' } },
-      [1],
-    );
-    // Without the definitions, the priorities are unknown: sealProof cannot tell.
-    expect(problems(content)).toEqual([]);
+    const highest: OutputPart = {
+      type: 'number',
+      combine: 'highestPriority',
+      value: 1,
+      selected: { ruleId: 'r0' },
+    };
+    // The priorities are in the proof: sealProof and verifyProof decide without the rules.
+    expect(problems(withPending(highest, [1], 5000, 1000))).toEqual([]);
+    expect(problems(withPending(highest, [1], -1, -2.5))).toEqual([]);
+    for (const [winner, waiting] of [
+      [5000, 5000],
+      [5000, 6000],
+      [0, 0.5],
+    ] as const) {
+      expect(problems(withPending(highest, [1], winner, waiting))).toEqual([
+        'settled output with pending rules: value',
+      ]);
+    }
+    const undetermined = { ...highest, status: 'undetermined' as const };
+    delete undetermined.value;
+    delete undetermined.selected;
+    expect(problems(withPending(undetermined, [1], 5000, 6000))).toEqual([]);
+  });
+
+  it('given the rules, each recorded priority is that of its definition', () => {
     const definition = (id: string, priority: number): RuleDefinitionInput => ({
       ...ruleA,
       id,
       priority,
     });
-    const proofWith = (winner: number, pending: number) => {
-      const rules = [definition('r0', winner), definition('w', pending)];
+    const highest: OutputPart = {
+      type: 'number',
+      combine: 'highestPriority',
+      value: 1,
+      selected: { ruleId: 'r0' },
+    };
+    const content = withPending(highest, [1], 5000, 1000);
+    const proofWith = (rules: RuleDefinitionInput[]) => {
       const listed = (content.rules as Entry[]).map((ref, i) => ({
         ...ref,
         checksum: computeRuleChecksum(rules[i]!),
       }));
-      return { proof: sealProof({ ...content, rules: listed } as unknown as UnsignedProof), rules };
+      return sealProof({ ...content, rules: listed } as unknown as UnsignedProof);
     };
-    const above = proofWith(5000, 1000);
-    expect(verifyProof(above.proof, { rules: above.rules }).issues).toEqual(['unsigned']);
-    for (const pending of [5000, 6000]) {
-      const tied = proofWith(5000, pending);
-      expect(verifyProof(tied.proof, { rules: tied.rules })).toEqual({
-        status: 'invalid',
-        issues: ['unsigned', 'settled output with pending rules: value'],
-      });
-    }
+    const honest = [definition('r0', 5000), definition('w', 1000)];
+    expect(verifyProof(proofWith(honest), { rules: honest }).issues).toEqual(['unsigned']);
+    // The definition of w says 6000: the proof recorded 1000, which hid its precedence.
+    const hidden = [definition('r0', 5000), definition('w', 6000)];
+    expect(verifyProof(proofWith(hidden), { rules: hidden })).toEqual({
+      status: 'invalid',
+      issues: ['unsigned', 'rule priority mismatch: w@1'],
+    });
+  });
+
+  it.each([
+    ['NaN', Number.NaN],
+    ['Infinity', Number.POSITIVE_INFINITY],
+    ['a text', '1'],
+    ['null', null],
+  ])('refuses a recorded priority that is %s', (_name, priority) => {
+    const content = withEntry('rules', 0, { priority });
+    expect(validateProof({ ...content, digest: '0'.repeat(64) }).issues).toEqual([
+      { path: 'rules[0].priority', message: 'rules[0].priority must be a finite number' },
+    ]);
+  });
+
+  it('the priorities enter the digest (vector frozen with Python stdlib)', () => {
+    const highest: OutputPart = {
+      type: 'number',
+      combine: 'highestPriority',
+      value: 2,
+      selected: { ruleId: 'r0' },
+    };
+    const content = outputProof(highest, [2, 2]);
+    content.rules[0]!.priority = 7;
+    content.rules[1]!.priority = -3;
+    // sha256 of json.dumps(content, sort_keys=True, separators=(',', ':')): JCS for this
+    // ASCII, integer-only content (Task 9J round 3).
+    const FROZEN = '2485de37eabcc2634d9e171723d7cdab98994235af963d89b65989e655d94205';
+    expect(sealProof(content).digest).toBe(FROZEN);
+    content.rules[1]!.priority = -4;
+    expect(sealProof(content).digest).not.toBe(FROZEN);
+  });
+
+  it('given the rules, a recorded -0 is the priority 0 of a definition', () => {
+    const content = outputProof({ type: 'number', combine: 'sum', value: 1 }, [1]);
+    const rule: RuleDefinitionInput = { ...ruleA, id: 'r0', priority: 0 };
+    content.rules[0] = { ...content.rules[0]!, checksum: computeRuleChecksum(rule), priority: -0 };
+    expect(verifyProof(sealProof(content), { rules: [rule] }).issues).toEqual(['unsigned']);
+  });
+
+  it('refuses a rule without its priority', () => {
+    const content = withEntry('rules', 0, { priority: undefined });
+    expect(validateProof({ ...content, digest: '0'.repeat(64) }).issues).toEqual([
+      { path: 'rules[0].priority', message: 'rules[0].priority is required' },
+    ]);
   });
 });
 
@@ -192,7 +268,7 @@ describe('items of a per output are the elements of its collection', () => {
 describe('every listed rule is decided (D-8)', () => {
   it('refuses a rule neither applied, skipped, pending nor the carrier of an exception', () => {
     const listed = entries('rules');
-    const z = { id: 'z', version: 1, checksum: 'c'.repeat(64), ruleSet: 'local' };
+    const z = { id: 'z', version: 1, checksum: 'c'.repeat(64), ruleSet: 'local', priority: 0 };
     // After the local rules, before those of the packs.
     const rules = [...listed.slice(0, 4), z, ...listed.slice(4)];
     expect(problems(withSection('rules', rules))).toEqual(['rule not decided: z@1']);

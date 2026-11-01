@@ -98,7 +98,7 @@ export function outputProof(
     strata: [['value']],
     rules: salted(
       'rules',
-      ids.map((id) => ({ id, version: 1, checksum: hex('b'), ruleSet: 'local' })),
+      ids.map((id) => ({ id, version: 1, checksum: hex('b'), ruleSet: 'local', priority: 0 })),
     ),
     outputs: [
       {
@@ -139,6 +139,7 @@ export function wideProof(n: number, type: 'number' | 'decimal'): UnsignedProof 
     version: 1,
     checksum: 'b'.repeat(64),
     ruleSet: 'local',
+    priority: 0,
     salt,
   });
   proof.rules = [

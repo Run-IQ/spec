@@ -33,7 +33,8 @@ export function compareOutputValues(
   if (!ORDERED.includes(type)) {
     throw newSpecError(
       'INVALID_RULE',
-      `${article(type)} ${type} output has no order: only number, decimal, enum, date and dateTime do`,
+      `${article(type)} ${type} output has no order: ` +
+        'only number, decimal, enum, date and dateTime do',
     );
   }
   for (const value of [a, b]) {

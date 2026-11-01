@@ -33,6 +33,7 @@ import {
   instant,
   outputName,
   packId,
+  priority,
   ruleId,
   ruleSetId,
   salt,
@@ -50,12 +51,13 @@ import {
 // `schema/decision-proof.schema.json` describes it.
 
 const RULE_REF: Shape = {
-  summary: '{ id, version, checksum, ruleSet, sourceRef?, salt }',
+  summary: '{ id, version, checksum, ruleSet, priority, sourceRef?, salt }',
   fields: {
     id: ruleId,
     version,
     checksum: sha256,
     ruleSet: ruleSetId,
+    priority,
     sourceRef: nonEmptyString,
     salt,
   },

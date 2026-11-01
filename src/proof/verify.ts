@@ -6,7 +6,6 @@ import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { inconsistencies } from './consistency.js';
-import { priorityProblems } from './statuses.js';
 import { contentDigest } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
@@ -41,7 +40,13 @@ interface Finding {
  *    declaration or its rounding; the outputs and items (status, value, bounds, selection,
  *    their contributors, pending rules and statuses, and whether each value follows from its
  *    contributions under `combine`: `output value does not follow from its contributions:
- *    name`); `unrounded` values; and rules with undeclared reads that are determined.
+ *    name`; their completeness: `undetermined output without a cause: name`, `settled output
+ *    with pending rules: name`, a `highestPriority` winner outranking the pending rules by the
+ *    priorities `rules` records; `item outside its per collection: name at subject`);
+ *    `unrounded` values; rules with undeclared reads that are determined; `rule not decided:
+ *    id@version`; and the statuses exceptions impose (`exception status differs from its
+ *    carrier's decision: id@version`, `decision weaker than the exception that affected it:
+ *    id@version`).
  * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
  *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters, not a curve point, or
  *    a small-order point), leave it at best `consistent`: nothing proves who produced it.
@@ -53,7 +58,9 @@ interface Finding {
  *    the set in `proof.rules`. Each difference makes it `invalid`, the rule cited by its
  *    qualified id (D-37): `rule missing: id@version` (in the proof, not given),
  *    `unexpected rule: id@version` (given, not in the proof), `rule checksum mismatch:
- *    id@version`, `duplicate rule: id@version`, `rule invalid: rules[i]: <reason>`.
+ *    id@version`, `duplicate rule: id@version`, `rule invalid: rules[i]: <reason>`, and, for a
+ *    rule whose checksum matches, `rule priority mismatch: id@version` when the priority the
+ *    proof records is not that of the definition (`-0` and `0` are the same priority).
  *
  * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
  * `invalid` too, rather than being ignored.
@@ -163,13 +170,12 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
     const checksum = given.get(key);
     if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);
     else if (checksum !== ref.checksum) invalid(`rule checksum mismatch: ${citeName(key)}`);
+    else if (priorities.get(key) !== ref.priority) {
+      invalid(`rule priority mismatch: ${citeName(key)}`);
+    }
   }
   for (const key of given.keys()) {
     if (!cited.has(key)) invalid(`unexpected rule: ${citeName(key)}`);
   }
-  // Given the definitions, a settled highestPriority fed by a pending rule is checked too.
-  const priorityOf = (ruleId: string, version: number): number | undefined =>
-    priorities.get(`${ruleId}@${version}`);
-  for (const message of priorityProblems(p, priorityOf)) invalid(message);
   return findings;
 }

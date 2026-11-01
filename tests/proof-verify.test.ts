@@ -258,6 +258,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
     const rules = listed.map((ref, i) => ({
       ...ref,
       checksum: computeRuleChecksum(definitions[i]!),
+      priority: ruleA.priority,
     }));
     const proof = sealProof({ ...content, rules } as unknown as UnsignedProof);
     expect(verifyProof(proof, { rules: definitions })).toEqual({
