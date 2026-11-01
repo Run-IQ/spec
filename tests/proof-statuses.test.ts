@@ -57,7 +57,10 @@ describe('bounds, pending rules and undeclared reads', () => {
       value: undefined,
       bounds: { min: false },
     });
-    expect(problems(content)).toEqual(['bounds on an unordered output: social:aid']);
+    expect(problems(content)).toEqual([
+      'bounds on an unordered output: social:aid',
+      'undetermined output without a cause: social:aid',
+    ]);
   });
 
   it('refuses pending rules of an item that are not those the pending section gives it', () => {

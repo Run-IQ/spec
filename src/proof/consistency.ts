@@ -10,6 +10,7 @@ import {
   nonCanonicalDecimals,
   offDeclarationValues,
 } from './output-values.js';
+import { exceptionProblems, undecidedRules } from './effects.js';
 import { citeItem, outputProblems } from './statuses.js';
 import type { ProofOutput, ProofStep, UnsignedProof } from './types.js';
 
@@ -78,8 +79,9 @@ const key = (entry: { ruleId: string; version: number }): string =>
  * and identities (`orderProblems`), the strata (`strataProblems`), rules feeding outputs of a
  * rule set theirs does not import, models not in `versions`, decimals not canonical
  * (`nonCanonicalDecimals`), values off their declaration (`offDeclarationValues`), the outputs
- * and items (`outputProblems`), `unrounded` values (`unroundedProblems`), and rules with
- * undeclared reads that are determined. `p` must be a plain-JSON snapshot that `validateProof`
+ * and items (`outputProblems`), `unrounded` values (`unroundedProblems`), rules with
+ * undeclared reads that are determined, rules not decided (`undecidedRules`) and the statuses
+ * exceptions impose (`exceptionProblems`). `p` must be a plain-JSON snapshot that `validateProof`
  * accepts.
  */
 export function inconsistencies(p: UnsignedProof): string[] {
@@ -98,6 +100,8 @@ export function inconsistencies(p: UnsignedProof): string[] {
       ...outputProblems(p, listed, imposedSteps(p)),
       ...unroundedProblems(p, listed),
       ...undeclaredReadProblems(p),
+      ...undecidedRules(p),
+      ...exceptionProblems(p),
     ]),
   ];
 }

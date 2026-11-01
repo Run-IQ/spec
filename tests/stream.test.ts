@@ -4,7 +4,8 @@ import { canonicalSha256Hex, isCanonicalText } from '../src/canonical.js';
 import { canonicalize, sha256Hex } from '../src/index.js';
 import type { JsonValue } from '../src/index.js';
 import { HashStream, STREAM_BUFFER_BYTES, writeJsonString } from '../src/stream.js';
-import { canonical, hex, nodeSha256, specError } from './helpers.js';
+import { specError } from './helpers.js';
+import { canonical, hex, nodeSha256 } from './hashing.js';
 
 /** The texts a stream must encode as `TextEncoder` does, piece boundaries included. */
 const PIECE = 16_384;

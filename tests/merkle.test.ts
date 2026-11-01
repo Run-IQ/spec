@@ -2,7 +2,8 @@ import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 import { inclusionPath, merkleRoot, verifyInclusion } from '../src/index.js';
 import { lastPackedBytes } from '../src/merkle.js';
-import { hex, leafHashes, nodeSha256, referencePath, referenceRoot, specError } from './helpers.js';
+import { specError } from './helpers.js';
+import { hex, leafHashes, nodeSha256, referencePath, referenceRoot } from './hashing.js';
 
 const NODE = Uint8Array.of(1);
 const [A, B, C] = ['a', 'b', 'c'].map((text) => nodeSha256(text)) as [

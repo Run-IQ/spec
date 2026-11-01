@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { inputLeafHash, validateProofInput } from '../../src/index.js';
 import { MAX_INPUT_LEAF_TEXT, MAX_JSON_VALUES } from '../../src/values.js';
-import { hex, LONGEST_DATA_LIST, loose, nodeLeafHash, proofInput, specError } from '../helpers.js';
+import { LONGEST_DATA_LIST, loose, proofInput, specError } from '../helpers.js';
+import { hex, nodeLeafHash } from '../hashing.js';
 
 const SALTS = { salt: 'ab'.repeat(32), valueSalt: 'cd'.repeat(32) };
 

@@ -8,7 +8,8 @@ import {
 } from '../../src/index.js';
 import type { JsonValue } from '../../src/index.js';
 import { lastValuesSpent, MAX_JSON_VALUES } from '../../src/values.js';
-import { expectedHashWork, hashWorkOf, leafBytes, proofInput } from '../helpers.js';
+import { proofInput } from '../helpers.js';
+import { expectedHashWork, hashWorkOf, leafBytes } from '../hashing.js';
 
 const SEED = deriveInputSeed(new Uint8Array(32).fill(7), 'r1');
 const DIGEST = '0'.repeat(64);

@@ -7,16 +7,8 @@ import {
 } from '../src/index.js';
 import type { FactDisclosure, FactDisclosureVerification, ProofInput } from '../src/index.js';
 import { lastValuesSpent } from '../src/values.js';
-import {
-  countValues,
-  fromHex,
-  hashWorkOf,
-  jsonCopy,
-  loose,
-  nested,
-  proofInput,
-  specError,
-} from './helpers.js';
+import { countValues, jsonCopy, loose, nested, proofInput, specError } from './helpers.js';
+import { fromHex, hashWorkOf } from './hashing.js';
 import first from './vectors/input-v1.json';
 
 const X: ProofInput = first.input;

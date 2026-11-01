@@ -236,7 +236,11 @@ function scaledOf(value: number): Scaled {
   return { coefficient: negative ? -digits : digits, exponent: -fraction.length };
 }
 
-/** `a + b`, rounded to 20 significant digits, a tie away from zero. */
+/**
+ * `a + b`, rounded to 20 significant digits, a tie away from zero: one step of core's
+ * `floatSum` (`core/src/engine/decimalArithmetic.ts`: `Float`, decimal.js `precision: 20` and
+ * `ROUND_HALF_UP`, which rounds a tie away from zero). `1e20 + 5` is `100000000000000000010`.
+ */
 function addRounded(a: Scaled, b: Scaled): Scaled {
   const exponent = Math.min(a.exponent, b.exponent);
   const sum =

@@ -30,12 +30,14 @@ export function citeItem(output: string, subject: string): string {
 /** What one output or item receives: steps, pending rules, and the strongest candidate. */
 interface Feed {
   steps: ProofStep[];
+  /** The ids of the pending rules, and their entries. */
   pending: string[];
+  waiting: ProofPending[];
   /** The rank of the strongest exclusion that would have fed it, -1 when none. */
   candidates: number;
 }
 
-const newFeed = (): Feed => ({ steps: [], pending: [], candidates: -1 });
+const newFeed = (): Feed => ({ steps: [], pending: [], waiting: [], candidates: -1 });
 
 /** A node of the trie of the subjects of a per output: an item ends at it, or an exclusion. */
 interface Node {
@@ -150,8 +152,10 @@ function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): Fe
   };
   for (const step of p.applied) route(step, step.output, 'step')?.steps.push(step);
   for (const entry of p.pending) {
-    if (entry.output !== undefined)
-      route(entry, entry.output, 'pending rule')?.pending.push(entry.ruleId);
+    if (entry.output === undefined) continue;
+    const feed = route(entry, entry.output, 'pending rule');
+    feed?.pending.push(entry.ruleId);
+    feed?.waiting.push(entry);
   }
   for (const skip of p.skipped) exclude(skip, outputs, tries);
   for (const trie of tries.values()) trie.settle();
@@ -209,6 +213,79 @@ function boundsProblems(
   return [];
 }
 
+/**
+ * True when `subject` is an element of the collection `per` (`/foyers/*\/personnes`): its
+ * segments are those of `per`, each `*` an element segment (`@<key>`), then one element
+ * segment (D-2). A subject deeper or shallower, an index, a group or a time segment is not.
+ */
+function inCollection(per: string, subject: string): boolean {
+  const pattern = parsePointer(per);
+  const segments = parsePointer(subject);
+  if (segments.length !== pattern.length + 1) return false;
+  const element = (segment: string | undefined): boolean => segment?.startsWith('@') === true;
+  return (
+    pattern.every((part, i) => (part === '*' ? element(segments[i]) : part === segments[i])) &&
+    element(segments[pattern.length])
+  );
+}
+
+/**
+ * The completeness of an output or item (D-7, the table of Task 9M2): a pending rule that feeds
+ * it makes it `undetermined`, except an `any` with a `true` contribution, an `all` with a
+ * `false` one, and a `highestPriority` whose winner outranks every pending rule (its priorities
+ * are in the rule definitions: `verifyProof` checks it when given them, `priorityProblems`). An
+ * `undetermined` one has a cause: a pending rule, or, for an `all` no rule reached without
+ * `empty`, its own emptiness (`emptyOutput`).
+ */
+function completenessProblems(target: Target, feed: Feed): string[] {
+  const { combine, empty } = target.declaration;
+  const pending = feed.pending.length > 0;
+  if (target.status === 'undetermined') {
+    const emptyAll = combine === 'all' && feed.steps.length === 0 && empty !== true;
+    return pending || emptyAll ? [] : [`undetermined output without a cause: ${target.cite()}`];
+  }
+  if (!pending || combine === 'highestPriority') return [];
+  const decisive = combine === 'any' ? true : combine === 'all' ? false : undefined;
+  if (decisive !== undefined && feed.steps.some((step) => step.contribution === decisive)) {
+    return [];
+  }
+  return [`settled output with pending rules: ${target.cite()}`];
+}
+
+/**
+ * Internal, for `verifyProof` given the rule definitions: each settled `highestPriority` output
+ * or item that a pending rule feeds whose priority (`priorityOf`, by qualified id and version)
+ * is not strictly below that of its winner, the rule of `selected` (`settled output with
+ * pending rules: name`). A rule whose priority is unknown is not compared.
+ */
+export function priorityProblems(
+  p: UnsignedProof,
+  priorityOf: (ruleId: string, version: number) => number | undefined,
+): string[] {
+  const listed = new Map<string, ProofOutput>();
+  for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
+  const issues: string[] = [];
+  const feeds = feedsOf(p, listed);
+  for (const { target, feed } of targetsOf(p, listed, feeds)) {
+    const { selected } = target;
+    if (target.declaration.combine !== 'highestPriority' || target.status === 'undetermined') {
+      continue;
+    }
+    if (selected === undefined || feed.pending.length === 0) continue;
+    const winner = feed.steps.find(
+      (step) => step.ruleId === selected.ruleId && step.subject === selected.subject,
+    );
+    const top = winner === undefined ? undefined : priorityOf(winner.ruleId, winner.version);
+    if (top === undefined) continue;
+    const outranked = feed.waiting.some((entry) => {
+      const priority = priorityOf(entry.ruleId, entry.version);
+      return priority !== undefined && priority >= top;
+    });
+    if (outranked) issues.push(`settled output with pending rules: ${target.cite()}`);
+  }
+  return issues;
+}
+
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
 function samePending(named: readonly string[], pending: readonly string[]): boolean {
   const expected = new Set(pending);
@@ -262,6 +339,9 @@ export function outputProblems(
       continue;
     }
     issues.push(...entryProblems(item, () => citeItem(item.output, item.subject), output));
+    if (!inCollection(output.per, item.subject)) {
+      issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
+    }
   }
   const feeds = feedsOf(p, listed);
   issues.push(...feeds.strays);
@@ -271,6 +351,7 @@ export function outputProblems(
     if (!samePending(pending, feed.pending)) {
       issues.push(`pending differ from pending rules: ${target.cite()}`);
     }
+    issues.push(...completenessProblems(target, feed));
   }
   issues.push(...statusProblems(p, listed, feeds, targets));
   return issues;

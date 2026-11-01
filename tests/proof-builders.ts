@@ -53,7 +53,11 @@ export function withEntry(section: string, index: number, patch: Entry): Content
 }
 
 /** The declaration and value of an output, without the members `outputProof` fills. */
-export type OutputPart = Omit<ProofOutput, 'name' | 'status' | 'contributors' | 'pending' | 'salt'>;
+export type OutputPart = Omit<
+  ProofOutput,
+  'name' | 'status' | 'contributors' | 'pending' | 'salt'
+> &
+  Partial<Pick<ProofOutput, 'status' | 'contributors' | 'pending'>>;
 
 /**
  * A determined proof of one output `value` (its declaration and value from `output`), fed by one

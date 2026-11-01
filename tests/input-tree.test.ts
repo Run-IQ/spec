@@ -32,27 +32,29 @@ import {
 } from '../src/values.js';
 import {
   countValues,
-  expectedHashWork,
-  leafBytes,
   LONGEST_DATA_LIST,
   loose,
+  HUMAN_ASSERTION,
+  nested,
+  proofInput,
+  specError,
+  tooDeepIssue,
+} from './helpers.js';
+import {
+  expectedHashWork,
+  leafBytes,
   nodeLeafHash,
   fromHex,
   hex,
-  HUMAN_ASSERTION,
-  nested,
   nodeHmac,
   nodeInputDigest,
   nodeInputSeed,
   nodeSha256,
-  proofInput,
   referenceRoot,
   pointerText,
   sharedPointerText,
-  specError,
-  tooDeepIssue,
-} from './helpers.js';
-import type { TreeLeaf } from './helpers.js';
+} from './hashing.js';
+import type { TreeLeaf } from './hashing.js';
 
 const SECRET = new Uint8Array(32).fill(0x42);
 /** The problem of an input whose leaf pointers hold too many code units. */

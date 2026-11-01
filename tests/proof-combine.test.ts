@@ -438,14 +438,16 @@ describe('carried from 9I: each value checked against the whole declaration', ()
       status: 'undetermined',
       bounds: { min: '1.0' },
     };
-    expect(problems({ output })).toEqual(['decimal value not canonical: value']);
+    // Undetermined by no pending rule: without a cause too.
+    const NO_CAUSE = 'undetermined output without a cause: value';
+    expect(problems({ output })).toEqual(['decimal value not canonical: value', NO_CAUSE]);
     const count = {
       type: 'number',
       combine: 'count',
       status: 'undetermined',
       bounds: { min: 1.5 },
     };
-    expect(problems({ output: count })).toEqual([VALUE_OFF]);
+    expect(problems({ output: count })).toEqual([VALUE_OFF, NO_CAUSE]);
   });
 });
 

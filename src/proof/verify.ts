@@ -6,6 +6,7 @@ import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { inconsistencies } from './consistency.js';
+import { priorityProblems } from './statuses.js';
 import { contentDigest } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
@@ -128,9 +129,11 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   const items = readList(rules, 'rules');
   if (!Array.isArray(items)) return [{ message: items.message, invalid: true }];
   const given = new Map<string, string>();
+  const priorities = new Map<string, number>();
   items.forEach((rule, i) => {
     let key: string;
     let checksum: string;
+    let priority: number;
     try {
       // Read and counted as `canonicalRulePayload` reads any rule, so `verifyProof` accepts a
       // rule exactly when `computeRuleChecksum` does. It validates any value; the cast only
@@ -141,12 +144,16 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       const id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
       key = `${id}@${definition.version}`;
       checksum = sha256Hex(payload);
+      priority = definition.priority;
     } catch (error) {
       invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
       return;
     }
     if (given.has(key)) invalid(`duplicate rule: ${citeName(key)}`);
-    else given.set(key, checksum);
+    else {
+      given.set(key, checksum);
+      priorities.set(key, priority);
+    }
   });
 
   const cited = new Set<string>();
@@ -160,5 +167,9 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
   for (const key of given.keys()) {
     if (!cited.has(key)) invalid(`unexpected rule: ${citeName(key)}`);
   }
+  // Given the definitions, a settled highestPriority fed by a pending rule is checked too.
+  const priorityOf = (ruleId: string, version: number): number | undefined =>
+    priorities.get(`${ruleId}@${version}`);
+  for (const message of priorityProblems(p, priorityOf)) invalid(message);
   return findings;
 }

@@ -192,7 +192,8 @@ export interface ProofSkip {
 
 /**
  * One rule (or instance) whose decision is not known (D-8): why, the pointers it misses, and
- * the output it would have fed.
+ * the output it would have fed (for a `shortCircuit` carrier, the output its short circuit
+ * targets). A pending rule makes that output `undetermined` (D-7, the completeness table).
  */
 export interface ProofPending {
   ruleId: string;

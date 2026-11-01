@@ -198,6 +198,7 @@ describe('strata, decimals and rounding in a proof', () => {
     const empty: UnsignedProof = {
       ...unsigned(),
       strata: [],
+      rules: [],
       outputs: [],
       applied: [],
       skipped: [],
@@ -220,14 +221,6 @@ describe('strata, decimals and rounding in a proof', () => {
     ['a number contribution', (p: UnsignedProof) => (p.applied[1]!.contribution = 100.13)],
     ['a non-canonical unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = '100.1250')],
     ['a number unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = 100.125)],
-    [
-      'a non-canonical bound',
-      (p: UnsignedProof) => {
-        const [fine] = p.outputs;
-        p.outputs[0] = { ...fine!, status: 'undetermined', bounds: { min: '1.0' } };
-        delete p.outputs[0].value;
-      },
-    ],
   ])('refuses a decimal output with %s', (_name, change) => {
     const content = staged();
     change(content);
@@ -242,6 +235,19 @@ describe('strata, decimals and rounding in a proof', () => {
     expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
       'Cannot sign the proof: decimal value not canonical: fine',
     );
+  });
+
+  it('refuses a decimal output with a non-canonical bound', () => {
+    const content = staged();
+    const [fine] = content.outputs;
+    content.outputs[0] = { ...fine!, status: 'undetermined', bounds: { min: '1.0' } };
+    delete content.outputs[0].value;
+    expect(verifyProof(handSealed(content)).issues).toEqual([
+      'decimal value not canonical: fine',
+      // Nothing pending feeds it: no cause either.
+      'undetermined output without a cause: fine',
+      'unsigned',
+    ]);
   });
 
   it('checks decimals only on decimal outputs; a number output takes numbers', () => {

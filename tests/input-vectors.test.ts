@@ -19,7 +19,7 @@ import {
   nodeInputSeed,
   nodeSha256,
   referenceRoot,
-} from './helpers.js';
+} from './hashing.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 

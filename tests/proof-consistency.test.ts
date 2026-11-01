@@ -41,6 +41,8 @@ describe('outputs: a list sorted by name, one entry per name', () => {
   it('refuses a value on an undetermined output', () => {
     expect(problems(withEntry('outputs', 2, { status: 'undetermined' }))).toEqual([
       'undetermined output has a value: value',
+      // Nothing pending feeds it: no cause either.
+      'undetermined output without a cause: value',
     ]);
   });
 
@@ -52,7 +54,10 @@ describe('outputs: a list sorted by name, one entry per name', () => {
 
   it('refuses a selection on an undetermined output (pre-flight M-10)', () => {
     const content = withEntry('outputs', 3, { status: 'undetermined', value: undefined });
-    expect(problems(content)).toEqual(['selected on an undetermined output: vat:level']);
+    expect(problems(content)).toEqual([
+      'selected on an undetermined output: vat:level',
+      'undetermined output without a cause: vat:level',
+    ]);
   });
 
   it('refuses a selection outside max, min and highestPriority', () => {
@@ -90,7 +95,9 @@ describe('outputs: a list sorted by name, one entry per name', () => {
       status: 'determined',
     });
     const applied = entries('applied').slice(0, 4);
-    expect(problems({ ...content, applied })).toEqual([]);
+    // Its rule is no longer decided: it leaves the proof with its step.
+    const rules = entries('rules').filter((rule) => !(rule.id === 'R2' && rule.version === 1));
+    expect(problems({ ...content, applied, rules })).toEqual([]);
   });
 
   it('refuses a settled output without value when its rules gave one', () => {
@@ -113,7 +120,8 @@ describe('outputs: a list sorted by name, one entry per name', () => {
     });
     const applied = entries('applied').filter((step) => step.output !== 'social:aid');
     const readsUndeclared: Entry[] = [];
-    expect(problems({ ...content, applied, readsUndeclared })).toEqual([
+    const rules = entries('rules').filter((rule) => rule.id !== 'R1');
+    expect(problems({ ...content, applied, readsUndeclared, rules })).toEqual([
       'all output without contribution must be undetermined: social:aid',
     ]);
   });
@@ -163,7 +171,8 @@ describe('items (pre-flight I19)', () => {
     const applied = entries('applied').slice(1);
     const pending: Entry[] = [];
     const skipped = entries('skipped').slice(1);
-    expect(problems({ ...content, applied, pending, skipped })).toEqual([]);
+    const rules = entries('rules').filter((rule) => rule.id !== 'k');
+    expect(problems({ ...content, applied, pending, skipped, rules })).toEqual([]);
   });
 
   it('refuses a step of a per output that feeds no item', () => {

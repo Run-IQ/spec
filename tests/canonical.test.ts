@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, canonicalizeAt, SpecError } from '../src/index.js';
-import { canonical, specError } from './helpers.js';
+import { specError } from './helpers.js';
+import { canonical } from './hashing.js';
 
 const nonSerializable = expect.objectContaining({ code: 'NON_SERIALIZABLE' });
 

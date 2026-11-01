@@ -21,21 +21,17 @@ import type {
   ProofInput,
 } from '../src/index.js';
 import * as canonicalEntry from '../src/canonical-entry.js';
+import { builtFile, jsonCopy, loose, proofInput, specError } from './helpers.js';
 import {
-  builtFile,
   fromHex,
   handTree,
   hashWorkOf,
   hex,
-  jsonCopy,
-  loose,
   nodeCommitment,
   nodeCommittedLeafHash,
   nodeLeafHash,
-  proofInput,
-  specError,
-} from './helpers.js';
-import type { HandLeaf, HandNeighbour, TreeLeaf } from './helpers.js';
+} from './hashing.js';
+import type { HandLeaf, HandNeighbour, TreeLeaf } from './hashing.js';
 import first from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 import vectors from './vectors/disclosure-v1.json';

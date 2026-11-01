@@ -2,13 +2,8 @@ import { describe, expect, it } from 'vitest';
 import { computeInputDigest, deriveInputSeed, inputLeaves } from '../../src/index.js';
 import type { ProofInput } from '../../src/index.js';
 import { MAX_INPUT_LEAF_TEXT } from '../../src/values.js';
-import {
-  expectedHashWork,
-  hashWorkOf,
-  leafBytes,
-  proofInput,
-  sharedPointerText,
-} from '../helpers.js';
+import { proofInput } from '../helpers.js';
+import { expectedHashWork, hashWorkOf, leafBytes, sharedPointerText } from '../hashing.js';
 
 /** `core`'s `DEFAULT_LIMITS.maxInputLeaves` (D-26): the default largest input. */
 const MAX_INPUT_LEAVES = 500_000;

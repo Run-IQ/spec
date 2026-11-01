@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, canonicalizeAt } from '../src/index.js';
-import { canonical, specError } from './helpers.js';
+import { specError } from './helpers.js';
+import { canonical } from './hashing.js';
 
 // Vectors from RFC 8785 (JSON Canonicalization Scheme), sections 3.2.2 and 3.2.3.
 describe('canonicalize is JCS (RFC 8785)', () => {

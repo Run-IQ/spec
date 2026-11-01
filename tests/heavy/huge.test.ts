@@ -9,7 +9,8 @@ import {
   validateProofInput,
 } from '../../src/index.js';
 import type { ProofInput } from '../../src/index.js';
-import { hex, nodeHmac, nodeInputDigest, referenceRoot, specError } from '../helpers.js';
+import { specError } from '../helpers.js';
+import { hex, nodeHmac, nodeInputDigest, referenceRoot } from '../hashing.js';
 
 /**
  * Values whose canonical text is longer than a JavaScript string can be (V8: 2^29 - 24 code
