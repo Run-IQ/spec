@@ -18,7 +18,7 @@ import { inconsistencies } from './consistency.js';
 import { readUnsaltedProof } from './validate.js';
 import { treeDigest } from './tree.js';
 import { inputSalter, readSeed, UNSALTED_SEED } from '../input/seed.js';
-import { ownCopy, spendValues, tooLargeMessage, withValueBudget } from '../values.js';
+import { MAX_JSON_VALUES, ownCopy, spendValues, withValueBudget } from '../values.js';
 
 /**
  * The digest a proof keeps in place of its input (D-15), lowercase hex:
@@ -138,8 +138,10 @@ function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined
  * Throws `SpecError`:
  * - `INVALID_KEY` when `seed` is not a `Uint8Array` of 32 bytes (checked first);
  * - `INVALID_PROOF`, `Cannot seal the proof: <first problem>`, when the content is not a valid
- *   unsalted proof (see `validateProof`; an entry with a `salt` or redacted is refused), when
- *   `inputSalted does not match the seed`, or when it is not internally consistent (the checks
+ *   unsalted proof (see `validateProof`; an entry with a `salt` or redacted is refused; a value
+ *   past the budget is named by its path), when the content fits but its salts would not (`the
+ *   salts of its <n> entries would take it past 10000000 values`), when `inputSalted does not
+ *   match the seed`, or when it is not internally consistent (the checks
  *   of `verifyProof`: `cited rule not listed: ...`, `outputs not sorted at 1`, `output value does
  *   not follow from its contributions: ...`, …).
  */
@@ -158,8 +160,11 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
     );
   }
   const salted = saltEntries(proof, bytes);
-  if (salted === undefined) {
-    throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${tooLargeMessage('proof')}`);
+  if (typeof salted === 'number') {
+    throw newSpecError(
+      'INVALID_PROOF',
+      `Cannot seal the proof: the salts of its ${salted} entries would take it past ${MAX_JSON_VALUES} values`,
+    );
   }
   const [inconsistency] = inconsistencies(salted);
   if (inconsistency) {
@@ -169,13 +174,14 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
 }
 
 /**
- * `proof` (a snapshot) with the salt of its place on each entry (D-14), or `undefined` when the
- * salts do not fit the value budget: each is a value of the sealed proof, counted here.
+ * `proof` (a snapshot) with the salt of its place on each entry (D-14), or the number of its
+ * entries when their salts do not fit the value budget left once it was read (with the digest
+ * sealing adds): each salt is a value of the sealed proof, counted here.
  */
-function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | undefined {
+function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number {
   let entries = 0;
   for (const section of PROOF_SECTIONS) entries += proof[section].length;
-  if (!spendValues(entries)) return undefined;
+  if (!spendValues(entries)) return entries;
   const salter = inputSalter(seed, 'proof:');
   const salted = { ...proof } as unknown as Record<string, unknown>;
   for (const section of PROOF_SECTIONS) {

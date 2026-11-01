@@ -14,6 +14,7 @@ import { comparePointers } from '../../src/path/pointer.js';
 import { generator, omit, specError } from '../helpers.js';
 import { outputProof, wideProof } from '../proof-builders.js';
 import { unsalted } from '../proof-cases.js';
+import { hashWork } from '../../src/stream.js';
 import type { ProofView } from '../../src/proof/types.js';
 
 type Entry = Record<string, JsonValue>;
@@ -123,29 +124,52 @@ function summed(n: number): ProofView {
   return proof;
 }
 
-// The plan (Task 9K1) asks for 8 s at 250 000 steps and 3 s at 80 000. On the machine of Task
-// 9K1, the code before it (one sha256 of the canonical proof, salts given) took 7.4 to 8.4 s and
-// 2.3 to 2.5 s; with a leaf per entry hashed by @noble/hashes and the salts computed by
-// sealProof, 9.8 to 10.4 s and 2.8 to 3.6 s. The budgets below hold that cost, pending the
-// controller's ruling on the plan's (see the report of Task 9K1).
-describe('sealing and verifying at scale (D-26, pre-flight I30)', () => {
-  it.each([
-    [80_000, 4_000],
-    [250_000, 12_000],
-  ])(
-    '%i steps: sealed then verified in less than %i ms',
-    (n, budget) => {
-      const content = unsalted(summed(n));
-      const start = performance.now();
-      const sealed = sealProof(content);
-      expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
-      const elapsed = performance.now() - start;
-      expect(sealed.applied).toHaveLength(n);
-      expect(elapsed).toBeLessThan(budget);
+/** The sha256 calls and bytes `run` makes (`hashWork`: leaves, nodes, digests, HMACs). */
+function counted<T>(run: () => T): { result: T; calls: number; bytes: number } {
+  const before = { ...hashWork };
+  const result = run();
+  return { result, calls: hashWork.calls - before.calls, bytes: hashWork.bytes - before.bytes };
+}
+
+// Counted, not timed (hardening): the wall-clock times measured in Task 9K1 are in
+// docs/phase-2-changes.md; the absolute budgets are the D-26 bench's.
+describe('sealing and verifying at scale: counted work (D-26, pre-flight I30)', () => {
+  /** The work of sealing then verifying `summed(n)`. */
+  function workOf(n: number) {
+    const content = unsalted(summed(n));
+    const seal = counted(() => sealProof(content));
+    const sealed = seal.result;
+    const verify = counted(() => verifyProof(sealed));
+    expect(verify.result).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(sealed.applied).toHaveLength(n);
+    // The header, n rules, one output, n steps.
+    const leaves = 2 * n + 2;
+    expect(proofLeafHashes(sealed)).toHaveLength(leaves);
+    return { n, leaves, seal, verify };
+  }
+
+  const sizes = [80_000, 250_000].map(workOf);
+
+  it.each(sizes.map((work) => [work.n, work] as const))(
+    '%i steps: one hash per leaf and per internal node, the digest, a salt per entry',
+    (_n, { leaves, seal, verify }) => {
+      const nodes = leaves - 1;
+      const entries = leaves - 1;
+      expect(verify.calls).toBe(leaves + nodes + 1);
+      expect(seal.calls).toBe(leaves + nodes + 1 + entries);
     },
-    120_000,
   );
-});
+
+  it('the bytes hashed grow with the steps: at most 4 bytes more per step (longer indices)', () => {
+    const [small, large] = sizes as [(typeof sizes)[0], (typeof sizes)[0]];
+    for (const phase of ['seal', 'verify'] as const) {
+      const perStepSmall = small[phase].bytes / small.n;
+      const perStepLarge = large[phase].bytes / large.n;
+      expect(perStepLarge).toBeGreaterThanOrEqual(perStepSmall - 1);
+      expect(perStepLarge).toBeLessThanOrEqual(perStepSmall + 4);
+    }
+  });
+}, 300_000);
 
 describe('one leaf among 200 000, checked alone (volume addendum)', () => {
   it('reads the header, the leaf and the hashes of its path: O(log n)', () => {
