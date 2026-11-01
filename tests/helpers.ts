@@ -1,4 +1,7 @@
 import { createHash, createHmac, hkdfSync } from 'node:crypto';
+import { existsSync } from 'node:fs';
+import { dirname, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
 import {
   canonicalize,
@@ -440,4 +443,19 @@ export function nodeLeafHash(leaf: InputLeaf): Uint8Array {
 /** `value` typed as what a JavaScript caller may pass. */
 export function loose<T>(value: unknown): T {
   return value as T;
+}
+
+/** The built package, `dist/`, that `npm run build` writes. */
+const DIST = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
+
+/**
+ * The path of `file` in the built package. A test of the build never skips: without it, it
+ * fails, saying to build first.
+ */
+export function builtFile(file: string): string {
+  const path = resolve(DIST, file);
+  if (!existsSync(path)) {
+    throw new Error(`${path} is missing: run \`npm run build\` first`);
+  }
+  return path;
 }

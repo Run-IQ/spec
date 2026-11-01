@@ -1,15 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
+import { builtFile } from '../helpers.js';
 
-const dist = resolve(__dirname, '../../dist/index.js');
-
-describe.skipIf(!existsSync(dist))(
-  '10 000 000 leaves in a process of default heap (built dist)',
-  () => {
-    it("computes the root, holding 32 bytes a leaf beside the caller's list", () => {
-      const script = `
+describe('10 000 000 leaves in a process of default heap (built dist)', () => {
+  it("computes the root, holding 32 bytes a leaf beside the caller's list", () => {
+    const dist = builtFile('index.js');
+    const script = `
       const { merkleRoot } = await import(${JSON.stringify(`file://${dist}`)});
       const n = 10_000_000;
       const bytes = new Uint8Array(32 * n);
@@ -23,15 +19,14 @@ describe.skipIf(!existsSync(dist))(
         heap: after.heapUsed - before.heapUsed,
         buffers: after.arrayBuffers - before.arrayBuffers,
       }));`;
-      const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
-        encoding: 'utf8',
-      });
-      const { root, heap, buffers } = JSON.parse(out) as Record<string, number>;
-      expect(root).toBe(32);
-      // No array per hash: 10^7 of them would take hundreds of megabytes of heap.
-      expect(heap).toBeLessThan(64 * 2 ** 20);
-      // The packed storage: 32 bytes a leaf, allocated once.
-      expect(buffers).toBeLessThanOrEqual(32 * 10_000_000 + 2 ** 20);
-    }, 300_000);
-  },
-);
+    const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+      encoding: 'utf8',
+    });
+    const { root, heap, buffers } = JSON.parse(out) as Record<string, number>;
+    expect(root).toBe(32);
+    // No array per hash: 10^7 of them would take hundreds of megabytes of heap.
+    expect(heap).toBeLessThan(64 * 2 ** 20);
+    // The packed storage: 32 bytes a leaf, allocated once.
+    expect(buffers).toBeLessThanOrEqual(32 * 10_000_000 + 2 ** 20);
+  }, 300_000);
+});

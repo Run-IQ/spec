@@ -1,23 +1,17 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import type { CivilCalendar } from '../src/index.js';
-import { fixedCalendar, ueReferential, overlapReport } from './helpers.js';
+import { builtFile, fixedCalendar, ueReferential, overlapReport } from './helpers.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
-// copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
-const dist = resolve(dirname(fileURLToPath(import.meta.url)), '../dist');
-const built = ['index.js', 'index.cjs', 'canonical.js', 'canonical.cjs'].every((f) =>
-  existsSync(resolve(dist, f)),
-);
-// eslint-disable-next-line no-console -- say why the suite is skipped
-if (!built) console.warn('dist-entries tests skipped: dist is missing, run `npm run build` first');
-const describeBuilt = describe.skipIf(!built);
+// copies of `SpecError` (tsup `splitting: false`). Each test fails without the build, saying
+// to run `npm run build`: it never skips.
+const ENTRIES = ['index.js', 'index.cjs', 'canonical.js', 'canonical.cjs'];
 
 type SpecErrorClass = new (
   code: string,
@@ -116,11 +110,11 @@ type Entry = {
 };
 
 async function esm(file: string): Promise<Entry> {
-  return (await import(/* @vite-ignore */ pathToFileURL(resolve(dist, file)).href)) as Entry;
+  return (await import(/* @vite-ignore */ pathToFileURL(builtFile(file)).href)) as Entry;
 }
-const cjs = (file: string): Entry => createRequire(import.meta.url)(resolve(dist, file)) as Entry;
+const cjs = (file: string): Entry => createRequire(import.meta.url)(builtFile(file)) as Entry;
 
-describeBuilt('built entries: one SpecError identity', () => {
+describe('built entries: one SpecError identity', () => {
   it('the two ESM entries bundle distinct classes that recognise each other', async () => {
     const main = (await esm('index.js')).SpecError;
     const canonical = (await esm('canonical.js')).SpecError;
@@ -406,8 +400,8 @@ describeBuilt('built entries: one SpecError identity', () => {
   });
 
   it('no built entry imports a node: module or crypto', () => {
-    for (const file of ['index.js', 'index.cjs', 'canonical.js', 'canonical.cjs']) {
-      const code = readFileSync(resolve(dist, file), 'utf8');
+    for (const file of ENTRIES) {
+      const code = readFileSync(builtFile(file), 'utf8');
       expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']node:/);
       expect(code, file).not.toMatch(/(?:from|import|require)\s*\(?\s*["']crypto["']/);
     }

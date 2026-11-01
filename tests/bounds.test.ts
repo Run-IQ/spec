@@ -1,6 +1,4 @@
 import { execFileSync } from 'node:child_process';
-import { existsSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
@@ -33,7 +31,14 @@ import type {
   VersionedRuleWindow,
 } from '../src/index.js';
 import { MAX_JSON_VALUES } from '../src/values.js';
-import { BASE_RULE, fixedCalendar, HUMAN_ASSERTION, proofInput, specError } from './helpers.js';
+import {
+  BASE_RULE,
+  builtFile,
+  fixedCalendar,
+  HUMAN_ASSERTION,
+  proofInput,
+  specError,
+} from './helpers.js';
 
 const SEED = UNSALTED_SEED;
 
@@ -376,10 +381,9 @@ describe('governingAssertion: the cost follows the assertions, not the pointer',
   }, 60_000);
 });
 
-const dist = resolve(__dirname, '../dist/index.js');
-
-describe.skipIf(!existsSync(dist))('under a 1 GB heap (built dist)', () => {
+describe('under a 1 GB heap (built dist)', () => {
   it('a sparse array of length 2^32 - 1 gives the named error, the process exits 0', () => {
+    const dist = builtFile('index.js');
     const script = `
       const s = await import(${JSON.stringify(`file://${dist}`)});
       const sp = () => { const a = []; a.length = 2 ** 32 - 1; return a; };

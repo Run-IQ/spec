@@ -27,8 +27,8 @@ jobs:
       - run: npm ci
       - run: npm run typecheck
       - run: npm run lint
-      - run: npm test
+      # Built before the tests: the tests of the built entries need dist and fail without it.
       - run: npm run build
-      # The scale limits, one file at a time (minutes, gigabytes), after the fast suite and the
-      # build (the 10M-leaf test runs the built entry).
+      - run: npm test
+      # The scale limits, one file at a time (minutes, gigabytes), after the fast suite.
       - run: npm run test:heavy
