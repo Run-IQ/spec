@@ -82,7 +82,7 @@ function carriers(n: number): UnsignedProof {
     version: 1,
     output: 'value',
     ...(i + 1 < n
-      ? { reason: 'PENDING_CARRIER', detail: `carrier ${ids[i + 1]!}@1 is pending` }
+      ? { reason: 'PENDING_CARRIER', detail: 'x', carrier: { ruleId: ids[i + 1]!, version: 1 } }
       : { reason: 'UNDETERMINED', detail: 'missing /a' }),
     missing: [],
     ...(i === 0 ? {} : { fired: false }),

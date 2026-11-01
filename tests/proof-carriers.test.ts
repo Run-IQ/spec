@@ -19,16 +19,24 @@ function inhibition(decision: { skipped?: Trace['skipped']; pending?: Trace['pen
   };
 }
 
+/** The `carrier` link of a rule pending PENDING_CARRIER behind `id` (version 1). */
+const of = (id: string, subject?: string): Entry =>
+  subject === undefined ? { ruleId: id, version: 1 } : { ruleId: id, version: 1, subject };
+
 /** X, pending for `reason` and `detail` with `fired`, inhibited T: its exception recorded. */
-const carrier = (reason: string, detail: string, fired: boolean): Trace =>
-  inhibition({ pending: [{ ruleId: 'X', reason, detail, fired }] });
+const carrier = (reason: string, detail: string, fired: boolean, link?: Entry): Trace =>
+  inhibition({
+    pending: [
+      { ruleId: 'X', reason, detail, fired, ...(link === undefined ? {} : { carrier: link }) },
+    ],
+  });
 
 /** T pending PENDING_CARRIER behind X, pending for `reason` and `detail` with `fired`. */
 const holder = (reason: string, detail: string, fired: boolean): Trace => ({
   output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ['T'] },
   rules: [{ id: 'T' }, { id: 'X' }],
   pending: [
-    { ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: 'carrier X@1 is pending' },
+    { ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: 'x', carrier: of('X') },
     { ruleId: 'X', reason, detail, fired },
   ],
 });
@@ -36,13 +44,14 @@ const holder = (reason: string, detail: string, fired: boolean): Trace => ({
 // R18: a carrier whose condition held fires its exceptions, even when its own computation
 // fails. The reason and cause it is pending for say whether it fired for some of them; for the
 // others (f17: before or after the condition), and for a cause or reason not known, the
-// pending entry says so alone (`fired`).
+// pending entry says so alone (`fired`). A cause is one of ERROR_CAUSES (the validator).
 const FREE: [string, string][] = [
   ['UNDETERMINED', 'missing /$outputs/y'],
   ['ERROR', 'OUTPUT_MISMATCH: value is NaN'],
   ['AMBIGUOUS_ORDER', 'tie on orderBy'],
   ['ERROR', 'INVALID_ORDER_VALUE: /e/1/n'],
-  ['ERROR', 'LATER_CAUSE: x'],
+  ['ERROR', 'INVALID_GROUP_VALUE: /g'],
+  ['ERROR', 'TZDATA_UNKNOWN: Europe/X'],
   ['LATER_REASON', 'x'],
 ];
 const FIRED: [string, string][] = [
@@ -118,7 +127,7 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
   });
 
   it('refuses a carrier pending PENDING_CARRIER that fired (g1 C3)', () => {
-    const trace = carrier('PENDING_CARRIER', 'carrier T@1 is pending', true);
+    const trace = carrier('PENDING_CARRIER', 'x', true, of('T'));
     expect(problems(traceProof(trace))).toEqual([
       'fired contradicts its reason: X@1',
       'pending carrier without a pending carrier: X@1',
@@ -151,89 +160,88 @@ function chain(entries: Entry[]): Trace {
   return {
     output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ids },
     rules: ids.map((id) => ({ id })),
-    pending: entries.map((entry) => ({ output: 'value', reason: 'PENDING_CARRIER', ...entry })),
+    pending: entries.map((entry) => ({
+      output: 'value',
+      reason: 'PENDING_CARRIER',
+      detail: 'x',
+      ...entry,
+    })),
   };
 }
-const by = (id: string): string => `carrier ${id} is pending`;
+const root = { reason: 'UNDETERMINED', detail: 'missing /p', fired: false };
 
 describe('PENDING_CARRIER: a chain of pending carriers down to one that did not fire (D-8)', () => {
   it('accepts a target held through a chain of pending carriers (X-12, AI Act 6(3))', () => {
     const trace = chain([
-      { ruleId: 'T', detail: by('X@1') },
-      { ruleId: 'X', detail: by('Y@1'), fired: false },
-      { ruleId: 'Y', reason: 'UNDETERMINED', detail: 'missing /p', fired: false },
+      { ruleId: 'T', carrier: of('X') },
+      { ruleId: 'X', carrier: of('Y'), fired: false },
+      { ruleId: 'Y', ...root },
     ]);
     expect(problems(traceProof(trace))).toEqual([]);
   });
 
-  it('accepts a carrier named with its subject', () => {
-    const trace: Trace = {
-      output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ['T'] },
-      rules: [{ id: 'T' }, { id: 'X' }],
-      pending: [
-        { ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: by('X@1 at /e/1') },
-        { ruleId: 'X', subject: '/e/1', reason: 'UNDETERMINED', detail: 'x', fired: false },
-      ],
-    };
+  it('follows carrier, not detail, which stays free text', () => {
+    const trace = chain([
+      { ruleId: 'T', carrier: of('X'), detail: 'carrier Z@1 is pending' },
+      { ruleId: 'X', ...root },
+    ]);
     expect(problems(traceProof(trace))).toEqual([]);
-    trace.pending![0]!.detail = by('X@1');
-    expect(problems(traceProof(trace))).toEqual(['pending carrier without a pending carrier: T@1']);
   });
 
   it('reads the carrier named whatever its subject holds', () => {
-    for (const subject of ['/e/a is pending', '/e/carrier X@1', '/e/ at /e/1', '/e/~1@:']) {
+    const subjects = ['/e/1', '/e/a is pending', '/e/carrier X@1', '/e/ at /e/1', '/e/~1@:'];
+    for (const subject of subjects) {
       const trace: Trace = {
         output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ['T'] },
         rules: [{ id: 'T' }, { id: 'X' }],
         pending: [
-          {
-            ruleId: 'T',
-            output: 'value',
-            reason: 'PENDING_CARRIER',
-            detail: by(`X@1 at ${subject}`),
-          },
-          { ruleId: 'X', subject, reason: 'UNDETERMINED', detail: 'x', fired: false },
+          { ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: 'x' },
+          { ruleId: 'X', subject, ...root },
         ],
       };
+      trace.pending![0]!.carrier = of('X', subject);
       expect(problems(traceProof(trace))).toEqual([]);
-      trace.pending![0]!.detail = by(`X@1 at ${subject} `);
-      expect(problems(traceProof(trace))).toEqual([
-        'pending carrier without a pending carrier: T@1',
-      ]);
+      for (const other of [undefined, `${subject} `, `${subject}/0`]) {
+        trace.pending![0]!.carrier = of('X', other);
+        expect(problems(traceProof(trace))).toEqual([
+          'pending carrier without a pending carrier: T@1',
+        ]);
+      }
     }
   });
 
-  it('refuses a target whose detail names no pending carrier that did not fire', () => {
-    const named = (detail: string, x?: Entry): string[] =>
+  it('refuses a target whose carrier is no pending carrier that did not fire', () => {
+    const named = (link: Entry, x?: Entry): string[] =>
       problems(
         traceProof(
-          chain([{ ruleId: 'T', detail }, ...(x === undefined ? [] : [{ ruleId: 'X', ...x }])]),
+          chain([
+            { ruleId: 'T', carrier: link },
+            ...(x === undefined ? [] : [{ ruleId: 'X', ...x }]),
+          ]),
         ),
       );
-    const root = { reason: 'UNDETERMINED', detail: 'x', fired: false };
     const refused = ['pending carrier without a pending carrier: T@1'];
-    expect(named('x')).toEqual(refused);
-    expect(named(by('Z@1'), root)).toEqual(refused);
-    expect(named('carrier X@1', root)).toEqual(refused);
-    expect(named(by('X@2'), root)).toEqual(refused);
+    expect(named(of('Z'), root)).toEqual(refused);
+    expect(named({ ruleId: 'X', version: 2 }, root)).toEqual(refused);
     // X says nothing of its exceptions: not a carrier of the proof.
-    expect(named(by('X@1'), { reason: 'UNDETERMINED', detail: 'x' })).toEqual(refused);
-    expect(named(by('X@1'), root)).toEqual([]);
+    expect(named(of('X'), { reason: 'UNDETERMINED', detail: 'x' })).toEqual(refused);
+    expect(named(of('X'), { ...root, fired: true })).toEqual(refused);
+    expect(named(of('X'), root)).toEqual([]);
   });
 
   it('refuses a pending carrier as its own source, or in a cycle (g1 A, A0, A2, A3)', () => {
     // A: T holds itself.
-    const self = chain([{ ruleId: 'T', detail: by('T@1'), fired: false }]);
+    const self = chain([{ ruleId: 'T', carrier: of('T'), fired: false }]);
     expect(problems(traceProof(self))).toEqual(['pending carrier without a root: T@1']);
     // A0: T holds itself, saying nothing of its exceptions.
-    const unsaid = chain([{ ruleId: 'T', detail: by('T@1') }]);
+    const unsaid = chain([{ ruleId: 'T', carrier: of('T') }]);
     expect(problems(traceProof(unsaid))).toEqual([
       'pending carrier without a pending carrier: T@1',
     ]);
     // A2: T and X hold each other.
     const mutual = chain([
-      { ruleId: 'T', detail: by('X@1'), fired: false },
-      { ruleId: 'X', detail: by('T@1'), fired: false },
+      { ruleId: 'T', carrier: of('X'), fired: false },
+      { ruleId: 'X', carrier: of('T'), fired: false },
     ]);
     expect(problems(traceProof(mutual))).toEqual([
       'pending carrier without a root: T@1',
@@ -241,8 +249,8 @@ describe('PENDING_CARRIER: a chain of pending carriers down to one that did not 
     ]);
     // A3: X, pending PENDING_CARRIER behind T, holds T.
     const loop = chain([
-      { ruleId: 'T', detail: by('X@1') },
-      { ruleId: 'X', detail: by('T@1'), fired: false },
+      { ruleId: 'T', carrier: of('X') },
+      { ruleId: 'X', carrier: of('T'), fired: false },
     ]);
     expect(problems(traceProof(loop))).toEqual([
       'pending carrier without a root: T@1',
@@ -250,9 +258,9 @@ describe('PENDING_CARRIER: a chain of pending carriers down to one that did not 
     ]);
     // A chain into a cycle has no root either.
     const into = chain([
-      { ruleId: 'T', detail: by('X@1') },
-      { ruleId: 'X', detail: by('Y@1'), fired: false },
-      { ruleId: 'Y', detail: by('X@1'), fired: false },
+      { ruleId: 'T', carrier: of('X') },
+      { ruleId: 'X', carrier: of('Y'), fired: false },
+      { ruleId: 'Y', carrier: of('X'), fired: false },
     ]);
     expect(problems(traceProof(into))).toEqual([
       'pending carrier without a root: T@1',
@@ -279,7 +287,10 @@ describe('given the rules, fired is on the pending entries of carriers only', ()
         { id: 'T', priority: 1 },
         { id: 'X', priority: 1 },
       ],
-      pending: [{ ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: by('X@1') }, x],
+      pending: [
+        { ruleId: 'T', output: 'value', reason: 'PENDING_CARRIER', detail: 'x', carrier: of('X') },
+        x,
+      ],
     });
     const listed = (content.rules as Entry[]).map((ref, i) => ({
       ...ref,

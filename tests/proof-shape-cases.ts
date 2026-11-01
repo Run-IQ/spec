@@ -42,6 +42,35 @@ export const VALID_PROOFS: [string, unknown][] = [
   ['a null evaluatedAt', proofWith({ evaluatedAt: null })],
   ['an instant evaluatedAt', proofWith({ evaluatedAt: '2024-02-29T23:59:59.999Z' })],
   ['an inputSalted proof', proofWith({ inputSalted: true })],
+  [
+    'a pending carrier naming its carrier, with a subject',
+    entryWith('pending', 0, {
+      reason: 'PENDING_CARRIER',
+      carrier: { ruleId: 'vat:x', version: 2, subject: '/e/a is pending' },
+    }),
+  ],
+  ...[
+    'DSL_ERROR',
+    'TIMEOUT',
+    'DSL_NOT_FOUND',
+    'INVALID_PARAMS',
+    'CHECKSUM_MISMATCH',
+    'INVALID_RULE',
+    'MODEL_ERROR',
+    'OUTPUT_MISMATCH',
+    'NOT_A_COLLECTION',
+    'TEMPORAL_OVERLAP',
+    'INVALID_ORDER_VALUE',
+    'INVALID_GROUP_VALUE',
+    'TZDATA_UNKNOWN',
+  ].map((cause): [string, unknown] => [
+    `an ERROR caused by ${cause}`,
+    entryWith('pending', 0, { reason: 'ERROR', detail: `${cause}: x:y` }),
+  ]),
+  [
+    'an ERROR cause with an empty message',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'TIMEOUT:' }),
+  ],
   ['a fixed-offset time zone', proofWith({ timeZone: '-03:30' })],
   [
     'every rule set kind without its optional members',
@@ -239,6 +268,79 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     proofWith({ digest: 'd'.repeat(63) }),
     'digest',
     'digest must be a lowercase sha256 hex string',
+  ],
+  [
+    'an ERROR cause not known',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'LATER_CAUSE: x' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'an ERROR cause in lower case',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'model_error: x' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'an ERROR cause with a space',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'MODEL_ERROR : x' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'an ERROR detail without a cause',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'MODEL_ERROR' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'an ERROR cause after a prefix',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'x MODEL_ERROR: y' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'an ERROR cause with a trailing letter',
+    entryWith('pending', 0, { reason: 'ERROR', detail: 'MODEL_ERRORS: y' }),
+    'pending[0].detail',
+    'pending[0].detail must be <CAUSE>: <message>, its cause one of ERROR_CAUSES',
+  ],
+  [
+    'PENDING_CARRIER without its carrier',
+    entryWith('pending', 0, { reason: 'PENDING_CARRIER' }),
+    'pending[0].carrier',
+    'pending[0].carrier is required for PENDING_CARRIER',
+  ],
+  [
+    'a carrier on another reason',
+    entryWith('pending', 0, { carrier: { ruleId: 'x', version: 1 } }),
+    'pending[0].carrier',
+    'pending[0].carrier applies only to PENDING_CARRIER',
+  ],
+  [
+    'a carrier with an unknown member',
+    entryWith('pending', 0, {
+      reason: 'PENDING_CARRIER',
+      carrier: { ruleId: 'x', version: 1, k: 1 },
+    }),
+    'pending[0].carrier.k',
+    'pending[0].carrier has an unknown key "k"',
+  ],
+  [
+    'a carrier without its version',
+    entryWith('pending', 0, { reason: 'PENDING_CARRIER', carrier: { ruleId: 'x' } }),
+    'pending[0].carrier.version',
+    'pending[0].carrier.version is required',
+  ],
+  [
+    'a carrier cited as local',
+    entryWith('pending', 0, {
+      reason: 'PENDING_CARRIER',
+      carrier: { ruleId: 'local:x', version: 1 },
+    }),
+    'pending[0].carrier.ruleId',
+    'pending[0].carrier.ruleId name must not be qualified by "local": ' +
+      'a local name is written bare',
   ],
   [
     'fired as text',

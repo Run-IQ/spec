@@ -7,6 +7,39 @@ import type { ProofPending, UnsignedProof } from './types.js';
 // (R18, D-8): whether each fired its exceptions, and which pending carrier holds a rule
 // pending `PENDING_CARRIER`.
 
+/**
+ * The causes of a pending `ERROR` (D-8): its `detail` is `<CAUSE>: <message>`, its cause (the
+ * text before the first `:`) exactly one of these. A new cause is a change of the format.
+ */
+export const ERROR_CAUSES: readonly string[] = [
+  'DSL_ERROR',
+  'TIMEOUT',
+  'DSL_NOT_FOUND',
+  'INVALID_PARAMS',
+  'CHECKSUM_MISMATCH',
+  'INVALID_RULE',
+  'MODEL_ERROR',
+  'OUTPUT_MISMATCH',
+  'NOT_A_COLLECTION',
+  'TEMPORAL_OVERLAP',
+  'INVALID_ORDER_VALUE',
+  'INVALID_GROUP_VALUE',
+  'TZDATA_UNKNOWN',
+];
+const CAUSES: ReadonlySet<string> = new Set(ERROR_CAUSES);
+
+/** The cause of an `ERROR` `detail`: the text before its first `:`, if any. */
+function causeOf(detail: string): string | undefined {
+  const colon = detail.indexOf(':');
+  return colon < 0 ? undefined : detail.slice(0, colon);
+}
+
+/** True when `detail` is `<CAUSE>: <message>` with a cause of `ERROR_CAUSES`. */
+export function hasErrorCause(detail: string): boolean {
+  const cause = causeOf(detail);
+  return cause !== undefined && CAUSES.has(cause);
+}
+
 /** The causes of a pending `ERROR` after which a carrier fired: its condition held (R18). */
 const FIRING_CAUSES: ReadonlySet<string> = new Set(['INVALID_PARAMS', 'MODEL_ERROR']);
 
@@ -30,18 +63,16 @@ const UNFIRING_CAUSES: ReadonlySet<string> = new Set([
  * `PENDING_DOMINANT` (dominance runs after the exceptions, D-22) and the causes of
  * `FIRING_CAUSES`, `false` for `PENDING_CARRIER` (a pending carrier would have reached it: it
  * fired nothing) and the causes of `UNFIRING_CAUSES`. `undefined` when the entry alone says it:
- * `UNDETERMINED`, `AMBIGUOUS_ORDER`, the causes `OUTPUT_MISMATCH` and `INVALID_ORDER_VALUE`
- * each come before or after the condition (D-33, D-9, D-21), and a reason or cause not known
- * here (D-6: reasons are open) may come from either side, which only its producer knows.
- * The cause of an `ERROR` is its `detail` up to the first `:` (`<CAUSE>: <message>`, D-8),
- * the whole `detail` without one.
+ * `UNDETERMINED`, `AMBIGUOUS_ORDER`, the causes `OUTPUT_MISMATCH`, `INVALID_ORDER_VALUE`,
+ * `INVALID_GROUP_VALUE` and `TZDATA_UNKNOWN` each come before or after the condition (D-33,
+ * D-9, D-21: a model or a condition reads them), and a reason not known here (D-6: reasons
+ * are open) may come from either side, which only its producer knows.
  */
 function firedOf(entry: ProofPending): boolean | undefined {
   if (entry.reason === 'PENDING_DOMINANT') return true;
   if (entry.reason === 'PENDING_CARRIER') return false;
   if (entry.reason !== 'ERROR') return undefined;
-  const colon = entry.detail.indexOf(':');
-  const cause = colon < 0 ? entry.detail : entry.detail.slice(0, colon);
+  const cause = causeOf(entry.detail) ?? '';
   if (FIRING_CAUSES.has(cause)) return true;
   if (UNFIRING_CAUSES.has(cause)) return false;
   return undefined;
@@ -62,23 +93,13 @@ export function firedProblems(p: UnsignedProof, problems: string[]): void {
   }
 }
 
-const HEAD = 'carrier ';
-const TAIL = ' is pending';
-
-/** The instance a `PENDING_CARRIER` detail names (`carrier <instanceKey> is pending`). */
-function namedCarrier(detail: string): string | undefined {
-  if (detail.length < HEAD.length + TAIL.length) return undefined;
-  if (!detail.startsWith(HEAD) || !detail.endsWith(TAIL)) return undefined;
-  return detail.slice(HEAD.length, detail.length - TAIL.length);
-}
-
 /** How the carrier a `PENDING_CARRIER` entry names holds it. */
 type Hold = 'root' | 'none' | 'rootless';
 
 /**
  * The problems of the rules pending `PENDING_CARRIER` (D-8), in the order of `pending`. Each
- * names, in its `detail`, the pending carrier that held it: `carrier id@version[ at subject]
- * is pending`, a pending instance whose `fired` is `false`
+ * names, in its `carrier`, the pending carrier that held it: a pending instance whose `fired`
+ * is `false`
  * (`pending carrier without a pending carrier: id@version[ at subject]` otherwise). A carrier
  * itself pending `PENDING_CARRIER` holds nothing by itself: following the carriers named, the
  * chain ends at a carrier pending for another reason, never on itself or in a cycle
@@ -102,8 +123,8 @@ export function pendingCarrierProblems(
       }
       holds.set(entry, 'open');
       path.push(entry);
-      const named = namedCarrier(entry.detail);
-      const carrier = named === undefined ? undefined : waiting.get(named);
+      const link = entry.carrier;
+      const carrier = link === undefined ? undefined : waiting.get(instanceKey(link));
       if (carrier === undefined || carrier.fired !== false) {
         holds.set(entry, 'none');
         path.pop();

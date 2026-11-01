@@ -214,18 +214,25 @@ export interface ProofPending {
   subject?: Subject;
   output?: string;
   reason: string;
+  /** Free text; for `ERROR`, `<CAUSE>: <message>`, its cause one of `ERROR_CAUSES` (D-8). */
   detail: string;
   missing: JsonPointer[];
   /**
    * For a rule that carries exceptions, and only for one: whether this carrier fired its
    * exceptions (R18: its condition held, and it was not pending `PENDING_CARRIER`), though its
    * own computation failed. One that did not fire has its targets pending `PENDING_CARRIER`
-   * (D-8), each naming it in `detail` (`carrier id@version[ at subject] is pending`). Fixed by
+   * (D-8), each naming it in `carrier`. Fixed by
    * the reason for some (`firedOf`): `true` for `PENDING_DOMINANT` and the causes
    * `INVALID_PARAMS`, `MODEL_ERROR`; `false` for `PENDING_CARRIER` and the causes of a failed
    * or never reached condition.
    */
   fired?: boolean;
+  /**
+   * For a rule pending `PENDING_CARRIER`, and only for one: the pending carrier that held it,
+   * an instance pending in the proof with `fired: false`. Following carriers, the chain ends at
+   * a carrier pending for another reason, never in a cycle (D-8).
+   */
+  carrier?: { ruleId: string; version: number; subject?: Subject };
   stratum: number;
   salt: string;
 }

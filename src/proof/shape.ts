@@ -21,6 +21,7 @@ import {
   stringCheck,
 } from './checks.js';
 import type { Add, Check, Shape } from './checks.js';
+import { hasErrorCause } from './carriers.js';
 import { isProofFormat, PROOF_FORMATS } from './formats.js';
 import {
   citedRule,
@@ -328,9 +329,16 @@ const SKIP: Shape = {
   },
 };
 
+const CARRIER: Shape = {
+  summary: '{ ruleId, version, subject? }',
+  fields: { ruleId: citedRule, version, subject },
+  optional: ['subject'],
+};
+
 const PENDING: Shape = {
   summary:
-    '{ ruleId, version, subject?, output?, reason, detail, missing, fired?, ' + 'stratum, salt }',
+    '{ ruleId, version, subject?, output?, reason, detail, missing, fired?, carrier?, ' +
+    'stratum, salt }',
   fields: {
     ruleId: citedRule,
     version,
@@ -340,10 +348,23 @@ const PENDING: Shape = {
     detail: nonEmptyString,
     missing: listOf(contextPointer),
     fired: boolean,
+    carrier: objectOf(CARRIER),
     stratum,
     salt,
   },
-  optional: ['subject', 'output', 'fired'],
+  optional: ['subject', 'output', 'fired', 'carrier'],
+  refine: (copy, path, add) => {
+    const at = `${path}.carrier`;
+    if (copy.reason === 'PENDING_CARRIER' && copy.carrier === undefined) {
+      add(at, `${citeName(at)} is required for PENDING_CARRIER`);
+    } else if (copy.reason !== 'PENDING_CARRIER' && copy.carrier !== undefined) {
+      add(at, `${citeName(at)} applies only to PENDING_CARRIER`);
+    }
+    if (copy.reason === 'ERROR' && !hasErrorCause(String(copy.detail))) {
+      const detail = `${path}.detail`;
+      add(detail, `${citeName(detail)} must be <CAUSE>: <message>, its cause one of ERROR_CAUSES`);
+    }
+  },
 };
 
 const AFFECTED: Shape = {
