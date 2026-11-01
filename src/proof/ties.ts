@@ -64,15 +64,27 @@ const newNode = (): Node => ({ children: new Map(), marked: false, below: false 
 /** Marked rule instances, by rule id and subject; the queries are by subject prefix. */
 export class Scope {
   private readonly roots = new Map<string, Node>();
+  private created = 0;
+
+  /** The nodes this trie holds: what its marks cost in memory. */
+  get nodes(): number {
+    return this.created;
+  }
 
   mark(entry: { ruleId: string; subject?: string }): void {
-    let node = this.roots.get(entry.ruleId) ?? newNode();
-    this.roots.set(entry.ruleId, node);
+    let root = this.roots.get(entry.ruleId);
+    if (root === undefined) {
+      root = newNode();
+      this.created++;
+      this.roots.set(entry.ruleId, root);
+    }
+    let node: Node = root;
     node.below = true;
     for (const segment of segmentsOf(entry.subject)) {
       let child = node.children.get(segment);
       if (child === undefined) {
         child = newNode();
+        this.created++;
         node.children.set(segment, child);
       }
       child.below = true;

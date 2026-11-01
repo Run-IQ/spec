@@ -67,21 +67,25 @@ const definitions = new Map<string, RuleDefinition>([
 
 /**
  * The property reads of the decisions of `proof` and of `rules` the carrier checks make, the
- * carrier instances they mark in a trie (`Scope`), those of them in a merged trie, and the
- * questions they ask a trie (`covers`); none is found.
+ * carrier instances they mark in a trie (`Scope`) and the nodes created, those of a merged
+ * trie, and the questions they ask a trie (`covers`); none is found.
  */
 function costOf(
   proof: UnsignedProof,
   rules: ReadonlyMap<string, RuleDefinition> = definitions,
-): { reads: number; marks: number; merged: number; queries: number } {
+): Cost {
   // Counted by wrapping the trie's methods, never by a spy: a spy keeps every call's arguments.
   const { mark, covers } = Scope.prototype;
-  const cost = { marks: 0, merged: 0, queries: 0 };
+  const cost = { marks: 0, merged: 0, queries: 0, nodes: 0, mergedNodes: 0 };
   Scope.prototype.mark = function (this: Scope, entry: { ruleId: string; subject?: string }) {
-    cost.marks++;
-    // A carrier's own trie is keyed by its rule (`id@version`), a merged one by its group.
-    if (!entry.ruleId.includes('@')) cost.merged++;
+    const before = this.nodes;
     mark.call(this, entry);
+    // A carrier's own trie is keyed by its rule (`id@version`), a merged one by its group.
+    const isMerged = !entry.ruleId.includes('@');
+    cost.marks++;
+    cost.nodes += this.nodes - before;
+    if (isMerged) cost.merged++;
+    if (isMerged) cost.mergedNodes += this.nodes - before;
   };
   Scope.prototype.covers = function (this: Scope, entry: { ruleId: string; subject?: string }) {
     cost.queries++;
@@ -93,6 +97,23 @@ function costOf(
     Scope.prototype.mark = mark;
     Scope.prototype.covers = covers;
   }
+}
+
+/** What the carrier checks cost (`costOf`): reads, marks, trie questions and nodes created. */
+interface Cost {
+  reads: number;
+  marks: number;
+  merged: number;
+  queries: number;
+  nodes: number;
+  mergedNodes: number;
+}
+
+/** The segments of the subjects of the pending entries and decisions of `proof`, plus them. */
+function nodeBudget(proof: UnsignedProof): number {
+  const entries = [...proof.pending, ...proof.applied, ...proof.skipped];
+  const segments = (subject: string | undefined) => subject?.split('/').length ?? 1;
+  return entries.reduce((sum, entry) => sum + segments(entry.subject), 0);
 }
 
 /** The property reads of `costOf`. */
@@ -218,6 +239,17 @@ function shared(
   return [proof, rules];
 }
 
+/**
+ * The reviewer's `deep` shape: X (tag `vat`) pending once at a subject of `l` segments, and `m`
+ * target rules T<i> tagged `vat`, `d` steps each, each also selected by id by Y<i>, pending
+ * once: `m` groups {X, Y<i>} sharing X's deep instance. No step is in the scope of a carrier.
+ */
+function deep(l: number, m: number, d: number): [UnsignedProof, Map<string, RuleDefinition>] {
+  const [proof, rules] = shared(1, 1, m, d);
+  proof.pending[0] = { ...proof.pending[0]!, subject: '/e' + '/@1/e'.repeat(l / 2) };
+  return [proof, rules];
+}
+
 /** The reads of the carrier checks on `manyCarriers(k, n)`. */
 const readsWith = (k: number, n: number): number => readsOf(...manyCarriers(k, n));
 
@@ -282,13 +314,27 @@ describe('the carriers against their rules, on hostile proofs', () => {
     // instances 160 times.
     for (const d of [50, 49]) {
       const [proof, rules] = shared(1_000, 50, 160, d);
-      const { marks, merged, queries } = costOf(proof, rules);
+      const { marks, merged, queries, nodes, mergedNodes } = costOf(proof, rules);
       const pending = proof.pending.length;
       const decisions = proof.applied.length;
       expect(merged).toBeLessThanOrEqual(pending + decisions);
       expect(marks - merged).toBeLessThanOrEqual(pending);
+      expect(mergedNodes).toBeLessThanOrEqual(nodeBudget(proof));
+      expect(nodes - mergedNodes).toBeLessThanOrEqual(nodeBudget(proof));
       // At most the carriers selecting its rule, 1 001, per decision.
       expect(queries).toBeLessThanOrEqual(decisions * 1_001);
+    }
+  }, 600_000);
+  it('groups sharing a 100 000-segment instance: trie nodes within the subject segments', () => {
+    for (const d of [1, 2]) {
+      for (const m of [40, 100, 400]) {
+        const [proof, rules] = deep(100_000, m, d);
+        const { nodes, mergedNodes, queries } = costOf(proof, rules);
+        // X's instance, 100 001 nodes, in its own trie once; never copied per group.
+        expect(mergedNodes).toBeLessThanOrEqual(nodeBudget(proof));
+        expect(nodes - mergedNodes).toBeLessThanOrEqual(nodeBudget(proof));
+        expect(queries).toBeLessThanOrEqual(2 * m * d);
+      }
     }
   }, 600_000);
 });

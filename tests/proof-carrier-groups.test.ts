@@ -98,8 +98,9 @@ describe('the targets of the carriers pending without firing, given the rules', 
   });
 
   it('judges the same with some groups merged and the others asked one carrier at a time', () => {
-    // With 3 far instances each, A's group (X, W, V: 12 instances, 4 decisions) is asked one
-    // carrier at a time, B's (X) and C's (W), 4 instances for 5 decisions each, merged.
+    // With 3 far instances each (3 trie nodes per subject), A's group (X, W, V: 36 nodes, 3
+    // carriers asked through 12) saves nothing merged: asked one carrier at a time. B's (X: 12
+    // nodes, asked through 16) and C's (W: 12, through 14) are merged.
     expect(found(3)).toEqual(expected);
   });
 });

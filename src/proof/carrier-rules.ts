@@ -170,9 +170,22 @@ interface Group {
 /** How a group's decisions ask its carriers' instances (see `waitingTargets`). */
 interface Plan {
   members: string[];
-  instances: number;
-  decisions: number;
+  /** N_g: the trie nodes of its carriers' instances, merged. */
+  nodes: number;
+  /** S_g: the steps of one question per decision, through its subject (`nodesOf`). */
+  steps: number;
   merged: boolean;
+}
+
+/**
+ * The trie nodes a subject needs, a question through it costs: one per segment (a JSON
+ * pointer's `/`), plus the root.
+ */
+function nodesOf(subject: string | undefined): number {
+  let nodes = 1;
+  if (subject === undefined) return nodes;
+  for (let i = 0; i < subject.length; i++) if (subject.charCodeAt(i) === 0x2f) nodes++;
+  return nodes;
 }
 
 /** The target rules (among `targets`, through `index`) `carrier`, rule `key`, selects. */
@@ -198,21 +211,25 @@ function selectedBy(
  * `target decided as if its carrier were not pending` (see `carrierRuleFindings`). With D
  * decisions, P pending entries, R rule definitions, and the target rules (those with a decision
  * that does not wait) grouped by the exact set of carrier rules (pending with `fired: false`)
- * selecting them, a group g having I_g carrier instances, D_g decisions and C_g carriers, the
+ * selecting them, a group g having C_g carriers, N_g trie nodes for their instances (one per
+ * subject segment, plus one: `nodesOf`) and S_g nodes through its decisions' subjects, the
  * work is linear in:
- * - D + P + R: the decisions, the carrier instances and the target rules, each indexed once;
+ * - D + P + R and the subject segments: the decisions, the carrier instances and the target
+ *   rules, each indexed once;
  * - the candidates of each selector: the target rules of its most selective field, one lookup
  *   per name it lists (`Index`), each confirmed by `matchesSelector`;
  * - the pairs (carrier rule, target rule it selects), each refining the target's group once;
  * - the questions: each decision of a group asks its merged trie once, or the trie of each of
  *   its carriers in turn, stopping at the first that reaches it: at most C_g questions, a
  *   number the rules fix, never the proof; each question linear in the subject's depth.
- * Memory is linear in P + D, beside the index and the groups of the rules (R, and the pairs):
+ * Memory is linear in the total subject segments of the proof (those of the pending entries and
+ * decisions, plus P + D), beside the index and the groups of the rules (R, and the pairs):
  * each carrier instance is marked at most once in its own carrier's trie, and the merged
- * tries, chosen by saving (D_g × C_g - I_g, the greatest first, ties in the order of their
- * first decision), hold at most P + D marks in all. One carrier with N instances selecting M
- * target rules marks N instances, never N × M; a carrier beside M carriers selecting one
- * target each, N + M; groups sharing carriers never copy them beyond the budget.
+ * tries, chosen by saving (S_g × C_g - N_g, the greatest first, ties in the order of their
+ * first decision), hold at most that many nodes in all. One carrier with N instances selecting
+ * M target rules marks N instances, never N × M; a carrier beside M carriers selecting one
+ * target each, N + M; groups sharing carriers, or a deep instance, never copy them beyond the
+ * budget.
  */
 function waitingTargets(
   p: UnsignedProof,
@@ -245,14 +262,22 @@ function waitingTargets(
   }
   if (early.length === 0) return;
   // The subjects of the instances of the carriers pending without firing, by rule.
+  // With the trie nodes they need (`nodesOf`), and the nodes all the subjects of the pending
+  // entries and decisions would need: the budget of the merged tries.
   const carriers = new Map<string, (string | undefined)[]>();
+  const carrierNodes = new Map<string, number>();
+  let budget = 0;
+  for (const decision of decisions) budget += nodesOf(decision.subject);
   for (const entry of p.pending) {
+    const nodes = nodesOf(entry.subject);
+    budget += nodes;
     if (entry.fired !== false) continue;
     const key = ruleKey(entry);
     if (!definitions.has(key)) continue;
     const subjects = carriers.get(key);
     if (subjects === undefined) carriers.set(key, [entry.subject]);
     else subjects.push(entry.subject);
+    carrierNodes.set(key, (carrierNodes.get(key) ?? 0) + nodes);
   }
   // The target rules by the exact set of carrier rules selecting them (`Group`), refined
   // carrier by carrier: one step per carrier rule and target rule it selects.
@@ -282,25 +307,24 @@ function waitingTargets(
     let plan = plans.get(group);
     if (plan === undefined) {
       const members: string[] = [];
-      let instances = 0;
+      let nodes = 0;
       for (let link: Group | undefined = group; link !== undefined; link = link.parent) {
         members.push(link.carrier);
-        instances += carriers.get(link.carrier)?.length ?? 0;
+        nodes += carrierNodes.get(link.carrier) ?? 0;
       }
-      plan = { members, instances, decisions: 0, merged: false };
+      plan = { members, nodes, steps: 0, merged: false };
       plans.set(group, plan);
     }
-    plan.decisions += 1;
+    plan.steps += nodesOf(decision.subject);
   }
-  // The groups merged in one trie (`merged`, the group's id as `ruleId`): by saving (D_g × C_g
-  // questions for I_g marks), the greatest first, ties in the order of their first decision,
-  // while their marks fit a budget of the pending entries and the decisions (P + D: memory
-  // linear in the proof). Any other group asks the trie of each of its carriers (`own`, the
+  // The groups merged in one trie (`merged`, the group's id as `ruleId`), in trie nodes: by
+  // saving (S_g × C_g steps of questions for N_g nodes), the greatest first, ties in the order
+  // of their first decision, while their nodes fit the budget (memory linear in the subject
+  // segments of the proof). Any other group asks the trie of each of its carriers (`own`, the
   // carrier rule as `ruleId`), where each instance is marked once.
-  const saving = (plan: Plan): number => plan.decisions * plan.members.length - plan.instances;
+  const saving = (plan: Plan): number => plan.steps * plan.members.length - plan.nodes;
   const bySaving = [...plans].filter(([, plan]) => saving(plan) > 0);
   bySaving.sort(([, a], [, b]) => saving(b) - saving(a));
-  let budget = p.pending.length + decisions.length;
   const own = new Scope();
   const ownMarked = new Set<string>();
   const merged = new Scope();
@@ -310,8 +334,8 @@ function waitingTargets(
     }
   };
   for (const [group, plan] of bySaving) {
-    if (plan.instances > budget) continue;
-    budget -= plan.instances;
+    if (plan.nodes > budget) continue;
+    budget -= plan.nodes;
     plan.merged = true;
     for (const key of plan.members) markAll(merged, group.id, key);
   }
