@@ -47,8 +47,14 @@ function oracleLeaf(pointer: string, content: readonly string[]): Uint8Array {
   const valueSalt = nodeHmac(UNSALTED_SEED, `value:${pointer}`);
   const commitment = oracle([Uint8Array.of(3), TAG, Uint8Array.of(0), valueSalt, ...content]);
   const salt = nodeHmac(UNSALTED_SEED, `input:${pointer}`);
-  const pointerHash = oracle([JSON.stringify(pointer)]);
-  return oracle([Uint8Array.of(0), TAG, Uint8Array.of(0), salt, pointerHash, commitment]);
+  return oracle([
+    Uint8Array.of(0),
+    TAG,
+    Uint8Array.of(0),
+    salt,
+    commitment,
+    JSON.stringify(pointer),
+  ]);
 }
 
 /** The unsalted input digest of `data` (its keys sorted, each holding `text`), by the oracle. */

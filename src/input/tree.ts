@@ -91,10 +91,11 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
 
 /**
  * The hash of one input leaf (D-15), 32 bytes:
- * `sha256(0x00 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ salt ‖ sha256(utf8(canonicalize(pointer))) ‖
- * C)`, where `C`, the commitment to its content, is `sha256(0x03 ‖ utf8('run-iq.input/1') ‖ 0x00
- * ‖ valueSalt ‖ utf8(canonicalize(c)))` and `c` is `['value', value]`, `['array', length]` or
- * `['object']` (salts as 32 raw bytes). The kind and the value are inside `C` alone: a leaf can
+ * `sha256(0x00 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ salt ‖ C ‖ utf8(canonicalize(pointer)))` (the
+ * two hashes of fixed length first, the pointer of any length last), where `C`, the commitment
+ * to its content, is `sha256(0x03 ‖ utf8('run-iq.input/1') ‖ 0x00 ‖ valueSalt ‖
+ * utf8(canonicalize(c)))` and `c` is `['value', value]`, `['array', length]` or `['object']`
+ * (salts as 32 raw bytes). The kind and the value are inside `C` alone: a leaf can
  * be shown by its pointer, `salt` and `C`, its content hidden (a neighbour in a proof of
  * absence, `run-iq.disclosure/1`). Everything is hashed as it is written (a value of any length).
  *
@@ -244,7 +245,7 @@ export function createLeafHasher(): LeafHasher {
 
 /**
  * Writes into `out` the hash of the leaf at `pointer` with its raw `salt` and its commitment
- * (D-15): the pointer is hashed first, as `canonicalize` writes a string.
+ * (D-15): the pointer last, as `canonicalize` writes a string, hashed as it is written.
  */
 function writeLeafHash(
   out: Uint8Array,
@@ -252,14 +253,15 @@ function writeLeafHash(
   salt: Uint8Array,
   commitment: Uint8Array,
 ): void {
-  const pointerHash = withSha256((stream) => {
-    writeJsonString(stream, pointer);
-  });
-  hashLeafInto(out, LEAF_PREFIX, salt, pointerHash, commitment);
+  out.set(
+    withSha256((stream) => {
+      stream.bytes(LEAF_PREFIX);
+      stream.bytes(salt);
+      stream.bytes(commitment);
+      writeJsonString(stream, pointer);
+    }),
+  );
 }
-
-/** The hasher of the fixed 112 bytes of a leaf hash: no text, no stream needed. */
-const hashLeafInto = createHasherInto();
 
 /**
  * Internal: the hash of a leaf shown without its content (D-15): its `pointer`, its raw `salt`

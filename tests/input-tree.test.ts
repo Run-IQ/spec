@@ -265,7 +265,7 @@ describe('inputLeaves (D-15)', () => {
 });
 
 describe('inputLeafHash (D-15 encoding)', () => {
-  it('is sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ sha256(JCS(pointer)) ‖ C), C over valueSalt, c', () => {
+  it('is sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ C ‖ JCS(pointer)), C over valueSalt and c', () => {
     expect(INPUT_TREE_TAG).toBe('run-iq.input/1');
     const input = proofInput(
       { context: { s: 'é"\\\u{1F600}', n: -0 } },
@@ -682,7 +682,7 @@ describe('computeInputDigest (D-15)', () => {
     const after = hashWorkDone();
     const done = { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
     expect(done).toEqual(expectedHashWork(leaves.map(leafBytes)));
-    expect(done.calls).toBe(6 * leaves.length);
+    expect(done.calls).toBe(5 * leaves.length);
   });
 
   it('does not depend on key order', () => {

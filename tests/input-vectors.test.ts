@@ -55,9 +55,9 @@ function nodeLeaf(seed: Uint8Array, pointer: string, content: string): Uint8Arra
     nodeHmac(seed, `value:${pointer}`),
     content,
   );
-  const pointerHash = nodeSha256(JSON.stringify(pointer));
+
   const salt = nodeHmac(seed, `input:${pointer}`);
-  return nodeSha256(Uint8Array.of(0), ...tag, salt, pointerHash, commitment);
+  return nodeSha256(Uint8Array.of(0), ...tag, salt, commitment, JSON.stringify(pointer));
 }
 
 /** The RFC 6962 root of the vector's input under `seed`, by `node:crypto` alone. */

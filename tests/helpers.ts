@@ -386,10 +386,10 @@ export interface LeafBytes {
 
 /**
  * The hash work (`hashWork`) a digest of these leaves does, by D-14 and D-15 alone: per leaf,
- * its two salts (HMACs of `input:` and `value:` with its pointer, the messages counted), the
- * hash of its pointer in JCS, its commitment `C` (`0x03 ‖ tag ‖ 0x00`, 16 bytes, its value salt,
- * its content) and its hash (16 bytes, its salt, the pointer hash, `C`: 112 bytes); the `n - 1`
- * nodes of 65 bytes; the digest (`0x02 ‖ tag ‖ 0x00`, the count and the root, 56 bytes).
+ * its two salts (HMACs of `input:` and `value:` with its pointer, the messages counted), its
+ * commitment `C` (`0x03 ‖ tag ‖ 0x00`, 16 bytes, its value salt, its content) and its hash (16
+ * bytes, its salt, `C`, its pointer in JCS); the `n - 1` nodes of 65 bytes; the digest
+ * (`0x02 ‖ tag ‖ 0x00`, the count and the root, 56 bytes).
  */
 export function expectedHashWork(leaves: Iterable<LeafBytes>): { calls: number; bytes: number } {
   let n = 0;
@@ -397,10 +397,10 @@ export function expectedHashWork(leaves: Iterable<LeafBytes>): { calls: number; 
   for (const leaf of leaves) {
     n += 1;
     bytes += 2 * ('input:'.length + leaf.pointerBytes) + leaf.quotedBytes;
-    bytes += 16 + 32 + leaf.contentBytes + 112;
+    bytes += 16 + 32 + leaf.contentBytes + 80;
   }
   bytes += 65 * Math.max(n - 1, 0) + 56;
-  return { calls: 5 * n + Math.max(n - 1, 0) + 1, bytes };
+  return { calls: 4 * n + Math.max(n - 1, 0) + 1, bytes };
 }
 
 /**
@@ -450,7 +450,7 @@ export function nodeCommitment(leaf: InputLeaf): Uint8Array {
 
 /**
  * The hash of a leaf from its pointer, its salt (hex) and its commitment (D-15), by
- * `node:crypto`: `sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ sha256(utf8(canonicalize(pointer))) ‖ C)`.
+ * `node:crypto`: `sha256(0x00 ‖ tag ‖ 0x00 ‖ salt ‖ C ‖ utf8(canonicalize(pointer)))`.
  */
 export function nodeCommittedLeafHash(
   pointer: string,
@@ -462,8 +462,8 @@ export function nodeCommittedLeafHash(
     'run-iq.input/1',
     Uint8Array.of(0),
     fromHex(salt),
-    nodeSha256(canonicalize(pointer)),
     commitment,
+    canonicalize(pointer),
   );
 }
 

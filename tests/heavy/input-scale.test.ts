@@ -29,21 +29,20 @@ function largestInput(): ProofInput {
 // The time budgets of D-26 are measured by `npm run bench`, never asserted here: a test bounds
 // the work by counting it.
 describe(`scale (D-26): an input of ${MAX_INPUT_LEAVES} leaves`, () => {
-  it('is digested by 6 hashes a leaf, over the bytes of its leaves and nothing more', () => {
+  it('is digested by 5 hashes a leaf, over the bytes of its leaves and nothing more', () => {
     const input = largestInput();
     const seed = deriveInputSeed(new Uint8Array(32).fill(1), 'scale');
     let digest = '';
     const work = hashWorkOf(() => {
       digest = computeInputDigest(input, seed);
     });
-    // 6 hashes a leaf: two salts, its pointer, its commitment, its hash, a node (but one), and
-    // the digest.
-    expect(work.calls / 6).toBe(MAX_INPUT_LEAVES);
+    // 5 hashes a leaf: two salts, its commitment, its hash, a node (but one), and the digest.
+    expect(work.calls / 5).toBe(MAX_INPUT_LEAVES);
     const leaves = inputLeaves(input, seed);
     expect(leaves).toHaveLength(MAX_INPUT_LEAVES);
     expect(work).toEqual(expectedHashWork(leaves.map(leafBytes)));
-    // Counted independently (Python, report of Task 9H2, round 2).
-    expect(work.bytes).toBe(160_231_249);
+    // Counted independently (Python, report of Task 9H2, round 3).
+    expect(work.bytes).toBe(144_231_249);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
   }, 60_000);
 });
@@ -54,7 +53,7 @@ describe(`leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units, the most an input 
     const seed = deriveInputSeed(new Uint8Array(32).fill(2), 'limit');
     const meta = inputLeaves(proofInput({}, {}), seed).filter((leaf) => leaf.pointer !== '/data');
     const work = hashWorkOf(() => computeInputDigest(input, seed));
-    expect(work.calls / 6).toBe(paths + 1 + meta.length);
+    expect(work.calls / 5).toBe(paths + 1 + meta.length);
     // Each `/data/k…/l/…` leaf holds the value 0: its content is `["value",0]`, 11 bytes, and
     // its pointer in JCS is its pointer in quotes.
     const pointer = 6 + width + 2 * 16;

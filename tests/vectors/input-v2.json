@@ -1,6 +1,6 @@
 {
   "format": "run-iq.input/1",
-  "description": "Second frozen vector of the input tree (D-14, D-15), Task 9H1 round 3: escaped segments (~0, ~1), non-ASCII and astral text (é, U+1F600) in keys and values, list indices ordered as text (/data/l/10 before /data/l/2), a non-integer number, nested lists, empty lists and objects in lists, meta in full. contents: each leaf in order, [pointer, JCS of its content c]. Same formulas as input-v1 (leaf encoding of Task 9H2 round 2).",
+  "description": "Second frozen vector of the input tree (D-14, D-15), Task 9H1 round 3: escaped segments (~0, ~1), non-ASCII and astral text (é, U+1F600) in keys and values, list indices ordered as text (/data/l/10 before /data/l/2), a non-integer number, nested lists, empty lists and objects in lists, meta in full. contents: each leaf in order, [pointer, JCS of its content c]. Same formulas as input-v1 (leaf encoding of Task 9H2 round 3).",
   "secret": "0707070707070707070707070707070707070707070707070707070707070707",
   "requestId": "r2",
   "input": {
@@ -93,13 +93,13 @@
       "salt": "a764b762c568821a5d97516ad9df5575dc2f209384ab47a667f77a86518cb515",
       "valueSalt": "44e501b478eb79179f05e8247ef63463c84b2e1fee10d57deb70c94231327d56",
       "commitment": "46e603bc6265b2f061ac17c6c260e863262fc0b30c9157d681269e1e885cea74",
-      "hash": "323af760360b0d9be670774ea2d3437c24cb3c89a0b29c84e265b7dcfe784168"
+      "hash": "ea70d8ad652fa78a711e4253979a88662b78f01ecdee08f9282d57f0225ec645"
     },
-    "merkleRoot": "d53fcc87081479c4747ed3a162c96f638313ebe43c8e2ccc1d1e79ef70bbd79e",
-    "inputDigest": "ed7bcbc238409b41c106ac0760507140ebaca72ae1fa472a64361c9feaa581e8"
+    "merkleRoot": "7ef8b42525ad24ff5a2ba9b1c938dcedc44146e879f3364b92e0eb528801d5e9",
+    "inputDigest": "01fd3b2595103e0348fef6e279ee9bd7f5933b36889335a8288b38d718861387"
   },
   "unsalted": {
-    "merkleRoot": "2d4680607f246517e17353c87e005dc27a6cd5c9be72b74c6519d154a2af1d53",
-    "inputDigest": "4bf8661736b7db46c83de571e880d4efc58511658f5724bbff0d22ceea1f5b87"
+    "merkleRoot": "dc89d192542668dc110d418dafba1a4b6477757bd3ef6595cd0b78d987f82abd",
+    "inputDigest": "d7a5994b4fcd00c8b74234dd5c20585f281c0e64dea046e9effacc5afae962ad"
   }
 }
