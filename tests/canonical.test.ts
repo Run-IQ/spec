@@ -1,48 +1,46 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, canonicalizeAt, SpecError } from '../src/index.js';
-import { specError } from './helpers.js';
+import { canonical, specError } from './helpers.js';
 
 const nonSerializable = expect.objectContaining({ code: 'NON_SERIALIZABLE' });
 
 describe('canonicalize', () => {
   it('serialises scalars like JSON', () => {
-    expect(canonicalize(null)).toBe('null');
-    expect(canonicalize(true)).toBe('true');
-    expect(canonicalize(false)).toBe('false');
-    expect(canonicalize(0)).toBe('0');
-    expect(canonicalize(-0)).toBe('0');
-    expect(canonicalize(1.5)).toBe('1.5');
-    expect(canonicalize(1e21)).toBe('1e+21');
-    expect(canonicalize('a"b\\c\n')).toBe(JSON.stringify('a"b\\c\n'));
-    expect(canonicalize('é€😀')).toBe('"é€😀"');
+    expect(canonical(null)).toBe('null');
+    expect(canonical(true)).toBe('true');
+    expect(canonical(false)).toBe('false');
+    expect(canonical(0)).toBe('0');
+    expect(canonical(-0)).toBe('0');
+    expect(canonical(1.5)).toBe('1.5');
+    expect(canonical(1e21)).toBe('1e+21');
+    expect(canonical('a"b\\c\n')).toBe(JSON.stringify('a"b\\c\n'));
+    expect(canonical('é€😀')).toBe('"é€😀"');
   });
 
   it('sorts object keys at every depth', () => {
-    expect(canonicalize({ b: 1, a: { d: 2, c: [{ z: 1, y: 2 }] } })).toBe(
+    expect(canonical({ b: 1, a: { d: 2, c: [{ z: 1, y: 2 }] } })).toBe(
       '{"a":{"c":[{"y":2,"z":1}],"d":2},"b":1}',
     );
   });
 
   it('sorts keys by code unit, integer-like keys included', () => {
-    expect(canonicalize({ b: 1, 10: 2, 2: 3, A: 4, _: 5 })).toBe(
-      '{"10":2,"2":3,"A":4,"_":5,"b":1}',
-    );
+    expect(canonical({ b: 1, 10: 2, 2: 3, A: 4, _: 5 })).toBe('{"10":2,"2":3,"A":4,"_":5,"b":1}');
   });
 
   it('gives the same string whatever the insertion order', () => {
     const a = { x: 1, y: { p: true, q: null }, z: ['s', 2] };
     const b = { z: ['s', 2], y: { q: null, p: true }, x: 1 };
-    expect(canonicalize(a)).toBe(canonicalize(b));
+    expect(canonical(a)).toBe(canonicalize(b));
   });
 
   it('keeps array order', () => {
-    expect(canonicalize([3, 1, 2])).toBe('[3,1,2]');
-    expect(canonicalize([1, 2])).not.toBe(canonicalize([2, 1]));
+    expect(canonical([3, 1, 2])).toBe('[3,1,2]');
+    expect(canonical([1, 2])).not.toBe(canonicalize([2, 1]));
   });
 
   it('omits undefined object properties', () => {
-    expect(canonicalize({ a: 1, b: undefined })).toBe('{"a":1}');
-    expect(canonicalize({ a: { b: undefined } })).toBe('{"a":{}}');
+    expect(canonical({ a: 1, b: undefined })).toBe('{"a":1}');
+    expect(canonical({ a: { b: undefined } })).toBe('{"a":{}}');
   });
 
   it('refuses undefined in an array and a hole: neither is JSON, neither is written null', () => {
@@ -65,7 +63,7 @@ describe('canonicalize', () => {
   });
 
   it('serialises a Date as its ISO string', () => {
-    expect(canonicalize({ d: new Date('2025-01-01T00:00:00Z') })).toBe(
+    expect(canonical({ d: new Date('2025-01-01T00:00:00Z') })).toBe(
       '{"d":"2025-01-01T00:00:00.000Z"}',
     );
   });
@@ -74,18 +72,18 @@ describe('canonicalize', () => {
     const o = Object.create(null) as Record<string, unknown>;
     o.b = 1;
     o.a = 2;
-    expect(canonicalize(o)).toBe('{"a":2,"b":1}');
+    expect(canonical(o)).toBe('{"a":2,"b":1}');
   });
 
   it('accepts the same object referenced twice when it is not a cycle', () => {
     const shared = { v: 1 };
-    expect(canonicalize({ a: shared, b: shared, c: [shared, shared] })).toBe(
+    expect(canonical({ a: shared, b: shared, c: [shared, shared] })).toBe(
       '{"a":{"v":1},"b":{"v":1},"c":[{"v":1},{"v":1}]}',
     );
   });
 
   it('ignores symbol keys, as JSON does', () => {
-    expect(canonicalize({ a: 1, [Symbol('s')]: 2 })).toBe('{"a":1}');
+    expect(canonical({ a: 1, [Symbol('s')]: 2 })).toBe('{"a":1}');
   });
 
   it.each([
@@ -135,7 +133,7 @@ describe('canonicalize', () => {
   });
 
   it('applies no Unicode normalization: strings are data', () => {
-    expect(canonicalize('\u00e9')).not.toBe(canonicalize('e\u0301'));
+    expect(canonical('\u00e9')).not.toBe(canonicalize('e\u0301'));
   });
 
   it('refuses a Decimal-like class instance: the caller converts it to JSON', () => {
@@ -146,7 +144,7 @@ describe('canonicalize', () => {
       }
     }
     expect(() => canonicalize({ amount: new Decimal('1.10') })).toThrow(nonSerializable);
-    expect(canonicalize({ amount: '1.10' })).toBe('{"amount":"1.10"}');
+    expect(canonical({ amount: '1.10' })).toBe('{"amount":"1.10"}');
   });
 
   it('does not use toJSON', () => {

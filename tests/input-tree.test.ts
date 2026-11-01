@@ -18,8 +18,12 @@ import {
   verifyInputInclusion,
 } from '../src/index.js';
 import type { InputLeaf, JsonValue, ProofInput } from '../src/index.js';
-import { hashWorkDone } from '../src/merkle.js';
-import { lastValuesSpent, MAX_INPUT_LEAF_TEXT } from '../src/values.js';
+import { copyWork } from '../src/input/read.js';
+import { inputLeafText } from '../src/input/validate.js';
+import { hashWorkDone } from '../src/stream.js';
+import { DATE_FORMS } from '../src/input/assertions.js';
+import { ASSERTION_METHODS } from '../src/input/types.js';
+import { lastValuesSpent, MAX_INPUT_LEAF_TEXT, MAX_JSON_VALUES } from '../src/values.js';
 import {
   countValues,
   expectedHashWork,
@@ -45,6 +49,12 @@ const SECRET = new Uint8Array(32).fill(0x42);
 const POINTER_TEXT =
   'the leaf pointers of the input hold more than ' + `${MAX_INPUT_LEAF_TEXT} code units`;
 const SEED = nodeInputSeed(SECRET, 'r1');
+/** The longest list at `/data/a`: every input holds `data`, `meta`, its six members and `a`. */
+const LONGEST_DATA_LIST = MAX_JSON_VALUES - 9;
+/** Why `/meta` is never a leaf. */
+const META_ALWAYS = '/meta always holds its six members, so it is never a leaf';
+const NON_EMPTY = '/value must be a non-empty string';
+const SALT_A = 'ab'.repeat(32);
 /** The leaves of the `meta` of `proofInput()`: its six members, `dates` holding one date. */
 const META_LEAVES = 6;
 
@@ -321,17 +331,17 @@ describe('inputLeafHash (D-15 encoding)', () => {
       [
         { pointer: '/data/a', kind: 'array', length: -1, salt },
         '/length',
-        '/length must be an integer from 0 to 10000000',
+        `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
         { pointer: '/data/a', kind: 'array', length: 1.5, salt },
         '/length',
-        '/length must be an integer from 0 to 10000000',
+        `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
-        { pointer: '/data/a', kind: 'array', length: 10_000_001, salt },
+        { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST + 1, salt },
         '/length',
-        '/length must be an integer from 0 to 10000000',
+        `/length must be an integer from 0 to ${LONGEST_DATA_LIST}`,
       ],
       [
         { pointer: '/data/a', kind: 'object', value: 1, salt },
@@ -360,15 +370,249 @@ describe('inputLeafHash (D-15 encoding)', () => {
     expect(reads.sort()).toEqual(['kind', 'pointer', 'salt', 'value']);
   });
 
-  it('refuses a pointer longer than every leaf pointer of an input may be', () => {
-    const pointer = `/data/${'k'.repeat(MAX_INPUT_LEAF_TEXT)}`;
+  it('refuses a pointer longer than a leaf there can be, and accepts the longest', () => {
+    // Every input also holds /meta/tenantId and the five other parts of meta: 80 code units.
+    const longest = MAX_INPUT_LEAF_TEXT - 80;
+    const pointer = `/data/${'k'.repeat(longest - '/data/'.length)}`;
+    expect(pointer).toHaveLength(longest);
     const leaf = { pointer, kind: 'value', value: 1, salt: 'ab'.repeat(32) };
-    expect(specError(() => inputLeafHash(loose(leaf)))).toMatchObject({
+    expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
+    expect(
+      specError(() => inputLeafHash(loose({ ...leaf, pointer: `${pointer}k` }))),
+    ).toMatchObject({
       code: 'INVALID_INPUT',
       path: '/pointer',
-      message: `invalid input leaf: /pointer is longer than ${MAX_INPUT_LEAF_TEXT} code units`,
+      message: `invalid input leaf: /pointer is longer than ${longest} code units`,
     });
+  }, 60_000);
+
+  it('refuses every leaf whose place, kind or value no valid input has (M3)', () => {
+    const salt = 'ab'.repeat(32);
+    const none = (why: string): string => `/pointer names no leaf of a valid input: ${why}`;
+    const digest = 'a'.repeat(64);
+    const cases: [object, string, string][] = [
+      [{ pointer: '/meta', kind: 'object' }, '/pointer', none(META_ALWAYS)],
+      [
+        { pointer: '/meta/foo', kind: 'value', value: 1 },
+        '/pointer',
+        none('/meta has no member "foo"'),
+      ],
+      [
+        { pointer: '/meta/__proto__', kind: 'object' },
+        '/pointer',
+        none('/meta has no member "__proto__"'),
+      ],
+      [
+        { pointer: '/data/$x', kind: 'value', value: 1 },
+        '/pointer',
+        none('a root key of /data starting with "$" is reserved'),
+      ],
+      [
+        { pointer: '/data', kind: 'value', value: 1 },
+        '/kind',
+        '/kind must be object at this pointer',
+      ],
+      [
+        { pointer: '/data', kind: 'array', length: 0 },
+        '/kind',
+        '/kind must be object at this pointer',
+      ],
+      [
+        { pointer: '/meta/tenantId', kind: 'array', length: 3 },
+        '/kind',
+        '/kind must be value at this pointer',
+      ],
+      [{ pointer: '/meta/tenantId', kind: 'value', value: '' }, '/value', NON_EMPTY],
+      [{ pointer: '/meta/tenantId', kind: 'value', value: 1 }, '/value', NON_EMPTY],
+      [
+        { pointer: '/meta/tenantId/x', kind: 'value', value: 'a' },
+        '/pointer',
+        none('nothing is below /meta/tenantId, a string'),
+      ],
+      [
+        { pointer: '/meta/dates', kind: 'array', length: 0 },
+        '/kind',
+        '/kind must be object at this pointer',
+      ],
+      [
+        { pointer: '/meta/dates/-', kind: 'value', value: '2026-01-01' },
+        '/pointer',
+        none('a date name is never empty or "-"'),
+      ],
+      [
+        { pointer: '/meta/dates/$at', kind: 'value', value: '2026-01-01' },
+        '/pointer',
+        none('a date name never starts with "$"'),
+      ],
+      [
+        { pointer: '/meta/dates/d', kind: 'value', value: '2026-02-30' },
+        '/value',
+        `/value must be ${DATE_FORMS}`,
+      ],
+      [
+        { pointer: '/meta/dates/d/x', kind: 'value', value: 'a' },
+        '/pointer',
+        none('a date is a string'),
+      ],
+      [{ pointer: '/meta/tags', kind: 'object' }, '/kind', '/kind must be array at this pointer'],
+      [
+        { pointer: '/meta/tags/01', kind: 'value', value: 'a' },
+        '/pointer',
+        none('a tag is named by its index, written 0|[1-9][0-9]*'),
+      ],
+      [{ pointer: '/meta/tags/0', kind: 'value', value: '' }, '/value', NON_EMPTY],
+      [
+        { pointer: '/meta/dimensions/pays', kind: 'value', value: ':TG' },
+        '/value',
+        '/value has an empty code system before ":"',
+      ],
+      [
+        { pointer: '/meta/dimensions/pays', kind: 'array', length: 1 },
+        '/length',
+        `/length must be an integer from 2 to ${MAX_JSON_VALUES - 9}`,
+      ],
+      [
+        { pointer: '/meta/dimensions/pays', kind: 'object' },
+        '/kind',
+        '/kind must be value or array at this pointer',
+      ],
+      [
+        { pointer: '/meta/dimensions/pays/x', kind: 'value', value: 'TG' },
+        '/pointer',
+        none('a dimension value is named by its index, 0|[1-9][0-9]*'),
+      ],
+      [
+        { pointer: '/meta/dimensions/pays/0', kind: 'value', value: 1 },
+        '/value',
+        '/value must be a string',
+      ],
+      [
+        { pointer: '/meta/dimensions/pays/0/x', kind: 'value', value: 'a' },
+        '/pointer',
+        none('below a string'),
+      ],
+      [
+        { pointer: '/meta/assertions/~1a', kind: 'object' },
+        '/pointer',
+        none('an assertion holds by, method, at and status, so it is never a leaf'),
+      ],
+      [
+        { pointer: '/meta/assertions/a/by', kind: 'value', value: 'x' },
+        '/pointer',
+        none('assertion key "a" must be a JSON pointer'),
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/other', kind: 'value', value: 1 },
+        '/pointer',
+        none('an assertion has no field "other"'),
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/method', kind: 'value', value: 'guess' },
+        '/value',
+        `/value must be one of ${ASSERTION_METHODS.join(', ')}`,
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/confidence', kind: 'value', value: 2 },
+        '/value',
+        '/value must be a number from 0 to 1',
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/complete', kind: 'value', value: true },
+        '/value',
+        '/value must be false',
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/source', kind: 'object' },
+        '/pointer',
+        none('a source holds proofDigest and output, so it is never a leaf'),
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/source/proofDigest', kind: 'value', value: 'x' },
+        '/value',
+        '/value must be a lowercase sha256 hex string',
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/source/output', kind: 'value', value: 'a.b' },
+        '/value',
+        '/value name must not contain "."',
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/source/other', kind: 'value', value: digest },
+        '/pointer',
+        none('a source has no field "other"'),
+      ],
+      [
+        { pointer: '/meta/assertions/~1a/by/x', kind: 'value', value: 'a' },
+        '/pointer',
+        none('a field of an assertion is a scalar'),
+      ],
+    ];
+    for (const [leaf, path, message] of cases) {
+      expect([leaf, specError(() => inputLeafHash(loose({ ...leaf, salt })))]).toMatchObject([
+        leaf,
+        { code: 'INVALID_INPUT', path, message: `invalid input leaf: ${message}` },
+      ]);
+    }
   });
+
+  it('accepts a leaf at each place a valid input has one, as the input tree gives it', () => {
+    const input = proofInput(
+      {
+        tenantId: 't',
+        dates: { d: '2026-01-01', i: '2026-01-01T00:00:00.000Z' },
+        tags: ['a', 'b'],
+        dimensions: { pays: 'TG', zone: ['A', 'B'] },
+        context: { $x: [1, {}], y: null },
+        assertions: {
+          '/a': {
+            by: 'clerk',
+            method: 'decision',
+            at: '2026-01-01',
+            status: 'validated',
+            basis: 'b',
+            evidenceDigest: 'a'.repeat(64),
+            confidence: 0.5,
+            complete: false,
+            source: { proofDigest: 'b'.repeat(64), output: 'pack:total', subject: '/rows/0' },
+          },
+        },
+      },
+      { a: [1, 'x', null, true, [], {}], b: {}, 'c/~': { d: 2 } },
+    );
+    const leaves = inputLeaves(input, SEED);
+    expect(leaves).toHaveLength(34);
+    for (const leaf of leaves) {
+      expect([leaf.pointer, hex(inputLeafHash(leaf))]).toEqual([
+        leaf.pointer,
+        hex(nodeLeafHash(leaf)),
+      ]);
+    }
+    const empty = inputLeaves(proofInput({ dates: {} }, {}), SEED).map((leaf) => leaf.pointer);
+    expect(empty).toEqual([
+      '/data',
+      '/meta/assertions',
+      '/meta/context',
+      '/meta/dates',
+      '/meta/dimensions',
+      '/meta/tags',
+      '/meta/tenantId',
+    ]);
+    for (const leaf of inputLeaves(proofInput({ dates: {} }, {}), SEED)) {
+      expect(hex(inputLeafHash(leaf))).toBe(hex(nodeLeafHash(leaf)));
+    }
+  });
+
+  it(`a list holds at most ${MAX_JSON_VALUES} values less those every input holds`, () => {
+    const meta = proofInput({ dates: {} }, {}).meta;
+    const longest = { data: { a: new Array<number>(LONGEST_DATA_LIST).fill(0) }, meta };
+    expect(validateProofInput(longest)).toEqual([]);
+    const over = { data: { a: new Array<number>(LONGEST_DATA_LIST + 1).fill(0) }, meta };
+    expect(validateProofInput(over)).toEqual([
+      { path: '/meta', message: '/meta is too large: more than 10000000 values' },
+    ]);
+    const leaf = { pointer: '/data/a', kind: 'array', length: LONGEST_DATA_LIST, salt: SALT_A };
+    expect(hex(inputLeafHash(loose(leaf)))).toBe(hex(nodeLeafHash(loose(leaf))));
+  }, 60_000);
 });
 
 describe('computeInputDigest (D-15)', () => {
@@ -621,6 +865,61 @@ describe(`leaf pointers: at most ${MAX_INPUT_LEAF_TEXT} code units in all`, () =
         message: POINTER_TEXT,
       },
     ]);
+  });
+});
+
+describe('the validator counts the leaf pointers the input tree has', () => {
+  it('on inputs using every part of meta, escapes, unicode and shared values', () => {
+    const shared = { s: [1, { t: 'é' }], 'u/~': {} };
+    const inputs: ProofInput[] = [
+      proofInput({}, {}),
+      proofInput({ dates: {} }, { a: [] }),
+      proofInput(
+        {
+          dates: { 'd/~': '2026-01-01', é: '2026-02-01T00:00:00.000Z' },
+          tags: ['a', 'b', 'c', 'd', 'e', 'f', 'g', 'h', 'i', 'j', 'k', 'l'],
+          dimensions: { pays: 'TG', 'z/o': ['A', 'B', 'C'] },
+          context: { '~': shared, k: [shared, shared] },
+          assertions: {
+            '/x~1y': {
+              by: 'b',
+              method: 'decision',
+              at: '2026-01-01',
+              status: 'validated',
+              complete: false,
+              source: { proofDigest: 'a'.repeat(64), output: 'o', subject: '/r' },
+            },
+            '/$dates/d': { by: 'b', method: 'human', at: '2026-01-01', status: 'proposed' },
+          },
+        },
+        { 'a~b': shared, l: Array.from({ length: 12 }, (_, i) => [i, shared]), m: {} },
+      ),
+      EXAMPLE,
+    ];
+    for (const input of inputs) {
+      expect(validateProofInput(input)).toEqual([]);
+      expect(inputLeafText(input)).toBe(pointerText(input));
+    }
+  });
+});
+
+describe('validateProofInput keeps no copy; a digest reads its input once into one', () => {
+  it('copies no value when it only checks, and each value once for a digest', () => {
+    const input = proofInput({}, { a: [1, 2] });
+    const before = copyWork.values;
+    expect(validateProofInput(input)).toEqual([]);
+    expect(copyWork.values).toBe(before);
+    computeInputDigest(input, SEED);
+    // data: 1, 2, the list, data itself; context {}; the date of meta.dates.
+    expect(copyWork.values - before).toBe(6);
+  });
+
+  it('checks an input of a million values without copying one', () => {
+    const rows = Array.from({ length: 250_000 }, (_, i) => ({ id: `r${i}`, n: i, ok: true }));
+    const input = proofInput({ tags: ['a', 'b'], dimensions: { z: ['A', 'B'] } }, { rows });
+    const before = copyWork.values;
+    expect(validateProofInput(input)).toEqual([]);
+    expect(copyWork.values).toBe(before);
   });
 });
 

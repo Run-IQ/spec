@@ -1,9 +1,16 @@
+/* eslint-env node */
 // The time budgets of D-26 for the input tree (Task 9H1), measured on the built package:
 // `npm run bench` (it builds first). Not part of `npm test` nor of CI: the suite bounds the same
 // work by counting it (tests/input-scale.test.ts); a clock is only read here, on a machine at
 // rest. Exits with 1 when a written budget is not held.
 import { performance } from 'node:perf_hooks';
-import { computeInputDigest, deriveInputSeed } from '../dist/index.js';
+import {
+  computeInputDigest,
+  deriveInputSeed,
+  inputLeaves,
+  UNSALTED_SEED,
+  validateProofInput,
+} from '../dist/index.js';
 
 /** `core`'s `DEFAULT_LIMITS.maxInputLeaves` (D-26). */
 const MAX_INPUT_LEAVES = 500_000;
@@ -20,6 +27,11 @@ const meta = {
   assertions: {},
 };
 
+/** The code units of the leaf pointers of `meta`, as the package itself lists its leaves. */
+const META_TEXT = inputLeaves({ data: {}, meta }, UNSALTED_SEED)
+  .filter((leaf) => leaf.pointer.startsWith('/meta'))
+  .reduce((sum, leaf) => sum + leaf.pointer.length, 0);
+
 /** 500 000 leaves: 166 664 rows of three facts, their list, a total and the 6 leaves of meta. */
 function largestInput() {
   const rows = Array.from({ length: 166_664 }, (_, i) => ({
@@ -31,19 +43,32 @@ function largestInput() {
 }
 
 /**
- * Leaf pointers of exactly `MAX_INPUT_LEAF_TEXT` code units: a value shared by 2^16 paths under
- * a long key, a second key for the remainder (as `sharedPointerText` of the tests).
+ * Leaf pointers of `units` code units: a value shared by 2^16 paths under a long key, and a
+ * second key for the remainder (as `sharedPointerText` of the tests).
  */
-function longestPointers() {
+function sharedPointers(units) {
   const depth = 16;
   const paths = 2 ** depth;
-  // The pointers of meta: /meta/assertions, context, dates/effective, dimensions, tags, tenantId.
-  const fixed = 16 + 13 + 21 + 16 + 10 + 14;
-  const width = Math.floor((MAX_INPUT_LEAF_TEXT - fixed - 7) / paths) - 6 - 2 * depth;
-  const rest = MAX_INPUT_LEAF_TEXT - fixed - paths * (6 + width + 2 * depth) - 6;
+  const width = Math.floor((units - META_TEXT - 7) / paths) - 6 - 2 * depth;
+  const rest = units - META_TEXT - paths * (6 + width + 2 * depth) - 6;
   let shared = 0;
   for (let level = 0; level < depth; level++) shared = { l: shared, r: shared };
   return { data: { ['k'.repeat(width)]: shared, ['z'.repeat(rest)]: 0 }, meta };
+}
+
+/** Leaf pointers of `units` code units in one leaf: `/data/<key>` holding 0. */
+function singleKey(units) {
+  return { data: { ['k'.repeat(units - META_TEXT - '/data/'.length)]: 0 }, meta };
+}
+
+/** `make(MAX_INPUT_LEAF_TEXT)`, proven at the limit: valid, and one code unit more is not. */
+function atTheLimit(make) {
+  const input = make(MAX_INPUT_LEAF_TEXT);
+  const over = validateProofInput(make(MAX_INPUT_LEAF_TEXT + 1));
+  if (validateProofInput(input).length !== 0 || over.length !== 1) {
+    throw new Error('the bench input is not at the leaf text limit');
+  }
+  return input;
 }
 
 /** The median of `RUNS` timed digests of `input`, after one run to warm up. */
@@ -61,21 +86,27 @@ function measure(input) {
 }
 
 const cases = [
-  { name: `computeInputDigest, ${MAX_INPUT_LEAVES} leaves`, input: largestInput(), budget: 5_000 },
+  { name: `${MAX_INPUT_LEAVES} leaves`, input: () => largestInput(), budget: 5_000 },
   {
-    name: `computeInputDigest, leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units`,
-    input: longestPointers(),
+    name: `leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units, 2^16 paths to a shared value`,
+    input: () => atTheLimit(sharedPointers),
+    budget: undefined,
+  },
+  {
+    name: `leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units, one key`,
+    input: () => atTheLimit(singleKey),
     budget: undefined,
   },
 ];
 
-console.log(`node ${process.version}, median of ${RUNS} runs`);
+const print = (line) => process.stdout.write(`${line}\n`);
+print(`node ${process.version}, computeInputDigest, median of ${RUNS} runs`);
 for (const { name, input, budget } of cases) {
-  const ms = measure(input);
+  const ms = measure(input());
   const verdict =
     budget === undefined
       ? 'no written budget'
       : `budget ${budget} ms: ${ms < budget ? 'held' : 'NOT HELD'}`;
-  console.log(`${name}: ${ms.toFixed(0)} ms (${verdict})`);
+  print(`${name}: ${ms.toFixed(0)} ms (${verdict})`);
   if (budget !== undefined && ms >= budget) process.exitCode = 1;
 }

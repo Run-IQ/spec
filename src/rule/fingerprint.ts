@@ -1,6 +1,5 @@
-import { canonicalize } from '../canonical.js';
+import { canonicalSha256Hex } from '../canonical.js';
 import { ownCopy, withValueBudget } from '../values.js';
-import { sha256Hex } from '../hash.js';
 import type { RuleDefinitionInput } from './definition.js';
 import { normalizeRuleDefinition } from './normalize.js';
 
@@ -30,6 +29,6 @@ export function computeRuleFingerprint(input: RuleDefinitionInput): string {
     const content: Record<string, unknown> = normalizeRuleDefinition(input);
     for (const field of NON_CONTENT_FIELDS) delete content[field];
     // The normalized copy's values were counted when they were read from `input`.
-    return sha256Hex(ownCopy(() => canonicalize(content)));
+    return ownCopy(() => canonicalSha256Hex(content));
   });
 }

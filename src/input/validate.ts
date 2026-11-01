@@ -16,14 +16,14 @@ import {
   isPlainObject,
   loneSurrogateMessage,
   MAX_INPUT_LEAF_TEXT,
-  ownCopy,
 } from '../values.js';
-import { leafPointerText } from './leaves.js';
 import { assertionKeyProblem, DATE_FORMS, readAssertion } from './assertions.js';
 import {
   announce,
+  addText,
   checkText,
   childPointer,
+  copyWork,
   expectPlainObject,
   ownKeys,
   readFields,
@@ -34,7 +34,7 @@ import {
   surrogateKeyMessage,
   walkJson,
 } from './read.js';
-import type { Reader } from './read.js';
+import type { LeafCount, Reader } from './read.js';
 import type { FactAssertion, ProofInput } from './types.js';
 
 const INPUT_KEYS: readonly string[] = ['data', 'meta'];
@@ -92,15 +92,25 @@ const PLAIN_OBJECT = 'a plain object';
  * message longer than `MAX_ISSUE_TEXT` (1024) code units is cut there and followed by `…`.
  */
 export function validateProofInput(value: unknown): RuleValidationIssue[] {
-  return check(value, true).issues;
+  return check(value, false).issues;
 }
 
 /**
  * Internal (not exported from the package): the property values `validateProofInput` reads
- * on `value`, so that tests bound the work without a clock.
+ * on `value`, so that tests bound the work without a clock. Like `validateProofInput`, it keeps
+ * no copy of `value`: beyond the input, its memory is the walk's state and the issues.
  */
 export function inputCheckReads(value: unknown): number {
   return check(value, false).reads;
+}
+
+/**
+ * Internal (not exported from the package), for tests: the UTF-16 code units of the leaf
+ * pointers of `value` as `validateProofInput` counts them while it reads (D-15), stopped one past
+ * `MAX_INPUT_LEAF_TEXT`.
+ */
+export function inputLeafText(value: unknown): number {
+  return check(value, false).leafText;
 }
 
 /**
@@ -141,22 +151,37 @@ const POINTER_TEXT_MESSAGE =
 function check(
   value: unknown,
   copy: boolean,
-): { issues: RuleValidationIssue[]; reads: number; snapshot: ProofInput | undefined } {
+): {
+  issues: RuleValidationIssue[];
+  reads: number;
+  snapshot: ProofInput | undefined;
+  leafText: number;
+} {
   let snapshot: ProofInput | undefined;
+  let leafText = 0;
   const { issues, reads } = runCheck(
     (reader) => {
       snapshot = readInput(value, reader);
+      leafText = reader.leafText;
     },
     (error) => ({ path: '', message: unreadableMessage('proof input', error) }),
     { copy },
   );
-  // Only a valid input has a copy; its leaves are those the input tree hashes (D-15).
-  if (issues.length === 0 && snapshot !== undefined) {
-    const copied = snapshot;
-    const text = ownCopy(() => leafPointerText(copied, MAX_INPUT_LEAF_TEXT));
-    if (text > MAX_INPUT_LEAF_TEXT) issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
+  // The leaves are those the input tree hashes (D-15), counted as the input was read.
+  if (issues.length === 0 && leafText > MAX_INPUT_LEAF_TEXT) {
+    issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
   }
-  return { issues, reads, snapshot };
+  return { issues, reads, snapshot: issues.length === 0 ? snapshot : undefined, leafText };
+}
+
+/** Adds to `reader.leafText` the leaves of a value walked at `path` (`walkJson`). */
+function countLeaves(reader: Reader, path: string, count: LeafCount): void {
+  reader.leafText = addText(reader.leafText, addText(count.units, count.leaves * path.length));
+}
+
+/** Adds `units` code units of leaf pointers to `reader.leafText`. */
+function countText(reader: Reader, units: number): void {
+  reader.leafText = addText(reader.leafText, units);
 }
 
 /** The input read, as a plain copy (with `reader.copies`); complete only without a problem. */
@@ -173,11 +198,13 @@ function readInput(value: unknown, reader: Reader): ProofInput | undefined {
   if (fields.values.has('data')) {
     const value = fields.values.get('data');
     if (expectPlainObject(value, '/data', PLAIN_OBJECT, add)) {
-      data = walkJson(value, '/data', reader, true).copy;
+      const walked = walkJson(value, '/data', reader, true);
+      countLeaves(reader, '/data', walked);
+      data = walked.copy;
     }
   }
   const meta = fields.values.has('meta') ? readMeta(fields.values.get('meta'), reader) : undefined;
-  if (!isJsonObject(data) || meta === undefined) return undefined;
+  if (reader.copies === undefined || !isJsonObject(data) || meta === undefined) return undefined;
   return { data, meta };
 }
 
@@ -196,6 +223,7 @@ function readMeta(value: unknown, reader: Reader): ProofInput['meta'] | undefine
 
   const tenantId = field('tenantId');
   if (tenantId !== undefined) checkText(tenantId.value, '/meta/tenantId', add);
+  countText(reader, '/meta/tenantId'.length);
   const dates = field('dates');
   const datesCopy = dates === undefined ? undefined : readDates(dates.value, reader);
   const tags = field('tags');
@@ -207,7 +235,9 @@ function readMeta(value: unknown, reader: Reader): ProofInput['meta'] | undefine
   let contextCopy: JsonValue | undefined;
   if (context !== undefined) {
     if (expectPlainObject(context.value, '/meta/context', PLAIN_OBJECT, add)) {
-      contextCopy = walkJson(context.value, '/meta/context', reader).copy;
+      const walked = walkJson(context.value, '/meta/context', reader);
+      countLeaves(reader, '/meta/context', walked);
+      contextCopy = walked.copy;
     }
   }
   const assertions = field('assertions');
@@ -236,9 +266,10 @@ function readMeta(value: unknown, reader: Reader): ProofInput['meta'] | undefine
 /**
  * Reads each member of the object at `path` once, after counting them; a member whose value is
  * `undefined` is absent; a key holding a lone surrogate is reported at `path`. Calls `each` with
- * the key, its pointer and its value, and returns the copy of the values `each` returns (a
- * value `each` refuses is left out: the problem is reported); `undefined` when `value` is not
- * an object or its keys cannot be listed.
+ * the key, its pointer and its value. With `reader.copies`, returns the copy of the values
+ * `each` returns (a value `each` refuses is left out: the problem is reported); without, an
+ * empty record (no copy is kept). `undefined` when `value` is not an object or its keys cannot
+ * be listed. An object without member is a leaf (D-15): its pointer is counted.
  */
 function eachMember<T>(
   value: unknown,
@@ -252,17 +283,20 @@ function eachMember<T>(
   if (keys === undefined) return undefined;
   announce(reader, keys.length, path);
   const copy: Record<string, T> = {};
+  let members = 0;
   for (const key of keys) {
     const at = childPointer(path, key);
     const read = readMember(value, key, at, add);
     if (read === 'failed' || read.value === undefined) continue;
+    members += 1;
     if (hasLoneSurrogate(key)) {
       add(path, surrogateKeyMessage(path, key));
       continue;
     }
     const member = each(key, at, read.value);
     // Plain assignment would turn a `__proto__` key into a prototype change.
-    if (member !== undefined) {
+    if (member !== undefined && reader.copies !== undefined) {
+      copyWork.values += 1;
       Object.defineProperty(copy, key, {
         value: member,
         enumerable: true,
@@ -271,6 +305,7 @@ function eachMember<T>(
       });
     }
   }
+  if (members === 0) countText(reader, path.length);
   return copy;
 }
 
@@ -284,21 +319,26 @@ function readDates(
     else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(at));
     else if (!isCivilDate(date) && !isInstant(date)) {
       reader.add(at, `${citeName(at)} must be ${DATE_FORMS}`);
-    } else return date;
+    } else {
+      countText(reader, at.length);
+      return date;
+    }
     return undefined;
   });
 }
 
 /**
- * The elements of the list at `path`, each read once after counting them: `not a list` when
- * `value` is not a list (or announces an impossible length), `failed` after reporting a read
- * that threw.
+ * Reads the elements of the list at `path`, each once after counting them, and calls `each`
+ * with each in order (none is kept): `not a list` when `value` is not a list (or announces an
+ * impossible length), `failed` after reporting a read that threw, else the length. The list and
+ * each element are leaves (D-15): their pointers are counted.
  */
-function readList(
+function eachElement(
   value: unknown,
   path: string,
   reader: Reader,
-): unknown[] | 'not a list' | 'failed' {
+  each: (item: unknown, at: string) => void,
+): number | 'not a list' | 'failed' {
   const { add } = reader;
   let length: unknown;
   try {
@@ -313,37 +353,62 @@ function readList(
     return 'not a list';
   }
   announce(reader, length, path);
-  const items: unknown[] = [];
+  countText(reader, path.length);
   for (let i = 0; i < length; i++) {
     const read = readElement(value, i, path, add);
     if (read === 'failed') return 'failed';
-    items.push(read.value);
+    const at = `${path}/${i}`;
+    countText(reader, at.length);
+    each(read.value, at);
   }
-  return items;
+  return length;
 }
 
-/** True when `items` are strictly increasing in UTF-16 code units: sorted, no duplicate. */
-function strictlySorted(items: readonly string[]): boolean {
-  return items.every((item, i) => i === 0 || (items[i - 1] ?? '') < item);
+/**
+ * Checks, element by element, that the strings of a list are strictly increasing in UTF-16 code
+ * units (sorted, no duplicate), keeping only the last one; `copy` keeps them all when a copy is
+ * made.
+ */
+class SortedTexts {
+  private last: string | undefined;
+  sorted = true;
+  allTexts = true;
+  readonly copy: string[] | undefined;
+
+  constructor(reader: Reader) {
+    this.copy = reader.copies === undefined ? undefined : [];
+  }
+
+  add(item: unknown): item is string {
+    if (typeof item !== 'string') {
+      this.allTexts = false;
+      return false;
+    }
+    if (this.last !== undefined && !(this.last < item)) this.sorted = false;
+    this.last = item;
+    if (this.copy !== undefined) {
+      copyWork.values += 1;
+      this.copy.push(item);
+    }
+    return true;
+  }
 }
 
 function readTags(value: unknown, reader: Reader): string[] | undefined {
   const path = '/meta/tags';
-  const tags = readList(value, path, reader);
-  if (tags === 'failed') return undefined;
-  const texts =
-    tags === 'not a list' ? [] : tags.filter((tag): tag is string => typeof tag === 'string');
-  if (tags === 'not a list' || texts.length !== tags.length) {
-    reader.add(path, `${citeName(path)} must be an array of strings`);
-    return undefined;
-  }
-  texts.forEach((tag, i) => {
-    const at = `${path}/${i}`;
+  const tags = new SortedTexts(reader);
+  const length = eachElement(value, path, reader, (tag, at) => {
+    if (!tags.add(tag)) return;
     if (tag === '') reader.add(at, `${citeName(at)} must be a non-empty string`);
     else if (hasLoneSurrogate(tag)) reader.add(at, loneSurrogateMessage(at));
   });
-  if (!strictlySorted(texts)) reader.add(path, 'tags must be sorted without duplicates');
-  return texts;
+  if (length === 'failed') return undefined;
+  if (length === 'not a list' || !tags.allTexts) {
+    reader.add(path, `${citeName(path)} must be an array of strings`);
+    return undefined;
+  }
+  if (!tags.sorted) reader.add(path, 'tags must be sorted without duplicates');
+  return tags.copy ?? [];
 }
 
 function readDimensions(
@@ -375,33 +440,34 @@ function readDimension(
 ): string | string[] | undefined {
   const { add } = reader;
   if (typeof value === 'string') {
+    countText(reader, path.length);
     const problem = dimensionValueProblem(value, path);
     if (problem === undefined) return value;
     add(path, problem);
     return undefined;
   }
-  const values = readList(value, path, reader);
-  if (values === 'failed') return undefined;
-  if (values === 'not a list') {
-    add(path, `${citeName(path)} must be a value or a sorted list of at least two values`);
-    return undefined;
-  }
+  const values = new SortedTexts(reader);
   let valid = true;
-  values.forEach((item, i) => {
-    const problem = dimensionValueProblem(item, `${path}/${i}`);
+  const length = eachElement(value, path, reader, (item, at) => {
+    values.add(item);
+    const problem = dimensionValueProblem(item, at);
     if (problem !== undefined) {
-      add(`${path}/${i}`, problem);
+      add(at, problem);
       valid = false;
     }
   });
-  const texts = values.filter((item): item is string => typeof item === 'string');
-  if (!valid || texts.length !== values.length) return undefined;
-  if (texts.length === 0) add(path, `${citeName(path)} must not be an empty list`);
-  else if (texts.length === 1) {
+  if (length === 'failed') return undefined;
+  if (length === 'not a list') {
+    add(path, `${citeName(path)} must be a value or a sorted list of at least two values`);
+    return undefined;
+  }
+  if (!valid || !values.allTexts) return undefined;
+  if (length === 0) add(path, `${citeName(path)} must not be an empty list`);
+  else if (length === 1) {
     add(path, `${citeName(path)} holds a single value: write it as a string, not a list`);
-  } else if (!strictlySorted(texts)) {
+  } else if (!values.sorted) {
     add(path, `${citeName(path)} must be sorted without duplicates`);
-  } else return texts;
+  } else return values.copy ?? [];
   return undefined;
 }
 
@@ -411,8 +477,21 @@ function readAssertions(
 ): Record<JsonPointer, FactAssertion> | undefined {
   return eachMember(value, '/meta/assertions', reader, (key, at, assertion) => {
     const problem = assertionKeyProblem(key);
-    if (problem === undefined) return readAssertion(assertion, at, reader);
-    reader.add(at, problem);
-    return undefined;
+    if (problem !== undefined) {
+      reader.add(at, problem);
+      return undefined;
+    }
+    const read = readAssertion(assertion, at, reader);
+    // Its fields are its leaves (D-15); `source` holds the leaves of its own fields.
+    if (read !== undefined) {
+      for (const [field, member] of Object.entries(read)) {
+        const fieldAt = `${at}/${field}`;
+        if (typeof member !== 'object') countText(reader, fieldAt.length);
+        else
+          for (const name of Object.keys(member))
+            countText(reader, fieldAt.length + 1 + name.length);
+      }
+    }
+    return read;
   });
 }

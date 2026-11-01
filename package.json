@@ -48,8 +48,8 @@
     "test": "vitest run",
     "bench": "npm run build && node bench/input.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "lint": "eslint src/ tests/ && prettier --check src/ tests/ schema/",
-    "lint:fix": "eslint src/ tests/ --fix && prettier --write src/ tests/"
+    "lint": "eslint src/ tests/ bench/ --ext .ts,.mjs && prettier --check src/ tests/ schema/ bench/",
+    "lint:fix": "eslint src/ tests/ bench/ --ext .ts,.mjs --fix && prettier --write src/ tests/ bench/"
   },
   "keywords": [
     "run-iq",

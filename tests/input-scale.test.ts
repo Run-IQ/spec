@@ -1,10 +1,14 @@
 import { describe, expect, it } from 'vitest';
 import { computeInputDigest, deriveInputSeed, inputLeaves } from '../src/index.js';
 import type { ProofInput } from '../src/index.js';
-import { lastInputLeafCount } from '../src/input/tree.js';
-import { hashWorkDone } from '../src/merkle.js';
 import { MAX_INPUT_LEAF_TEXT } from '../src/values.js';
-import { expectedHashWork, leafBytes, proofInput, sharedPointerText } from './helpers.js';
+import {
+  expectedHashWork,
+  hashWorkOf,
+  leafBytes,
+  proofInput,
+  sharedPointerText,
+} from './helpers.js';
 
 /** `core`'s `DEFAULT_LIMITS.maxInputLeaves` (D-26): the default largest input. */
 const MAX_INPUT_LEAVES = 500_000;
@@ -22,14 +26,6 @@ function largestInput(): ProofInput {
   return proofInput({}, { rows, total: 0 });
 }
 
-/** The hash work `call` does (`hashWork`): its calls and the bytes given to them. */
-function hashWorkOf(call: () => unknown): { calls: number; bytes: number } {
-  const before = hashWorkDone();
-  call();
-  const after = hashWorkDone();
-  return { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
-}
-
 // The time budgets of D-26 are measured by `npm run bench`, never asserted here: a test bounds
 // the work by counting it.
 describe(`scale (D-26): an input of ${MAX_INPUT_LEAVES} leaves`, () => {
@@ -40,11 +36,11 @@ describe(`scale (D-26): an input of ${MAX_INPUT_LEAVES} leaves`, () => {
     const work = hashWorkOf(() => {
       digest = computeInputDigest(input, seed);
     });
-    expect(lastInputLeafCount()).toBe(MAX_INPUT_LEAVES);
+    // 3 hashes a leaf: a salt, a leaf hash, a node (but one), and the digest.
+    expect(work.calls / 3).toBe(MAX_INPUT_LEAVES);
     const leaves = inputLeaves(input, seed);
     expect(leaves).toHaveLength(MAX_INPUT_LEAVES);
     expect(work).toEqual(expectedHashWork(leaves.map(leafBytes)));
-    expect(work.calls).toBe(3 * MAX_INPUT_LEAVES);
     // Counted independently (Python, report of Task 9H1, round 2).
     expect(work.bytes).toBe(91_064_644);
     expect(digest).toMatch(/^[0-9a-f]{64}$/);
@@ -57,7 +53,7 @@ describe(`leaf pointers of ${MAX_INPUT_LEAF_TEXT} code units, the most an input 
     const seed = deriveInputSeed(new Uint8Array(32).fill(2), 'limit');
     const meta = inputLeaves(proofInput({}, {}), seed).filter((leaf) => leaf.pointer !== '/data');
     const work = hashWorkOf(() => computeInputDigest(input, seed));
-    expect(lastInputLeafCount()).toBe(paths + 1 + meta.length);
+    expect(work.calls / 3).toBe(paths + 1 + meta.length);
     // Each shared leaf `/data/k…/l/…` holds the value 0: its content is its pointer and 14 bytes.
     const pointer = 6 + width + 2 * 16;
     const shared = { pointerBytes: pointer, contentBytes: pointer + 14 };

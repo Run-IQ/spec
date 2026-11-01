@@ -7,6 +7,7 @@ import { describe, expect, it } from 'vitest';
 import type { CivilCalendar } from '../src/index.js';
 import { fixedCalendar, ueReferential, overlapReport } from './helpers.js';
 import vector from './vectors/input-v1.json';
+import second from './vectors/input-v2.json';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Run `npm run build` first.
@@ -370,6 +371,14 @@ describeBuilt('built entries: one SpecError identity', () => {
         vector.unsalted.inputDigest,
       );
       expect(entry.INPUT_TREE_TAG).toBe('run-iq.input/1');
+      const secondSeed = entry.deriveInputSeed(
+        new Uint8Array(Buffer.from(second.secret, 'hex')),
+        second.requestId,
+      );
+      expect(entry.computeInputDigest(second.input, secondSeed)).toBe(second.salted.inputDigest);
+      expect(entry.computeInputDigest(second.input, entry.UNSALTED_SEED)).toBe(
+        second.unsalted.inputDigest,
+      );
       const [first] = entry.inputLeaves(vector.input, seed);
       expect(first?.salt).toBe(vector.salted.firstLeaf.salt);
       expect(Buffer.from(entry.inputLeafHash(first ?? {})).toString('hex')).toBe(

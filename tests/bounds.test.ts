@@ -90,19 +90,25 @@ const referential = (members: unknown, periods: unknown = [{ from: '2020-01-01' 
 });
 
 /**
+ * A short list with each element made a hash (its holes kept: `map` skips them), so that a leaf
+ * list fails on its hole, not on an element read before it; any other list as it is. The cast
+ * passes a hostile list where the API types a valid one: that is the case under test.
+ */
+function asHashes(list: unknown): Uint8Array[] {
+  const short = Array.isArray(list) && list.length < 10;
+  return (short ? list.map(() => new Uint8Array(32)) : list) as Uint8Array[];
+}
+
+/**
  * Each walk of a caller list, and the path its named problem cites. The casts pass a hostile
  * list where the API types a valid one: that is the case under test.
  */
 const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ['canonicalize', (list) => specError(() => canonicalize({ a: list })).message, 'a'],
-  [
-    'merkleRoot',
-    (list) => specError(() => merkleRoot(list as Uint8Array[])).message,
-    'leaf hashes',
-  ],
+  ['merkleRoot', (list) => specError(() => merkleRoot(asHashes(list))).message, 'leaf hashes'],
   [
     'inclusionPath',
-    (list) => specError(() => inclusionPath(list as Uint8Array[], 0)).message,
+    (list) => specError(() => inclusionPath(asHashes(list), 0)).message,
     'leaf hashes',
   ],
   [

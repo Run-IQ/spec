@@ -1,4 +1,7 @@
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
+import { withSha256, writeJsonString } from './stream.js';
+import type { TextOut } from './stream.js';
 import {
   dateTimeOf,
   hasLoneSurrogate,
@@ -26,6 +29,10 @@ export type JsonValue = null | boolean | number | string | JsonValue[] | { [k: s
  * an invalid `Date`, a circular reference, `undefined` at the top level, a string or a key that
  * holds a lone UTF-16 surrogate (I-JSON, RFC 7493: such a text has no UTF-8 form), and any
  * object that is not a plain object, an array or a `Date` (Map, Set, class instances...).
+ * A canonical text longer than a JavaScript string can be (2^29 - 24 code units in V8) is
+ * refused by name (`… cannot be serialized to canonical JSON: too long to write as one
+ * string`); its digest can still be computed (every digest of this package hashes the text as
+ * it is written, never the string).
  * `toJSON` is ignored. A key with a lone surrogate is reported at the path of its object. A
  * value that cannot be read (a getter or a Proxy trap that throws, a caller's `SpecError`
  * included) is reported at its own path: `a value that could not be read: <reason>`, the reason
@@ -57,8 +64,36 @@ export function canonicalizeAt(value: unknown, path: string): string {
   if (typeof root !== 'string') {
     throw newSpecError('INVALID_PATH', `path must be a string, got a value of type ${typeof root}`);
   }
-  const options = { guarded: true, maxDepth: Infinity, freeForm: false };
-  return withValueBudget(() => write(value, root, options, new TextSink()));
+  const out = new StringOut(root);
+  withValueBudget(() => write(value, root, CANONICAL, new StreamSink(out)));
+  return out.value;
+}
+
+/** How `canonicalize` reads a value. */
+const CANONICAL = { guarded: true, maxDepth: Infinity, freeForm: false };
+
+/**
+ * Internal: the lowercase hex sha256 of the UTF-8 bytes of `canonicalize(value)`, with its
+ * checks and errors, written into the hash as it is produced: the text is never built, so a
+ * value whose canonical text is longer than a string can be (values shared by many paths, a
+ * text of 2^29 code units) has a digest all the same.
+ */
+export function canonicalSha256Hex(value: unknown): string {
+  return bytesToHex(
+    withSha256((stream) => {
+      withValueBudget(() => write(value, '', CANONICAL, new StreamSink(stream)));
+    }),
+  );
+}
+
+/**
+ * Internal: true when `canonicalize(value)` is exactly `text`, compared as it is produced (with
+ * the checks and errors of `canonicalize`); the canonical text is never built.
+ */
+export function isCanonicalText(value: unknown, text: string): boolean {
+  const out = new CompareOut(text);
+  withValueBudget(() => write(value, '', CANONICAL, new StreamSink(out)));
+  return out.matches();
 }
 
 /**
@@ -94,7 +129,7 @@ type Leaf = null | boolean | number | string;
 
 /**
  * How `write` assembles its output, one event at a time in document order: the canonical text
- * (`TextSink`), or a plain JSON copy (`ValueSink`).
+ * (`StreamSink`), or a plain JSON copy (`ValueSink`).
  */
 interface Sink<T> {
   leaf(value: Leaf): void;
@@ -107,45 +142,92 @@ interface Sink<T> {
 }
 
 /**
- * The canonical text. Each open container keeps the text of its members written so far, each
- * appended with `+` (a rope: no copy), as is a container's text to its parent's when it closes,
- * so the work stays linear in the length of the text at any depth.
+ * The canonical text, written in document order into a `TextOut` as the walk goes: the text of
+ * a container is never held apart from its members', and a long string is escaped slice by
+ * slice (`writeJsonString`). What the text goes to decides what it costs: a string
+ * (`canonicalize`), a hash (`canonicalSha256Hex`), a comparison (`isCanonicalText`).
  */
-class TextSink implements Sink<string> {
-  private text = '';
-  /** For each open container: its members' text, its brackets, and the pending key. */
-  private readonly containers: { out: string; array: boolean; key: string | undefined }[] = [];
+class StreamSink implements Sink<void> {
+  /** For each open container: whether it is a list, and whether a member was written. */
+  private readonly containers: { array: boolean; written: boolean }[] = [];
+
+  constructor(private readonly out: TextOut) {}
 
   leaf(value: Leaf): void {
-    this.add(typeof value === 'number' ? String(value) : JSON.stringify(value));
+    this.before();
+    if (typeof value === 'number') this.out.text(String(value));
+    else if (typeof value === 'string') writeJsonString(this.out, value);
+    else this.out.text(value === null ? 'null' : String(value));
   }
 
   open(array: boolean): void {
-    this.containers.push({ out: '', array, key: undefined });
+    this.before();
+    this.out.text(array ? '[' : '{');
+    this.containers.push({ array, written: false });
   }
 
   key(name: string): void {
     const top = this.containers[this.containers.length - 1];
-    if (top !== undefined) top.key = name;
+    if (top === undefined) return;
+    if (top.written) this.out.text(',');
+    top.written = true;
+    writeJsonString(this.out, name);
+    this.out.text(':');
   }
 
   close(): void {
     const top = this.containers.pop();
-    if (top !== undefined) this.add(top.array ? `[${top.out}]` : `{${top.out}}`);
+    if (top !== undefined) this.out.text(top.array ? ']' : '}');
   }
 
-  result(): string {
-    return this.text;
+  result(): void {
+    return undefined;
   }
 
-  private add(text: string): void {
+  /** The comma before a list's member (an object's is written with its key). */
+  private before(): void {
     const top = this.containers[this.containers.length - 1];
-    if (top === undefined) {
-      this.text = text;
-      return;
+    if (top === undefined || !top.array) return;
+    if (top.written) this.out.text(',');
+    top.written = true;
+  }
+}
+
+/**
+ * The text gathered into one string. A text longer than a string can be (V8 holds at most
+ * 2^29 - 24 code units) is refused by name: `SpecError` (`NON_SERIALIZABLE`, `… too long to
+ * write as one string`) rather than the engine's `RangeError`.
+ */
+class StringOut implements TextOut {
+  value = '';
+
+  constructor(private readonly path: string) {}
+
+  text(piece: string): void {
+    try {
+      this.value += piece;
+    } catch (error) {
+      if (error instanceof RangeError) fail(this.path, 'too long to write as one string');
+      throw error;
     }
-    const member = top.key === undefined ? text : `${JSON.stringify(top.key)}:${text}`;
-    top.out = top.out === '' ? member : `${top.out},${member}`;
+  }
+}
+
+/** Compares the text written with `expected`, piece by piece, building nothing. */
+class CompareOut implements TextOut {
+  private at = 0;
+  private same = true;
+
+  constructor(private readonly expected: string) {}
+
+  text(piece: string): void {
+    if (!this.same) return;
+    if (this.expected.startsWith(piece, this.at)) this.at += piece.length;
+    else this.same = false;
+  }
+
+  matches(): boolean {
+    return this.same && this.at === this.expected.length;
   }
 }
 

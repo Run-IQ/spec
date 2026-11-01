@@ -1,10 +1,9 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
-import { canonicalize } from '../canonical.js';
+import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { isCanonicalDecimal } from '../decision/decimal.js';
 import { isReservedOutputName } from '../decision/output.js';
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
-import { sha256Hex } from '../hash.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
 import { expectPlainObject, readFields, requireFields, runCheck, walkJson } from '../input/read.js';
 import { inputDigestBytes } from '../input/tree.js';
@@ -58,7 +57,8 @@ export function computeIdempotencyDigest(request: {
     const snapshot = readValidInput(input);
     const optionsCopy = readOptions(options);
     // Both copies were counted when they were read from the caller.
-    return sha256Hex(ownCopy(() => canonicalize({ input: snapshot, options: optionsCopy })));
+    // Hashed as it is written: the canonical text of a large request is never built.
+    return ownCopy(() => canonicalSha256Hex({ input: snapshot, options: optionsCopy }));
   });
 }
 
@@ -142,7 +142,7 @@ function seal(p: UnsignedProof): DecisionProof {
  */
 export function contentDigest(p: UnsignedProof): string {
   // The snapshot's values were counted when they were read from the caller.
-  return sha256Hex(ownCopy(() => canonicalize(proofContent(p))));
+  return ownCopy(() => canonicalSha256Hex(proofContent(p)));
 }
 
 /**

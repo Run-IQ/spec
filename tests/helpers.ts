@@ -8,6 +8,8 @@ import {
   UNSALTED_SEED,
   validateRuleDefinition,
 } from '../src/index.js';
+import { canonicalSha256Hex, isCanonicalText } from '../src/canonical.js';
+import { hashWorkDone } from '../src/stream.js';
 import type {
   CivilCalendar,
   JsonValue,
@@ -284,6 +286,20 @@ export function nodeInputDigest(size: number, root: Uint8Array): string {
   return hex(nodeSha256(Uint8Array.of(2), 'run-iq.input/1', Uint8Array.of(0), count, root));
 }
 
+/**
+ * `canonicalize(value)`, after checking that the streamed writers agree with it: the digest
+ * hashed as the text is written is the sha256 (by `node:crypto`) of that text, and the
+ * comparison as it is written accepts it, and refuses it with one more character or one less.
+ */
+export function canonical(value: unknown): string {
+  const text = canonicalize(value);
+  expect(canonicalSha256Hex(value)).toBe(hex(nodeSha256(text)));
+  expect(isCanonicalText(value, text)).toBe(true);
+  expect(isCanonicalText(value, `${text} `)).toBe(false);
+  expect(isCanonicalText(value, text.slice(0, -1))).toBe(false);
+  return text;
+}
+
 /** Lowercase hex of `bytes`. */
 export function hex(bytes: Uint8Array): string {
   return Buffer.from(bytes).toString('hex');
@@ -375,6 +391,18 @@ export function expectedHashWork(
   }
   bytes += 65 * Math.max(n - 1, 0) + 56;
   return { calls: 2 * n + Math.max(n - 1, 0) + 1, bytes };
+}
+
+/**
+ * The hash work `call` does (`hashWork`): its hash computations and the bytes given to them.
+ * A digest of an input of `n` leaves makes `3n` of them (a salt and a hash per leaf, `n - 1`
+ * nodes, the digest itself), so its leaf count is read from here, never from a side channel.
+ */
+export function hashWorkOf(call: () => unknown): { calls: number; bytes: number } {
+  const before = hashWorkDone();
+  call();
+  const after = hashWorkDone();
+  return { calls: after.calls - before.calls, bytes: after.bytes - before.bytes };
 }
 
 /** The UTF-8 bytes of a leaf's pointer and of its content, `[pointer, kind, …]` in JCS. */

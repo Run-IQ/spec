@@ -1,7 +1,8 @@
 import { isOwnError, newSpecError, unreadableMessage } from '../errors.js';
-import { sha256Hex } from '../hash.js';
+import { canonicalSha256Hex } from '../canonical.js';
+import { ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinitionInput } from './definition.js';
-import { canonicalRulePayload } from './payload.js';
+import { normalizeRuleDefinition } from './normalize.js';
 
 /**
  * Integrity seal of a rule: lowercase sha256 hex of
@@ -9,7 +10,12 @@ import { canonicalRulePayload } from './payload.js';
  * Covers every content field, identity and dates included; ignores `checksum`.
  */
 export function computeRuleChecksum(input: RuleDefinitionInput): string {
-  return sha256Hex(canonicalRulePayload(input));
+  return withValueBudget(() => {
+    const definition = normalizeRuleDefinition(input);
+    // The normalized copy's values were counted when they were read from `input`; it is hashed
+    // as its canonical text is written, never built.
+    return ownCopy(() => canonicalSha256Hex(definition));
+  });
 }
 
 /**

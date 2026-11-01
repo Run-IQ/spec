@@ -8,8 +8,9 @@ import {
   merkleRoot,
   UNSALTED_SEED,
 } from '../src/index.js';
-import type { ProofInput } from '../src/index.js';
+import type { InputLeaf, ProofInput } from '../src/index.js';
 import { inputDigestOf } from '../src/input/tree.js';
+import { readValidInput } from '../src/input/validate.js';
 import {
   fromHex,
   hex,
@@ -20,6 +21,7 @@ import {
   referenceRoot,
 } from './helpers.js';
 import vector from './vectors/input-v1.json';
+import second from './vectors/input-v2.json';
 
 const SECRET = fromHex(vector.secret);
 const INPUT: ProofInput = vector.input;
@@ -128,5 +130,65 @@ describe('frozen vector input-v1', () => {
     const leaves = ['a', 'b', 'c'].map((text) => nodeSha256(text));
     expect(hex(merkleRoot(leaves))).toBe(vector.merkle.root);
     expect(hex(referenceRoot(leaves))).toBe(vector.merkle.root);
+  });
+});
+
+describe('frozen vector input-v2: escapes, unicode, index order, numbers, nesting (M4)', () => {
+  const secret = fromHex(second.secret);
+  // A JSON module types `method` as any string: the validator's own reader gives the type.
+  const input: ProofInput = readValidInput(second.input);
+  const contentOf = (leaf: InputLeaf): string =>
+    JSON.stringify(
+      leaf.kind === 'value'
+        ? [leaf.pointer, leaf.kind, leaf.value]
+        : leaf.kind === 'array'
+          ? [leaf.pointer, leaf.kind, leaf.length]
+          : [leaf.pointer, leaf.kind],
+    );
+
+  it('node:crypto alone gives the frozen roots and digests from the frozen contents', () => {
+    expect(second.contents).toHaveLength(second.leafCount);
+    const rootOf = (seed: Uint8Array): Uint8Array =>
+      referenceRoot(
+        second.contents.map(([pointer = '', content = '']) =>
+          nodeSha256(
+            Uint8Array.of(0),
+            'run-iq.input/1',
+            Uint8Array.of(0),
+            nodeHmac(seed, `input:${pointer}`),
+            content,
+          ),
+        ),
+      );
+    const seed = nodeInputSeed(secret, second.requestId);
+    expect(hex(seed)).toBe(second.salted.seed);
+    expect(hex(rootOf(seed))).toBe(second.salted.merkleRoot);
+    expect(hex(rootOf(new Uint8Array(32)))).toBe(second.unsalted.merkleRoot);
+    expect(nodeInputDigest(second.leafCount, rootOf(seed))).toBe(second.salted.inputDigest);
+    expect(nodeInputDigest(second.leafCount, rootOf(new Uint8Array(32)))).toBe(
+      second.unsalted.inputDigest,
+    );
+  });
+
+  it('inputLeaves gives the frozen leaves, in order, and the first salt and hash', () => {
+    const seed = deriveInputSeed(secret, second.requestId);
+    const leaves = inputLeaves(input, seed);
+    expect(leaves.map((leaf) => [leaf.pointer, contentOf(leaf)])).toEqual(second.contents);
+    const pointers = leaves.map((leaf) => leaf.pointer);
+    expect(pointers.indexOf('/data/l/10')).toBeLessThan(pointers.indexOf('/data/l/2'));
+    const [first] = leaves;
+    expect(first?.pointer).toBe(second.salted.firstLeaf.pointer);
+    expect(first?.salt).toBe(second.salted.firstLeaf.salt);
+    expect(first === undefined ? '' : hex(inputLeafHash(first))).toBe(second.salted.firstLeaf.hash);
+    expect(hex(merkleRoot(leaves.map(inputLeafHash)))).toBe(second.salted.merkleRoot);
+  });
+
+  it('the input digests, salted and unsalted, through both entries', () => {
+    const seed = deriveInputSeed(secret, second.requestId);
+    expect(computeInputDigest(input, seed)).toBe(second.salted.inputDigest);
+    expect(canonicalEntry.computeInputDigest(input, seed)).toBe(second.salted.inputDigest);
+    expect(computeInputDigest(input, UNSALTED_SEED)).toBe(second.unsalted.inputDigest);
+    const unsalted = inputLeaves(input, UNSALTED_SEED).map(inputLeafHash);
+    expect(hex(merkleRoot(unsalted))).toBe(second.unsalted.merkleRoot);
   });
 });

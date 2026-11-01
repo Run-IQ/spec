@@ -1,6 +1,16 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { isOwnError, newSpecError, unreadableMessage } from './errors.js';
-import { bytesOf, readList, typeName, withValueBudget } from './values.js';
+import { hashWork } from './stream.js';
+import {
+  bytesOf,
+  copyBytesInto,
+  holeMessage,
+  spendValues,
+  tooLargeMessage,
+  typeName,
+  undefinedMessage,
+  withValueBudget,
+} from './values.js';
 
 /**
  * Merkle trees as RFC 6962 (section 2.1) defines them, shared by the input digest (D-15) and
@@ -39,18 +49,6 @@ export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) =>
   };
 }
 
-/**
- * Internal: the hash work this package has done since it was loaded: `calls`, the sha256 and
- * HMAC computations, and `bytes`, the bytes given to them (an HMAC's fixed key blocks aside).
- * Tests bound a digest's work by its difference across a call, never by a clock.
- */
-export const hashWork = { calls: 0, bytes: 0 };
-
-/** Internal, for tests: a copy of `hashWork` as it stands. */
-export function hashWorkDone(): { calls: number; bytes: number } {
-  return { ...hashWork };
-}
-
 /** Internal: as `createHasherInto`, each digest in a fresh array. */
 export function createHasher(): (...parts: Uint8Array[]) => Uint8Array {
   const hashInto = createHasherInto();
@@ -62,12 +60,21 @@ export function createHasher(): (...parts: Uint8Array[]) => Uint8Array {
 }
 
 /**
- * Internal: hashes kept end to end in one growing buffer (32 bytes each), so that a tree of
- * many leaves allocates no array per hash, and its root is computed in place (`root`).
+ * Internal: hashes kept end to end in one buffer (32 bytes each), so that a tree of many leaves
+ * allocates no array per hash, and its root (`root`) or an audit path (`path`) is computed in
+ * place. Made for `capacity` hashes when their number is known (it then never grows), else it
+ * grows by doubling. `allocated` counts the bytes of the buffers it made.
  */
 export class PackedHashes {
-  private bytes = new Uint8Array(HASH_BYTES * 1024);
+  private bytes: Uint8Array;
   private count = 0;
+  /** The bytes of every buffer this one allocated. */
+  allocated: number;
+
+  constructor(capacity = 1024) {
+    this.bytes = new Uint8Array(HASH_BYTES * Math.max(capacity, 1));
+    this.allocated = this.bytes.length;
+  }
 
   /** How many hashes it holds. */
   get length(): number {
@@ -79,6 +86,7 @@ export class PackedHashes {
     const end = (this.count + 1) * HASH_BYTES;
     if (end > this.bytes.length) {
       const grown = new Uint8Array(this.bytes.length * 2);
+      this.allocated += grown.length;
       grown.set(this.bytes);
       this.bytes = grown;
     }
@@ -122,6 +130,39 @@ export class PackedHashes {
     }
     return at(0).slice();
   }
+
+  /**
+   * The audit path of the hash at `index` (below `length`), from the bottom of the tree up,
+   * computed in place by levels as `root` is: at each level the sibling of the node on the way
+   * up is copied out (the last node of an odd level has none: it goes up unchanged), then the
+   * level is hashed into the next. Afterwards the buffer holds no meaningful hash.
+   */
+  path(index: number): Uint8Array[] {
+    const hashInto = createHasherInto();
+    const node = new Uint8Array(1 + 2 * HASH_BYTES);
+    node[0] = 1;
+    const at = (i: number): Uint8Array => this.bytes.subarray(i * HASH_BYTES, (i + 1) * HASH_BYTES);
+    const path: Uint8Array[] = [];
+    let width = this.count;
+    let position = index;
+    while (width > 1) {
+      const sibling = position % 2 === 1 ? position - 1 : position + 1;
+      if (sibling < width) path.push(at(sibling).slice());
+      let next = 0;
+      for (let i = 0; i < width; i += 2) {
+        if (i + 1 < width) {
+          node.set(this.bytes.subarray(i * HASH_BYTES, (i + 2) * HASH_BYTES), 1);
+          hashInto(at(next), node);
+        } else {
+          at(next).set(at(i));
+        }
+        next += 1;
+      }
+      width = next;
+      position = Math.floor(position / 2);
+    }
+    return path;
+  }
 }
 
 /**
@@ -129,15 +170,17 @@ export class PackedHashes {
  * copy (`[]` gives the sha256 of nothing; one leaf gives a copy of it).
  *
  * `leafHashes` is read once: its length first (at most `MAX_JSON_VALUES`, 10 000 000, checked
- * before any element is read), then each element, which must be a `Uint8Array` of 32 bytes (of
- * any realm; a `Buffer` is one) and is copied. Throws `SpecError` (`INVALID_PROOF`) otherwise:
- * `leaf hashes must be an array of 32-byte Uint8Array`, `leaf hashes has a hole at index <i>:
- * arrays must be dense`, `leaf hashes[<i>] is not JSON: undefined`, `leaf hashes is too large:
- * more than 10000000 values`, `leaf hashes could not be read: <reason>` (the list is read
- * whole first), then `leaf hash <i> must be a Uint8Array of 32 bytes (a sha256 digest)`.
+ * before any element is read), then each element in order, which must be a `Uint8Array` of 32
+ * bytes (of any realm; a `Buffer` is one) and is copied straight into one buffer of 32 bytes per
+ * leaf: no array is made per hash, and the list is not copied. Throws `SpecError`
+ * (`INVALID_PROOF`) at the first problem: `leaf hashes must be an array of 32-byte Uint8Array`,
+ * `leaf hashes has an invalid length`, `leaf hashes is too large: more than 10000000 values`,
+ * `leaf hashes has a hole at index <i>: arrays must be dense`, `leaf hashes[<i>] is not JSON:
+ * undefined`, `leaf hash <i> must be a Uint8Array of 32 bytes (a sha256 digest)`, or `leaf
+ * hashes could not be read: <reason>`.
  */
 export function merkleRoot(leafHashes: readonly Uint8Array[]): Uint8Array {
-  return withValueBudget(() => rootOf(readHashes(leafHashes)));
+  return withValueBudget(() => readHashes(leafHashes).root());
 }
 
 /**
@@ -162,7 +205,7 @@ export function inclusionPath(leafHashes: readonly Uint8Array[], index: number):
         `index ${String(at)} is not a leaf of a tree of ${leaves.length} leaves`,
       );
     }
-    return pathOf(leaves, at);
+    return leaves.path(at);
   });
 }
 
@@ -221,40 +264,6 @@ export function rootFromPath(
   return current;
 }
 
-/** Internal: the RFC 6962 hash of `leaves`, hashes this package owns, in order. */
-export function rootOf(leaves: readonly Uint8Array[]): Uint8Array {
-  const packed = new PackedHashes();
-  for (const leaf of leaves) {
-    packed.next().set(leaf);
-    packed.push();
-  }
-  return packed.root();
-}
-
-/** The audit path of the leaf `index` of `leaves` (a valid index), by levels. */
-function pathOf(leaves: readonly Uint8Array[], index: number): Uint8Array[] {
-  const hash = createHasher();
-  const path: Uint8Array[] = [];
-  let level = [...leaves];
-  let at = index;
-  while (level.length > 1) {
-    const sibling = at % 2 === 1 ? level[at - 1] : level[at + 1];
-    // The last node of an odd level has no sibling: it goes up unchanged.
-    if (sibling !== undefined) path.push(sibling.slice());
-    const next: Uint8Array[] = [];
-    for (let i = 0; i < level.length; i += 2) {
-      const left = level[i];
-      const right = level[i + 1];
-      if (left !== undefined) {
-        next.push(right === undefined ? left : hash(NODE_PREFIX, left, right));
-      }
-    }
-    level = next;
-    at = Math.floor(at / 2);
-  }
-  return path;
-}
-
 /**
  * The audit path of (`index`, `size`) as RFC 9162 (section 2.1.3.2) walks it: for each of its
  * entries, true when that entry is the left sibling. Its length is the length a valid path must
@@ -282,33 +291,53 @@ function auditSteps(index: number, size: number): boolean[] {
 }
 
 /**
- * Copies of the hashes of `list`, read once each after its length is checked against the
- * budget (`readList`: a hole or an `undefined` element stops the read), or a thrown `SpecError`
- * (`INVALID_PROOF`) naming the first problem.
+ * The hashes of `list`, copied straight into one packed buffer of exactly their size (no array
+ * per hash, no copy of the list): its length is read and counted first (`MAX_JSON_VALUES`),
+ * then each element once, in order. The first problem throws `SpecError` (`INVALID_PROOF`):
+ * `leaf hashes must be an array of 32-byte Uint8Array`, `leaf hashes has an invalid length`,
+ * `leaf hashes is too large: more than 10000000 values`, `leaf hashes has a hole at index
+ * <i>: arrays must be dense`, `leaf hashes[<i>] is not JSON: undefined`, `leaf hash <i> must be
+ * a Uint8Array of 32 bytes (a sha256 digest)`, or `leaf hashes could not be read: <reason>`.
  */
-function readHashes(list: readonly Uint8Array[]): Uint8Array[] {
-  let items: unknown[];
+function readHashes(list: readonly Uint8Array[]): PackedHashes {
   try {
     if (!Array.isArray(list)) {
       throw newSpecError('INVALID_PROOF', `${LEAVES} must be an array of 32-byte Uint8Array`);
     }
-    const read = readList(list, LEAVES);
-    if (!Array.isArray(read)) throw newSpecError('INVALID_PROOF', read.message);
-    items = read;
+    const length: unknown = list.length;
+    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+      throw newSpecError('INVALID_PROOF', `${LEAVES} has an invalid length`);
+    }
+    if (!spendValues(length)) throw newSpecError('INVALID_PROOF', tooLargeMessage(LEAVES));
+    const packed = new PackedHashes(length);
+    for (let i = 0; i < length; i++) {
+      if (!(i in list)) throw newSpecError('INVALID_PROOF', holeMessage(LEAVES, i));
+      const item: unknown = list[i];
+      if (item === undefined) {
+        throw newSpecError('INVALID_PROOF', undefinedMessage(`${LEAVES}[${i}]`));
+      }
+      if (!copyBytesInto(item, packed.next())) {
+        throw newSpecError(
+          'INVALID_PROOF',
+          `leaf hash ${i} must be a Uint8Array of ${HASH_BYTES} bytes (a sha256 digest)`,
+        );
+      }
+      packed.push();
+    }
+    lastPacked = packed.allocated;
+    return packed;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_PROOF', unreadableMessage(LEAVES, error));
   }
-  return items.map((item, i) => {
-    const hash = hashOf(item);
-    if (hash === undefined) {
-      throw newSpecError(
-        'INVALID_PROOF',
-        `leaf hash ${i} must be a Uint8Array of ${HASH_BYTES} bytes (a sha256 digest)`,
-      );
-    }
-    return hash;
-  });
+}
+
+/** The bytes of packed storage the last `merkleRoot` or `inclusionPath` allocated. */
+let lastPacked = 0;
+
+/** Internal, for tests: the bytes of packed storage the last read of leaf hashes allocated. */
+export function lastPackedBytes(): number {
+  return lastPacked;
 }
 
 /**

@@ -8,17 +8,19 @@ import type { ProofInput } from './types.js';
 import {
   hasLoneSurrogate,
   loneSurrogateMessage,
-  MAX_INPUT_LEAF_TEXT,
   MAX_JSON_VALUES,
   ownCopy,
   withValueBudget,
 } from '../values.js';
-import { Utf8Writer } from '../utf8.js';
+import { withSha256, writeJsonString } from '../stream.js';
+import type { TextOut } from '../stream.js';
 import { forEachLeaf } from './leaves.js';
 import type { JsonScalar, LeafContent } from './leaves.js';
 import { expectPlainObject, readFields, requireFields, runCheck } from './read.js';
 import type { Reader } from './read.js';
 import { inputSalter, readSeed } from './seed.js';
+import { leafPlace } from './place.js';
+import type { LeafKind, LeafPlace } from './place.js';
 import { readValidInput } from './validate.js';
 
 /**
@@ -52,9 +54,6 @@ const DIGEST_HEX = /^[0-9a-f]{64}$/;
 /** The fixed start of every leaf hash: `0x00 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
 const LEAF_PREFIX = Uint8Array.from([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
 
-/** The leaves the last digest of an input hashed (`lastInputLeafCount`). */
-let lastLeafCount = 0;
-
 /**
  * The leaves of `input` under `seed` (D-14, D-15), sorted by `comparePointers`: decoded
  * segments compared in UTF-16 code units, a pointer before its descendants, so list indices
@@ -83,14 +82,30 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
 /**
  * The hash of one input leaf (D-15), 32 bytes: `sha256(0x00 ‖ utf8('run-iq.input/1') ‖ 0x00
  * ‖ salt (32 raw bytes) ‖ utf8(canonicalize(c)))`, where `c` is `[pointer, 'value', value]`,
- * `[pointer, 'array', length]` or `[pointer, 'object']`.
+ * `[pointer, 'array', length]` or `[pointer, 'object']`, hashed as it is written (a value of
+ * any length).
  *
- * `leaf` is read once, and refused unless some valid input could have it: a plain object with
- * exactly the members of its kind; `pointer` a JSON pointer below `/data` or `/meta`, at most
- * `MAX_INPUT_LEAF_TEXT` code units; `value` a JSON scalar as an input holds it (no lone
- * surrogate, a finite number below 2^53 in absolute value); `length` an integer from 0 to
- * `MAX_JSON_VALUES`; `salt` 64 lowercase hex characters. Throws `SpecError`
- * (`INVALID_INPUT`, `invalid input leaf: <first problem>`, its path in the leaf as `path`).
+ * `leaf` is read once: a plain object with exactly the members of its kind, `salt` 64 lowercase
+ * hex characters. It is refused unless a valid input can hold such a leaf, judged by the leaf
+ * alone (its siblings, their order and their share of the budgets are not known here):
+ * - `pointer` is a JSON pointer below `/data` or `/meta` naming a place that holds a leaf in
+ *   some valid input (`/meta` itself, `/meta/foo`, `/data/$x`, an assertion, anything below a
+ *   string of `meta`: never), at most `MAX_INPUT_LEAF_TEXT` less the shortest pointers of the
+ *   other parts of an input (`/data`, `/meta/tenantId`, `/meta/dates`, `/meta/tags`,
+ *   `/meta/dimensions`, `/meta/context`, `/meta/assertions`) code units;
+ * - `kind` is one a leaf there has (`/data` and an empty part of `meta`: `object`; `/meta/tags`:
+ *   `array`; `/meta/tenantId`, a date, a tag, an assertion field: `value`; a dimension: `value`
+ *   or `array`; anything below `/data/<key>` or `/meta/context`: any);
+ * - `value` is a JSON scalar as an input holds it (no lone surrogate, a finite number below 2^53
+ *   in absolute value) and what that place holds (a non-empty string for `tenantId` and a tag,
+ *   a date as `validateProofInput` accepts one, a dimension value, the value of that assertion
+ *   field);
+ * - `length` is an integer from 0 (2 for a list of dimension values) to `MAX_JSON_VALUES` less
+ *   the values every input holds (`data`, `meta` and its six members) and those above the list.
+ *
+ * Throws `SpecError` (`INVALID_INPUT`, `invalid input leaf: <first problem>`, its path in the
+ * leaf as `path`); a place no valid input has a leaf at is `/pointer names no leaf of a valid
+ * input: <why>`. The rule is `leafPlace` (src/input/place.ts).
  */
 export function inputLeafHash(leaf: InputLeaf): Uint8Array {
   return withValueBudget(() => {
@@ -117,7 +132,6 @@ export function inputDigestBytes(input: ProofInput, seed: Uint8Array): Uint8Arra
       hashes.push();
     }),
   );
-  lastLeafCount = hashes.length;
   return inputDigestOf(hashes.length, hashes.root());
 }
 
@@ -164,32 +178,37 @@ export function verifyInputInclusion(
   return root !== undefined && bytesToHex(inputDigestOf(size, root)) === expected;
 }
 
-/** Internal, for tests: the leaves the last `inputDigestBytes` hashed. */
-export function lastInputLeafCount(): number {
-  return lastLeafCount;
-}
-
 /**
- * The JSON text of a leaf's content `c` (D-15): `[pointer, kind]`, then its value or length.
- * Exactly `canonicalize(c)`: a three-member list of scalars, each written as `canonicalize`
- * writes a scalar (a number by `String`, any other scalar by `JSON.stringify`), without spaces.
+ * Writes the JSON text of a leaf's content `c` (D-15): `[pointer, kind]`, then its value or
+ * length. Exactly `canonicalize(c)`: a three-member list of scalars, each written as
+ * `canonicalize` writes a scalar (a number by `String`, a string as `JSON.stringify` escapes it,
+ * slice by slice), without spaces; written piece by piece, never built whole.
  */
-function contentText(content: LeafContent): string {
-  const head = `[${JSON.stringify(content.pointer)},"${content.kind}"`;
-  if (content.kind === 'object') return `${head}]`;
-  const last = content.kind === 'array' ? content.length : content.value;
-  return `${head},${typeof last === 'number' ? String(last) : JSON.stringify(last)}]`;
+function writeContent(out: TextOut, content: LeafContent): void {
+  out.text('[');
+  writeJsonString(out, content.pointer);
+  out.text(`,"${content.kind}"`);
+  if (content.kind !== 'object') {
+    const last = content.kind === 'array' ? content.length : content.value;
+    out.text(',');
+    if (typeof last === 'string') writeJsonString(out, last);
+    else out.text(last === null ? 'null' : String(last));
+  }
+  out.text(']');
 }
 
 /**
- * The hash of a leaf from its content and its raw salt (D-15), written into `out`, reusing one
- * hasher.
+ * The hash of a leaf from its content and its raw salt (D-15), written into `out`, through the
+ * shared hash stream (`withSha256`): the content is hashed as it is written.
  */
 function createLeafHasher(): (out: Uint8Array, content: LeafContent, salt: Uint8Array) => void {
-  const hashInto = createHasherInto();
-  const writer = new Utf8Writer();
   return (out, content, salt) => {
-    hashInto(out, LEAF_PREFIX, salt, writer.encode(contentText(content)));
+    const hash = withSha256((stream) => {
+      stream.bytes(LEAF_PREFIX);
+      stream.bytes(salt);
+      writeContent(stream, content);
+    });
+    out.set(hash);
   };
 }
 
@@ -226,19 +245,24 @@ function readLeafFields(
   const fields = readFields(value, '', 'input leaf', LEAF_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, '', ['pointer', 'kind', 'salt'], add);
-  const pointer = readLeafPointer(fields.values.get('pointer'), fields.values.has('pointer'), add);
-  const kind = fields.values.get('kind');
-  if (fields.values.has('kind') && (typeof kind !== 'string' || !KINDS.includes(kind))) {
-    add('/kind', `/kind must be one of ${KINDS.join(', ')}`);
-  }
   const has = (key: string): boolean => fields.values.has(key);
+  const located = has('pointer') ? readLeafPointer(fields.values.get('pointer'), add) : undefined;
+  const at = located?.place;
+  const kind = fields.values.get('kind');
+  if (has('kind') && !isKind(kind)) add('/kind', `/kind must be one of ${KINDS.join(', ')}`);
+  else if (isKind(kind) && at !== undefined && !at.kinds.includes(kind)) {
+    add('/kind', `/kind must be ${at.kinds.join(' or ')} at this pointer`);
+  }
+  const pointer = located?.pointer;
   let content: LeafContent | undefined;
   if (kind === 'value') {
     if (has('length')) add('/length', '/length is only for a leaf of kind array');
     if (!has('value')) add('/value', '/value is required');
     else {
       const scalar = readScalar(fields.values.get('value'), add);
-      if (pointer !== undefined && scalar !== undefined) {
+      const problem = scalar === undefined || at === undefined ? undefined : at.value(scalar.value);
+      if (problem !== undefined) add('/value', problem);
+      else if (pointer !== undefined && scalar !== undefined) {
         content = { pointer, kind, value: scalar.value };
       }
     }
@@ -250,13 +274,15 @@ function readLeafFields(
     } else if (!has('length')) add('/length', '/length is required');
     else {
       const length = fields.values.get('length');
+      const min = at?.minLength ?? 0;
+      const max = at?.maxLength ?? MAX_JSON_VALUES;
       if (
         typeof length !== 'number' ||
         !Number.isSafeInteger(length) ||
-        length < 0 ||
-        length > MAX_JSON_VALUES
+        length < min ||
+        length > max
       ) {
-        add('/length', `/length must be an integer from 0 to ${MAX_JSON_VALUES}`);
+        add('/length', `/length must be an integer from ${min} to ${max}`);
       } else if (pointer !== undefined) content = { pointer, kind, length };
     }
   }
@@ -270,33 +296,47 @@ function readLeafFields(
   return { content, salt };
 }
 
-/** The leaf's pointer when it can be one of an input's leaves; reports it otherwise. */
+function isKind(value: unknown): value is LeafKind {
+  return typeof value === 'string' && KINDS.includes(value);
+}
+
+/**
+ * The leaf's pointer and its place when a valid input can have a leaf there (`leafPlace`);
+ * reports it otherwise: not a JSON pointer below `/data` or `/meta`, a place no valid input has
+ * a leaf at (`/pointer names no leaf of a valid input: <why>`), or longer than a leaf there can
+ * be.
+ */
 function readLeafPointer(
   value: unknown,
-  present: boolean,
   add: (path: string, message: string) => void,
-): string | undefined {
-  if (!present) return undefined;
+): { pointer: string; place: LeafPlace } | undefined {
   const invalid = '/pointer must be a JSON pointer below /data or /meta';
   if (typeof value !== 'string') {
     add('/pointer', invalid);
     return undefined;
   }
-  if (value.length > MAX_INPUT_LEAF_TEXT) {
-    add('/pointer', `/pointer is longer than ${MAX_INPUT_LEAF_TEXT} code units`);
+  let segments: string[];
+  try {
+    segments = parsePointer(value);
+  } catch {
+    add('/pointer', invalid);
     return undefined;
   }
-  let head: string | undefined;
-  try {
-    [head] = parsePointer(value);
-  } catch {
-    head = undefined;
-  }
+  const [head] = segments;
   if (head !== 'data' && head !== 'meta') {
     add('/pointer', invalid);
     return undefined;
   }
-  return value;
+  const place = leafPlace(segments);
+  if (typeof place === 'string') {
+    add('/pointer', `/pointer names no leaf of a valid input: ${place}`);
+    return undefined;
+  }
+  if (value.length > place.maxPointer) {
+    add('/pointer', `/pointer is longer than ${place.maxPointer} code units`);
+    return undefined;
+  }
+  return { pointer: value, place };
 }
 
 /** The leaf's value when it is a JSON scalar as an input holds it; reports it otherwise. */

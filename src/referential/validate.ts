@@ -1,6 +1,5 @@
 import { citeName, newSpecError, quoteText, unreadableMessage } from '../errors.js';
-import { canonicalize } from '../canonical.js';
-import { sha256Hex } from '../hash.js';
+import { canonicalSha256Hex } from '../canonical.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
@@ -128,7 +127,7 @@ export function computeReferentialDigest(
 ): string {
   const normal = normalizeReferential(referential, options);
   // The normal form is this package's copy: its values were counted when they were read.
-  return sha256Hex(ownCopy(() => canonicalize(normal)));
+  return ownCopy(() => canonicalSha256Hex(normal));
 }
 
 /**
@@ -312,13 +311,17 @@ function compareSpans(
   );
 }
 
-/** `entries` sorted by `compare`, an entry equal (by `canonicalize`) to its neighbour dropped. */
+/**
+ * `entries` sorted by `compare`, an entry equal to its neighbour dropped: two entries are equal
+ * when their canonical texts are, compared by their sha256 (`canonicalSha256Hex`), so no
+ * canonical text is ever built whole.
+ */
 function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number): T[] {
   const out: T[] = [];
   let last: string | undefined;
   for (const entry of [...entries].sort(compare)) {
     // An entry of the normal form: this package's copy.
-    const key = ownCopy(() => canonicalize(entry));
+    const key = ownCopy(() => canonicalSha256Hex(entry));
     if (key !== last) out.push(entry);
     last = key;
   }

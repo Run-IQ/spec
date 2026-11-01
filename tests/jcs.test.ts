@@ -1,19 +1,19 @@
 import { describe, expect, it } from 'vitest';
 import { canonicalize, canonicalizeAt } from '../src/index.js';
-import { specError } from './helpers.js';
+import { canonical, specError } from './helpers.js';
 
 // Vectors from RFC 8785 (JSON Canonicalization Scheme), sections 3.2.2 and 3.2.3.
 describe('canonicalize is JCS (RFC 8785)', () => {
   it('writes numbers as ECMAScript does (section 3.2.2.3)', () => {
     // RFC 8785 writes this vector with more digits than a double holds: that is its point.
     // eslint-disable-next-line @typescript-eslint/no-loss-of-precision
-    expect(canonicalize({ numbers: [333333333.33333329, 1e30, 4.5, 2e-3, 1e-27] })).toBe(
+    expect(canonical({ numbers: [333333333.33333329, 1e30, 4.5, 2e-3, 1e-27] })).toBe(
       '{"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27]}',
     );
   });
 
   it('sorts keys by UTF-16 code unit (section 3.2.3)', () => {
-    expect(canonicalize({ '€': 1, '\r': 2, '1': 3, ö: 4 })).toBe('{"\\r":2,"1":3,"ö":4,"€":1}');
+    expect(canonical({ '€': 1, '\r': 2, '1': 3, ö: 4 })).toBe('{"\\r":2,"1":3,"ö":4,"€":1}');
   });
 
   // Built from code points: an editor or a formatter could rewrite these characters.
@@ -50,7 +50,7 @@ describe('canonicalize is JCS (RFC 8785)', () => {
 
   it('writes every finite number of RFC 8785 Appendix B', () => {
     expect(APPENDIX_B).toHaveLength(24);
-    for (const [hex, text] of APPENDIX_B) expect(canonicalize(double(hex)), hex).toBe(text);
+    for (const [hex, text] of APPENDIX_B) expect(canonical(double(hex)), hex).toBe(text);
   });
 
   it('refuses the NaN and Infinity rows of Appendix B', () => {
@@ -71,7 +71,7 @@ describe('canonicalize is JCS (RFC 8785)', () => {
     ];
     const expected = [1, 3, 5, 6, 0, 4, 2].map((i) => entries[i]!);
     const text = (key: string): string => (key === ch(0x0d) ? '\\r' : key);
-    expect(canonicalize(Object.fromEntries(entries))).toBe(
+    expect(canonical(Object.fromEntries(entries))).toBe(
       `{${expected.map(([key, name]) => `"${text(key)}":"${name}"`).join(',')}}`,
     );
   });
@@ -82,12 +82,12 @@ describe('canonicalize is JCS (RFC 8785)', () => {
     const backslash = ch(0x5c);
     const escaped =
       `"${ch(0x20ac)}$${backslash}u000f${backslash}nA'B${backslash}"` + `${backslash.repeat(5)}"/"`;
-    expect(canonicalize(value)).toBe(escaped);
+    expect(canonical(value)).toBe(escaped);
   });
 
   it('writes -0 as 0', () => {
-    expect(canonicalize(-0)).toBe('0');
-    expect(canonicalize({ a: [-0] })).toBe('{"a":[0]}');
+    expect(canonical(-0)).toBe('0');
+    expect(canonical({ a: [-0] })).toBe('{"a":[0]}');
   });
 });
 
@@ -134,11 +134,11 @@ describe('canonicalize refuses lone UTF-16 surrogates (I-JSON, pre-flight M-1)',
   });
 
   it('omits a key with a lone surrogate whose value is undefined, like any undefined one', () => {
-    expect(canonicalize({ a: 1, '\udfff': undefined })).toBe('{"a":1}');
+    expect(canonical({ a: 1, '\udfff': undefined })).toBe('{"a":1}');
   });
 
   it('keeps well-formed pairs', () => {
-    expect(canonicalize({ '😀': '😀' })).toBe('{"😀":"😀"}');
+    expect(canonical({ '😀': '😀' })).toBe('{"😀":"😀"}');
   });
 
   it('names the root given to canonicalizeAt', () => {

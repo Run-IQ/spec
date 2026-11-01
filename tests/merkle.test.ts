@@ -1,6 +1,10 @@
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
+import { execFileSync } from 'node:child_process';
+import { existsSync } from 'node:fs';
+import { resolve } from 'node:path';
 import { inclusionPath, merkleRoot, verifyInclusion } from '../src/index.js';
+import { lastPackedBytes } from '../src/merkle.js';
 import { hex, leafHashes, nodeSha256, referencePath, referenceRoot, specError } from './helpers.js';
 
 const NODE = Uint8Array.of(1);
@@ -300,3 +304,62 @@ describe('inclusionPath and verifyInclusion', () => {
     expect(verifyInclusion(leaf, 0, 2, asLeaves([,]), root)).toBe(false);
   });
 });
+
+describe('leaf hashes are read into packed storage (M2)', () => {
+  it('allocates exactly 32 bytes a leaf, once, for the root and for a path', () => {
+    const leaves = leafHashes(1_000);
+    merkleRoot(leaves);
+    expect(lastPackedBytes()).toBe(32_000);
+    inclusionPath(leaves, 999);
+    expect(lastPackedBytes()).toBe(32_000);
+    merkleRoot([]);
+    expect(lastPackedBytes()).toBe(32);
+  });
+
+  it('reads each element once, in order, and stops at the first problem', () => {
+    const reads: string[] = [];
+    const list = new Proxy([A, A, 'x', A], {
+      get(target, key, receiver) {
+        reads.push(String(key));
+        return Reflect.get(target, key, receiver) as unknown;
+      },
+    });
+    expect(specError(() => merkleRoot(list as Uint8Array[])).message).toBe(
+      'leaf hash 2 must be a Uint8Array of 32 bytes (a sha256 digest)',
+    );
+    expect(reads).toEqual(['length', '0', '1', '2']);
+  });
+});
+
+const dist = resolve(__dirname, '../dist/index.js');
+
+describe.skipIf(!existsSync(dist))(
+  '10 000 000 leaves in a process of default heap (built dist)',
+  () => {
+    it("computes the root, holding 32 bytes a leaf beside the caller's list", () => {
+      const script = `
+      const { merkleRoot } = await import(${JSON.stringify(`file://${dist}`)});
+      const n = 10_000_000;
+      const bytes = new Uint8Array(32 * n);
+      for (let i = 0; i < n; i++) bytes[32 * i] = i & 255, bytes[32 * i + 1] = (i >> 8) & 255;
+      const leaves = Array.from({ length: n }, (_, i) => bytes.subarray(32 * i, 32 * i + 32));
+      const before = process.memoryUsage();
+      const root = merkleRoot(leaves);
+      const after = process.memoryUsage();
+      console.log(JSON.stringify({
+        root: root.length,
+        heap: after.heapUsed - before.heapUsed,
+        buffers: after.arrayBuffers - before.arrayBuffers,
+      }));`;
+      const out = execFileSync(process.execPath, ['--input-type=module', '-e', script], {
+        encoding: 'utf8',
+      });
+      const { root, heap, buffers } = JSON.parse(out) as Record<string, number>;
+      expect(root).toBe(32);
+      // No array per hash: 10^7 of them would take hundreds of megabytes of heap.
+      expect(heap).toBeLessThan(64 * 2 ** 20);
+      // The packed storage: 32 bytes a leaf, allocated once.
+      expect(buffers).toBeLessThanOrEqual(32 * 10_000_000 + 2 ** 20);
+    }, 300_000);
+  },
+);

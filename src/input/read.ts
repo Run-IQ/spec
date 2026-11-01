@@ -1,14 +1,17 @@
 import type { JsonValue } from '../canonical.js';
 import { citeName, quoteText, unreadableMessage } from '../errors.js';
-import { sha256Hex } from '../hash.js';
+import { bytesToHex } from '@noble/hashes/utils.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
+import { withSha256, writeJsonString } from '../stream.js';
+import type { HashStream } from '../stream.js';
 import {
   dateTimeOf,
   hasLoneSurrogate,
   isPlainObject,
   holeMessage,
   loneSurrogateMessage,
+  MAX_INPUT_LEAF_TEXT,
   MAX_JSON_DEPTH,
   spendValues,
   tooLargeMessage,
@@ -64,10 +67,39 @@ export interface Reader {
    * of its own (a problem of depth depends on the path, so it does not count here).
    */
   readonly encodings?: Map<object, string | undefined>;
+  /**
+   * The UTF-16 code units of the pointers of the leaves read so far (D-15): each scalar, each
+   * list and each empty object, on each path, added up as they are met, never built; it stops
+   * growing past `LEAF_TEXT_CAP`.
+   */
+  leafText: number;
 }
 
-/** An object walked: its height, and the values below it. */
-export interface Walked {
+/** Where `Reader.leafText` and the counts below stop growing: one past `MAX_INPUT_LEAF_TEXT`. */
+export const LEAF_TEXT_CAP = MAX_INPUT_LEAF_TEXT + 1;
+
+/** `a + b`, stopped at `LEAF_TEXT_CAP` (every count it adds is at least 0). */
+export function addText(a: number, b: number): number {
+  return Math.min(a + b, LEAF_TEXT_CAP);
+}
+
+/**
+ * Internal: the values this package copied out of callers' inputs since it was loaded (each
+ * scalar and each container of a copy `walkJson` or the meta readers made), so that tests can
+ * prove a check that keeps no copy makes none.
+ */
+export const copyWork = { values: 0 };
+
+/** The leaves below a value and the code units their pointers add below it (D-15). */
+export interface LeafCount {
+  /** The leaves of the value: itself when it is a scalar, a list or an empty object. */
+  readonly leaves: number;
+  /** The code units of their pointers after the value's own pointer, all added up. */
+  readonly units: number;
+}
+
+/** An object walked: its height, the values below it, and its leaves. */
+export interface Walked extends LeafCount {
   readonly height: number;
   readonly size: number;
 }
@@ -89,6 +121,7 @@ function createReader(options: ReaderOptions): Reader {
     reads: 0,
     maxDepth: MAX_JSON_DEPTH,
     walked: new Map(),
+    leafText: 0,
   };
   return {
     ...reader,
@@ -139,6 +172,16 @@ function runChecked(
 export function announce(reader: Reader, n: number, path: string): void {
   if (!spendValues(n)) throw new InputTooLarge(path);
   reader.reads += n;
+}
+
+/** The length of `key` as a JSON pointer segment writes it (`~` as `~0`, `/` as `~1`). */
+export function escapedLength(key: string): number {
+  let length = key.length;
+  for (let i = 0; i < key.length; i++) {
+    const code = key.charCodeAt(i);
+    if (code === 0x7e || code === 0x2f) length += 1;
+  }
+  return length;
 }
 
 /** The pointer of the member `key` of the value at `pointer` (RFC 6901 escapes). */
@@ -326,6 +369,9 @@ interface Frame {
   readonly contentBefore: number;
   /** The values below it so far: its members, and the values below each (`Reader.walked`). */
   size: number;
+  /** Its leaves so far and the code units their pointers add below it (`LeafCount`). */
+  leaves: number;
+  units: number;
   /**
    * The key being read, and for each member read its key, its encoding (with
    * `reader.encodings`) and its copy (with `reader.copies`).
@@ -340,7 +386,7 @@ function contentIssues(reader: Reader): number {
 }
 
 /** What `openValue` found: an object already walked (its values counted again), or one cut. */
-interface Closed {
+interface Closed extends LeafCount {
   readonly height: number;
   readonly cut: boolean;
   /** The values below it. */
@@ -364,21 +410,25 @@ interface Closed {
  * an object met again is counted again (its values, `Reader.walked`), as its JSON text holds it.
  *
  * With `reader.encodings`, returns the encoding of `root` (`containerEncoding`), and with
- * `reader.copies` its plain copy, when no problem was found under it; else `undefined`.
+ * `reader.copies` its plain copy, when no problem was found under it; else `undefined`. Always
+ * returns the leaves of `root` and the code units their pointers add below `path` (`LeafCount`,
+ * D-15), counted on every path as the walk goes (an object met again gives its count again),
+ * meaningful when no problem was found.
  */
 export function walkJson(
   root: unknown,
   path: string,
   reader: Reader,
   reservedRoot = false,
-): { encoding: string | undefined; copy: JsonValue | undefined } {
+): { encoding: string | undefined; copy: JsonValue | undefined } & LeafCount {
   const stack: Frame[] = [];
   const issuesBefore = reader.issues.length;
   let rootEncoding: string | undefined;
   let rootCopy: JsonValue | undefined;
+  let rootCount: LeafCount = { leaves: 0, units: 0 };
   const keepParts = reader.encodings !== undefined || reader.copies !== undefined;
   const settle = (
-    value: { height: number; size: number; cut: boolean },
+    value: { height: number; size: number; cut: boolean } & LeafCount,
     encoding: string | undefined,
     copy: JsonValue | undefined,
   ): void => {
@@ -386,11 +436,16 @@ export function walkJson(
     if (parent === undefined) {
       rootEncoding = encoding;
       rootCopy = copy;
+      rootCount = { leaves: value.leaves, units: value.units };
       return;
     }
     parent.height = Math.max(parent.height, value.height + 1);
     parent.size += value.size;
     if (value.cut) parent.cut = true;
+    // Each leaf below the member adds the member's segment (`/` and its escaped key).
+    const segment = 1 + escapedLength(String(parent.pending));
+    parent.leaves += value.leaves;
+    parent.units = addText(parent.units, addText(value.units, value.leaves * segment));
     if (keepParts) parent.parts.push([parent.pending, encoding, copy]);
   };
   const visit = (value: unknown, at: string, depth: number, isRoot: boolean): void => {
@@ -398,12 +453,10 @@ export function walkJson(
     const opened = openValue(value, at, depth, reader, isRoot && reservedRoot);
     if (opened === undefined) {
       const clean = contentIssues(reader) === contentBefore;
-      const leaf = { height: 0, size: 0, cut: false };
-      settle(
-        leaf,
-        clean ? scalarEncoding(value) : undefined,
-        clean ? scalarCopy(value) : undefined,
-      );
+      const leaf = { height: 0, size: 0, cut: false, leaves: 1, units: 0 };
+      const copy = clean && reader.copies !== undefined ? scalarCopy(value) : undefined;
+      if (copy !== undefined) copyWork.values += 1;
+      settle(leaf, clean ? scalarEncoding(value) : undefined, copy);
     } else if (!('node' in opened)) {
       const shared = opened.cut || typeof value !== 'object' || value === null ? undefined : value;
       const encoding = shared === undefined ? undefined : reader.encodings?.get(shared);
@@ -420,9 +473,17 @@ export function walkJson(
       const encoding =
         reader.encodings !== undefined && clean ? containerEncoding(frame) : undefined;
       const copy = reader.copies !== undefined && clean ? containerCopy(frame) : undefined;
+      if (copy !== undefined) copyWork.values += 1;
+      // An empty object or list is a leaf, and so is any list (its elements have their own).
+      if (frame.length === 0 || frame.keys === undefined) frame.leaves += 1;
       if (frame.cut || !frame.kept) reader.walked.delete(frame.node);
       else {
-        reader.walked.set(frame.node, { height: frame.height, size: frame.size });
+        reader.walked.set(frame.node, {
+          height: frame.height,
+          size: frame.size,
+          leaves: frame.leaves,
+          units: frame.units,
+        });
         reader.encodings?.set(frame.node, encoding);
         if (copy !== undefined) reader.copies?.set(frame.node, copy);
       }
@@ -439,23 +500,31 @@ export function walkJson(
       typeof key === 'number'
         ? readElement(frame.node, key, frame.path, reader.add)
         : readMember(frame.node, key, at, reader.add);
-    if (read === 'failed') settle({ height: 0, size: 0, cut: false }, undefined, undefined);
-    else visit(read.value, at, frame.depth + 1, false);
+    if (read === 'failed') {
+      settle({ height: 0, size: 0, cut: false, leaves: 0, units: 0 }, undefined, undefined);
+    } else visit(read.value, at, frame.depth + 1, false);
   }
-  if (reader.issues.length !== issuesBefore) return { encoding: undefined, copy: undefined };
-  return { encoding: rootEncoding, copy: rootCopy };
+  if (reader.issues.length !== issuesBefore) {
+    return { encoding: undefined, copy: undefined, ...rootCount };
+  }
+  return { encoding: rootEncoding, copy: rootCopy, ...rootCount };
 }
 
 /**
- * The encoding of a JSON scalar: its JSON text (`-0` written `0`, as `canonicalize` writes
- * it); `undefined` for a value that is not one. With `containerEncoding`, two values have the
- * same encoding exactly when they have the same canonical form (up to sha256 collisions), at a
- * cost linear in the number of distinct objects, never in the number of paths.
+ * The encoding of a JSON scalar: its JSON text (`-0` written `0`, as `canonicalize` writes it),
+ * or for a string longer than `SHORT_TEXT` code units, `~` and the sha256 of its JSON text
+ * (hashed as it is escaped, never built: `~` never starts a JSON text); `undefined` for a value
+ * that is not one. With `containerEncoding`, two values have the same encoding exactly when
+ * they have the same canonical form (up to sha256 collisions), at a cost linear in the number
+ * of distinct objects, never in the number of paths, and no encoding is longer than a few
+ * hundred code units.
  */
 function scalarEncoding(value: unknown): string | undefined {
   if (value === null) return 'null';
   switch (typeof value) {
     case 'string':
+      if (value.length <= SHORT_TEXT) return JSON.stringify(value);
+      return `~${hashOfText((stream) => writeJsonString(stream, value))}`;
     case 'boolean':
       return JSON.stringify(value);
     case 'number':
@@ -463,6 +532,14 @@ function scalarEncoding(value: unknown): string | undefined {
     default:
       return undefined;
   }
+}
+
+/** The strings whose encoding is their JSON text; a longer one is encoded by its sha256. */
+const SHORT_TEXT = 64;
+
+/** The lowercase hex sha256 of what `write` writes, hashed as it is written. */
+function hashOfText(write: (stream: HashStream) => void): string {
+  return bytesToHex(withSha256(write));
 }
 
 /** The copy of a JSON scalar: the value itself (`-0` written `0`, as `canonicalize` writes it). */
@@ -499,20 +576,29 @@ function containerCopy(frame: Frame): JsonValue | undefined {
 
 /**
  * The encoding of a list or an object: `#` and the sha256 of its members' encodings, written
- * as a JSON list or object with sorted keys (`#…` never starts a scalar's JSON text); `undefined`
- * when a member has none (a problem was reported).
+ * as a JSON list or object with sorted keys, hashed as it is written (`#…` never starts a
+ * scalar's JSON text); `undefined` when a member has none (a problem was reported).
  */
 function containerEncoding(frame: Frame): string | undefined {
   if (frame.parts.some(([, encoding]) => encoding === undefined)) return undefined;
   if (frame.parts.length !== frame.length) return undefined;
-  const text =
+  const parts =
     frame.keys === undefined
-      ? `[${frame.parts.map(([, encoding]) => encoding).join(',')}]`
-      : `{${[...frame.parts]
-          .sort(([a], [b]) => (String(a) < String(b) ? -1 : 1))
-          .map(([key, encoding]) => `${JSON.stringify(key)}:${encoding}`)
-          .join(',')}}`;
-  return `#${sha256Hex(text)}`;
+      ? frame.parts
+      : [...frame.parts].sort(([a], [b]) => (String(a) < String(b) ? -1 : 1));
+  const hash = hashOfText((stream) => {
+    stream.text(frame.keys === undefined ? '[' : '{');
+    parts.forEach(([key, encoding], i) => {
+      if (i > 0) stream.text(',');
+      if (frame.keys !== undefined) {
+        writeJsonString(stream, String(key));
+        stream.text(':');
+      }
+      stream.text(encoding ?? '');
+    });
+    stream.text(frame.keys === undefined ? ']' : '}');
+  });
+  return `#${hash}`;
 }
 
 /**
@@ -576,7 +662,7 @@ function openValue(
   // so the problem is named at its first container past the limit.
   if (seen !== undefined && depth + seen.height <= reader.maxDepth) {
     if (!spendValues(seen.size)) throw new InputTooLarge(path);
-    return { height: seen.height, cut: false, size: seen.size };
+    return { ...seen, cut: false };
   }
   let keys: string[] | undefined;
   let length: number;
@@ -599,7 +685,7 @@ function openValue(
   announce(reader, count, path);
   if (count > 0 && depth >= reader.maxDepth) {
     reportTooDeep(path, reader);
-    return { height: 1, cut: true, size: count };
+    return { height: 1, cut: true, size: count, leaves: 0, units: 0 };
   }
   reader.walked.set(node, 'open');
   return {
@@ -611,6 +697,8 @@ function openValue(
     index: 0,
     height: 0,
     size: count,
+    leaves: 0,
+    units: 0,
     cut: false,
     kept: !reservedRoot,
     contentBefore,

@@ -237,6 +237,25 @@ const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
 const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
 
 /**
+ * Internal: copies the bytes of `value` into `target` and returns true when `value` is a real
+ * `Uint8Array` of any realm (a Node `Buffer` included) of exactly `target.length` bytes; else
+ * leaves `target` as it is and returns false. Runs no caller code, as `bytesOf`.
+ */
+export function copyBytesInto(value: unknown, target: Uint8Array): boolean {
+  if (typeof value !== 'object' || value === null) return false;
+  if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return false;
+  try {
+    if (TYPED_ARRAY_TAG.call(value) !== 'Uint8Array') return false;
+    if (TYPED_ARRAY_LENGTH.call(value) !== target.length) return false;
+    // The tag above proves `value` holds the internal slots of a Uint8Array.
+    target.set(value as Uint8Array);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Internal: a copy of the bytes of `value` when it is a real `Uint8Array` of any realm (a Node
  * `Buffer` included), else `undefined`. Runs no caller code: the type and the length come from
  * the internal slots (a Proxy, which has none, is refused), and the bytes are copied by

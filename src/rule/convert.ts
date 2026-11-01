@@ -1,4 +1,4 @@
-import { canonicalize } from '../canonical.js';
+import { isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
@@ -37,7 +37,10 @@ export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
   return withValueBudget(() => {
     const definition = normalizeRuleDefinition(input);
     // The normalized copy's values were counted when they were read from `input`.
-    return executableOf(definition, sha256Hex(ownCopy(() => canonicalize(definition))));
+    return executableOf(
+      definition,
+      ownCopy(() => canonicalSha256Hex(definition)),
+    );
   });
 }
 
@@ -93,7 +96,10 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
     return fail(`invalid definition: ${reasonOf(error)}`);
   }
   // The normalized copy's values were counted when they were read from the parsed payload.
-  if (ownCopy(() => canonicalize(definition)) !== payload) fail('payload is not canonical');
+  // Compared as it is written: the canonical text is never built.
+  if (!ownCopy(() => isCanonicalText(definition, payload as string))) {
+    fail('payload is not canonical');
+  }
   const computed = sha256Hex(payload as string);
   if (computed !== checksum) {
     fail(

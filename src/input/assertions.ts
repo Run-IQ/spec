@@ -1,6 +1,5 @@
-import { canonicalize } from '../canonical.js';
+import { canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
-import { sha256Hex } from '../hash.js';
 import { parsePointer, parseReadPointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import { isSubject } from '../path/subject.js';
@@ -133,7 +132,7 @@ function assertionDigest(assertion: FactAssertion): string {
   }
   const read = snapshot;
   // The copy's values were counted when they were read from `assertion`.
-  return sha256Hex(ownCopy(() => canonicalize(read)));
+  return ownCopy(() => canonicalSha256Hex(read));
 }
 
 /**

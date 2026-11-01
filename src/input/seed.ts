@@ -1,10 +1,8 @@
 import { hkdf } from '@noble/hashes/hkdf.js';
-import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { newSpecError } from '../errors.js';
-import { hashWork } from '../merkle.js';
-import { Utf8Writer } from '../utf8.js';
+import { HashStream } from '../stream.js';
 import { bytesOf, hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 
 /** The bytes of a seed (D-14). */
@@ -73,22 +71,19 @@ export function readSeed(seed: Uint8Array): Uint8Array {
 
 /**
  * Internal: the salt of each input leaf under `seed` (a copy this package owns), D-14:
- * `HMAC-SHA256(seed, utf8('input:' + pointer))`, 32 bytes. The keyed state is built once and
- * cloned for each pointer; each salt is written into the same 32-byte array, returned by every
- * call: use it before the next call.
+ * `HMAC-SHA256(seed, utf8('input:' + pointer))`, 32 bytes, the pointer written as it is (no
+ * `'input:' + pointer` is built). The keyed state is built once and cloned for each pointer;
+ * each salt is written into the same 32-byte array, returned by every call: use it before the
+ * next call.
  */
 export function inputSalter(seed: Uint8Array): (pointer: string) => Uint8Array {
-  const keyed = hmac.create(sha256, seed);
-  const work = keyed.clone();
+  const stream = HashStream.hmacSha256(seed);
   const salt = new Uint8Array(SEED_BYTES);
-  const writer = new Utf8Writer();
   return (pointer) => {
-    keyed._cloneInto(work);
-    const message = writer.encode(`input:${pointer}`);
-    hashWork.calls += 1;
-    hashWork.bytes += message.length;
-    work.update(message);
-    work.digestInto(salt);
+    stream.start();
+    stream.text('input:');
+    stream.text(pointer);
+    stream.digestInto(salt);
     return salt;
   };
 }

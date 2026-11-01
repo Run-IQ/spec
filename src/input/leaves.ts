@@ -2,8 +2,8 @@ import { newSpecError } from '../errors.js';
 
 /**
  * Internal to `@run-iq/spec`: the leaves of a decision input (D-15), walked over a plain copy
- * this package made (`readProofInput`), never over a caller's value. Shared by the validator,
- * which bounds the total length of their pointers, and by the input tree, which hashes them.
+ * this package made (`readProofInput`), never over a caller's value: the input tree hashes them
+ * (the validator counts the same leaves as it reads, `walkJson`).
  *
  * A leaf is each scalar (`null` included), each list (empty or not: its elements have their own
  * leaves) and each empty object; a non-empty object has no leaf of its own (its descendants
@@ -24,16 +24,6 @@ export type LeafContent =
 /** A key as a JSON pointer segment writes it (RFC 6901): `~` as `~0`, `/` as `~1`. */
 function escapeSegment(key: string): string {
   return key.replace(/~/g, '~0').replace(/\//g, '~1');
-}
-
-/** The length of `escapeSegment(key)`, without building it. */
-function escapedLength(key: string): number {
-  let length = key.length;
-  for (let i = 0; i < key.length; i++) {
-    const code = key.charCodeAt(i);
-    if (code === 0x7e || code === 0x2f) length += 1;
-  }
-  return length;
 }
 
 /** True for a JSON scalar. */
@@ -100,56 +90,4 @@ export function forEachLeaf(root: unknown, visit: (leaf: LeafContent) => void): 
       if (member !== undefined) stack.push([member[1], `${pointer}/${escapeSegment(member[0])}`]);
     }
   }
-}
-
-/** The leaves below a value, and the code units their pointers hold below it. */
-interface Below {
-  readonly leaves: number;
-  readonly units: number;
-}
-
-/**
- * The UTF-16 code units the leaf pointers of `root` hold in all (the sum of their lengths), or
- * `cap + 1` when they hold more. Linear in the size of the copy, whatever the number of paths
- * through shared values: each list or object is summed once (its leaves and the units of their
- * pointers below it), and a path to it adds its own prefix once per leaf, by multiplication.
- * Iterative: an explicit stack.
- */
-export function leafPointerText(root: unknown, cap: number): number {
-  if (typeof root !== 'object' || root === null) return 0;
-  const done = new Map<object, Below>();
-  const stack: object[] = [root];
-  const below = (child: unknown): Below | undefined =>
-    typeof child === 'object' && child !== null ? done.get(child) : { leaves: 1, units: 0 };
-  while (stack.length > 0) {
-    const node = stack[stack.length - 1];
-    if (node === undefined) break;
-    if (done.has(node)) {
-      stack.pop();
-      continue;
-    }
-    const children = membersOf(node).map(([key, child]): [number, unknown] => [
-      escapedLength(key),
-      child,
-    ]);
-    let waiting = false;
-    for (const [, child] of children) {
-      if (typeof child === 'object' && child !== null && !done.has(child)) {
-        stack.push(child);
-        waiting = true;
-      }
-    }
-    if (waiting) continue;
-    stack.pop();
-    let leaves = Array.isArray(node) || children.length === 0 ? 1 : 0;
-    let units = 0;
-    for (const [segment, child] of children) {
-      const sum = below(child) ?? { leaves: 0, units: 0 };
-      leaves += sum.leaves;
-      // `/` and the segment, once per leaf below the child; capped to stay exact.
-      units = Math.min(units + sum.units + sum.leaves * (1 + segment), cap + 1);
-    }
-    done.set(node, { leaves, units });
-  }
-  return done.get(root)?.units ?? 0;
 }
