@@ -143,13 +143,22 @@ export function carrierRuleFindings(
   context: Context,
   invalid: (message: string) => void,
 ): void {
+  // Whether a carrier selects a target derives from the rules alone: once per pair.
+  const selections = new Map<string, boolean>();
   for (const entry of p.pending) {
     if (entry.carrier === undefined) continue;
-    const carrier = definitions.get(ruleKey(entry.carrier));
-    const target = definitions.get(ruleKey(entry));
-    if (carrier !== undefined && target !== undefined && !selects(carrier, target)) {
-      invalid(`carrier does not select its target: ${citeName(instanceKey(entry))}`);
+    const carrierKey = ruleKey(entry.carrier);
+    const targetKey = ruleKey(entry);
+    const carrier = definitions.get(carrierKey);
+    const target = definitions.get(targetKey);
+    if (carrier === undefined || target === undefined) continue;
+    const pair = `${carrierKey}\u0000${targetKey}`;
+    let selected = selections.get(pair);
+    if (selected === undefined) {
+      selected = selects(carrier, target);
+      selections.set(pair, selected);
     }
+    if (!selected) invalid(`carrier does not select its target: ${citeName(instanceKey(entry))}`);
   }
   waitingTargets(p, definitions, context.imposed, invalid);
   recordedExceptions(p, definitions, context.ties.losers, invalid);
@@ -394,14 +403,21 @@ function recordedExceptions(
     ...p.skipped.filter((skip) => !stopsCarrier(skip.reason)),
   ];
   const seen = new Set<string>();
+  const signatures = new Map<string, string[]>();
   for (const instance of fired) {
     const key = instanceKey(instance);
     if (seen.has(key)) continue;
     seen.add(key);
-    const definition = definitions.get(ruleKey(instance));
+    const ruleOf = ruleKey(instance);
+    const definition = definitions.get(ruleOf);
     if (definition === undefined) continue;
     const recorded = (records.get(key) ?? []).sort();
-    const defined = definedSignatures(definition);
+    // A definition's signatures derive from it alone: once per rule.
+    let defined = signatures.get(ruleOf);
+    if (defined === undefined) {
+      defined = definedSignatures(definition);
+      signatures.set(ruleOf, defined);
+    }
     const same = losers.has(key)
       ? recorded.length === 1 && defined.includes(recorded[0] ?? '')
       : recorded.length === defined.length && recorded.every((s, i) => s === defined[i]);
