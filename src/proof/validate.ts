@@ -39,10 +39,12 @@ const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
  *   names; `requested` a non-empty list of output names; `supersedes` `{ digest, reason }`
  *   with `reason` a code (`^[a-z0-9][a-z0-9_-]*$`);
  * - the ten sections are lists, each entry closed and carrying a `salt` of 16 bytes in
- *   lowercase hex. A rule is `{ id, version, checksum, ruleSet, sourceRef?, salt }`, its id
- *   bare; every other rule is cited by its qualified id (`qualifyName`, D-37) and every output
- *   by its name, both as cited names (`citedNameProblem`: no `$` output, no `local:`); subjects
- *   are subjects (`isSubject`); pending `missing` pointers are pointers of the evaluation
+ *   lowercase hex. A rule is `{ id, version, checksum, ruleSet, priority, sourceRef?, salt }`,
+ *   its id bare and its priority a finite number; a step's `rank` is a non-negative integer; an
+ *   exception names its `output` when it is a `shortCircuit`, and only then. Every other rule
+ *   is cited by its qualified id (`qualifyName`, D-37) and every output by its name, both as
+ *   cited names (`citedNameProblem`: no `$` output, no `local:`); subjects are subjects
+ *   (`isSubject`); pending `missing` pointers are pointers of the evaluation
  *   context, and fact paths pointers to an input fact (`contextToInputPointer`);
  * - an output carries its declaration in its normal form, checked as an output declaration
  *   (`validateOutputDeclaration`); its `status` is an output status, while the status of a

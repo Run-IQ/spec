@@ -3,6 +3,7 @@ import { computeRuleChecksum, sealProof, validateProof, verifyProof } from '../s
 import type { JsonValue, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
 import { entries, ruleA, unsaltedSalt } from './proof-cases.js';
 import { outputProof, problems, withEntry, withSection } from './proof-builders.js';
+import { traceProof } from './proof-trace.js';
 import type { Content, Entry, OutputPart } from './proof-builders.js';
 
 /**
@@ -149,19 +150,21 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
     ]);
   });
 
-  it('the priorities enter the digest (vector frozen with Python stdlib)', () => {
+  it('the priorities enter the digest (vector frozen with an RFC 8785 implementation)', () => {
+    // A proof core can produce: r0 (priority 7) wins; r1 (priority -3) applied below it.
     const highest: OutputPart = {
       type: 'number',
       combine: 'highestPriority',
       value: 2,
+      contributors: ['r0'],
       selected: { ruleId: 'r0' },
     };
     const content = outputProof(highest, [2, 2]);
     content.rules[0]!.priority = 7;
     content.rules[1]!.priority = -3;
-    // sha256 of json.dumps(content, sort_keys=True, separators=(',', ':')): JCS for this
-    // ASCII, integer-only content (Task 9J round 3).
-    const FROZEN = '2485de37eabcc2634d9e171723d7cdab98994235af963d89b65989e655d94205';
+    // sha256 of the RFC 8785 text of the content, by an independent Python implementation of
+    // JCS (refrozen in Task 9J round 4: round 3 named the lower rule a contributor).
+    const FROZEN = '3770246076f87e5ccc00a90381a7d7f4193d9cd4121f42ab861057d9aadb6d42';
     expect(sealProof(content).digest).toBe(FROZEN);
     content.rules[1]!.priority = -4;
     expect(sealProof(content).digest).not.toBe(FROZEN);
@@ -190,16 +193,30 @@ describe('exceptions (D-7): the decisions they affect are at least as strong', (
   });
 
   it('an exception at a subject affects the decisions under it only', () => {
-    const exception = { ...entries('exceptions')[0], status: 'conflict' };
-    const at = (subject: string): Content =>
-      withSection('exceptions', [{ ...exception, affected: [{ ruleId: 'k', subject }] }]);
-    expect(problems(at('/enfants/@a7'))).toEqual([
-      'decision weaker than the exception that affected it: k@1 at /enfants/@a7',
+    const at = (subject: string, status = 'conflict'): Content =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 0, status: 'conflict' },
+        rules: [{ id: 'A' }, { id: 'X' }],
+        skipped: [{ ruleId: 'A', subject: '/e/@1', output: 'value', reason: 'INHIBITED', status }],
+        exceptions: [
+          {
+            ruleId: 'X',
+            kind: 'inhibit',
+            affected: [{ ruleId: 'A', subject }],
+            status: 'conflict',
+          },
+        ],
+      });
+    expect(problems(at('/e/@1'))).toEqual([]);
+    expect(problems(at('/e'))).toEqual([]);
+    expect(problems(at('/e/@2'))).toEqual([
+      'affected rule not inhibited by X@1: A at /e/@2',
+      'inhibited without an exception: A@1 at /e/@1',
     ]);
-    expect(problems(at('/enfants'))).toEqual([
-      'decision weaker than the exception that affected it: k@1 at /enfants/@a7',
+    expect(problems(at('/e', 'provisional'))).toEqual([
+      'output status stronger than its causes: value',
+      'decision weaker than the exception that affected it: A@1 at /e/@1',
     ]);
-    expect(problems(at('/enfants/@b1'))).toEqual([]);
   });
 
   it('refuses an exception whose status is not that of its carrier applied', () => {

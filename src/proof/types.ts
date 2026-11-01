@@ -174,6 +174,12 @@ export interface ProofStep {
   unrounded?: JsonValue;
   sourceRef?: string;
   matches?: Record<string, { values: string[]; via: string[] }>;
+  /**
+   * The rank of its instance among those of its rule, by `forEach.orderBy` (`$index`, D-20):
+   * carried by each step with a subject that feeds a `highestPriority` output without `per`,
+   * whose winner among the instances of a rule is the one of rank 0 (D-21), and by no other.
+   */
+  rank?: number;
   salt: string;
 }
 
@@ -220,6 +226,11 @@ export interface ProofException {
   version: number;
   subject?: Subject;
   kind: RuleException['kind'];
+  /**
+   * The output a `shortCircuit` targets (qualified): its carrier's step on it is the value
+   * imposed. Present for a `shortCircuit` only.
+   */
+  output?: string;
   affected: Array<{ ruleId: string; subject?: Subject }>;
   status: SettledStatus;
   /** The index in `strata` of the stratum its carrier rule was evaluated in. */

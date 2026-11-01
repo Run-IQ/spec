@@ -95,7 +95,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
           ruleId: 'r4',
           version: 1,
           kind: 'inhibit',
-          affected: [{ ruleId: 'r1' }],
+          affected: [],
           status: 'determined',
           stratum: 0,
           salt,
@@ -138,7 +138,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
           stratum: 0,
           salt,
         }),
-      ['cited rule not listed: r8'],
+      ['cited rule not listed: r8', 'affected rule not inhibited by r1@1: r8'],
     ],
   ])('a rule id in %s that rules does not list', (_name, cite, issues) => {
     const content = unsigned();
@@ -155,7 +155,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
     const content = unsigned();
     const at = { ruleId: 'r5', version: 1, status: 'determined', stratum: 0, salt } as const;
     content.skipped.push({ ...at, output: 'value', reason: 'DOMINATED' });
-    content.exceptions.push({ ...at, kind: 'inhibit', affected: [{ ruleId: 'r2' }] });
+    content.exceptions.push({ ...at, kind: 'inhibit', affected: [] });
     expect(verifyProof(handSealed(content)).issues).toEqual([
       'cited rule not listed: r5@1',
       'unsigned',
@@ -326,6 +326,36 @@ describe('verifyProof: invalid, with a readable issue', () => {
       status: 'invalid',
       issues: ['options must be an object { trustedKeys?, rules? }', 'untrusted key'],
     });
+  });
+
+  it('options that cannot be read: an options problem, never one of the proof', () => {
+    type Options = Parameters<typeof verifyProof>[1];
+    const throwing = (reason: string): never => {
+      throw new Error(reason);
+    };
+    const opaque = new Proxy({}, { getPrototypeOf: () => throwing('opt') });
+    const rules = new Proxy([], { get: () => throwing('arr') });
+    const getter = {
+      get rules(): never {
+        return throwing('getter');
+      },
+    };
+    const keys = {
+      get trustedKeys(): never {
+        return throwing('keys');
+      },
+    };
+    // The options read, the signature is checked before the rules are.
+    const cases: [unknown, string[]][] = [
+      [opaque, ['options could not be read: opt']],
+      [getter, ['options.rules could not be read: getter']],
+      [keys, ['options.trustedKeys could not be read: keys']],
+      [{ rules }, ['untrusted key', 'options.rules could not be read: arr']],
+    ];
+    for (const [options, issues] of cases) {
+      // Hostile options, outside the declared type on purpose.
+      expect(verifyProof(signed(), options as Options)).toEqual({ status: 'invalid', issues });
+    }
   });
 
   it('never throws, whatever the input', () => {

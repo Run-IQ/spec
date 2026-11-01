@@ -34,6 +34,7 @@ import {
   outputName,
   packId,
   priority,
+  rank,
   ruleId,
   ruleSetId,
   salt,
@@ -288,9 +289,10 @@ const STEP: Shape = {
       name: (name, at) => (name.startsWith('$') ? reservedDimensionNameMessage(at) : undefined),
       nonEmpty: 'absent matches nothing',
     }),
+    rank,
     salt,
   },
-  optional: ['subject', 'unrounded', 'sourceRef', 'matches'],
+  optional: ['subject', 'unrounded', 'sourceRef', 'matches', 'rank'],
 };
 
 const instances = scalarCheck((value, path, add) => {
@@ -349,18 +351,29 @@ const AFFECTED: Shape = {
 };
 
 const EXCEPTION: Shape = {
-  summary: '{ ruleId, version, subject?, kind, affected, status, stratum, salt }',
+  summary: '{ ruleId, version, subject?, kind, output?, affected, status, stratum, salt }',
   fields: {
     ruleId: citedRule,
     version,
     subject,
     kind: oneOf(KINDS),
+    output: outputName,
     affected: listOf(objectOf(AFFECTED)),
     status: settledStatus('exception'),
     stratum,
     salt,
   },
-  optional: ['subject'],
+  optional: ['subject', 'output'],
+  refine: (copy, path, add) => {
+    // Checked once kind is: an unknown kind is its own problem.
+    if (!KINDS.some((kind) => kind === copy.kind)) return;
+    const at = `${path}.output`;
+    if (copy.kind === 'shortCircuit' && copy.output === undefined) {
+      add(at, `${citeName(at)} is required for a shortCircuit`);
+    } else if (copy.kind !== 'shortCircuit' && copy.output !== undefined) {
+      add(at, `${citeName(at)} applies only to a shortCircuit`);
+    }
+  },
 };
 
 const ASSERTION_KEYS = ['method', 'status', 'assertionDigest'];

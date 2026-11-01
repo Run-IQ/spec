@@ -3,6 +3,7 @@ import { isCanonicalDecimal, isOnStep, numberToDecimal } from '../decision/decim
 import { matchesValue } from '../decision/output.js';
 import type { OutputDeclaration } from '../decision/output.js';
 import type { JsonValue } from '../canonical.js';
+import { extend } from './collect.js';
 import type { ProofBounds, ProofOutput, ProofStep, UnsignedProof } from './types.js';
 
 /** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
@@ -46,11 +47,14 @@ function fedOutputs(p: UnsignedProof): Fed[] {
   for (const output of p.outputs) {
     if (!byName.has(output.name)) byName.set(output.name, { output, held: [], steps: [] });
   }
-  for (const output of p.outputs) byName.get(output.name)?.held.push(...heldValues(output));
+  for (const output of p.outputs) {
+    const fed = byName.get(output.name);
+    if (fed !== undefined) extend(fed.held, heldValues(output));
+  }
   for (const item of p.items) {
     // An item of an output without `per` is reported by `outputProblems`.
     const fed = byName.get(item.output);
-    if (fed?.output.per !== undefined) fed.held.push(...heldValues(item));
+    if (fed?.output.per !== undefined) extend(fed.held, heldValues(item));
   }
   for (const step of p.applied) byName.get(step.output)?.steps.push(step);
   return [...byName.values()];
@@ -62,13 +66,26 @@ export function instanceKey(entry: { ruleId: string; version: number; subject?: 
   return `${entry.ruleId}@${entry.version}${at}`;
 }
 
-/** The applied steps whose contribution a `shortCircuit` exception of their rule imposed. */
+/** The key of the step of a rule instance on `output`, as `imposedSteps` holds it. */
+export function imposedKey(
+  entry: { ruleId: string; version: number; subject?: string },
+  output: string,
+): string {
+  return `${instanceKey(entry)}\u0000${output}`;
+}
+
+/**
+ * The applied steps whose contribution a `shortCircuit` exception of their rule imposed: the
+ * step of its carrier instance on the output it targets (`imposedKey`), not another step of it.
+ */
 export function imposedSteps(p: UnsignedProof): Set<string> {
-  const carriers = new Set<string>();
+  const imposed = new Set<string>();
   for (const exception of p.exceptions) {
-    if (exception.kind === 'shortCircuit') carriers.add(instanceKey(exception));
+    if (exception.kind === 'shortCircuit' && exception.output !== undefined) {
+      imposed.add(imposedKey(exception, exception.output));
+    }
   }
-  return carriers;
+  return imposed;
 }
 
 /**
@@ -102,7 +119,7 @@ export function offDeclarationValues(p: UnsignedProof): string[] {
       issues.push(`output value not rounded as declared: ${cited}`);
     }
     const contributionForm = (step: ProofStep): boolean => {
-      const asValue = imposed.has(instanceKey(step)) || declaration.combine !== 'count';
+      const asValue = imposed.has(imposedKey(step, step.output)) || declaration.combine !== 'count';
       const form = (value: JsonValue): boolean =>
         asValue ? hasForm(value, declaration) : typeof value === 'boolean';
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));

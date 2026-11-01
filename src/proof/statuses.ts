@@ -3,9 +3,18 @@ import { OUTPUT_STATUSES } from '../decision/status.js';
 import type { OutputStatus } from '../decision/status.js';
 import { citeName } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
-import { qualifyName } from '../rule/ruleSet.js';
+import { append } from './collect.js';
 import { combinationProblems, comparator, SELECTING } from './combination.js';
-import type { Target } from './combination.js';
+import type { Context, Target } from './combination.js';
+import {
+  causeProblems,
+  completenessProblems,
+  inCollection,
+  pendingInOrder,
+  rankProblems,
+  samePending,
+} from './completeness.js';
+import type { Feed } from './completeness.js';
 import { declarationOf, instanceKey } from './output-values.js';
 import type {
   ProofBounds,
@@ -26,16 +35,6 @@ const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status)
 /** How messages cite an item: `name at subject`. */
 export function citeItem(output: string, subject: string): string {
   return `${citeName(output)} at ${citeName(subject)}`;
-}
-
-/** What one output or item receives: steps, pending rules, and the strongest candidate. */
-interface Feed {
-  steps: ProofStep[];
-  /** The ids of the pending rules, and their entries. */
-  pending: string[];
-  waiting: ProofPending[];
-  /** The rank of the strongest exclusion that would have fed it, -1 when none. */
-  candidates: number;
 }
 
 const newFeed = (): Feed => ({ steps: [], pending: [], waiting: [], candidates: -1 });
@@ -158,7 +157,14 @@ function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): Fe
     feed?.pending.push(entry.ruleId);
     feed?.waiting.push(entry);
   }
-  for (const skip of p.skipped) exclude(skip, outputs, tries);
+  for (const skip of p.skipped) {
+    // A per output is fed by instances (D-21): an exclusion without subject is grouped.
+    const perOutput = skip.output !== undefined && tries.has(skip.output);
+    if (perOutput && skip.subject === undefined && skip.instances === undefined) {
+      strays.push(`exclusion feeds no item: ${citeName(instanceKey(skip))}`);
+    }
+    exclude(skip, outputs, tries);
+  }
   for (const trie of tries.values()) trie.settle();
   return { outputs, items, strays };
 }
@@ -187,7 +193,7 @@ function entryProblems(entry: Entry, cite: () => string, output: ProofOutput): s
     issues.push(`undetermined output has a value: ${cite()}`);
   }
   const { bounds } = entry;
-  if (bounds !== undefined) issues.push(...boundsProblems(bounds, undetermined, cite, output));
+  if (bounds !== undefined) append(issues, boundsProblems(bounds, undetermined, cite, output));
   if (entry.selected !== undefined) {
     if (undetermined) issues.push(`selected on an undetermined output: ${cite()}`);
     else if (!SELECTING.has(output.combine)) {
@@ -215,78 +221,6 @@ function boundsProblems(
 }
 
 /**
- * True when `subject` is an element of the collection `per` (`/foyers/*\/personnes`): its
- * segments are those of `per`, each `*` an element segment (`@<key>`), then one element
- * segment (D-2). A subject deeper or shallower, an index, a group or a time segment is not.
- */
-function inCollection(per: string, subject: string): boolean {
-  const pattern = parsePointer(per);
-  const segments = parsePointer(subject);
-  if (segments.length !== pattern.length + 1) return false;
-  const element = (segment: string | undefined): boolean => segment?.startsWith('@') === true;
-  return (
-    pattern.every((part, i) => (part === '*' ? element(segments[i]) : part === segments[i])) &&
-    element(segments[pattern.length])
-  );
-}
-
-/** The priority of each listed rule, by qualified id and version (`id@version`). */
-export type Priorities = ReadonlyMap<string, number>;
-
-/**
- * The completeness of an output or item (D-7, the table of Task 9M2): a pending rule that feeds
- * it makes it `undetermined`, except an `any` with a `true` contribution, an `all` with a
- * `false` one, and a `highestPriority` whose winner (the step `selected` names) has a priority
- * strictly above that of every pending rule feeding it (the priorities the proof records in
- * `rules`; an unknown one never outranks). An `undetermined` one has a cause: a pending rule,
- * or, for an `all` no rule reached without `empty`, its own emptiness (`emptyOutput`).
- */
-function completenessProblems(target: Target, feed: Feed, priorities: Priorities): string[] {
-  const { combine, empty } = target.declaration;
-  const pending = feed.pending.length > 0;
-  if (target.status === 'undetermined') {
-    const emptyAll = combine === 'all' && feed.steps.length === 0 && empty !== true;
-    return pending || emptyAll ? [] : [`undetermined output without a cause: ${target.cite()}`];
-  }
-  if (!pending) return [];
-  if (combine === 'highestPriority' && outranksPending(target, feed, priorities)) return [];
-  const decisive = combine === 'any' ? true : combine === 'all' ? false : undefined;
-  if (decisive !== undefined && feed.steps.some((step) => step.contribution === decisive)) {
-    return [];
-  }
-  return [`settled output with pending rules: ${target.cite()}`];
-}
-
-/** True when the winner of `target` has a known priority above every pending rule's. */
-function outranksPending(target: Target, feed: Feed, priorities: Priorities): boolean {
-  const { selected } = target;
-  if (selected === undefined) return false;
-  const winner = feed.steps.find(
-    (step) => step.ruleId === selected.ruleId && step.subject === selected.subject,
-  );
-  const top = winner === undefined ? undefined : priorities.get(instanceRule(winner));
-  if (top === undefined) return false;
-  return feed.waiting.every((entry) => {
-    const priority = priorities.get(instanceRule(entry));
-    return priority !== undefined && priority < top;
-  });
-}
-
-const instanceRule = (entry: { ruleId: string; version: number }): string =>
-  `${entry.ruleId}@${entry.version}`;
-
-/** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
-function samePending(named: readonly string[], pending: readonly string[]): boolean {
-  const expected = new Set(pending);
-  const given = new Set(named);
-  return (
-    given.size === named.length &&
-    given.size === expected.size &&
-    named.every((id) => expected.has(id))
-  );
-}
-
-/**
  * Internal: the problems of the outputs and items of `p` (`listed`: each output name, first
  * entry), in this order: their status, value, bounds and selection, as outputs and items
  * (`undetermined output has a value`, `bounds on a settled output`, …; a per output carries no
@@ -300,18 +234,14 @@ function samePending(named: readonly string[], pending: readonly string[]): bool
 export function outputProblems(
   p: UnsignedProof,
   listed: ReadonlyMap<string, ProofOutput>,
-  imposed: ReadonlySet<string>,
+  context: Context,
 ): string[] {
   const issues: string[] = [];
-  const priorities = new Map<string, number>();
-  for (const rule of p.rules) {
-    priorities.set(`${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`, rule.priority);
-  }
   const nonPer = new Set<string>();
   for (const [name, output] of listed) {
     const cited = (): string => citeName(name);
     if (output.per === undefined) {
-      issues.push(...entryProblems(output, cited, output));
+      append(issues, entryProblems(output, cited, output));
       continue;
     }
     const { value, bounds, selected, contributors, pending } = output;
@@ -331,22 +261,28 @@ export function outputProblems(
       nonPer.add(item.output);
       continue;
     }
-    issues.push(...entryProblems(item, () => citeItem(item.output, item.subject), output));
+    append(
+      issues,
+      entryProblems(item, () => citeItem(item.output, item.subject), output),
+    );
     if (!inCollection(output.per, item.subject)) {
       issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
     }
   }
   const feeds = feedsOf(p, listed);
-  issues.push(...feeds.strays);
+  append(issues, feeds.strays);
   const targets = targetsOf(p, listed, feeds);
   for (const { target, feed, pending } of targets) {
-    issues.push(...combinationProblems(target, imposed));
+    append(issues, combinationProblems(target, context));
     if (!samePending(pending, feed.pending)) {
       issues.push(`pending differ from pending rules: ${target.cite()}`);
+    } else if (!pendingInOrder(pending, feed, context.standings)) {
+      issues.push(`pending not in contribution order: ${target.cite()}`);
     }
-    issues.push(...completenessProblems(target, feed, priorities));
+    append(issues, completenessProblems(target, feed, context.standings));
+    append(issues, rankProblems(target));
   }
-  issues.push(...statusProblems(p, listed, feeds, targets));
+  append(issues, statusProblems(p, listed, feeds, targets));
   return issues;
 }
 
@@ -374,7 +310,13 @@ function targetsOf(
     const direct = feeds.outputs.get(name);
     if (direct !== undefined) {
       fed.push({
-        target: { ...output, cite: () => citeName(name), declaration, steps: direct.steps },
+        target: {
+          ...output,
+          cite: () => citeName(name),
+          declaration,
+          steps: direct.steps,
+          whole: true,
+        },
         feed: direct,
         pending: output.pending,
       });
@@ -388,6 +330,7 @@ function targetsOf(
         cite: () => citeItem(name, item.subject),
         declaration,
         steps: feed.steps,
+        whole: false,
       };
       fed.push({ target, feed, pending: item.pending });
     }
@@ -413,13 +356,6 @@ function statusProblems(
       issues.push(`per output status differs from its items: ${citeName(name)}`);
     }
   }
-  for (const { target, feed } of targets) {
-    const rank = rankOf(target.status);
-    if (feed.steps.some((step) => rankOf(step.status) > rank)) {
-      issues.push(`output status weaker than its contributions: ${target.cite()}`);
-    }
-    if (feed.candidates > rank)
-      issues.push(`output status weaker than its candidates: ${target.cite()}`);
-  }
+  for (const { target, feed } of targets) append(issues, causeProblems(target, feed));
   return issues;
 }

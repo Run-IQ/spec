@@ -35,28 +35,29 @@ describe('a number sum: 20 significant digits, ties away from zero (core floatSu
   });
 });
 
-describe('the contribution order is that of contributors, then of applied (normative)', () => {
-  it('a number sum depends on it: a proof reordered without its value is refused', () => {
+describe('the contribution order is normative (D-5): one decision, one proof', () => {
+  // The rules r0, r1… of `outputProof` have the same priority: identity orders them.
+  const ORDER = 'contributors not in contribution order: value';
+
+  it('a number sum depends on it: a reordered proof is refused, whatever its value', () => {
     const output: OutputPart = { type: 'number', combine: 'sum', value: 10 };
     expect(found(output, [1e20, 5, -1e20])).toEqual([]);
-    // Summed as r0, r2, r1: 1e20 - 1e20 + 5 is 5, not 10.
+    // Summed as r0, r2, r1: 1e20 - 1e20 + 5 is 5, not 10; neither is the proof.
     const reordered = { ...output, contributors: ['r0', 'r2', 'r1'] };
-    expect(found(reordered, [1e20, 5, -1e20])).toEqual([NOT_FOLLOWING]);
-    expect(found({ ...reordered, value: 5 }, [1e20, 5, -1e20])).toEqual([]);
+    expect(found(reordered, [1e20, 5, -1e20])).toEqual([ORDER, NOT_FOLLOWING]);
+    expect(found({ ...reordered, value: 5 }, [1e20, 5, -1e20])).toEqual([ORDER]);
   });
 
   it('a union keeps the order of its contributors', () => {
     const output: OutputPart = { type: 'list', combine: 'union', value: ['a', 'b'] };
     expect(found(output, [['a'], ['b']])).toEqual([]);
-    expect(found({ ...output, contributors: ['r1', 'r0'] }, [['a'], ['b']])).toEqual([
-      NOT_FOLLOWING,
-    ]);
+    expect(found({ ...output, value: ['b', 'a'] }, [['a'], ['b']])).toEqual([NOT_FOLLOWING]);
     expect(
       found({ ...output, value: ['b', 'a'], contributors: ['r1', 'r0'] }, [['a'], ['b']]),
-    ).toEqual([]);
+    ).toEqual([ORDER]);
   });
 
-  it('a max selects the first of equal extremes in that order', () => {
+  it('a max selects the first of equal extremes in that order (D-27)', () => {
     const output: OutputPart = {
       type: 'number',
       combine: 'max',
@@ -64,12 +65,12 @@ describe('the contribution order is that of contributors, then of applied (norma
       selected: { ruleId: 'r0' },
     };
     expect(found(output, [2, 2])).toEqual([]);
-    expect(found({ ...output, contributors: ['r1', 'r0'] }, [2, 2])).toEqual([
+    expect(found({ ...output, selected: { ruleId: 'r1' } }, [2, 2])).toEqual([
       'selected does not match the value: value',
     ]);
   });
 
-  it('is irrelevant to the commutative strategies: a decimal sum, a count, all, any', () => {
+  it('even where the value does not depend on it: a decimal sum, a count, all, any', () => {
     const cases: [OutputPart, JsonValue[]][] = [
       [
         { type: 'decimal', combine: 'sum', value: '5' },
@@ -81,7 +82,9 @@ describe('the contribution order is that of contributors, then of applied (norma
     ];
     for (const [output, contributions] of cases) {
       expect(found(output, contributions)).toEqual([]);
-      expect(found({ ...output, contributors: ['r2', 'r1', 'r0'] }, contributions)).toEqual([]);
+      expect(found({ ...output, contributors: ['r2', 'r1', 'r0'] }, contributions)).toEqual([
+        ORDER,
+      ]);
     }
   });
 });

@@ -152,7 +152,7 @@ describe('strata, decimals and rounding in a proof', () => {
           ruleId: 'r1',
           version: 1,
           kind: 'inhibit',
-          affected: [{ ruleId: 'r2' }],
+          affected: [],
           status: 'determined',
           stratum: 2,
           salt,

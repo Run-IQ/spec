@@ -83,22 +83,3 @@ describe('a proof stored entry by entry', () => {
     );
   }, 600_000);
 });
-
-describe('verifyProof on a wide proof', () => {
-  it('verifies 80 000 steps in under 3 s', () => {
-    // 80 000 steps: 40 000 feeding as many outputs, 40 000 feeding the items of one output.
-    const content = wideProof(40_000, 'decimal');
-    content.rules = content.rules.filter((rule) => rule.id.startsWith('a') || rule.id === 'k');
-    content.skipped = [];
-    content.exceptions = [];
-    content.factsRead = [];
-    const proof = sealProof(content);
-    expect(proof.applied.length).toBe(80_000);
-    expect(proof.items.length).toBe(40_000);
-    const start = performance.now();
-    const result = verifyProof(proof);
-    const elapsed = performance.now() - start;
-    expect(result).toEqual({ status: 'consistent', issues: ['unsigned'] });
-    expect(elapsed).toBeLessThan(3_000);
-  }, 600_000);
-});

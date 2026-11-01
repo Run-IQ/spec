@@ -5,6 +5,7 @@ import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js'
 import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
+import { extend } from './collect.js';
 import { inconsistencies } from './consistency.js';
 import { contentDigest } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
@@ -96,17 +97,57 @@ function verify(p: unknown, options: unknown): ProofVerification {
     findings.push({ message: 'digest mismatch', invalid: true });
   }
   for (const message of inconsistencies(proof)) findings.push({ message, invalid: true });
-  if (options !== undefined && !isPlainObject(options)) {
-    findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });
-  }
-  const trustedKeys = isPlainObject(options) ? options.trustedKeys : undefined;
-  const rules = isPlainObject(options) ? options.rules : undefined;
-  findings.push(...signatureFindings(proof, trustedKeys));
-  if (rules !== undefined) findings.push(...ruleFindings(proof, rules));
+  extend(findings, optionFindings(proof, options));
 
   const issues = boundMessages(findings.map((finding) => finding.message));
   if (findings.some((finding) => finding.invalid)) return { status: 'invalid', issues };
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues };
+}
+
+/**
+ * The findings of the options: their shape, the signature against `trustedKeys`, the rules
+ * against `rules`. An option that cannot be read (a throwing getter, a Proxy trap) is an
+ * options problem (`options could not be read: <reason>`, `options.rules could not be read:
+ * <reason>`, …), never one of the proof.
+ */
+function optionFindings(proof: DecisionProof, options: unknown): Finding[] {
+  const unreadable = (subject: string, error: unknown): Finding[] => [
+    { message: unreadableMessage(subject, error), invalid: true },
+  ];
+  let record: Record<string, unknown> | undefined;
+  try {
+    record = isPlainObject(options) ? options : undefined;
+  } catch (error) {
+    return unreadable('options', error);
+  }
+  const findings: Finding[] = [];
+  if (options !== undefined && record === undefined) {
+    findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });
+  }
+  let trustedKeys: unknown;
+  let rules: unknown;
+  try {
+    trustedKeys = record?.trustedKeys;
+  } catch (error) {
+    return [...findings, ...unreadable('options.trustedKeys', error)];
+  }
+  try {
+    rules = record?.rules;
+  } catch (error) {
+    return [...findings, ...unreadable('options.rules', error)];
+  }
+  try {
+    extend(findings, signatureFindings(proof, trustedKeys));
+  } catch (error) {
+    return [...findings, ...unreadable('options.trustedKeys', error)];
+  }
+  if (rules === undefined) return findings;
+  try {
+    extend(findings, ruleFindings(proof, rules));
+  } catch (error) {
+    extend(findings, unreadable('options.rules', error));
+  }
+  return findings;
 }
 
 function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {

@@ -129,7 +129,7 @@ export function baseContent(): Record<string, unknown> {
         combine: 'all',
         status: 'provisional',
         value: true,
-        contributors: ['social:R1', 'vat:R1'],
+        contributors: ['vat:R1', 'social:R1'],
         pending: [],
         empty: true,
       },

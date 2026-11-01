@@ -299,7 +299,7 @@ function factReasons(
   } else if (after !== undefined) {
     if (after.index !== last.index + 1)
       reasons.push('the after leaf is not just after its last leaf');
-    reasons.push(...afterReasons(segmentsOf(after), fact.segments));
+    for (const reason of afterReasons(segmentsOf(after), fact.segments)) reasons.push(reason);
   }
   return reasons;
 }
@@ -330,7 +330,9 @@ function checkAbsences(
     if (beforeSegments && compareSegments(beforeSegments, entry.segments) >= 0) {
       reasons.push('the before leaf does not come before it');
     }
-    if (afterSegments) reasons.push(...afterReasons(afterSegments, entry.segments));
+    if (afterSegments) {
+      for (const reason of afterReasons(afterSegments, entry.segments)) reasons.push(reason);
+    }
     if (before && after) {
       if (after.index !== before.index + 1) {
         reasons.push('the before and after leaves are not adjacent');

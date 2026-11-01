@@ -7,7 +7,12 @@ import type { OutputStatus } from '../decision/status.js';
 import { ownCopy } from '../values.js';
 import { roundDecimal, roundNumber, sumDecimals, sumNumbers } from './arithmetic.js';
 import type { Rounding } from './arithmetic.js';
-import { instanceKey } from './output-values.js';
+import { append } from './collect.js';
+import { topOf } from './highest.js';
+import type { Top } from './highest.js';
+import { imposedKey } from './output-values.js';
+import { inStandingOrder, ruleKey } from './precedence.js';
+import type { Standing, Standings } from './precedence.js';
 import type { ProofSelection, ProofStep } from './types.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
@@ -21,6 +26,15 @@ export interface Target {
   selected?: ProofSelection;
   /** In the order of `applied`. */
   steps: readonly ProofStep[];
+  /** True for an output without `per`: the instances of a rule compete for it by rank. */
+  whole: boolean;
+}
+
+/** What the combination of a target is checked against: the proof's imposed steps, standings. */
+export interface Context {
+  /** The steps a `shortCircuit` imposed (`imposedKey`). */
+  imposed: ReadonlySet<string>;
+  standings: Standings;
 }
 
 /** The strategies whose value is one contribution, named by `selected` (D-27). */
@@ -206,14 +220,29 @@ function inContributionOrder(target: Target): ProofStep[] {
   return [...[...buckets.values()].flat(), ...unnamed];
 }
 
-/** True when `contributors` are the rules of the steps (for `highestPriority`, some of them). */
-function contributorsMatch(target: Target): boolean {
+/**
+ * True when `contributors` are the rules of the steps; for a `highestPriority`, the rules at its
+ * top (`top`), or, when the top cannot be told (a rule not listed), some of them.
+ */
+function contributorsMatch(target: Target, top: Top | undefined): boolean {
   const { contributors, steps, declaration } = target;
-  const fed = new Set(steps.map((step) => step.ruleId));
   const named = new Set(contributors);
-  if (named.size !== contributors.length || !contributors.every((id) => fed.has(id))) return false;
+  if (named.size !== contributors.length) return false;
+  if (top !== undefined)
+    return named.size === top.ids.size && contributors.every((id) => top.ids.has(id));
+  const fed = new Set(steps.map((step) => step.ruleId));
+  if (!contributors.every((id) => fed.has(id))) return false;
   if (declaration.combine !== 'highestPriority') return named.size === fed.size;
   return (named.size === 0) === (fed.size === 0);
+}
+
+/** The standing of each contributor of `target`: that of the first step of its rule. */
+function contributorStanding(target: Target, standings: Standings) {
+  const first = new Map<string, Standing | undefined>();
+  for (const step of target.steps) {
+    if (!first.has(step.ruleId)) first.set(step.ruleId, standings.get(ruleKey(step)));
+  }
+  return (id: string): Standing | undefined => first.get(id);
 }
 
 /**
@@ -233,21 +262,37 @@ function contributorsMatch(target: Target): boolean {
  * The contribution order is that of `contributors`, then that of `applied`. Contributions off
  * their declaration are reported by `offDeclarationValues`, and not combined.
  */
-export function combinationProblems(target: Target, imposed: ReadonlySet<string>): string[] {
+export function combinationProblems(target: Target, context: Context): string[] {
   const { declaration } = target;
   const cite = target.cite;
   const issues: string[] = [];
-  if (!contributorsMatch(target)) issues.push(`contributors differ from applied steps: ${cite()}`);
+  const carrier = target.steps.find((step) => context.imposed.has(imposedKey(step, step.output)));
+  if (carrier !== undefined && target.steps.length > 1) {
+    issues.push(`steps beside a short circuit: ${cite()}`);
+  }
+  const top =
+    declaration.combine === 'highestPriority' && carrier === undefined
+      ? topOf(target.steps, context.standings, target.whole, cite)
+      : undefined;
+  if (!contributorsMatch(target, top))
+    issues.push(`contributors differ from applied steps: ${cite()}`);
+  if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {
+    issues.push(`contributors not in contribution order: ${cite()}`);
+  }
+  if (top !== undefined) append(issues, top.problems);
   if (target.status === 'undetermined') return issues;
-  const named = new Set(target.contributors);
-  const ordered = inContributionOrder(target).filter(
-    // A `highestPriority` takes its value from its contributors only: lower priorities applied.
-    (step) => declaration.combine !== 'highestPriority' || named.has(step.ruleId),
-  );
-  const carrier = ordered.find((step) => imposed.has(instanceKey(step)));
-  const fed = carrier === undefined ? ordered : [carrier];
+  const fed =
+    carrier !== undefined
+      ? [carrier]
+      : top !== undefined
+        ? top.winners
+        : inContributionOrder(target);
   const expected: Expected =
-    carrier === undefined ? combine(declaration, fed) : imposedValue(declaration, carrier);
+    carrier !== undefined
+      ? imposedValue(declaration, carrier)
+      : top !== undefined && top.problems.length > 0
+        ? { unknown: true }
+        : combine(declaration, fed);
   const has = target.value !== undefined;
   // A value off its declaration is reported by `offDeclarationValues`, and not compared.
   if (target.value !== undefined && !matchesValue(target.value, declaration)) return issues;
@@ -255,7 +300,7 @@ export function combinationProblems(target: Target, imposed: ReadonlySet<string>
   if ('none' in expected && declaration.combine === 'all') {
     return [...issues, `all output without contribution must be undetermined: ${cite()}`];
   }
-  if (SELECTING.has(declaration.combine) && has) {
+  if (SELECTING.has(declaration.combine) && has && !('unknown' in expected && top !== undefined)) {
     const from = selectedStep(declaration, fed, carrier);
     const { selected } = target;
     if (selected === undefined) issues.push(`selected missing: ${cite()}`);

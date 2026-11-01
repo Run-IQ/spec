@@ -910,6 +910,12 @@
         "sourceRef": {
           "$ref": "#/$defs/nonEmptyString"
         },
+        "rank": {
+          "description": "The rank of its instance among the applied instances of its rule feeding a highestPriority output without per, by forEach.orderBy (D-20, D-21): the number of them before it. Carried by each step with a subject feeding such an output, and by no other.",
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 9007199254740991
+        },
         "matches": {
           "description": "Per dimension the rule constrains (not starting with $), the input values that matched and the referential groups they matched through.",
           "type": "object",
@@ -1033,7 +1039,7 @@
       "additionalProperties": false
     },
     "exception": {
-      "description": "One exception that took effect.",
+      "description": "One exception that took effect, in the order its carriers were processed.",
       "type": "object",
       "required": ["ruleId", "version", "kind", "affected", "status", "stratum", "salt"],
       "properties": {
@@ -1048,6 +1054,10 @@
         },
         "kind": {
           "enum": ["inhibit", "substitute", "shortCircuit"]
+        },
+        "output": {
+          "description": "The output a shortCircuit targets: its carrier step on it is the value imposed.",
+          "$ref": "#/$defs/outputName"
         },
         "affected": {
           "type": "array",
@@ -1075,7 +1085,37 @@
           "$ref": "#/$defs/salt"
         }
       },
-      "additionalProperties": false
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "description": "A shortCircuit names its output; no other kind does.",
+          "if": {
+            "type": "object",
+            "required": ["kind"],
+            "properties": {
+              "kind": {
+                "const": "shortCircuit"
+              }
+            }
+          },
+          "then": {
+            "type": "object",
+            "required": ["output"],
+            "properties": {
+              "output": {}
+            }
+          },
+          "else": {
+            "not": {
+              "type": "object",
+              "required": ["output"],
+              "properties": {
+                "output": {}
+              }
+            }
+          }
+        }
+      ]
     },
     "factRead": {
       "description": "A fact a rule read, and the assertion that governs it: method, status and assertionDigest together, or none.",

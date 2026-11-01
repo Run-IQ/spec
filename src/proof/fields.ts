@@ -48,6 +48,9 @@ export const stratum = scalarCheck((value, path, add) => {
   }
 });
 
+/** The rank of an instance (`$index`): a safe integer, 0 or more, as a stratum index is. */
+export const rank = stratum;
+
 export const salt = scalarCheck((value, path, add) => {
   if (typeof value !== 'string' || !SALT.test(value)) {
     add(path, `${citeName(path)} must be 16 bytes in lowercase hex (32 characters)`);

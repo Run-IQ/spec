@@ -310,6 +310,8 @@ describe('orders and identities (D-16, pre-flight I4)', () => {
     const affected = [{ ruleId: 'r2', subject: '/a/@1' }, { ruleId: 'r2' }];
     expect(problems(withEntry('exceptions', 0, { affected }))).toEqual([
       'exceptions[0].affected not sorted at 1',
+      // r2 is excluded as a whole: no instance at /a/@1 was inhibited.
+      'affected rule not inhibited by x@1: r2 at /a/@1',
     ]);
     expect(
       problems(withEntry('exceptions', 0, { affected: [{ ruleId: 'r2' }, { ruleId: 'r2' }] })),
@@ -334,9 +336,16 @@ describe('requested and supersedes', () => {
 describe('rule sets (D-23)', () => {
   const ruleSets = baseContent().ruleSets as Entry[];
 
-  it('keeps their order: it is the precedence', () => {
+  it('keeps their order: it is the precedence, which orders the contributors', () => {
     const reordered = [ruleSets[2], ruleSets[1], ruleSets[0], ruleSets[3]];
-    expect(problems({ ...baseContent(), ruleSets: reordered })).toEqual([]);
+    expect(problems({ ...baseContent(), ruleSets: reordered })).toEqual([
+      'contributors not in contribution order: social:aid',
+    ]);
+    // social now comes before vat.
+    const outputs = entries('outputs').map((output) =>
+      output.name === 'social:aid' ? { ...output, contributors: ['social:R1', 'vat:R1'] } : output,
+    );
+    expect(problems({ ...baseContent(), ruleSets: reordered, outputs })).toEqual([]);
   });
 
   it('at most one local entry, one entry per pack', () => {

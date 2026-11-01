@@ -334,3 +334,13 @@ export function omit<T extends object, K extends keyof T>(value: T, key: K): Omi
   delete copy[key];
   return copy;
 }
+
+/** `target` behind a Proxy that counts every property read in `counter`. */
+export function counted<T extends object>(target: T, counter: { reads: number }): T {
+  return new Proxy(target, {
+    get(object, key, receiver) {
+      counter.reads++;
+      return Reflect.get(object, key, receiver) as unknown;
+    },
+  });
+}

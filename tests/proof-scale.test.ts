@@ -1,19 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import type { UnsignedProof } from '../src/index.js';
 import { arithmeticWork } from '../src/proof/arithmetic.js';
-import { inconsistencies, orderProblems, strataProblems } from '../src/proof/consistency.js';
+import { inconsistencies, orderProblems } from '../src/proof/consistency.js';
+import { strataProblems } from '../src/proof/placement.js';
 import { nonCanonicalDecimals, offDeclarationValues } from '../src/proof/output-values.js';
+import { counted } from './helpers.js';
 import { wideProof } from './proof-builders.js';
-
-/** `target` behind a Proxy that counts every property read. */
-function counted<T extends object>(target: T, counter: { reads: number }): T {
-  return new Proxy(target, {
-    get(object, key, receiver) {
-      counter.reads++;
-      return Reflect.get(object, key, receiver) as unknown;
-    },
-  });
-}
 
 /** The reads of the lists of `wideProof(n, type)` that `check` makes. */
 function readsOf(check: (p: UnsignedProof) => string[], n: number, type: 'number' | 'decimal') {

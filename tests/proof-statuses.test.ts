@@ -79,7 +79,12 @@ describe('bounds, pending rules and undeclared reads', () => {
   });
 
   it('refuses a determined step of a rule whose reads were undeclared', () => {
-    expect(problems(withEntry('applied', 2, { status: 'determined' }))).toEqual([
+    // The output, provisional only through that step, is determined with it.
+    const outputs = entries('outputs').map((output) =>
+      output.name === 'social:aid' ? { ...output, status: 'determined' } : output,
+    );
+    const content = { ...withEntry('applied', 2, { status: 'determined' }), outputs };
+    expect(problems(content)).toEqual([
       'rule with undeclared reads cannot be determined: social:R1@1',
     ]);
   });

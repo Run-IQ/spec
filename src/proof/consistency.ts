@@ -1,18 +1,26 @@
-import { isCanonicalDecimal } from '../decision/decimal.js';
 import { citeName } from '../errors.js';
 import { comparePointers } from '../path/pointer.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
-import { roundDecimal, roundNumber } from './arithmetic.js';
 import {
-  declarationOf,
+  imposedKey,
   imposedSteps,
   instanceKey,
   nonCanonicalDecimals,
   offDeclarationValues,
 } from './output-values.js';
-import { exceptionProblems, undecidedRules } from './effects.js';
+import { append, full } from './collect.js';
+import { decisionProblems, exceptionProblems, undecidedRules } from './effects.js';
+import { exceptionOrderProblems, standingsOf } from './precedence.js';
+import type { Standings } from './precedence.js';
+import {
+  feedProblems,
+  modelProblems,
+  strataProblems,
+  undeclaredReadProblems,
+  unroundedProblems,
+} from './placement.js';
 import { citeItem, outputProblems } from './statuses.js';
-import type { ProofOutput, ProofStep, UnsignedProof } from './types.js';
+import type { ProofOutput, UnsignedProof } from './types.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
 // `signProof` and `verifyProof` check it. Every check is linear in the size of the proof: each
@@ -62,7 +70,7 @@ function sortProblems<T>(
   repeated?: (i: number) => string,
 ): string[] {
   const issues: string[] = [];
-  for (let i = 1; i < list.length; i++) {
+  for (let i = 1; i < list.length && !full(issues); i++) {
     const order = compare(list[i - 1] as T, list[i] as T);
     if (order > 0) issues.push(unsorted(i));
     else if (order === 0 && repeated !== undefined) issues.push(repeated(i));
@@ -87,23 +95,37 @@ const key = (entry: { ruleId: string; version: number }): string =>
 export function inconsistencies(p: UnsignedProof): string[] {
   const listed = new Map<string, ProofOutput>();
   for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
-  return [
-    ...new Set([
-      ...citationProblems(p, listed),
-      ...ruleSetProblems(p),
-      ...orderProblems(p, listed),
-      ...strataProblems(p, listed),
-      ...feedProblems(p),
-      ...modelProblems(p),
-      ...nonCanonicalDecimals(p),
-      ...offDeclarationValues(p),
-      ...outputProblems(p, listed, imposedSteps(p)),
-      ...unroundedProblems(p, listed),
-      ...undeclaredReadProblems(p),
-      ...undecidedRules(p),
-      ...exceptionProblems(p),
-    ]),
+  const imposed = imposedSteps(p);
+  const context = { imposed, standings: standingsOf(p) };
+  const checks: (() => string[])[] = [
+    () => citationProblems(p, listed),
+    () => ruleSetProblems(p),
+    () => orderProblems(p, listed, context.standings, imposed),
+    () => strataProblems(p, listed),
+    () => feedProblems(p),
+    () => modelProblems(p),
+    () => nonCanonicalDecimals(p),
+    () => offDeclarationValues(p),
+    () => outputProblems(p, listed, context),
+    () => unroundedProblems(p, listed),
+    () => undeclaredReadProblems(p),
+    () => undecidedRules(p),
+    () => decisionProblems(p, imposed),
+    () => exceptionProblems(p, imposed),
   ];
+  // Each problem once, in the order found, up to what `verifyProof` lists.
+  const issues: string[] = [];
+  const seen = new Set<string>();
+  for (const check of checks) {
+    if (full(issues)) break;
+    for (const issue of check()) {
+      if (full(issues)) break;
+      if (seen.has(issue)) continue;
+      seen.add(issue);
+      issues.push(issue);
+    }
+  }
+  return issues;
 }
 
 /**
@@ -126,24 +148,31 @@ export function citationProblems(
   }
   const issues: string[] = [];
   const sections = [p.applied, p.skipped, p.pending, p.exceptions, p.readsUndeclared];
-  for (const entry of sections.flat()) {
-    if (!keys.has(key(entry))) issues.push(`cited rule not listed: ${citeName(key(entry))}`);
+  for (const section of sections) {
+    for (const entry of section) {
+      if (full(issues)) return issues;
+      if (!keys.has(key(entry))) issues.push(`cited rule not listed: ${citeName(key(entry))}`);
+    }
   }
-  const named: string[] = [];
+  const cite = (id: string): void => {
+    if (!ids.has(id) && !full(issues)) issues.push(`cited rule not listed: ${citeName(id)}`);
+  };
   for (const entry of [...p.outputs, ...p.items]) {
-    named.push(...entry.contributors, ...entry.pending);
-    if (entry.selected !== undefined) named.push(entry.selected.ruleId);
+    for (const id of entry.contributors) cite(id);
+    for (const id of entry.pending) cite(id);
+    if (entry.selected !== undefined) cite(entry.selected.ruleId);
   }
-  for (const exception of p.exceptions) named.push(...exception.affected.map((a) => a.ruleId));
-  for (const id of named) if (!ids.has(id)) issues.push(`cited rule not listed: ${citeName(id)}`);
-  const outputs = [
-    ...p.items.map((item) => item.output),
-    ...p.applied.map((step) => step.output),
-    ...[...p.skipped, ...p.pending].flatMap((entry) => entry.output ?? []),
-  ];
-  for (const name of outputs) {
-    if (!listed.has(name)) issues.push(`cited output not listed: ${citeName(name)}`);
-  }
+  for (const exception of p.exceptions) for (const { ruleId } of exception.affected) cite(ruleId);
+  const output = (name: string | undefined): void => {
+    if (name !== undefined && !listed.has(name) && !full(issues)) {
+      issues.push(`cited output not listed: ${citeName(name)}`);
+    }
+  };
+  for (const item of p.items) output(item.output);
+  for (const step of p.applied) output(step.output);
+  for (const entry of p.skipped) output(entry.output);
+  for (const entry of p.pending) output(entry.output);
+  for (const exception of p.exceptions) output(exception.output);
   const packs = new Set(p.ruleSets.flatMap((set) => (set.kind === 'pack' ? [set.id] : [])));
   const sets = [...p.rules.map((rule) => rule.ruleSet), ...[...listed.keys()].map(ruleSetOf)];
   for (const set of sets) {
@@ -178,8 +207,9 @@ export function ruleSetProblems(p: UnsignedProof): string[] {
       issues.push(`rule set imports a pack not listed: ${citeName(id)}`);
     }
     const at = `ruleSets[${i}].imports`;
-    issues.push(
-      ...sortProblems(
+    append(
+      issues,
+      sortProblems(
         imports,
         byText,
         (j) => `${at} not sorted at ${j}`,
@@ -202,10 +232,12 @@ export function ruleSetProblems(p: UnsignedProof): string[] {
 export function orderProblems(
   p: UnsignedProof,
   listed: ReadonlyMap<string, ProofOutput>,
+  standings: Standings = standingsOf(p),
+  imposed: ReadonlySet<string> = imposedSteps(p),
 ): string[] {
   const issues: string[] = [];
   const push = (list: string[]): void => {
-    issues.push(...list);
+    append(issues, list);
   };
   push(
     sortProblems(
@@ -239,7 +271,8 @@ export function orderProblems(
       sortProblems<(typeof list)[number]>(list, byInstance, (i) => `${section} not sorted at ${i}`),
     );
   }
-  push(decidedTwice(p));
+  push(decidedTwice(p, imposed));
+  push(exceptionOrderProblems(p, standings));
   push(
     sortProblems(
       p.readsUndeclared,
@@ -273,10 +306,13 @@ export function orderProblems(
 }
 
 /** One rule instance decided twice across `applied`, `skipped` and `pending`. */
-function decidedTwice(p: UnsignedProof): string[] {
+function decidedTwice(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
   const issues: string[] = [];
   const decided = new Map<string, { whole: boolean; subjects: Set<string> }>();
   for (const entry of [...p.applied, ...p.skipped, ...p.pending]) {
+    if (full(issues)) break;
+    // The step a short circuit imposed is the effect of an exception, not a decision.
+    if ('model' in entry && imposed.has(imposedKey(entry, entry.output))) continue;
     const rule = key(entry);
     const grouped = 'instances' in entry && entry.instances !== undefined;
     let state = decided.get(rule);
@@ -312,8 +348,9 @@ function requestedProblems(p: UnsignedProof, listed: ReadonlyMap<string, ProofOu
 function innerOrderProblems(p: UnsignedProof): string[] {
   const issues: string[] = [];
   const components = p.versions.components;
-  issues.push(
-    ...sortProblems(
+  append(
+    issues,
+    sortProblems(
       components,
       (a, b) =>
         byText(a.name, b.name) ||
@@ -325,12 +362,16 @@ function innerOrderProblems(p: UnsignedProof): string[] {
     ),
   );
   p.strata.forEach((names, i) => {
-    issues.push(...sortProblems(names, byText, (j) => `strata[${i}] not sorted at ${j}`));
+    append(
+      issues,
+      sortProblems(names, byText, (j) => `strata[${i}] not sorted at ${j}`),
+    );
   });
   p.pending.forEach((entry, i) => {
     const at = `pending[${i}].missing`;
-    issues.push(
-      ...sortProblems(
+    append(
+      issues,
+      sortProblems(
         entry.missing,
         comparePointers,
         (j) => `${at} not sorted at ${j}`,
@@ -343,8 +384,9 @@ function innerOrderProblems(p: UnsignedProof): string[] {
       for (const member of ['values', 'via'] as const) {
         const list = match[member];
         const at = `applied[${i}].matches.${name}.${member}`;
-        issues.push(
-          ...sortProblems(
+        append(
+          issues,
+          sortProblems(
             list,
             byText,
             (j) => `${citeName(at)} not sorted at ${j}`,
@@ -357,8 +399,9 @@ function innerOrderProblems(p: UnsignedProof): string[] {
   p.exceptions.forEach((exception, i) => {
     const { affected } = exception;
     const at = `exceptions[${i}].affected`;
-    issues.push(
-      ...sortProblems(
+    append(
+      issues,
+      sortProblems(
         affected,
         (a, b) => byText(a.ruleId, b.ruleId) || bySubject(a.subject, b.subject),
         (j) => `${at} not sorted at ${j}`,
@@ -371,124 +414,4 @@ function innerOrderProblems(p: UnsignedProof): string[] {
     );
   });
   return issues;
-}
-
-/**
- * Internal: where `p.strata` contradicts the rest of the proof, each problem reported once, in
- * this order:
- * - each name of `strata`, in order: `stratum output unknown: name` (not a listed output),
- *   `stratum output repeated: name` (in more than one place);
- * - each listed output, in no stratum: `output not in strata: name`;
- * - each entry of `applied`, `skipped`, `pending` and `exceptions`, in order:
- *   `stratum out of range: id@version` when its `stratum` is not an index of `strata`,
- *   otherwise, for an entry naming an output not in `strata[stratum]`,
- *   `step stratum mismatch: id@version`.
- *
- * Linear in the size of the proof: each stratum is turned into a set once.
- */
-export function strataProblems(
-  p: UnsignedProof,
-  listed: ReadonlyMap<string, ProofOutput>,
-): string[] {
-  const issues: string[] = [];
-  const placed = new Set<string>();
-  for (const name of p.strata.flat()) {
-    if (!listed.has(name)) issues.push(`stratum output unknown: ${citeName(name)}`);
-    if (placed.has(name)) issues.push(`stratum output repeated: ${citeName(name)}`);
-    placed.add(name);
-  }
-  for (const name of listed.keys()) {
-    if (!placed.has(name)) issues.push(`output not in strata: ${citeName(name)}`);
-  }
-  const members = p.strata.map((names) => new Set(names));
-  const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
-    const names = members[entry.stratum];
-    if (!names) issues.push(`stratum out of range: ${citeName(key(entry))}`);
-    else if (output !== undefined && !names.has(output)) {
-      issues.push(`step stratum mismatch: ${citeName(key(entry))}`);
-    }
-  };
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending]) place(entry, entry.output);
-  for (const exception of p.exceptions) place(exception);
-  return issues;
-}
-
-/**
- * Internal: each rule feeding (applied, excluded or pending) an output of another rule set than
- * its own, unless its own is a pack that imports it (D-23): local rules and outputs import
- * nothing and are imported by nothing. `rule feeds an output of a rule set it does not import:
- * id@version`.
- */
-export function feedProblems(p: UnsignedProof): string[] {
-  const imports = new Map<string, Set<string>>();
-  for (const set of p.ruleSets) {
-    if (set.kind === 'pack') imports.set(set.id, new Set(set.imports ?? []));
-  }
-  const issues: string[] = [];
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending]) {
-    if (entry.output === undefined) continue;
-    const own = ruleSetOf(entry.ruleId);
-    const target = ruleSetOf(entry.output);
-    if (own === target || imports.get(own)?.has(target) === true) continue;
-    issues.push(`rule feeds an output of a rule set it does not import: ${citeName(key(entry))}`);
-  }
-  return issues;
-}
-
-/** Internal: each model of an applied step that `versions.models` does not list. */
-export function modelProblems(p: UnsignedProof): string[] {
-  return p.applied
-    .filter((step) => !Object.hasOwn(p.versions.models, step.model))
-    .map((step) => `model not in versions: ${citeName(step.model)}`);
-}
-
-/**
- * Internal: each applied step whose `unrounded` value contradicts its output's rounding: present
- * without `rounding.at: 'contribution'` (`unrounded value without rounding at contribution`), or
- * not rounding to its contribution, or equal to it (`unrounded value does not round to its
- * contribution`): it is kept only when rounding changed the contribution.
- */
-export function unroundedProblems(
-  p: UnsignedProof,
-  listed: ReadonlyMap<string, ProofOutput>,
-): string[] {
-  const issues: string[] = [];
-  for (const step of p.applied) {
-    const output = listed.get(step.output);
-    if (step.unrounded === undefined || output === undefined) continue;
-    const { rounding } = declarationOf(output);
-    const cited = citeName(instanceKey(step));
-    if (rounding?.at !== 'contribution') {
-      issues.push(`unrounded value without rounding at contribution: ${cited}`);
-    } else if (!roundsTo(step, rounding)) {
-      issues.push(`unrounded value does not round to its contribution: ${cited}`);
-    }
-  }
-  return issues;
-}
-
-/** True when the step's `unrounded` rounds to its contribution and differs from it. */
-function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1]): boolean {
-  const { unrounded, contribution } = step;
-  if (typeof unrounded === 'number' && typeof contribution === 'number') {
-    return unrounded !== contribution && roundNumber(unrounded, rounding) === contribution;
-  }
-  const canonical = (value: unknown): value is string =>
-    typeof value === 'string' && isCanonicalDecimal(value);
-  if (canonical(unrounded) && canonical(contribution)) {
-    return unrounded !== contribution && roundDecimal(unrounded, rounding) === contribution;
-  }
-  // Off its declaration: reported by `offDeclarationValues`.
-  return true;
-}
-
-/**
- * Internal: each rule whose reads are not known (`readsUndeclared`, D-39) whose step, exclusion
- * or exception is `determined`: it is at best `provisional`.
- */
-export function undeclaredReadProblems(p: UnsignedProof): string[] {
-  const undeclared = new Set(p.readsUndeclared.map(key));
-  return [...p.applied, ...p.skipped, ...p.exceptions]
-    .filter((entry) => entry.status === 'determined' && undeclared.has(key(entry)))
-    .map((entry) => `rule with undeclared reads cannot be determined: ${citeName(key(entry))}`);
 }

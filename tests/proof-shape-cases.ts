@@ -74,6 +74,7 @@ export const VALID_PROOFS: [string, unknown][] = [
         version: 1,
         subject: '/a/@1',
         kind,
+        ...(kind === 'shortCircuit' ? { output: 'value' } : {}),
         affected: [{ ruleId: 'r2', subject: '/a/@1' }],
         status: 'provisional',
         stratum: 0,
@@ -430,6 +431,30 @@ export const REFUSED_PROOFS: [string, unknown, string, string][] = [
     entryWith('rules', 0, { priority: '5000' }),
     'rules[0].priority',
     'rules[0].priority must be a finite number',
+  ],
+  [
+    'a shortCircuit without its output',
+    entryWith('exceptions', 0, { kind: 'shortCircuit' }),
+    'exceptions[0].output',
+    'exceptions[0].output is required for a shortCircuit',
+  ],
+  [
+    'an inhibition with an output',
+    entryWith('exceptions', 0, { output: 'value' }),
+    'exceptions[0].output',
+    'exceptions[0].output applies only to a shortCircuit',
+  ],
+  [
+    'a step with a negative rank',
+    entryWith('applied', 0, { rank: -1 }),
+    'applied[0].rank',
+    'applied[0].rank must be a non-negative integer',
+  ],
+  [
+    'a step with a fractional rank',
+    entryWith('applied', 0, { rank: 0.5 }),
+    'applied[0].rank',
+    'applied[0].rank must be a non-negative integer',
   ],
   [
     'a rule with a fractional version',

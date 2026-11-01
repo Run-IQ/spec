@@ -3,11 +3,14 @@ import type { OutputStatus } from '../decision/status.js';
 import { citeName } from '../errors.js';
 import { parsePointer } from '../path/pointer.js';
 import { qualifyName } from '../rule/ruleSet.js';
-import { instanceKey } from './output-values.js';
-import type { ProofSkip, ProofStep, UnsignedProof } from './types.js';
+import { full } from './collect.js';
+import { imposedKey, instanceKey } from './output-values.js';
+import { ruleKey } from './precedence.js';
+import type { ProofException, ProofSkip, ProofStep, UnsignedProof } from './types.js';
 
-// Internal to `@run-iq/spec`: what the decisions of a proof owe each other (D-7, D-8). Linear:
-// each list is indexed once, and each subject walked once in a trie.
+// Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
+// that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
+// each subject walked once in a trie.
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
 
@@ -18,52 +21,129 @@ const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status)
  */
 export function undecidedRules(p: UnsignedProof): string[] {
   const decided = new Set<string>();
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending, ...p.exceptions]) {
-    decided.add(`${entry.ruleId}@${entry.version}`);
+  for (const list of [p.applied, p.skipped, p.pending, p.exceptions]) {
+    for (const entry of list) decided.add(ruleKey(entry));
   }
   const issues: string[] = [];
   for (const rule of p.rules) {
+    if (full(issues)) break;
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
     if (!decided.has(key)) issues.push(`rule not decided: ${citeName(key)}`);
   }
   return issues;
 }
 
-/** A node of the subjects an exception affected, with the strongest status that reached it. */
-interface Node {
-  children: Map<string, Node>;
-  rank: number;
-}
-
-const newNode = (): Node => ({ children: new Map(), rank: -1 });
-
 /**
- * Internal: the statuses exceptions impose (D-7: a rule's decision is at least as strong as
- * that of the carrier that inhibited, substituted or short-circuited it), in this order:
- * - `exception status differs from its carrier's decision: id@version[ at subject]`: the
- *   carrier has an applied step at the exception's instance, of another status;
- * - `decision weaker than the exception that affected it: id@version[ at subject]`: an applied
- *   or skipped entry of an affected rule, at the affected subject or under it (D-21; an
- *   affected entry without subject covers every instance), is weaker than the exception.
+ * Internal: what the decisions of each rule owe each other, in this order:
+ * - `rule feeds two outputs: id@version`: its steps, exclusions and pending entries name more
+ *   than one output (D-21: a rule has one output). The step its short circuit imposed on
+ *   another output is the effect of its exception (`imposedSteps`), not one of its decisions;
+ * - `tie loser not in conflict: id@version[ at subject]`: an exclusion `RULE_CONFLICT` (a tie
+ *   settled by `onConflict: 'first'`) is `conflict` (D-7).
  */
-export function exceptionProblems(p: UnsignedProof): string[] {
+export function decisionProblems(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
   const issues: string[] = [];
-  const steps = new Map<string, ProofStep>();
-  for (const step of p.applied) steps.set(instanceKey(step), step);
-  for (const exception of p.exceptions) {
-    const carrier = steps.get(instanceKey(exception));
-    if (carrier !== undefined && carrier.status !== exception.status) {
-      const cited = citeName(instanceKey(exception));
-      issues.push(`exception status differs from its carrier's decision: ${cited}`);
+  const outputs = new Map<string, string>();
+  const reported = new Set<string>();
+  const feeds = (entry: { ruleId: string; version: number }, output: string | undefined) => {
+    if (output === undefined || full(issues)) return;
+    const key = ruleKey(entry);
+    const known = outputs.get(key);
+    if (known === undefined) outputs.set(key, output);
+    else if (known !== output && !reported.has(key)) {
+      reported.add(key);
+      issues.push(`rule feeds two outputs: ${citeName(key)}`);
+    }
+  };
+  for (const step of p.applied) {
+    if (!imposed.has(imposedKey(step, step.output))) feeds(step, step.output);
+  }
+  for (const skip of p.skipped) feeds(skip, skip.output);
+  for (const entry of p.pending) feeds(entry, entry.output);
+  for (const skip of p.skipped) {
+    if (full(issues)) break;
+    if (skip.reason === 'RULE_CONFLICT' && skip.status !== 'conflict') {
+      issues.push(`tie loser not in conflict: ${citeName(instanceKey(skip))}`);
     }
   }
+  return issues;
+}
+
+/** What each kind of exception does to the decisions it affects. */
+const VERB: Readonly<Record<ProofException['kind'], string>> = {
+  inhibit: 'inhibited',
+  substitute: 'substituted',
+  shortCircuit: 'short-circuited',
+};
+
+/** The affected entries of one kind (and short-circuited output) that end at a node. */
+interface Group {
+  /** The strongest status of these exceptions. */
+  rank: number;
+  /** True once a decision they produced is found under the node. */
+  produced: boolean;
+  /** Each exception (its index) and affected entry. */
+  entries: [number, { ruleId: string; subject?: string }][];
+}
+
+/** A node of the subjects one rule is affected at; the root, the rule without subject. */
+interface Node {
+  children: Map<string, Node>;
+  groups: Map<string, Group>;
+}
+
+const newNode = (): Node => ({ children: new Map(), groups: new Map() });
+
+/** The group an exclusion or step a kind of exception produced belongs to, if any. */
+function groupOf(decision: ProofStep | ProofSkip, imposed: ReadonlySet<string>): string[] {
+  if ('model' in decision) {
+    // An applied step: substituted, or (refused below) applied though inhibited.
+    return imposed.has(imposedKey(decision, decision.output)) ? [] : ['substitute'];
+  }
+  if (decision.reason === 'INHIBITED') return ['inhibit'];
+  if (decision.reason === 'INVALID_PARAMS') return ['substitute'];
+  if (decision.reason === 'SHORT_CIRCUITED' && decision.output !== undefined) {
+    return [`shortCircuit\u0000${decision.output}`];
+  }
+  return [];
+}
+
+/**
+ * Internal: the exceptions against the decisions they produced (D-7, D-21, R15-R18). An
+ * affected entry `{ ruleId, subject? }` reaches the instances of the rule at its subject or
+ * under it, every instance without subject. An inhibition produces the exclusions `INHIBITED`
+ * of the rules it affects, a short circuit their exclusions `SHORT_CIRCUITED` from its output,
+ * a substitution their steps (or their exclusion `INVALID_PARAMS`, refused once substituted).
+ * In this order:
+ * - `exception status differs from its carrier's decision: id@version[ at subject]`: its
+ *   carrier is applied at its instance, with another status;
+ * - `short circuit without its carrier applied: id@version[ at subject]`: no step of its
+ *   carrier on the output it targets, though it affected rules or no other short circuit of
+ *   that output has its carrier's step there;
+ * - `inhibited rule applied: id@version[ at subject]`: a step an inhibition reaches;
+ * - `affected rule not <inhibited|substituted|short-circuited> by id@version[ at subject]:
+ *   rule[ at subject]`: an affected entry under which the exception produced nothing;
+ * - `inhibited without an exception`, `short-circuited without an exception: id@version[ at
+ *   subject]`: an exclusion no exception of that kind reaches;
+ * - `decision weaker than the exception that affected it: id@version[ at subject]`: a
+ *   decision an exception produced is weaker than it (D-7).
+ */
+export function exceptionProblems(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
+  const issues: string[] = [];
+  const push = (issue: string): void => {
+    if (!full(issues)) issues.push(issue);
+  };
+  carrierProblems(p, imposed, push);
   const tries = new Map<string, Node>();
-  for (const exception of p.exceptions) {
-    const rank = rankOf(exception.status);
-    for (const { ruleId, subject } of exception.affected) {
-      let node: Node = tries.get(ruleId) ?? newNode();
-      tries.set(ruleId, node);
-      for (const segment of subject === undefined ? [] : parsePointer(subject)) {
+  p.exceptions.forEach((exception, index) => {
+    const kind =
+      exception.kind === 'shortCircuit'
+        ? `shortCircuit\u0000${exception.output ?? ''}`
+        : exception.kind;
+    for (const affected of exception.affected) {
+      let node: Node = tries.get(affected.ruleId) ?? newNode();
+      tries.set(affected.ruleId, node);
+      for (const segment of affected.subject === undefined ? [] : parsePointer(affected.subject)) {
         let child: Node | undefined = node.children.get(segment);
         if (child === undefined) {
           child = newNode();
@@ -71,22 +151,109 @@ export function exceptionProblems(p: UnsignedProof): string[] {
         }
         node = child;
       }
-      node.rank = Math.max(node.rank, rank);
+      const group = node.groups.get(kind) ?? { rank: -1, produced: false, entries: [] };
+      group.rank = Math.max(group.rank, rankOf(exception.status));
+      group.entries.push([index, affected]);
+      node.groups.set(kind, group);
     }
-  }
+  });
+  const weaker: string[] = [];
+  const uncovered: string[] = [];
   const decisions: (ProofStep | ProofSkip)[] = [...p.applied, ...p.skipped];
   for (const decision of decisions) {
+    if (full(issues)) break;
+    const kinds = groupOf(decision, imposed);
+    let strongest = -1;
+    let reached = false;
+    let inhibited = false;
+    const visit = (node: Node): void => {
+      for (const kind of kinds) {
+        const group = node.groups.get(kind);
+        if (group === undefined) continue;
+        group.produced = true;
+        reached = true;
+        strongest = Math.max(strongest, group.rank);
+      }
+      if ('model' in decision && node.groups.has('inhibit')) inhibited = true;
+    };
     let node = tries.get(decision.ruleId);
-    let strongest = node?.rank ?? -1;
+    if (node !== undefined) visit(node);
     for (const segment of decision.subject === undefined ? [] : parsePointer(decision.subject)) {
       node = node?.children.get(segment);
       if (node === undefined) break;
-      strongest = Math.max(strongest, node.rank);
+      visit(node);
     }
-    if (rankOf(decision.status) < strongest) {
-      const cited = citeName(instanceKey(decision));
-      issues.push(`decision weaker than the exception that affected it: ${cited}`);
+    const cited = (): string => citeName(instanceKey(decision));
+    if (inhibited) push(`inhibited rule applied: ${cited()}`);
+    if (!reached && !('model' in decision)) {
+      if (decision.reason === 'INHIBITED') {
+        uncovered.push(`inhibited without an exception: ${cited()}`);
+      }
+      if (decision.reason === 'SHORT_CIRCUITED') {
+        uncovered.push(`short-circuited without an exception: ${cited()}`);
+      }
+    }
+    if (reached && rankOf(decision.status) < strongest) {
+      weaker.push(`decision weaker than the exception that affected it: ${cited()}`);
     }
   }
+  const unproduced: [number, string][] = [];
+  const stack = [...tries.values()];
+  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
+    for (const child of node.children.values()) stack.push(child);
+    for (const group of node.groups.values()) {
+      if (group.produced) continue;
+      for (const [index, affected] of group.entries) {
+        const exception = p.exceptions[index];
+        if (exception === undefined) continue;
+        const at = affected.subject === undefined ? '' : ` at ${affected.subject}`;
+        const by = citeName(instanceKey(exception));
+        const rule = citeName(affected.ruleId + at);
+        unproduced.push([index, `affected rule not ${VERB[exception.kind]} by ${by}: ${rule}`]);
+      }
+    }
+  }
+  // In the order of the exceptions, then of their affected entries.
+  unproduced.sort((a, b) => a[0] - b[0]);
+  for (const [, message] of unproduced) push(message);
+  for (const message of uncovered) push(message);
+  for (const message of weaker) push(message);
   return issues;
+}
+
+/** The status of each exception against its carrier's step, and the carriers of short circuits. */
+function carrierProblems(
+  p: UnsignedProof,
+  imposed: ReadonlySet<string>,
+  push: (issue: string) => void,
+): void {
+  const steps = new Map<string, ProofStep>();
+  for (const step of p.applied) {
+    if (!imposed.has(imposedKey(step, step.output))) steps.set(instanceKey(step), step);
+  }
+  const won = new Set<string>();
+  for (const step of p.applied) {
+    if (imposed.has(imposedKey(step, step.output))) {
+      steps.set(imposedKey(step, step.output), step);
+      won.add(step.output);
+    }
+  }
+  for (const exception of p.exceptions) {
+    const cited = citeName(instanceKey(exception));
+    const { output } = exception;
+    const carrier =
+      exception.kind === 'shortCircuit' && output !== undefined
+        ? steps.get(imposedKey(exception, output))
+        : steps.get(instanceKey(exception));
+    if (carrier !== undefined && carrier.status !== exception.status) {
+      push(`exception status differs from its carrier's decision: ${cited}`);
+    }
+    if (exception.kind !== 'shortCircuit' || output === undefined || carrier !== undefined) {
+      continue;
+    }
+    // A carrier whose claim on the output another won affected nothing (R18).
+    if (exception.affected.length > 0 || !won.has(output)) {
+      push(`short circuit without its carrier applied: ${cited}`);
+    }
+  }
 }

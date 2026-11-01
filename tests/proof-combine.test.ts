@@ -73,6 +73,7 @@ function proofOf({ output, contributions = [], shortCircuit = false }: Case): En
             ruleId: 'r0',
             version: 1,
             kind: 'shortCircuit',
+            output: 'value',
             affected: [],
             status: 'determined',
             stratum: 0,
