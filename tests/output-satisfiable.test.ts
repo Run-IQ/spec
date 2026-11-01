@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
-  PROOF_FORMAT,
   sealProof,
   sha256Hex,
   validateOutputDeclaration,
@@ -9,36 +8,16 @@ import {
   valueMatchesOutputType,
   verifyProof,
 } from '../src/index.js';
-import type { JsonValue, ProofOutput, UnsignedProof } from '../src/index.js';
+import type { JsonValue, UnsignedProof } from '../src/index.js';
+import { outputProof } from './proof-builders.js';
+import type { OutputPart } from './proof-builders.js';
 import { isOnStep, numberToDecimal, stepWorkDone } from '../src/decision/decimal.js';
 
 const LONE = String.fromCharCode(0xd800);
 
 /** A proof of one output `value`, fed by one rule per contribution. */
-function proofOf(output: Omit<ProofOutput, 'contributors'>, contributions: JsonValue[] = []) {
-  const proof: UnsignedProof = {
-    format: PROOF_FORMAT,
-    requestId: 'req-1',
-    evaluatedAt: null,
-    sealedAt: '2026-01-01T00:00:00.000Z',
-    inputDigest: 'a'.repeat(64),
-    rules: contributions.map((_, i) => ({ id: `r${i}`, version: 1, checksum: 'b'.repeat(64) })),
-    versions: { engine: '1', plugins: {}, dsls: {} },
-    strata: [['value']],
-    outputs: { value: { ...output, contributors: contributions.map((_, i) => `r${i}`) } },
-    applied: contributions.map((contribution, i) => ({
-      ruleId: `r${i}`,
-      version: 1,
-      model: 'M',
-      output: 'value',
-      contribution,
-      stratum: 0,
-    })),
-    skipped: [],
-    exceptions: [],
-  };
-  return proof;
-}
+const proofOf = (output: OutputPart, contributions: JsonValue[] = []): UnsignedProof =>
+  outputProof(output, contributions);
 
 /** What `verifyProof` reports on `p` sealed by hand, past the digest and the signature. */
 function inconsistencies(p: UnsignedProof): string[] {
@@ -72,8 +51,8 @@ describe('an increment has at most 20 digits before the point, as after it', () 
     expect(validateProof({ ...output(largest), digest: 'c'.repeat(64) }).issues).toEqual([]);
     expect(validateProof({ ...output(tooLong), digest: 'c'.repeat(64) }).issues).toEqual([
       {
-        path: 'outputs.value.rounding.increment',
-        message: 'outputs.value.rounding.increment must have at most 20 digits before the point',
+        path: 'outputs[0].rounding.increment',
+        message: 'outputs[0].rounding.increment must have at most 20 digits before the point',
       },
     ]);
   });
@@ -128,9 +107,9 @@ describe('a number output rounds to a scale only (a satisfiable rounding)', () =
     });
     expect(validateProof({ ...proof, digest: 'c'.repeat(64) }).issues).toEqual([
       {
-        path: 'outputs.value.rounding.increment',
+        path: 'outputs[0].rounding.increment',
         message:
-          `outputs.value.rounding.increment "${increment}" applies to a decimal output only: ` +
+          `outputs[0].rounding.increment "${increment}" applies to a decimal output only: ` +
           'a number output rounds to a scale',
       },
     ]);
@@ -199,22 +178,30 @@ describe('a number output rounds to a scale only (a satisfiable rounding)', () =
 describe('a number rounded at each contribution: only its sum leaves the step', () => {
   const rounding = { scale: 2, mode: 'halfUp' as const, at: 'contribution' as const };
 
-  it('a max takes a contribution: its value is checked (the reviewer case)', () => {
+  const OFF_STEP = 'output value not rounded as declared: value';
+  const NOT_FOLLOWING = 'output value does not follow from its contributions: value';
+
+  it('a max takes a contribution: its value is checked on the step and against it', () => {
     const proof = proofOf({ type: 'number', combine: 'max', value: 1.234, rounding }, [1.23]);
-    expect(inconsistencies(proof)).toEqual(['output value not rounded as declared: value']);
+    expect(inconsistencies(proof)).toEqual([OFF_STEP, NOT_FOLLOWING]);
+    const taken = proofOf({ type: 'number', combine: 'max', value: 1.23, rounding }, [1.23]);
+    expect(inconsistencies(taken)).toEqual([]);
   });
 
   it.each(['min', 'highestPriority'] as const)('a %s too', (combine) => {
     const proof = proofOf({ type: 'number', combine, value: 1.234, rounding }, [1.23]);
-    expect(inconsistencies(proof)).toEqual(['output value not rounded as declared: value']);
+    expect(inconsistencies(proof)).toEqual([OFF_STEP, NOT_FOLLOWING]);
   });
 
-  it('a sum is not: 0.1 + 0.2 is the sum of two values on the step', () => {
-    const proof = proofOf(
+  it('a sum is not checked on the step: it is the decimal sum of its contributions', () => {
+    // 0.1 + 0.2 in 20 significant digits is 0.3, as the engine sums numbers.
+    const sum = proofOf({ type: 'number', combine: 'sum', value: 0.3, rounding }, [0.1, 0.2]);
+    expect(inconsistencies(sum)).toEqual([]);
+    const binary = proofOf(
       { type: 'number', combine: 'sum', value: 0.1 + 0.2, rounding },
       [0.1, 0.2],
     );
-    expect(inconsistencies(proof)).toEqual([]);
+    expect(inconsistencies(binary)).toEqual([NOT_FOLLOWING]);
   });
 });
 

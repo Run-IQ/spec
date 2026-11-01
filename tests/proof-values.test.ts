@@ -1,59 +1,33 @@
 import { describe, expect, it } from 'vitest';
-import {
-  canonicalize,
-  PROOF_FORMAT,
-  sealProof,
-  sha256Hex,
-  validateProof,
-  verifyProof,
-} from '../src/index.js';
-import type { JsonValue, ProofOutput, ProofStep, UnsignedProof } from '../src/index.js';
+import { canonicalize, sealProof, sha256Hex, validateProof, verifyProof } from '../src/index.js';
+import type { JsonValue, UnsignedProof } from '../src/index.js';
 import { isOnStep, numberToDecimal } from '../src/decision/decimal.js';
 import { specError } from './helpers.js';
+import { outputProof } from './proof-builders.js';
+import type { OutputPart } from './proof-builders.js';
 
-/** A proof of one output `value`, fed by `r1` with `contribution` (and `unrounded`). */
-function proofOf(
-  output: Omit<ProofOutput, 'contributors'> & { contributors?: string[] },
-  contribution?: JsonValue,
-  unrounded?: JsonValue,
-): UnsignedProof {
-  const step: ProofStep = {
-    ruleId: 'r1',
-    version: 1,
-    model: 'M',
-    output: 'value',
-    contribution: contribution ?? null,
-    stratum: 0,
-  };
-  if (unrounded !== undefined) step.unrounded = unrounded;
-  return {
-    format: PROOF_FORMAT,
-    requestId: 'req-1',
-    evaluatedAt: null,
-    sealedAt: '2026-01-01T00:00:00.000Z',
-    inputDigest: 'a'.repeat(64),
-    rules: [{ id: 'r1', version: 1, checksum: 'b'.repeat(64) }],
-    versions: { engine: '1', plugins: {}, dsls: {} },
-    strata: [['value']],
-    outputs: { value: { contributors: contribution === undefined ? [] : ['r1'], ...output } },
-    applied: contribution === undefined ? [] : [step],
-    skipped: [],
-    exceptions: [],
-  };
-}
-
-/** What `verifyProof` finds in `p`, sealed by hand when `sealProof` refuses it. */
-function issuesOf(p: UnsignedProof): string[] {
-  expect(validateProof({ ...p, digest: 'c'.repeat(64) }).issues).toEqual([]);
-  return verifyProof({ ...p, digest: sha256Hex(canonicalize(p)) }).issues.filter(
-    (issue) => issue !== 'unsigned' && issue !== 'digest mismatch',
-  );
-}
+/** A proof of one output `value`, fed by `r0` with `contribution` (and `unrounded`). */
+const proofOf = (output: OutputPart, contribution?: JsonValue, unrounded?: JsonValue) =>
+  outputProof(output, contribution === undefined ? [] : [contribution], unrounded);
 
 const VALUE_OFF = 'output value does not match its declaration: value';
 const NOT_ROUNDED = 'output value not rounded as declared: value';
 const CONTRIBUTION_OFF = 'contribution does not match its output declaration: value';
 const CONTRIBUTION_NOT_ROUNDED = 'contribution not rounded as declared: value';
+/** The checks of values against their declaration: those this file tests. */
+const FORM_ISSUES = new Set([VALUE_OFF, NOT_ROUNDED, CONTRIBUTION_OFF, CONTRIBUTION_NOT_ROUNDED]);
+
+/**
+ * What `verifyProof` finds in `p` (sealed by hand when `sealProof` refuses it) about its values
+ * against their declaration; whether a value follows from its contributions is tested in
+ * tests/proof-combine.test.ts.
+ */
+function issuesOf(p: UnsignedProof): string[] {
+  expect(validateProof({ ...p, digest: 'c'.repeat(64) }).issues).toEqual([]);
+  return verifyProof({ ...p, digest: sha256Hex(canonicalize(p)) }).issues.filter((issue) =>
+    FORM_ISSUES.has(issue),
+  );
+}
 
 describe('verifyProof: each output value has the form its declaration gives', () => {
   const cases: [string, UnsignedProof, string[]][] = [
@@ -75,8 +49,16 @@ describe('verifyProof: each output value has the form its declaration gives', ()
       [VALUE_OFF, CONTRIBUTION_OFF],
     ],
     ['a negative count', proofOf({ type: 'number', combine: 'count', value: -1 }), [VALUE_OFF]],
-    ['an enum value', proofOf({ type: 'enum', combine: 'max', value: 'high' }, 'high'), []],
-    ['an enum that is no string', proofOf({ type: 'enum', combine: 'max', value: 2 }), [VALUE_OFF]],
+    [
+      'an enum value',
+      proofOf({ type: 'enum', combine: 'max', values: ['high'], value: 'high' }, 'high'),
+      [],
+    ],
+    [
+      'an enum that is no string',
+      proofOf({ type: 'enum', combine: 'max', values: ['high'], value: 2 }),
+      [VALUE_OFF],
+    ],
     [
       'a number given as text',
       proofOf({ type: 'number', combine: 'sum', value: '1' }),
@@ -85,15 +67,12 @@ describe('verifyProof: each output value has the form its declaration gives', ()
     ['a list', proofOf({ type: 'list', combine: 'union', value: {} }), [VALUE_OFF]],
     ['an object', proofOf({ type: 'object', combine: 'highestPriority', value: [] }), [VALUE_OFF]],
     ['a boolean', proofOf({ type: 'boolean', combine: 'any', value: 0 }), [VALUE_OFF]],
+    ['no value for a max no rule reached', proofOf({ type: 'number', combine: 'max' }), []],
+    ['no value for an all no rule reached', proofOf({ type: 'boolean', combine: 'all' }), []],
     [
-      'no value (null) for a max no rule reached',
+      'null for a max no rule reached: null is a value, not none',
       proofOf({ type: 'number', combine: 'max', value: null }),
-      [],
-    ],
-    [
-      'no value (null) for an all no rule reached',
-      proofOf({ type: 'boolean', combine: 'all', value: null }),
-      [],
+      [VALUE_OFF],
     ],
     [
       'null for a sum: its empty value is 0',
@@ -103,6 +82,26 @@ describe('verifyProof: each output value has the form its declaration gives', ()
     [
       'null for a max a rule reached',
       proofOf({ type: 'number', combine: 'max', value: null }, 1),
+      [VALUE_OFF],
+    ],
+    [
+      'a value outside the enum values',
+      proofOf({ type: 'enum', combine: 'max', values: ['low', 'high'], value: 'mid' }, 'mid'),
+      [VALUE_OFF, CONTRIBUTION_OFF],
+    ],
+    [
+      'a sum of the wrong sign',
+      proofOf({ type: 'number', combine: 'sum', sign: 'nonPositive', value: 1 }, 1),
+      [VALUE_OFF, CONTRIBUTION_OFF],
+    ],
+    [
+      'a string that is no value of its dimension',
+      proofOf({ type: 'string', combine: 'highestPriority', dimension: 'pays', value: 'FR:' }),
+      [VALUE_OFF],
+    ],
+    [
+      'a bound of the wrong type',
+      proofOf({ type: 'date', combine: 'max', bounds: { max: 3 } }),
       [VALUE_OFF],
     ],
     [

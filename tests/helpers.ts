@@ -552,3 +552,63 @@ export function handTree(
     },
   };
 }
+
+/** A deterministic generator (mulberry32): the same cases on every run. */
+export function generator(seed: number): <T>(choices: readonly T[]) => T {
+  let state = seed;
+  return <T>(choices: readonly T[]): T => {
+    state = (state + 0x6d2b79f5) | 0;
+    let t = Math.imul(state ^ (state >>> 15), 1 | state);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    const unit = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+    const index = Math.floor(unit * choices.length);
+    if (index >= choices.length) throw new Error('no choices');
+    // An index below the length: the choice itself, `undefined` included.
+    return choices[index] as T;
+  };
+}
+
+/** Every string of 1 to `n` characters drawn from `alphabet`. */
+export function stringsOf(alphabet: readonly string[], n: number): string[] {
+  let level = [''];
+  const all: string[] = [];
+  for (let length = 1; length <= n; length++) {
+    level = level.flatMap((text) => alphabet.map((c) => text + c));
+    all.push(...level);
+  }
+  return all;
+}
+
+/** A Proxy over `target` whose every trap calls `fail` (which throws). */
+export function allTrapsThrow(target: object, fail: () => never): object {
+  const traps: ProxyHandler<object> = {
+    get: fail,
+    has: fail,
+    ownKeys: fail,
+    getOwnPropertyDescriptor: fail,
+    getPrototypeOf: fail,
+    apply: fail,
+    construct: fail,
+    set: fail,
+    defineProperty: fail,
+    deleteProperty: fail,
+    isExtensible: fail,
+    preventExtensions: fail,
+    setPrototypeOf: fail,
+  };
+  return new Proxy(target, traps);
+}
+
+/** A Proxy that has been revoked: every operation on it throws a `TypeError`. */
+export function revokedProxy(): object {
+  const { proxy, revoke } = Proxy.revocable({}, {});
+  revoke();
+  return proxy;
+}
+
+/** A shallow copy of `value` without its member `key`. */
+export function omit<T extends object, K extends keyof T>(value: T, key: K): Omit<T, K> {
+  const copy = { ...value };
+  delete copy[key];
+  return copy;
+}

@@ -3,8 +3,10 @@ import { readFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { pathToFileURL } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { PROOF_SECTIONS } from '../src/index.js';
 import type { CivilCalendar } from '../src/index.js';
 import { builtFile, fixedCalendar, ueReferential, overlapReport } from './helpers.js';
+import { unsigned } from './proof-cases.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 import disclosures from './vectors/disclosure-v1.json';
@@ -34,6 +36,8 @@ type Entry = {
     options?: { trustedKeys?: Record<string, string> },
   ) => { status: string; issues: string[] };
   OUTPUTS_VARIABLE: string;
+  PROOF_FORMAT: string;
+  PROOF_SECTIONS: readonly string[];
   OUTPUT_STATUSES: readonly string[];
   joinStatus: (a: string, b: string) => string;
   compareOutputValues: (a: unknown, b: unknown, d: object) => number;
@@ -192,29 +196,21 @@ describe('built entries: one SpecError identity', () => {
       cjs('index.cjs'),
       cjs('canonical.cjs'),
     ];
-    const unsigned = {
-      format: 'run-iq.proof/1',
-      requestId: 'req-1',
-      evaluatedAt: null,
-      sealedAt: '2025-06-01T10:00:00.000Z',
-      inputDigest: '0'.repeat(64),
-      rules: [],
-      versions: { engine: '1.0.0', plugins: {}, dsls: {} },
-      strata: [],
-      outputs: {},
-      applied: [],
-      skipped: [],
-      exceptions: [],
-    };
+    // A proof of every section: the small decision of the signing tests.
+    const content = unsigned();
     for (const signer of entries) {
       const { privateKey, publicKey } = signer.createSigningKeyPair();
-      const proof = signer.signProof(signer.sealProof(unsigned), privateKey, 'k');
+      const proof = signer.signProof(signer.sealProof(content), privateKey, 'k');
       for (const verifier of entries) {
         expect(verifier.verifyProof(proof, { trustedKeys: { k: publicKey } })).toEqual({
           status: 'authentic',
           issues: [],
         });
       }
+    }
+    for (const entry of entries) {
+      expect(entry.PROOF_SECTIONS).toEqual(PROOF_SECTIONS);
+      expect(entry.PROOF_FORMAT).toBe('run-iq.proof/1');
     }
   });
 

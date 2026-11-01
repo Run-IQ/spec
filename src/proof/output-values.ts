@@ -1,64 +1,117 @@
 import { citeName } from '../errors.js';
 import { isCanonicalDecimal, isOnStep, numberToDecimal } from '../decision/decimal.js';
-import { isOutputText } from '../decision/output.js';
-import { isCivilDate, isInstant } from '../time/civil.js';
+import { matchesValue } from '../decision/output.js';
+import type { OutputDeclaration } from '../decision/output.js';
 import type { JsonValue } from '../canonical.js';
-import type { ProofOutput, ProofStep, UnsignedProof } from './types.js';
+import type { ProofBounds, ProofOutput, ProofStep, UnsignedProof } from './types.js';
 
-/** The strategies whose output has no value when no contribution reached it (`emptyOutput`). */
-const WITHOUT_VALUE: ReadonlySet<string> = new Set(['max', 'min', 'highestPriority', 'all']);
+/** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
+export function declarationOf(output: ProofOutput): OutputDeclaration {
+  const { type, combine, values, rounding, unit, empty, per, dimension, sign } = output;
+  const declaration: OutputDeclaration = { type, combine };
+  if (values !== undefined) declaration.values = values;
+  if (rounding !== undefined) declaration.rounding = rounding;
+  if (unit !== undefined) declaration.unit = unit;
+  if (empty !== undefined) declaration.empty = empty;
+  if (per !== undefined) declaration.per = per;
+  if (dimension !== undefined) declaration.dimension = dimension;
+  if (sign !== undefined) declaration.sign = sign;
+  return declaration;
+}
+
+/** The values an output or an item holds besides its contributions: its value, its bounds. */
+function heldValues(entry: { value?: JsonValue; bounds?: ProofBounds }): JsonValue[] {
+  const held: JsonValue[] = [];
+  if (entry.value !== undefined) held.push(entry.value);
+  if (entry.bounds?.min !== undefined) held.push(entry.bounds.min);
+  if (entry.bounds?.max !== undefined) held.push(entry.bounds.max);
+  return held;
+}
+
+/** What `offDeclarationValues` and `nonCanonicalDecimals` read: each output and what feeds it. */
+interface Fed {
+  output: ProofOutput;
+  /** Its value and bounds, and those of its items. */
+  held: JsonValue[];
+  steps: ProofStep[];
+}
 
 /**
- * Internal: each output whose values contradict the declaration the proof carries for it
- * (`type`, `combine`, `rounding`), by sorted name, each problem reported once per output:
- * - `output value does not match its declaration: name`: the value is not of its type (a
- *   number, a boolean, a string for a string or an enum, an array, an object, a civil date, a
- *   canonical instant; a non-negative safe integer for a `count`). `null` stands for no value
- *   only when no rule contributed and the strategy has none then (`max`, `min`,
- *   `highestPriority`, `all`). A `decimal` is checked by `nonCanonicalDecimals`;
+ * Each listed output (the first of a name), with what it holds and the applied steps feeding
+ * it, in the order of `p.outputs`. `imposed` holds the steps whose contribution a
+ * `shortCircuit` imposed: a value of the output, never a count's boolean.
+ */
+function fedOutputs(p: UnsignedProof): Fed[] {
+  const byName = new Map<string, Fed>();
+  for (const output of p.outputs) {
+    if (!byName.has(output.name)) byName.set(output.name, { output, held: [], steps: [] });
+  }
+  for (const output of p.outputs) byName.get(output.name)?.held.push(...heldValues(output));
+  for (const item of p.items) {
+    // An item of an output without `per` is reported by `outputProblems`.
+    const fed = byName.get(item.output);
+    if (fed?.output.per !== undefined) fed.held.push(...heldValues(item));
+  }
+  for (const step of p.applied) byName.get(step.output)?.steps.push(step);
+  return [...byName.values()];
+}
+
+/** The key of a rule instance: its qualified id, version and subject. */
+export function instanceKey(entry: { ruleId: string; version: number; subject?: string }): string {
+  const at = entry.subject === undefined ? '' : ` at ${entry.subject}`;
+  return `${entry.ruleId}@${entry.version}${at}`;
+}
+
+/** The applied steps whose contribution a `shortCircuit` exception of their rule imposed. */
+export function imposedSteps(p: UnsignedProof): Set<string> {
+  const carriers = new Set<string>();
+  for (const exception of p.exceptions) {
+    if (exception.kind === 'shortCircuit') carriers.add(instanceKey(exception));
+  }
+  return carriers;
+}
+
+/**
+ * Internal: each output whose values contradict the declaration the proof carries for it, by
+ * output (in the order of `outputs`), each problem reported once per output:
+ * - `output value does not match its declaration: name`: its value, a bound, or the value or a
+ *   bound of one of its items is not a value of the declaration (`valueMatchesOutputType`: its
+ *   type, an enum's `values`, `sign`, a `dimension` value, a count's non-negative integer). A
+ *   `decimal` that is not canonical is reported by `nonCanonicalDecimals` instead;
  * - `output value not rounded as declared: name`: a rounded `number` or `decimal` value is not
- *   on the step (`scale` places, or a multiple of `increment`). A `number` `sum` rounded at
- *   each contribution is not checked: the binary sum of rounded numbers is not on the step;
+ *   on the step (`scale` places, or a multiple of `increment`). A `number` `sum` rounded at each
+ *   contribution is left to the combination check (`combinationProblems`);
  * - `contribution does not match its output declaration: name`: an applied contribution, or
- *   its `unrounded` value, is not of the output's type (a boolean for a `count`);
+ *   its `unrounded` value, is not a value of the output (a boolean for a `count`, unless a
+ *   `shortCircuit` imposed it: then a value of the output);
  * - `contribution not rounded as declared: name`: with `at: 'contribution'`, an applied
  *   contribution is not on the step.
  *
- * What the proof does not carry yet is not checked here (Task 9J adds it to `ProofOutput`):
- * an enum's `values` (an enum value is only checked to be a string), `sign`, `unit`, `empty`
- * (an `all` without contribution may hold `true` or `null`), `per` and `dimension` (a string
- * value is checked to hold no lone surrogate, not to be a dimension value).
- *
- * Linear in the size of the proof: the applied list is read once, and each value is checked
- * against its step in time linear in its digits (`isOnStep`).
+ * Linear in the size of the proof: each list is read once, and each value is checked against
+ * its step in time linear in its digits (`isOnStep`).
  */
 export function offDeclarationValues(p: UnsignedProof): string[] {
-  const steps = new Map<string, ProofStep[]>();
-  for (const step of p.applied) {
-    const list = steps.get(step.output);
-    if (list === undefined) steps.set(step.output, [step]);
-    else list.push(step);
-  }
+  const imposed = imposedSteps(p);
   const issues: string[] = [];
-  for (const name of Object.keys(p.outputs).sort()) {
-    const output = p.outputs[name];
-    if (output === undefined) continue;
-    const cited = citeName(name);
-    const noValue =
-      output.value === null &&
-      output.contributors.length === 0 &&
-      WITHOUT_VALUE.has(output.combine);
-    if (!noValue && !hasForm(output.value, output)) {
+  for (const { output, held, steps } of fedOutputs(p)) {
+    const declaration = declarationOf(output);
+    const cited = citeName(output.name);
+    if (held.some((value) => !hasForm(value, declaration))) {
       issues.push(`output value does not match its declaration: ${cited}`);
-    } else if (!noValue && !valueOnStep(output.value, output)) {
+    } else if (output.value !== undefined && !valueOnStep(output.value, declaration)) {
       issues.push(`output value not rounded as declared: ${cited}`);
     }
-    const fed = steps.get(name) ?? [];
-    if (fed.some((step) => !contributionHasForm(step, output))) {
+    const contributionForm = (step: ProofStep): boolean => {
+      const asValue = imposed.has(instanceKey(step)) || declaration.combine !== 'count';
+      const form = (value: JsonValue): boolean =>
+        asValue ? hasForm(value, declaration) : typeof value === 'boolean';
+      return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
+    };
+    if (steps.some((step) => !contributionForm(step))) {
       issues.push(`contribution does not match its output declaration: ${cited}`);
     } else if (
-      output.rounding?.at === 'contribution' &&
-      fed.some((step) => !onStep(step.contribution, output))
+      declaration.rounding?.at === 'contribution' &&
+      steps.some((step) => !onStep(step.contribution, declaration))
     ) {
       issues.push(`contribution not rounded as declared: ${cited}`);
     }
@@ -67,59 +120,50 @@ export function offDeclarationValues(p: UnsignedProof): string[] {
 }
 
 /**
- * True when `value` has the form of a value of `output` (a decimal is checked elsewhere; a
- * string with a lone surrogate, which `validateProof` refuses first, is refused here too).
+ * Internal: each `decimal` output (in the order of `outputs`) whose value or bounds, those of
+ * its items, or the `contribution` or `unrounded` value of an applied rule feeding it, is not a
+ * canonical decimal string (`isCanonicalDecimal`), reported once as
+ * `decimal value not canonical: name`. A count of a decimal output does not exist.
  */
-function hasForm(value: JsonValue, output: ProofOutput): boolean {
-  if (output.combine === 'count') {
-    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+export function nonCanonicalDecimals(p: UnsignedProof): string[] {
+  const canonical = (value: JsonValue): boolean =>
+    typeof value === 'string' && isCanonicalDecimal(value);
+  const issues: string[] = [];
+  for (const { output, held, steps } of fedOutputs(p)) {
+    if (output.type !== 'decimal') continue;
+    const values = [
+      ...held,
+      ...steps.flatMap((step) =>
+        step.unrounded === undefined ? [step.contribution] : [step.contribution, step.unrounded],
+      ),
+    ];
+    if (!values.every(canonical))
+      issues.push(`decimal value not canonical: ${citeName(output.name)}`);
   }
-  switch (output.type) {
-    case 'number':
-      return typeof value === 'number';
-    case 'decimal':
-      return true;
-    case 'boolean':
-      return typeof value === 'boolean';
-    case 'string':
-      // The proof does not carry `dimension` yet (Task 9J): checked as a plain string.
-      return typeof value === 'string' && isOutputText(value, undefined);
-    case 'enum':
-      return typeof value === 'string';
-    case 'list':
-      return Array.isArray(value);
-    case 'object':
-      return typeof value === 'object' && value !== null && !Array.isArray(value);
-    case 'date':
-      return isCivilDate(value);
-    case 'dateTime':
-      return isInstant(value);
-  }
+  return issues;
 }
 
-function contributionHasForm(step: ProofStep, output: ProofOutput): boolean {
-  if (output.combine === 'count') return typeof step.contribution === 'boolean';
-  const { unrounded } = step;
-  return (
-    hasForm(step.contribution, output) && (unrounded === undefined || hasForm(unrounded, output))
-  );
+/** True when `value` has the form of a value of `declaration`; a non-canonical decimal passes. */
+function hasForm(value: JsonValue, declaration: OutputDeclaration): boolean {
+  if (declaration.type === 'decimal' && declaration.combine !== 'count') {
+    if (typeof value !== 'string' || !isCanonicalDecimal(value)) return true;
+  }
+  return matchesValue(value, declaration);
 }
 
 /**
  * The output value on the step of its rounding. A `number` sum rounded at each contribution is
- * not checked: the binary sum of numbers on the step leaves it (`0.1 + 0.2`). Any other value
- * rounded at each contribution is one of them (`max`, `min`, `highestPriority`) or an exact
- * decimal sum, so it is on the step.
+ * left to the combination check: in 20 significant digits, its sum may leave the step.
  */
-function valueOnStep(value: JsonValue, output: ProofOutput): boolean {
-  const { type, combine, rounding } = output;
+function valueOnStep(value: JsonValue, declaration: OutputDeclaration): boolean {
+  const { type, combine, rounding } = declaration;
   if (type === 'number' && combine === 'sum' && rounding?.at === 'contribution') return true;
-  return onStep(value, output);
+  return onStep(value, declaration);
 }
 
-/** True when `value` is on the step of the rounding of `output`, or there is none to check. */
-function onStep(value: JsonValue, output: ProofOutput): boolean {
-  const { rounding } = output;
+/** True when `value` is on the step of the rounding of `declaration`, or nothing to check. */
+function onStep(value: JsonValue, declaration: OutputDeclaration): boolean {
+  const { rounding } = declaration;
   if (rounding === undefined) return true;
   if (typeof value === 'number' && Number.isFinite(value)) {
     return isOnStep(numberToDecimal(value), rounding);

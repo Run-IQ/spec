@@ -6,7 +6,6 @@ import {
   computeReferentialDigest,
   computeRuleChecksum,
   normalizeRuleDefinition,
-  PROOF_FORMAT,
   sealProof,
   UNSALTED_SEED,
   validateProof,
@@ -23,6 +22,7 @@ import type {
   UnsignedProof,
 } from '../src/index.js';
 import { BASE_RULE, HUMAN_ASSERTION, proofInput, specError, ueReferential } from './helpers.js';
+import { outputProof } from './proof-builders.js';
 
 /**
  * Ruling (Round 13): one rule everywhere. A member of an object the format defines whose value
@@ -154,31 +154,9 @@ describe('rules', () => {
 });
 
 describe('proofs', () => {
-  const unsigned = (): UnsignedProof => ({
-    format: PROOF_FORMAT,
-    requestId: 'req-1',
-    evaluatedAt: null,
-    sealedAt: '2025-06-01T10:00:00.000Z',
-    inputDigest: 'a'.repeat(64),
-    rules: [{ id: 'r1', version: 1, checksum: 'b'.repeat(64) }],
-    versions: { engine: '1', plugins: {}, dsls: {} },
-    strata: [['value']],
-    outputs: {
-      value: { type: 'object', combine: 'highestPriority', value: { a: 1 }, contributors: ['r1'] },
-    },
-    applied: [
-      {
-        ruleId: 'r1',
-        version: 1,
-        model: 'FLAT',
-        output: 'value',
-        contribution: { a: 1 },
-        stratum: 0,
-      },
-    ],
-    skipped: [],
-    exceptions: [],
-  });
+  /** A proof of one `object` output, fed by `r0` with `{ a: 1 }`. */
+  const unsigned = (): UnsignedProof =>
+    outputProof({ type: 'object', combine: 'highestPriority', value: { a: 1 } }, [{ a: 1 }]);
 
   /** Asserts that validateProof and sealProof refuse `proof` with `message` at `path`. */
   function expectProofRefused(proof: unknown, path: string): void {
@@ -191,12 +169,12 @@ describe('proofs', () => {
 
   it('refuses undefined in an output value, a contribution and an unrounded value', () => {
     const p = unsigned();
-    const output = p.outputs.value;
+    const output = p.outputs[0];
     const step = p.applied[0];
     if (output === undefined || step === undefined) throw new Error('fixture');
     expectProofRefused(
-      { ...p, outputs: { value: { ...output, value: { a: undefined } } } },
-      'outputs.value.value.a',
+      { ...p, outputs: [{ ...output, value: { a: undefined } }] },
+      'outputs[0].value.a',
     );
     expectProofRefused(
       { ...p, applied: [{ ...step, contribution: [undefined] }] },
@@ -216,7 +194,7 @@ describe('proofs', () => {
 
   it('takes an undefined member of an object the format defines as absent', () => {
     const p = unsigned();
-    const output = p.outputs.value;
+    const output = p.outputs[0];
     const step = p.applied[0];
     const rule = p.rules[0];
     if (output === undefined || step === undefined || rule === undefined) {
@@ -228,8 +206,10 @@ describe('proofs', () => {
       ruleSet: undefined,
       rules: [{ ...rule, sourceRef: undefined, note: undefined }],
       versions: { ...p.versions, plugins: { gone: undefined } },
-      outputs: { value: { ...output, rounding: undefined }, gone: undefined },
-      applied: [{ ...step, unrounded: undefined, sourceRef: undefined }],
+      outputs: [{ ...output, rounding: undefined, bounds: undefined, unit: undefined }],
+      applied: [{ ...step, unrounded: undefined, sourceRef: undefined, subject: undefined }],
+      supersedes: undefined,
+      requested: undefined,
     };
     expect(validateProof({ ...withUndefined, digest: 'c'.repeat(64) }).issues).toEqual([]);
     const sealed = sealProof(fromJavaScript<UnsignedProof>(withUndefined));

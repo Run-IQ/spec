@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/decision-proof.schema.json",
   "title": "Run-IQ decision proof",
-  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the sha256 of the canonical proof without digest and signature; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. This schema checks the shape only; verifyProof checks the digest and the signature. The internal consistency is checked only by verifyProof, sealProof and signProof, never by this schema nor validateProof: every rule cited in applied, skipped, exceptions, output contributors and exception affected is listed in rules; every name in strata is a key of outputs (no unknown stratum output) and appears once (no repeated stratum output); every key of outputs is in a stratum; every stratum index of applied, skipped and exceptions is an index of strata; every applied rule's output is in its stratum; no output key, stratum name or applied output starts with $ (reserved names, ruling R36); and every decimal output holds a canonical decimal string as its value, and as the contribution and unrounded value of every applied rule feeding it. Three rules are NOT expressible in JSON Schema and are checked only by validateProof: no two entries of rules have the same id and version; every output value, contribution and unrounded value nests at most 1000 levels of non-empty arrays or objects (MAX_JSON_DEPTH; {\"a\": 1} is 1 level); a proof holds at most 10000000 values in all (MAX_JSON_VALUES, list lengths counted before any element is read).",
+  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the sha256 of the canonical proof without digest and signature; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. Every entry of the ten sections carries a salt (D-14). Rules are cited by their qualified id (D-37). This schema checks the shape only; verifyProof checks the digest and the signature. The internal consistency is checked only by verifyProof, sealProof and signProof, never by this schema nor validateProof: the order of every list (rules, outputs, items, applied, skipped, pending, factsRead, missingFacts, readsUndeclared, requested, components, strata, imports, missing pointers, matches, affected) and the identities it must not repeat; every cited rule, output and rule set is listed; strata place every output once and hold each entry's stratum; a rule feeds an output of its own rule set or of a pack its pack imports; every applied model is in versions.models; every value, bound and contribution has the form of its output's declaration (decimals canonical, rounded values on their step); a value follows from its contributions under its strategy, and selected names the contribution it came from; unrounded rounds to its contribution; the statuses of outputs and items are no weaker than their contributions and candidate exclusions, a per output's is that of its items; and a rule with undeclared reads is never determined. Rules NOT expressible in JSON Schema, checked only by validateProof: no two entries of rules have the same qualified id and version; no text holds a lone UTF-16 surrogate; the dates of a time segment of a subject exist and the first is before the second; every free-form value (an output value, a bound, a contribution, unrounded) nests at most 1000 levels of non-empty arrays or objects (MAX_JSON_DEPTH; {\"a\": 1} is 1 level); a proof holds at most 10000000 values in all (MAX_JSON_VALUES, list lengths counted before any element is read).",
   "type": "object",
   "required": [
     "format",
@@ -10,13 +10,21 @@
     "evaluatedAt",
     "sealedAt",
     "inputDigest",
-    "rules",
+    "inputSalted",
+    "timeZone",
+    "ruleSets",
     "versions",
     "strata",
+    "rules",
     "outputs",
+    "items",
     "applied",
     "skipped",
+    "pending",
     "exceptions",
+    "factsRead",
+    "missingFacts",
+    "readsUndeclared",
     "digest"
   ],
   "properties": {
@@ -27,52 +35,42 @@
       "$ref": "#/$defs/nonEmptyString"
     },
     "evaluatedAt": {
-      "description": "The effective date of the evaluation, or null.",
+      "description": "The reference date of the evaluation, or null.",
       "anyOf": [
         {
           "type": "null"
         },
         {
-          "$ref": "#/$defs/isoDate"
+          "$ref": "#/$defs/civilDate"
+        },
+        {
+          "$ref": "#/$defs/instant"
         }
       ]
     },
     "sealedAt": {
-      "$ref": "#/$defs/isoDate"
+      "$ref": "#/$defs/instant"
     },
     "inputDigest": {
       "$ref": "#/$defs/sha256Hex"
     },
-    "rules": {
-      "description": "The rules the evaluation received.",
+    "inputSalted": {
+      "description": "False when the input digest was computed with UNSALTED_SEED (D-14).",
+      "type": "boolean"
+    },
+    "timeZone": {
+      "$ref": "#/$defs/timeZone"
+    },
+    "ruleSets": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/ruleRef"
-      }
-    },
-    "ruleSet": {
-      "description": "The published pack the rules come from.",
-      "type": "object",
-      "required": ["kind", "id", "version", "digest"],
-      "properties": {
-        "kind": {
-          "const": "pack"
-        },
-        "id": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "version": {
-          "$ref": "#/$defs/nonEmptyString"
-        },
-        "digest": {
-          "$ref": "#/$defs/sha256Hex"
-        }
+        "$ref": "#/$defs/ruleSet"
       },
-      "additionalProperties": false
+      "description": "The rule sets and referentials used, in precedence order."
     },
     "versions": {
       "type": "object",
-      "required": ["engine", "plugins", "dsls"],
+      "required": ["engine", "plugins", "dsls", "models", "components"],
       "properties": {
         "engine": {
           "$ref": "#/$defs/nonEmptyString"
@@ -82,46 +80,121 @@
         },
         "dsls": {
           "$ref": "#/$defs/versionMap"
+        },
+        "models": {
+          "$ref": "#/$defs/versionMap"
+        },
+        "components": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/component"
+          }
         }
       },
       "additionalProperties": false
     },
     "strata": {
-      "description": "The output names of each evaluation stratum, in evaluation order. A stratum may be empty.",
       "type": "array",
       "items": {
         "type": "array",
         "items": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/outputName"
         }
-      }
+      },
+      "description": "The output names of each evaluation stratum, in evaluation order. A stratum may be empty."
+    },
+    "requested": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/outputName"
+      },
+      "minItems": 1,
+      "description": "The outputs the caller asked for (D-24); absent: every output."
+    },
+    "supersedes": {
+      "description": "The proof this one replaces, and why, as a code.",
+      "type": "object",
+      "required": ["digest", "reason"],
+      "properties": {
+        "digest": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "reason": {
+          "type": "string",
+          "pattern": "^[a-z0-9][a-z0-9_-]*$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rules": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ruleRefEntry"
+      },
+      "description": "The rules the evaluation received, sorted by (rule set, id, version)."
     },
     "outputs": {
-      "type": "object",
-      "propertyNames": {
-        "minLength": 1
-      },
-      "additionalProperties": {
+      "type": "array",
+      "items": {
         "$ref": "#/$defs/output"
-      }
+      },
+      "description": "The outputs, sorted by name."
+    },
+    "items": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/item"
+      },
+      "description": "The elements of the outputs declared per a collection, sorted by (output, subject)."
     },
     "applied": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/step"
-      }
+      },
+      "description": "The rules that applied, sorted by (rule set, id, version, subject)."
     },
     "skipped": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/skip"
-      }
+      },
+      "description": "The rules that did not apply, sorted by (rule set, id, version, subject)."
+    },
+    "pending": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/pending"
+      },
+      "description": "The rules whose decision is not known, sorted by (rule set, id, version, subject)."
     },
     "exceptions": {
       "type": "array",
       "items": {
         "$ref": "#/$defs/exception"
-      }
+      },
+      "description": "The exceptions that took effect, in the order their carriers were processed."
+    },
+    "factsRead": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/factRead"
+      },
+      "description": "The facts the rules read, sorted by path (comparePointers)."
+    },
+    "missingFacts": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/missingFact"
+      },
+      "description": "The facts the rules needed and the input did not hold, sorted by path."
+    },
+    "readsUndeclared": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/undeclaredRead"
+      },
+      "description": "The rules whose reads are not known (D-39), sorted by (rule set, id, version)."
     },
     "digest": {
       "$ref": "#/$defs/sha256Hex"
@@ -162,14 +235,77 @@
       "maximum": 9007199254740991
     },
     "sha256Hex": {
-      "description": "Lowercase sha256 hex.",
+      "description": "A sha256 digest in lowercase hex.",
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
     },
-    "isoDate": {
-      "description": "YYYY-MM-DD or an ISO 8601 date-time with Z or a +HH:MM/-HH:MM offset, as for rule dates.",
+    "salt": {
+      "description": "The salt of a section entry (D-14): 16 bytes in lowercase hex.",
       "type": "string",
-      "pattern": "^(?:\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|02-(?:0[1-9]|1\\d|2[0-8]))|(?:\\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)(?:T(?:[01]\\d|2[0-3]):[0-5]\\d(?::[0-5]\\d(?:\\.\\d{1,9})?)?(?:Z|[+-](?:[01]\\d|2[0-3]):[0-5]\\d))?$"
+      "pattern": "^[0-9a-f]{32}$"
+    },
+    "civilDate": {
+      "description": "A civil date YYYY-MM-DD that exists (proleptic Gregorian, years 0000 to 9999). It stays civil after normalization.",
+      "type": "string",
+      "pattern": "^(?:\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|02-(?:0[1-9]|1\\d|2[0-8]))|(?:\\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)$"
+    },
+    "instant": {
+      "description": "An instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ (a day that exists, hour 00 to 23, second 00 to 59).",
+      "type": "string",
+      "pattern": "^(?:\\d{4}-(?:(?:0[13578]|1[02])-(?:0[1-9]|[12]\\d|3[01])|(?:0[469]|11)-(?:0[1-9]|[12]\\d|30)|02-(?:0[1-9]|1\\d|2[0-8]))|(?:\\d{2}(?:0[48]|[2468][048]|[13579][26])|(?:[02468][048]|[13579][26])00)-02-29)T(?:[01]\\d|2[0-3]):[0-5]\\d:[0-5]\\d\\.\\d{3}Z$"
+    },
+    "timeZone": {
+      "description": "A time zone in its normal form: UTC, +HH:MM/-HH:MM (hour at most 23, minute at most 59; +00:00 and -00:00 are written UTC), or an IANA name Area/Location.",
+      "type": "string",
+      "pattern": "^(?:UTC|[+-](?:[01]\\d|2[0-3]):[0-5]\\d|[A-Z][A-Za-z0-9_+-]*(?:/[A-Za-z][A-Za-z0-9_+-]*)+)$",
+      "not": {
+        "enum": ["+00:00", "-00:00"]
+      }
+    },
+    "ruleSetId": {
+      "description": "A rule set id (D-4): lowercase letters, digits, '_' and '-'; no '.' (a version is never part of the id, and every qualified name stays readable by every DSL). local names the rules without a rule set.",
+      "type": "string",
+      "pattern": "^[a-z0-9][a-z0-9_-]*$"
+    },
+    "packId": {
+      "description": "A pack id: a rule set id other than local.",
+      "type": "string",
+      "pattern": "^(?!local$)[a-z0-9][a-z0-9_-]*$"
+    },
+    "ruleId": {
+      "description": "A rule id inside its rule set: non-empty, without ':'.",
+      "type": "string",
+      "pattern": "^[^:]+$"
+    },
+    "ruleRef": {
+      "description": "A rule cited by its qualified id (D-37): id for a local rule, <rule set>:<id> for a rule of a pack.",
+      "type": "string",
+      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9_-]*:)?[^:]+$"
+    },
+    "outputName": {
+      "description": "An output name (D-4): name or <rule set>:<name>, with at most one ':'. No '.' anywhere (a JSONLogic var would read it as a path); neither part starts with $ (reserved); the rule set part is a rule set id other than local (a local name is written bare); the name part is non-empty.",
+      "type": "string",
+      "pattern": "^(?:(?!local:)[a-z0-9][a-z0-9_-]*:)?[^$.:][^.:]*$"
+    },
+    "subject": {
+      "description": "The subject of a rule instance: a non-empty JSON pointer whose segments starting with ! are !group=<value> or !segment=<from>..<until> (two civil dates). NOT expressible in JSON Schema, checked only by validateProof: the two dates exist and the first is before the second.",
+      "type": "string",
+      "pattern": "^(?:/(?:(?!!)(?:[^/~]|~[01])*|!group=(?:[^/~]|~[01])*|!segment=[0-9]{4}-[0-9]{2}-[0-9]{2}\\.\\.[0-9]{4}-[0-9]{2}-[0-9]{2}))+$"
+    },
+    "contextPointer": {
+      "description": "A JSON pointer of the evaluation context (a fact, /$dates/..., /$dimensions/..., /$outputs/...): no '-' segment.",
+      "type": "string",
+      "pattern": "^(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)*$"
+    },
+    "factPointer": {
+      "description": "A pointer of the evaluation context to a fact of the input: not the root; its first segment does not start with $, or is $dates or $dimensions; no '-' segment.",
+      "type": "string",
+      "pattern": "^(?:/(?!\\$)(?!-(?:/|$))|/\\$dates(?=/|$)|/\\$dimensions(?=/|$))(?:[^/~]|~[01])*(?:/(?!-(?:/|$))(?:[^/~]|~[01])*)*$"
+    },
+    "dimensionValue": {
+      "description": "A dimension value: a non-empty code, or <system>:<code> (the first ':' separates; both parts non-empty).",
+      "type": "string",
+      "pattern": "^[^:]+(?::[\\s\\S]+)?$"
     },
     "versionMap": {
       "type": "object",
@@ -180,30 +316,88 @@
         "$ref": "#/$defs/nonEmptyString"
       }
     },
-    "ruleRef": {
+    "outputStatus": {
+      "enum": ["determined", "provisional", "conflict", "undetermined"]
+    },
+    "settledStatus": {
+      "description": "The status of a rule's decision: never undetermined (a rule whose decision is not known is pending).",
+      "enum": ["determined", "provisional", "conflict"]
+    },
+    "ruleRefs": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/ruleRef"
+      }
+    },
+    "bounds": {
+      "description": "What an undetermined output is known to lie within.",
       "type": "object",
-      "required": ["id", "version", "checksum"],
+      "required": [],
       "properties": {
-        "id": {
-          "$ref": "#/$defs/nonEmptyString"
+        "min": {},
+        "max": {}
+      },
+      "additionalProperties": false
+    },
+    "selection": {
+      "description": "The contribution a max, min or highestPriority output took its value from (D-27).",
+      "type": "object",
+      "required": ["ruleId"],
+      "properties": {
+        "ruleId": {
+          "$ref": "#/$defs/ruleRef"
         },
-        "version": {
-          "$ref": "#/$defs/positiveInteger"
+        "subject": {
+          "$ref": "#/$defs/subject"
+        }
+      },
+      "additionalProperties": false
+    },
+    "rounding": {
+      "description": "A rounding in mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it: from 10^-20 to below 10^20); at is output (the default) or contribution.",
+      "type": "object",
+      "required": ["mode"],
+      "oneOf": [
+        {
+          "required": ["scale"],
+          "properties": {
+            "scale": {}
+          }
         },
-        "checksum": {
-          "$ref": "#/$defs/sha256Hex"
+        {
+          "required": ["increment"],
+          "properties": {
+            "increment": {}
+          }
+        }
+      ],
+      "properties": {
+        "scale": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 20
         },
-        "sourceRef": {
-          "$ref": "#/$defs/nonEmptyString"
+        "increment": {
+          "type": "string",
+          "pattern": "^(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]{0,19}(\\.[0-9]{0,19}[1-9])?)$"
+        },
+        "mode": {
+          "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]
+        },
+        "at": {
+          "enum": ["output", "contribution"]
         }
       },
       "additionalProperties": false
     },
     "output": {
-      "description": "An output. Its combine applies to its type, as in an output declaration; rounding, when present, applies to a number or decimal output that is not a count, and is written in its normal form.",
+      "description": "The final state of one output: its declaration in its normal form (checked as schema/output-declaration.schema.json checks a declaration), its status, its value when it has one, its contributors and its pending rules.",
       "type": "object",
-      "required": ["type", "combine", "value", "contributors"],
+      "required": ["name", "type", "combine", "status", "contributors", "pending", "salt"],
       "properties": {
+        "name": {
+          "$ref": "#/$defs/outputName"
+        },
         "type": {
           "enum": [
             "number",
@@ -220,37 +414,64 @@
         "combine": {
           "enum": ["sum", "max", "min", "highestPriority", "union", "all", "any", "count"]
         },
-        "value": {
-          "description": "Any JSON value, null included."
-        },
-        "contributors": {
+        "values": {
+          "description": "The strings of an enum, distinct and ranked in their order.",
           "type": "array",
+          "minItems": 1,
+          "uniqueItems": true,
           "items": {
-            "$ref": "#/$defs/nonEmptyString"
+            "type": "string",
+            "minLength": 1
           }
         },
         "rounding": {
           "$ref": "#/$defs/rounding"
+        },
+        "unit": {
+          "description": "The unit of a number or decimal output: not empty, no white space around it.",
+          "type": "string",
+          "pattern": "^\\S(?:[\\s\\S]*\\S)?$"
+        },
+        "empty": {
+          "description": "Allowed on an all output only.",
+          "type": "boolean"
+        },
+        "per": {
+          "description": "One value per element of a collection: a pointer as forEach.path (same refusals).",
+          "type": "string",
+          "pattern": "^/(?!\\$)(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*(?:/\\*/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?(?:/(?:(?!(?:-|\\*)(?:/|$))(?:[^/~@!]|~[01])(?:[^/~]|~[01])*)?)*)*$"
+        },
+        "dimension": {
+          "description": "The dimension a string or enum output sets: not empty, not -, not starting with $.",
+          "type": "string",
+          "pattern": "^(?!\\$)(?!-$)[\\s\\S]+$"
+        },
+        "sign": {
+          "description": "Allowed on a sum only.",
+          "enum": ["nonNegative", "nonPositive"]
+        },
+        "status": {
+          "$ref": "#/$defs/outputStatus"
+        },
+        "value": {},
+        "contributors": {
+          "$ref": "#/$defs/ruleRefs"
+        },
+        "pending": {
+          "$ref": "#/$defs/ruleRefs"
+        },
+        "bounds": {
+          "$ref": "#/$defs/bounds"
+        },
+        "selected": {
+          "$ref": "#/$defs/selection"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
         }
       },
       "additionalProperties": false,
       "allOf": [
-        {
-          "if": {
-            "type": "object",
-            "required": ["type"],
-            "properties": {
-              "type": {
-                "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
-              }
-            }
-          },
-          "then": {
-            "properties": {
-              "rounding": false
-            }
-          }
-        },
         {
           "description": "sum combines number, decimal.",
           "if": {
@@ -385,6 +606,116 @@
           }
         },
         {
+          "description": "values is required for an enum, refused otherwise.",
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["enum"]
+              }
+            }
+          },
+          "then": {
+            "required": ["values"],
+            "properties": {
+              "values": {}
+            }
+          }
+        },
+        {
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": [
+                  "number",
+                  "boolean",
+                  "string",
+                  "list",
+                  "object",
+                  "decimal",
+                  "date",
+                  "dateTime"
+                ]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "values": false
+            }
+          }
+        },
+        {
+          "description": "rounding and unit apply to a number or decimal output only.",
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["boolean", "string", "enum", "list", "object", "date", "dateTime"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rounding": false,
+              "unit": false
+            }
+          }
+        },
+        {
+          "description": "A number output rounds to a scale: an increment on it is a power of ten from 1 to 10^-20 (which is that scale); any other increment applies to a decimal output only.",
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["number"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "rounding": {
+                "type": "object",
+                "properties": {
+                  "increment": {
+                    "type": "string",
+                    "pattern": "^(1|0\\.0{0,19}1)$"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "description": "The values of an enum that sets a dimension are dimension values, split at their first colon: no empty code system before it, no empty code after it (a:b: and a:: are valid).",
+          "if": {
+            "type": "object",
+            "required": ["type", "dimension"],
+            "properties": {
+              "type": {
+                "const": "enum"
+              },
+              "dimension": {}
+            }
+          },
+          "then": {
+            "properties": {
+              "values": {
+                "type": "array",
+                "items": {
+                  "type": "string",
+                  "pattern": "^(?!:)(?![^:]*:$)"
+                }
+              }
+            }
+          }
+        },
+        {
           "description": "No rounding on a count: its value is an integer.",
           "if": {
             "type": "object",
@@ -402,91 +733,318 @@
           }
         },
         {
-          "description": "A number output rounds to a scale: an increment applies to a decimal output only.",
+          "description": "empty applies to an all output only.",
           "if": {
             "type": "object",
-            "required": ["type"],
+            "required": ["combine"],
             "properties": {
-              "type": {
-                "const": "number"
+              "combine": {
+                "enum": ["sum", "max", "min", "highestPriority", "union", "any", "count"]
               }
             }
           },
           "then": {
             "properties": {
-              "rounding": {
-                "properties": {
-                  "increment": false
+              "empty": false
+            }
+          }
+        },
+        {
+          "description": "sign applies to a sum only.",
+          "if": {
+            "type": "object",
+            "required": ["combine"],
+            "properties": {
+              "combine": {
+                "enum": ["max", "min", "highestPriority", "union", "all", "any", "count"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "sign": false
+            }
+          }
+        },
+        {
+          "description": "dimension applies to a string or enum output only.",
+          "if": {
+            "type": "object",
+            "required": ["type"],
+            "properties": {
+              "type": {
+                "enum": ["number", "boolean", "list", "object", "decimal", "date", "dateTime"]
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "dimension": false
+            }
+          }
+        },
+        {
+          "description": "per and dimension are exclusive (D-19).",
+          "not": {
+            "required": ["per", "dimension"],
+            "properties": {
+              "per": {},
+              "dimension": {}
+            }
+          }
+        },
+        {
+          "description": "The declaration is written in its normal form (normalizeOutputDeclaration): no empty: false, no rounding.at: output, no increment that is a power of ten from 1 to 10^-20 (written as its scale).",
+          "properties": {
+            "empty": {
+              "const": true
+            },
+            "rounding": {
+              "type": "object",
+              "properties": {
+                "at": {
+                  "const": "contribution"
                 },
-                "type": "object"
+                "increment": {
+                  "not": {
+                    "type": "string",
+                    "pattern": "^(?:1|0\\.0{0,19}1)$"
+                  }
+                }
               }
             }
           }
         }
       ]
     },
-    "step": {
+    "item": {
+      "description": "One element of an output declared per a collection.",
       "type": "object",
-      "required": ["ruleId", "version", "model", "output", "contribution", "stratum"],
+      "required": ["output", "subject", "status", "contributors", "pending", "salt"],
+      "properties": {
+        "output": {
+          "$ref": "#/$defs/outputName"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "status": {
+          "$ref": "#/$defs/outputStatus"
+        },
+        "value": {},
+        "contributors": {
+          "$ref": "#/$defs/ruleRefs"
+        },
+        "pending": {
+          "$ref": "#/$defs/ruleRefs"
+        },
+        "bounds": {
+          "$ref": "#/$defs/bounds"
+        },
+        "selected": {
+          "$ref": "#/$defs/selection"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "match": {
+      "type": "object",
+      "required": ["values", "via"],
+      "properties": {
+        "values": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/dimensionValue"
+          },
+          "minItems": 1
+        },
+        "via": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/nonEmptyString"
+          }
+        }
+      },
+      "additionalProperties": false
+    },
+    "step": {
+      "description": "One rule (or instance) that applied.",
+      "type": "object",
+      "required": [
+        "ruleId",
+        "version",
+        "model",
+        "output",
+        "contribution",
+        "status",
+        "stratum",
+        "salt"
+      ],
       "properties": {
         "ruleId": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/ruleRef"
         },
         "version": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
         },
         "model": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "output": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/outputName"
         },
-        "contribution": {
-          "description": "Any JSON value, null included."
+        "contribution": {},
+        "status": {
+          "$ref": "#/$defs/settledStatus"
         },
         "stratum": {
           "$ref": "#/$defs/stratumIndex"
         },
-        "unrounded": {
-          "description": "The contribution before rounding, when it was rounded: any JSON value, null included."
-        },
+        "unrounded": {},
         "sourceRef": {
           "$ref": "#/$defs/nonEmptyString"
+        },
+        "matches": {
+          "description": "Per dimension the rule constrains (not starting with $), the input values that matched and the referential groups they matched through.",
+          "type": "object",
+          "minProperties": 1,
+          "propertyNames": {
+            "pattern": "^(?!\\$)[\\s\\S]+$"
+          },
+          "additionalProperties": {
+            "$ref": "#/$defs/match"
+          }
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
         }
       },
       "additionalProperties": false
     },
     "skip": {
+      "description": "One rule (or instance) that did not apply.",
       "type": "object",
-      "required": ["ruleId", "version", "reason", "stratum"],
+      "required": ["ruleId", "version", "reason", "status", "stratum", "salt"],
       "properties": {
         "ruleId": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/ruleRef"
         },
         "version": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "instances": {
+          "description": "The number of instances of a grouped exclusion: 2 or more.",
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 9007199254740991
+        },
+        "output": {
+          "$ref": "#/$defs/outputName"
         },
         "reason": {
           "$ref": "#/$defs/nonEmptyString"
         },
         "detail": {
-          "type": "string"
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "status": {
+          "$ref": "#/$defs/settledStatus"
         },
         "stratum": {
           "$ref": "#/$defs/stratumIndex"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false,
+      "allOf": [
+        {
+          "description": "A grouped exclusion (instances) has no subject and one of the reasons INACTIVE_DATE, DIMENSION_MISMATCH, TAG_MISMATCH, NOT_REQUESTED.",
+          "if": {
+            "type": "object",
+            "required": ["instances"],
+            "properties": {
+              "instances": {}
+            }
+          },
+          "then": {
+            "not": {
+              "type": "object",
+              "required": ["subject"],
+              "properties": {
+                "subject": {}
+              }
+            },
+            "properties": {
+              "reason": {
+                "enum": ["INACTIVE_DATE", "DIMENSION_MISMATCH", "TAG_MISMATCH", "NOT_REQUESTED"]
+              }
+            }
+          }
+        }
+      ]
+    },
+    "pending": {
+      "description": "One rule (or instance) whose decision is not known (D-8).",
+      "type": "object",
+      "required": ["ruleId", "version", "reason", "detail", "missing", "stratum", "salt"],
+      "properties": {
+        "ruleId": {
+          "$ref": "#/$defs/ruleRef"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
+        },
+        "output": {
+          "$ref": "#/$defs/outputName"
+        },
+        "reason": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "detail": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "missing": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/contextPointer"
+          }
+        },
+        "stratum": {
+          "$ref": "#/$defs/stratumIndex"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
         }
       },
       "additionalProperties": false
     },
     "exception": {
+      "description": "One exception that took effect.",
       "type": "object",
-      "required": ["ruleId", "version", "kind", "affected", "stratum"],
+      "required": ["ruleId", "version", "kind", "affected", "status", "stratum", "salt"],
       "properties": {
         "ruleId": {
-          "$ref": "#/$defs/nonEmptyString"
+          "$ref": "#/$defs/ruleRef"
         },
         "version": {
           "$ref": "#/$defs/positiveInteger"
+        },
+        "subject": {
+          "$ref": "#/$defs/subject"
         },
         "kind": {
           "enum": ["inhibit", "substitute", "shortCircuit"]
@@ -494,48 +1052,214 @@
         "affected": {
           "type": "array",
           "items": {
-            "$ref": "#/$defs/nonEmptyString"
+            "type": "object",
+            "required": ["ruleId"],
+            "properties": {
+              "ruleId": {
+                "$ref": "#/$defs/ruleRef"
+              },
+              "subject": {
+                "$ref": "#/$defs/subject"
+              }
+            },
+            "additionalProperties": false
           }
+        },
+        "status": {
+          "$ref": "#/$defs/settledStatus"
         },
         "stratum": {
           "$ref": "#/$defs/stratumIndex"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
         }
       },
       "additionalProperties": false
     },
-    "rounding": {
-      "description": "A declared rounding in its normal form (normalizeOutputDeclaration): mode, with exactly one of scale (decimal places, 0 to 20) and increment (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it that is not a power of ten from 1 to 10^-20, which is written as its scale: 0.05, 10); at is contribution or absent (output, the default, is never written).",
+    "factRead": {
+      "description": "A fact a rule read, and the assertion that governs it: method, status and assertionDigest together, or none.",
       "type": "object",
-      "required": ["mode"],
+      "required": ["path", "salt"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/factPointer"
+        },
+        "method": {
+          "enum": [
+            "human",
+            "ai",
+            "document",
+            "presumed",
+            "declared",
+            "measured",
+            "estimated",
+            "derived",
+            "decision"
+          ]
+        },
+        "status": {
+          "enum": ["proposed", "validated", "contested"]
+        },
+        "assertionDigest": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false,
+      "dependentRequired": {
+        "method": ["status", "assertionDigest"],
+        "status": ["method", "assertionDigest"],
+        "assertionDigest": ["method", "status"]
+      }
+    },
+    "missingFact": {
+      "type": "object",
+      "required": ["path", "salt"],
+      "properties": {
+        "path": {
+          "$ref": "#/$defs/factPointer"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "undeclaredRead": {
+      "type": "object",
+      "required": ["ruleId", "version", "salt"],
+      "properties": {
+        "ruleId": {
+          "$ref": "#/$defs/ruleRef"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ruleRefEntry": {
+      "description": "A rule the evaluation received, in its rule set.",
+      "type": "object",
+      "required": ["id", "version", "checksum", "ruleSet", "salt"],
+      "properties": {
+        "id": {
+          "$ref": "#/$defs/ruleId"
+        },
+        "version": {
+          "$ref": "#/$defs/positiveInteger"
+        },
+        "checksum": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "ruleSet": {
+          "$ref": "#/$defs/ruleSetId"
+        },
+        "sourceRef": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "salt": {
+          "$ref": "#/$defs/salt"
+        }
+      },
+      "additionalProperties": false
+    },
+    "ruleSet": {
+      "description": "A rule set or a referential, in precedence order (D-23).",
+      "type": "object",
+      "required": ["kind"],
+      "properties": {
+        "kind": {
+          "enum": ["pack", "local", "referential"]
+        }
+      },
       "oneOf": [
         {
-          "required": ["scale"],
+          "type": "object",
+          "required": ["kind", "id", "version", "digest"],
           "properties": {
-            "scale": {}
-          }
+            "kind": {
+              "const": "pack"
+            },
+            "id": {
+              "$ref": "#/$defs/packId"
+            },
+            "version": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "digest": {
+              "$ref": "#/$defs/sha256Hex"
+            },
+            "imports": {
+              "type": "array",
+              "items": {
+                "$ref": "#/$defs/packId"
+              },
+              "minItems": 1
+            },
+            "timeZone": {
+              "$ref": "#/$defs/timeZone"
+            }
+          },
+          "additionalProperties": false
         },
         {
-          "required": ["increment"],
+          "type": "object",
+          "required": ["kind"],
           "properties": {
-            "increment": {}
-          }
+            "kind": {
+              "const": "local"
+            },
+            "timeZone": {
+              "$ref": "#/$defs/timeZone"
+            }
+          },
+          "additionalProperties": false
+        },
+        {
+          "type": "object",
+          "required": ["kind", "id", "version", "digest"],
+          "properties": {
+            "kind": {
+              "const": "referential"
+            },
+            "id": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "version": {
+              "$ref": "#/$defs/nonEmptyString"
+            },
+            "digest": {
+              "$ref": "#/$defs/sha256Hex"
+            }
+          },
+          "additionalProperties": false
         }
-      ],
+      ]
+    },
+    "component": {
+      "description": "A component the decision depends on (D-25): engine, plugin:<name> or model:<name> declares it.",
+      "type": "object",
+      "required": ["name", "version", "declaredBy"],
       "properties": {
-        "scale": {
-          "type": "integer",
-          "minimum": 0,
-          "maximum": 20
+        "name": {
+          "$ref": "#/$defs/nonEmptyString"
         },
-        "increment": {
+        "version": {
+          "$ref": "#/$defs/nonEmptyString"
+        },
+        "digest": {
+          "$ref": "#/$defs/sha256Hex"
+        },
+        "declaredBy": {
           "type": "string",
-          "pattern": "^(?!1$)(?!0\\.0*1$)(0\\.[0-9]{0,19}[1-9]|[1-9][0-9]{0,19}(\\.[0-9]{0,19}[1-9])?)$"
-        },
-        "mode": {
-          "enum": ["halfUp", "halfDown", "halfEven", "up", "down", "ceiling", "floor"]
-        },
-        "at": {
-          "enum": ["contribution"]
+          "pattern": "^(?:engine|(?:plugin|model):[\\s\\S]+)$"
         }
       },
       "additionalProperties": false

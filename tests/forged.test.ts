@@ -29,7 +29,15 @@ import type {
 import * as canonicalEntry from '../src/canonical-entry.js';
 import { isOwnError } from '../src/errors.js';
 import * as api from '../src/index.js';
-import { BASE_RULE, fixedCalendar, loose, proofInput, specError } from './helpers.js';
+import {
+  allTrapsThrow,
+  BASE_RULE,
+  fixedCalendar,
+  loose,
+  proofInput,
+  revokedProxy,
+  specError,
+} from './helpers.js';
 
 /** 1.2 million characters a message must never carry raw: newlines and quotes. */
 const HUGE = 'q\n"'.repeat(400_000);
@@ -67,33 +75,6 @@ function throwingProxy(thrown: unknown): Record<string, FactAssertion> {
 /** Throws a forged `SpecError`. */
 function throwForged(): never {
   throw forged();
-}
-
-/** A Proxy over `target` whose every trap throws a forged `SpecError`. */
-function allTrapsThrow(target: object): object {
-  const traps: ProxyHandler<object> = {
-    get: throwForged,
-    has: throwForged,
-    ownKeys: throwForged,
-    getOwnPropertyDescriptor: throwForged,
-    getPrototypeOf: throwForged,
-    apply: throwForged,
-    construct: throwForged,
-    set: throwForged,
-    defineProperty: throwForged,
-    deleteProperty: throwForged,
-    isExtensible: throwForged,
-    preventExtensions: throwForged,
-    setPrototypeOf: throwForged,
-  };
-  return new Proxy(target, traps);
-}
-
-/** A Proxy that has been revoked: every operation on it throws a `TypeError`. */
-function revokedProxy(): object {
-  const { proxy, revoke } = Proxy.revocable({}, {});
-  revoke();
-  return proxy;
 }
 
 /** A version whose `effectiveFrom` getter throws `thrown`. */
@@ -479,9 +460,9 @@ describe('every exported function: hostile arguments give an own SpecError or a 
     ['a symbol', Symbol('s')],
     ['a bigint', 1n],
     ['a function', () => 1],
-    ['a Proxy whose every trap throws', allTrapsThrow({})],
-    ['an array Proxy whose every trap throws', allTrapsThrow([])],
-    ['a Date Proxy whose every trap throws', allTrapsThrow(new Date(0))],
+    ['a Proxy whose every trap throws', allTrapsThrow({}, throwForged)],
+    ['an array Proxy whose every trap throws', allTrapsThrow([], throwForged)],
+    ['a Date Proxy whose every trap throws', allTrapsThrow(new Date(0), throwForged)],
     ['a revoked Proxy', revokedProxy()],
     ['an object whose every read throws', new Proxy({}, { get: () => throwForged() })],
     ['an object whose conversions throw', { toString: throwForged, valueOf: throwForged }],

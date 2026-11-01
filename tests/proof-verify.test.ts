@@ -1,0 +1,354 @@
+import { describe, expect, it } from 'vitest';
+import {
+  canonicalize,
+  computeRuleChecksum,
+  createSigningKeyPair,
+  sealProof,
+  sha256Hex,
+  signProof,
+  verifyProof,
+} from '../src/index.js';
+import type { DecisionProof, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
+import {
+  baseContent,
+  RFC_SECRET,
+  ruleA,
+  ruleB,
+  RULES,
+  sealed,
+  signed,
+  TRUSTED,
+  unsaltedSalt,
+  unsigned,
+} from './proof-cases.js';
+import { specError } from './helpers.js';
+
+/** `content` sealed by hand, as a faulty producer would: sealProof refuses it. */
+const handSealed = (content: UnsignedProof): DecisionProof => ({
+  ...content,
+  digest: sha256Hex(canonicalize(content)),
+});
+
+describe('verifyProof: invalid, with a readable issue', () => {
+  it('a field changed after sealing', () => {
+    const proof = signed();
+    proof.requestId = 'req-x';
+    expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch'],
+    });
+    const unsignedProof = sealed();
+    unsignedProof.requestId = 'req-x';
+    expect(verifyProof(unsignedProof)).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch', 'unsigned'],
+    });
+  });
+
+  it('an output value changed after sealing: it no longer follows from its contributions', () => {
+    const proof = signed();
+    proof.outputs[0]!.value = 1;
+    expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch', 'output value does not follow from its contributions: value'],
+    });
+  });
+
+  it('a rule removed from the proof after sealing', () => {
+    const proof = signed();
+    proof.rules.pop();
+    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch', 'cited rule not listed: r2@2', 'unexpected rule: r2@2'],
+    });
+    expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['digest mismatch', 'cited rule not listed: r2@2'],
+    });
+  });
+
+  const salt = unsaltedSalt('rules', 0);
+
+  it.each([
+    [
+      'applied',
+      (p: UnsignedProof) => p.applied.push({ ...p.applied[0]!, version: 2, contribution: 0 }),
+      'r1@2',
+    ],
+    [
+      'skipped',
+      (p: UnsignedProof) =>
+        p.skipped.push({
+          ruleId: 'r3',
+          version: 1,
+          reason: 'INACTIVE_DATE',
+          status: 'determined',
+          stratum: 0,
+          salt,
+        }),
+      'r3@1',
+    ],
+    [
+      'exceptions',
+      (p: UnsignedProof) =>
+        p.exceptions.push({
+          ruleId: 'r4',
+          version: 1,
+          kind: 'inhibit',
+          affected: [{ ruleId: 'r1' }],
+          status: 'determined',
+          stratum: 0,
+          salt,
+        }),
+      'r4@1',
+    ],
+  ])('a rule cited in %s but not listed in rules', (_name, cite, key) => {
+    const content = unsigned();
+    cite(content);
+    const proof = handSealed(content);
+    const resigned = { ...proof, signature: signed().signature };
+    expect(verifyProof(proof)).toEqual({
+      status: 'invalid',
+      issues: [`cited rule not listed: ${key}`, 'unsigned'],
+    });
+    expect(verifyProof(resigned, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: [`cited rule not listed: ${key}`, 'signature invalid'],
+    });
+    const error = specError(() => sealProof(content));
+    expect(error.code).toBe('INVALID_PROOF');
+    expect(error.message).toBe(`Cannot seal the proof: cited rule not listed: ${key}`);
+  });
+
+  it.each([
+    [
+      'outputs contributors',
+      (p: UnsignedProof) => p.outputs[0]!.contributors.push('r7'),
+      ['cited rule not listed: r7', 'contributors differ from applied steps: value'],
+    ],
+    [
+      'exceptions affected',
+      (p: UnsignedProof) =>
+        p.exceptions.push({
+          ruleId: 'r1',
+          version: 1,
+          kind: 'inhibit',
+          affected: [{ ruleId: 'r8' }],
+          status: 'determined',
+          stratum: 0,
+          salt,
+        }),
+      ['cited rule not listed: r8'],
+    ],
+  ])('a rule id in %s that rules does not list', (_name, cite, issues) => {
+    const content = unsigned();
+    cite(content);
+    const proof = handSealed(content);
+    expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [...issues, 'unsigned'] });
+    expect(specError(() => sealProof(content)).message).toBe(`Cannot seal the proof: ${issues[0]}`);
+    expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
+      `Cannot sign the proof: ${issues[0]}`,
+    );
+  });
+
+  it('reports a rule cited several times once', () => {
+    const content = unsigned();
+    const at = { ruleId: 'r5', version: 1, status: 'determined', stratum: 0, salt } as const;
+    content.skipped.push({ ...at, output: 'value', reason: 'DOMINATED' });
+    content.exceptions.push({ ...at, kind: 'inhibit', affected: [{ ruleId: 'r2' }] });
+    expect(verifyProof(handSealed(content)).issues).toEqual([
+      'cited rule not listed: r5@1',
+      'unsigned',
+    ]);
+  });
+
+  it('a digest recomputed after tampering, without a new signature', () => {
+    const proof = signed();
+    proof.requestId = 'req-x';
+    const tampered = { ...proof, digest: sealProof(proof).digest };
+    expect(verifyProof(tampered, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['signature invalid'],
+    });
+  });
+
+  it('the signature of another digest', () => {
+    const other = signProof(
+      sealProof({ ...unsigned(), requestId: 'req-2' }),
+      RFC_SECRET,
+      'executor-1',
+    );
+    const proof = { ...signed(), signature: other.signature };
+    expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
+      status: 'invalid',
+      issues: ['signature invalid'],
+    });
+  });
+
+  it('a signature checked against the wrong trusted key', () => {
+    const { publicKey } = createSigningKeyPair();
+    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': publicKey } })).toEqual({
+      status: 'invalid',
+      issues: ['signature invalid'],
+    });
+  });
+
+  it.each([
+    ['not a curve point', 'f'.repeat(64)],
+    ['a small-order point (the identity)', `01${'0'.repeat(62)}`],
+  ])('a trusted key of the right length that is %s', (_name, key) => {
+    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': key } })).toEqual({
+      status: 'consistent',
+      issues: ['trusted key malformed'],
+    });
+  });
+
+  it('a rule missing from the given rules', () => {
+    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [ruleA] })).toEqual({
+      status: 'invalid',
+      issues: ['rule missing: r2@2'],
+    });
+  });
+
+  it('an extra rule in the given rules', () => {
+    const extra = { ...ruleA, id: 'r3' };
+    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [...RULES, extra] })).toEqual({
+      status: 'invalid',
+      issues: ['unexpected rule: r3@1'],
+    });
+  });
+
+  it('a given rule whose checksum differs', () => {
+    const changed = { ...ruleA, params: { amount: 151 } };
+    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [changed, ruleB] })).toEqual({
+      status: 'invalid',
+      issues: ['rule checksum mismatch: r1@1'],
+    });
+  });
+
+  it('a rule given twice', () => {
+    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [...RULES, ruleA] })).toEqual({
+      status: 'invalid',
+      issues: ['duplicate rule: r1@1'],
+    });
+  });
+
+  it('a given rule spec refuses', () => {
+    const broken = { ...ruleA, effectiveFrom: 'yesterday' };
+    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [broken, ruleB] })).toEqual({
+      status: 'invalid',
+      issues: [
+        'rule invalid: rules[0]: effectiveFrom must be a Date, a civil date YYYY-MM-DD or an ' +
+          'instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; ' +
+          'got "yesterday"',
+        'rule missing: r1@1',
+      ],
+    });
+  });
+
+  it('rules of packs: each given rule matched by its qualified id (D-37)', () => {
+    const content = baseContent();
+    const listed = content.rules as { id: string; version: number; ruleSet: string }[];
+    const definitions: RuleDefinitionInput[] = listed.map(({ id, version, ruleSet }) => ({
+      ...ruleA,
+      id,
+      version,
+      ...(ruleSet === 'local' ? {} : { ruleSet }),
+    }));
+    const rules = listed.map((ref, i) => ({
+      ...ref,
+      checksum: computeRuleChecksum(definitions[i]!),
+    }));
+    const proof = sealProof({ ...content, rules } as unknown as UnsignedProof);
+    expect(verifyProof(proof, { rules: definitions })).toEqual({
+      status: 'consistent',
+      issues: ['unsigned'],
+    });
+    // R1@1 of social given as a rule of vat: the vat one twice, the social one missing.
+    const moved = definitions.map((rule) =>
+      rule.ruleSet === 'social' ? { ...rule, ruleSet: 'vat' } : rule,
+    );
+    expect(verifyProof(proof, { rules: moved })).toEqual({
+      status: 'invalid',
+      issues: ['unsigned', 'duplicate rule: vat:R1@1', 'rule missing: social:R1@1'],
+    });
+    // A local rule r1 is not the rule R1 of a pack, nor `local:r1` another rule.
+    const local = definitions.map((rule) =>
+      rule.id === 'R2' && rule.version === 2 ? ruleA : rule,
+    );
+    expect(verifyProof(proof, { rules: local })).toEqual({
+      status: 'invalid',
+      issues: ['unsigned', 'duplicate rule: r1@1', 'rule missing: vat:R2@2'],
+    });
+  });
+
+  it('every problem at once, in a fixed order', () => {
+    const proof = sealed();
+    proof.requestId = 'req-x';
+    const changed = { ...ruleA, params: { amount: 151 } };
+    expect(verifyProof(proof, { rules: [changed, { ...ruleB, id: 'r9' }] })).toEqual({
+      status: 'invalid',
+      issues: [
+        'digest mismatch',
+        'unsigned',
+        'rule checksum mismatch: r1@1',
+        'rule missing: r2@2',
+        'unexpected rule: r9@2',
+      ],
+    });
+  });
+
+  it('an unknown format or a missing field', () => {
+    expect(verifyProof({ ...signed(), format: 'run-iq.proof/2' })).toEqual({
+      status: 'invalid',
+      issues: ['unknown format: run-iq.proof/2'],
+    });
+    const withoutOutputs: Record<string, unknown> = { ...signed() };
+    delete withoutOutputs.outputs;
+    expect(verifyProof(withoutOutputs)).toEqual({
+      status: 'invalid',
+      issues: ['outputs is required'],
+    });
+  });
+
+  it('malformed options', () => {
+    const bad = { trustedKeys: 'key', rules: 'r1' } as unknown as Parameters<typeof verifyProof>[1];
+    expect(verifyProof(signed(), bad)).toEqual({
+      status: 'invalid',
+      issues: ['trustedKeys must be an object of hex public keys', 'rules must be an array'],
+    });
+  });
+
+  it('options that are not an object', () => {
+    const bad = 'trusted' as unknown as Parameters<typeof verifyProof>[1];
+    expect(verifyProof(signed(), bad)).toEqual({
+      status: 'invalid',
+      issues: ['options must be an object { trustedKeys?, rules? }', 'untrusted key'],
+    });
+  });
+
+  it('never throws, whatever the input', () => {
+    const hostile = new Proxy(
+      {},
+      {
+        ownKeys: () => {
+          throw new Error('boom');
+        },
+      },
+    );
+    const values: unknown[] = [undefined, null, 'proof', 42, [], {}, new Map(), hostile];
+    for (const value of values) {
+      const result = verifyProof(value);
+      expect(result.status).toBe('invalid');
+      expect(result.issues.length).toBeGreaterThan(0);
+    }
+    expect(verifyProof(null)).toEqual({
+      status: 'invalid',
+      issues: ['a decision proof must be a plain object'],
+    });
+    expect(verifyProof(hostile)).toEqual({
+      status: 'invalid',
+      issues: ['proof could not be read: boom'],
+    });
+  });
+});

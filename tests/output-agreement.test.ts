@@ -9,8 +9,8 @@ import {
   validateProof,
 } from '../src/index.js';
 import type { OutputDeclaration } from '../src/index.js';
-import { proofWith } from './proof-cases.js';
-import { jsonCopy, loose, specError } from './helpers.js';
+import { proofWith, unsaltedSalt } from './proof-cases.js';
+import { generator, jsonCopy, loose, specError, stringsOf } from './helpers.js';
 
 const schema = JSON.parse(
   readFileSync(new URL('../schema/decision-proof.schema.json', import.meta.url), 'utf8'),
@@ -23,19 +23,18 @@ const declarationSchemaAccepts = new Ajv2020({ strict: true, allErrors: true }).
   declarationSchema,
 );
 
-/** A deterministic generator (mulberry32): the same cases on every run. */
-function generator(seed: number): <T>(choices: readonly T[]) => T {
-  let state = seed;
-  return <T>(choices: readonly T[]): T => {
-    state = (state + 0x6d2b79f5) | 0;
-    let t = Math.imul(state ^ (state >>> 15), 1 | state);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    const unit = ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-    const index = Math.floor(unit * choices.length);
-    if (index >= choices.length) throw new Error('no choices');
-    // An index below the length: the choice itself, `undefined` included.
-    return choices[index] as T;
+/** A proof whose one output carries `declaration` (its value and the rest left to the checks). */
+function proofOutput(declaration: Record<string, unknown>): unknown {
+  const output = {
+    name: 'value',
+    status: 'undetermined',
+    contributors: [],
+    pending: [],
+    salt: unsaltedSalt('outputs', 0),
   };
+  // The other sections empty: each draw validates one output, quickly.
+  const empty = { rules: [], items: [], applied: [], skipped: [], pending: [], exceptions: [] };
+  return proofWith({ ...empty, outputs: [{ ...output, ...declaration }] });
 }
 
 const INCREMENTS: unknown[] = [
@@ -80,17 +79,7 @@ function rounding(pick: <T>(choices: readonly T[]) => T): Record<string, unknown
 
 describe('a rounding: the declaration validator, the proof validator and the schema agree', () => {
   const proofOf = (value: unknown, type = 'decimal'): unknown =>
-    proofWith({
-      outputs: {
-        value: {
-          type,
-          combine: 'sum',
-          value: type === 'decimal' ? '1' : 1,
-          contributors: [],
-          rounding: value,
-        },
-      },
-    });
+    proofOutput({ type, combine: 'sum', rounding: value });
 
   it('on 3 000 drawn roundings, both outcomes reached', () => {
     const pick = generator(9);
@@ -121,12 +110,12 @@ describe('a rounding: the declaration validator, the proof validator and the sch
     const value = { increment: '0.01', mode: 'up', at: 'output' };
     expect(validateProof(proofOf(value)).issues).toEqual([
       {
-        path: 'outputs.value.rounding.at',
-        message: 'outputs.value.rounding.at must be absent: output is the default',
+        path: 'outputs[0].rounding.at',
+        message: 'outputs[0].rounding.at must be absent: output is the default',
       },
       {
-        path: 'outputs.value.rounding.increment',
-        message: 'outputs.value.rounding.increment "0.01" must be written as scale 2',
+        path: 'outputs[0].rounding.increment',
+        message: 'outputs[0].rounding.increment "0.01" must be written as scale 2',
       },
     ]);
     expect(schemaAccepts(proofOf(value))).toBe(false);
@@ -138,24 +127,18 @@ describe('a rounding: the declaration validator, the proof validator and the sch
   it('a proof refuses a combination its declaration could not have, and a rounded count', () => {
     const cases: [Record<string, unknown>, string, string][] = [
       [
-        { type: 'string', combine: 'sum', value: 'a', contributors: [] },
-        'outputs.value.combine',
-        'outputs.value.combine "sum" cannot combine a string output: it applies to number, decimal',
+        { type: 'string', combine: 'sum' },
+        'outputs[0].combine',
+        'outputs[0].combine "sum" cannot combine a string output: it applies to number, decimal',
       ],
       [
-        {
-          type: 'number',
-          combine: 'count',
-          value: 1,
-          contributors: [],
-          rounding: { scale: 0, mode: 'up' },
-        },
-        'outputs.value.rounding',
-        'outputs.value.rounding does not apply to a count: its value is an integer',
+        { type: 'number', combine: 'count', rounding: { scale: 0, mode: 'up' } },
+        'outputs[0].rounding',
+        'outputs[0].rounding does not apply to a count: its value is an integer',
       ],
     ];
     for (const [output, path, message] of cases) {
-      const proof = proofWith({ outputs: { value: output } });
+      const proof = proofOutput(output);
       expect(validateProof(proof).issues).toEqual([{ path, message }]);
       expect(schemaAccepts(proof)).toBe(false);
     }
@@ -163,35 +146,23 @@ describe('a rounding: the declaration validator, the proof validator and the sch
 });
 
 describe('the new types and strategy in a proof', () => {
-  const outputs = {
-    due: { type: 'date', combine: 'max', value: '2026-01-31', contributors: ['r1'] },
-    at: { type: 'dateTime', combine: 'min', value: '2026-01-01T00:00:00.000Z', contributors: [] },
-    criteria: { type: 'number', combine: 'count', value: 2, contributors: ['r1'] },
-    cash: {
-      type: 'decimal',
-      combine: 'sum',
-      value: '10.05',
-      contributors: [],
-      rounding: { increment: '0.05', mode: 'halfUp' },
-    },
-  };
-
-  it('are accepted by the validator and the schema', () => {
-    const proof = proofWith({ outputs, strata: [['at', 'cash', 'criteria', 'due', 'value']] });
+  it.each([
+    { type: 'date', combine: 'max' },
+    { type: 'dateTime', combine: 'min' },
+    { type: 'number', combine: 'count' },
+    { type: 'decimal', combine: 'sum', rounding: { increment: '0.05', mode: 'halfUp' } },
+  ])('accepts %j: the validator and the schema', (declaration) => {
+    const proof = proofOutput(declaration);
     expect(validateProof(proof).issues).toEqual([]);
     expect(schemaAccepts(proof)).toBe(true);
   });
 
   it.each(['date', 'dateTime'])('a rounding on a %s output is refused by both', (type) => {
-    const proof = proofWith({
-      outputs: {
-        value: { type, combine: 'max', value: null, contributors: [], rounding: { scale: 0 } },
-      },
-    });
+    const proof = proofOutput({ type, combine: 'max', rounding: { scale: 0, mode: 'up' } });
     expect(validateProof(proof).issues).toEqual([
       {
-        path: 'outputs.value.rounding',
-        message: 'outputs.value.rounding applies only to a number or decimal output',
+        path: 'outputs[0].rounding',
+        message: 'outputs[0].rounding applies only to a number or decimal output',
       },
     ]);
     expect(schemaAccepts(proof)).toBe(false);
@@ -293,6 +264,32 @@ describe('validateOutputDeclaration, normalizeOutputDeclaration and the JSON sch
   });
 });
 
+describe('a declaration in a proof: the proof validator, schema and normal form agree', () => {
+  it('on 10 000 drawn declarations: a proof takes the valid ones in normal form', () => {
+    const pick = generator(7);
+    let accepted = 0;
+    for (let i = 0; i < 10_000; i++) {
+      const value = declaration(pick);
+      const valid = validateOutputDeclaration(value).length === 0;
+      // The JSON text of the declaration: an `undefined` member has none, as it is absent.
+      const written = jsonCopy(value);
+      const normal =
+        valid &&
+        canonicalize(normalizeOutputDeclaration(loose<OutputDeclaration>(value))) ===
+          canonicalize(written);
+      const proof = proofOutput(written);
+      expect([value, validateProof(proof).issues.length === 0, schemaAccepts(proof)]).toEqual([
+        value,
+        normal,
+        normal,
+      ]);
+      if (normal) accepted += 1;
+    }
+    // Both verdicts reached, seeded: the same draws on every run.
+    expect(accepted).toBe(2_024);
+  }, 60_000);
+});
+
 describe('the output declaration schema: what only the validator checks', () => {
   const LONE = String.fromCharCode(0xd800);
   const cases: [string, Record<string, unknown>][] = [
@@ -346,17 +343,6 @@ describe('the output declaration schema: what only the validator checks', () => 
     }
   });
 });
-
-/** Every string of 1 to `n` characters drawn from `alphabet`. */
-function stringsOf(alphabet: readonly string[], n: number): string[] {
-  let level = [''];
-  const all: string[] = [];
-  for (let length = 1; length <= n; length++) {
-    level = level.flatMap((text) => alphabet.map((c) => text + c));
-    all.push(...level);
-  }
-  return all;
-}
 
 describe('each text pattern of the declaration schema matches its validator exactly', () => {
   /** Asserts the schema and the validator agree on `declare(text)` for every `text`. */
@@ -412,16 +398,10 @@ describe('each text pattern of the declaration schema matches its validator exac
       agree(texts, (v) => ({ type, combine: 'sum', rounding: { increment: v, mode: 'up' } }));
       // The proof schema and validateProof agree on the same texts, in the normal form.
       for (const text of texts) {
-        const proof = proofWith({
-          outputs: {
-            value: {
-              type,
-              combine: 'max',
-              value: null,
-              contributors: [],
-              rounding: { increment: text, mode: 'up' },
-            },
-          },
+        const proof = proofOutput({
+          type,
+          combine: 'max',
+          rounding: { increment: text, mode: 'up' },
         });
         expect([type, text, schemaAccepts(proof)]).toEqual([
           type,

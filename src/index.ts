@@ -118,18 +118,29 @@ export { joinStatus, OUTPUT_STATUSES } from './decision/status.js';
 export type { OutputStatus } from './decision/status.js';
 export { compareOutputValues } from './decision/compare.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
-export { PROOF_FORMAT } from './proof/types.js';
+export { PROOF_FORMAT, PROOF_SECTIONS } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';
 export type {
   DecisionProof,
+  ProofBounds,
+  ProofComponent,
   ProofException,
+  ProofFactRead,
   ProofInput,
+  ProofItem,
+  ProofMissingFact,
   ProofOutput,
+  ProofPending,
   ProofRuleRef,
+  ProofRuleSet,
+  ProofSection,
+  ProofSelection,
   ProofSkip,
   ProofStatus,
   ProofStep,
+  ProofUndeclaredRead,
   ProofVerification,
+  SettledStatus,
   UnsignedProof,
 } from './proof/types.js';
 export { computeIdempotencyDigest, computeInputDigest, sealProof } from './proof/digest.js';

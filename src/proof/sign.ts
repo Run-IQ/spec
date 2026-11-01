@@ -1,7 +1,8 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { newSpecError } from '../errors.js';
-import { contentDigest, inconsistencies } from './digest.js';
+import { inconsistencies } from './consistency.js';
+import { contentDigest } from './digest.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
 

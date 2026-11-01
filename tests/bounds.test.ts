@@ -45,6 +45,7 @@ import {
   proofInput,
   specError,
 } from './helpers.js';
+import { outputProof } from './proof-builders.js';
 
 const SEED = UNSALTED_SEED;
 
@@ -76,20 +77,10 @@ function claiming(length: number, holeAt?: number): unknown[] {
   });
 }
 
-const PROOF: UnsignedProof = {
-  format: 'run-iq.proof/1',
-  requestId: 'r',
-  inputDigest: 'a'.repeat(64),
-  evaluatedAt: null,
-  sealedAt: '2026-01-01T00:00:00.000Z',
-  rules: [],
-  versions: { engine: '1', plugins: {}, dsls: {} },
-  strata: [],
-  outputs: {},
-  applied: [],
-  skipped: [],
-  exceptions: [],
-};
+/** A consistent proof with no rule, output nor step: each list under test is its only content. */
+const PROOF: UnsignedProof = outputProof({ type: 'number', combine: 'sum', value: 0 });
+PROOF.outputs = [];
+PROOF.strata = [];
 
 const referential = (members: unknown, periods: unknown = [{ from: '2020-01-01' }]): unknown => ({
   format: 'run-iq.referential/1',
@@ -193,6 +184,66 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
     'validateProof strata',
     (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), strata: list }).errors[0],
     'strata',
+  ],
+  [
+    'validateProof ruleSets',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), ruleSets: list }).errors[0],
+    'ruleSets',
+  ],
+  [
+    'validateProof outputs',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), outputs: list }).errors[0],
+    'outputs',
+  ],
+  [
+    'validateProof items',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), items: list }).errors[0],
+    'items',
+  ],
+  [
+    'validateProof skipped',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), skipped: list }).errors[0],
+    'skipped',
+  ],
+  [
+    'validateProof pending',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), pending: list }).errors[0],
+    'pending',
+  ],
+  [
+    'validateProof exceptions',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), exceptions: list }).errors[0],
+    'exceptions',
+  ],
+  [
+    'validateProof factsRead',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), factsRead: list }).errors[0],
+    'factsRead',
+  ],
+  [
+    'validateProof missingFacts',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), missingFacts: list }).errors[0],
+    'missingFacts',
+  ],
+  [
+    'validateProof readsUndeclared',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), readsUndeclared: list }).errors[0],
+    'readsUndeclared',
+  ],
+  [
+    'validateProof requested',
+    (list) => validateProof({ ...PROOF, digest: 'b'.repeat(64), requested: list }).errors[0],
+    'requested',
+  ],
+  [
+    'validateProof versions.components',
+    (list) =>
+      validateProof({
+        ...PROOF,
+        digest: 'b'.repeat(64),
+        versions: { ...PROOF.versions, components: list },
+      }).errors[0],
+    'versions.components',
   ],
   [
     'sealProof rules',

@@ -3,8 +3,10 @@ import { sha256Hex } from '../hash.js';
 import { boundMessages } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
 import { canonicalRulePayload } from '../rule/payload.js';
+import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
-import { contentDigest, inconsistencies } from './digest.js';
+import { inconsistencies } from './consistency.js';
+import { contentDigest } from './digest.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
 import type { DecisionProof, ProofVerification } from './types.js';
 import { readDecisionProof } from './validate.js';
@@ -25,26 +27,30 @@ interface Finding {
  *    read once (each property read and counted exactly once) into a plain-JSON snapshot built
  *    from the very values checked, and every later check runs on that snapshot only.
  * 2. The digest, recomputed from the content: `digest mismatch` makes it `invalid`.
- * 3. Internal consistency: every rule the proof cites (in `applied`, `skipped`, `exceptions`,
- *    output `contributors` and exception `affected`) must be listed in `rules`, otherwise
- *    `cited rule not listed: id@version` (or `: id` for the lists of ids) makes it `invalid`.
- *    So does every contradiction between `strata` and the rest of the proof:
- *    `stratum output unknown: name`, `stratum output repeated: name`,
- *    `output not in strata: name`, `stratum out of range: id@version` (an entry of `applied`,
- *    `skipped` or `exceptions` whose stratum `strata` does not have), and
- *    `step stratum mismatch: id@version` (an applied rule whose output is not in its stratum);
- *    `output name reserved: name` (an output key, stratum name or step output starting with
- *    `$`); and `decimal value not canonical: name` (a `decimal` output whose value, or an
- *    applied contribution or `unrounded` value for it, is not a canonical decimal string).
+ * 3. Internal consistency (`inconsistencies`), each contradiction an issue that makes it
+ *    `invalid`, in this order: citations (`cited rule not listed: id@version`, qualified, or
+ *    `: id`; `cited output not listed: name`; `rule set not listed: id`); rule sets (listed
+ *    twice, importing themselves or a pack not listed, imports out of order); the order and
+ *    identity of every list (`<section> not sorted at i`, `duplicate output: name`,
+ *    `rule decided twice: id@version`, ...); strata (`stratum output unknown: name`,
+ *    `stratum output repeated: name`, `output not in strata: name`,
+ *    `stratum out of range: id@version`, `step stratum mismatch: id@version`); rules feeding an
+ *    output of a rule set their pack does not import; models missing from `versions.models`;
+ *    decimals not canonical (`decimal value not canonical: name`); values off their output's
+ *    declaration or its rounding; the outputs and items (status, value, bounds, selection,
+ *    their contributors, pending rules and statuses, and whether each value follows from its
+ *    contributions under `combine`: `output value does not follow from its contributions:
+ *    name`); `unrounded` values; and rules with undeclared reads that are determined.
  * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
  *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters, not a curve point, or
  *    a small-order point), leave it at best `consistent`: nothing proves who produced it.
  *    `signature invalid` makes it `invalid`. `trustedKeys` maps a key id to a hex ed25519
  *    public key.
  * 5. With `rules`, the rules the decision claims to have received: the set of
- *    `{ id, version, checksum }` of `rules` (each checksum recomputed as
- *    `sha256Hex(canonicalRulePayload(rule))`) must equal the set in `proof.rules`. Each
- *    difference makes it `invalid`: `rule missing: id@version` (in the proof, not given),
+ *    `{ ruleSet, id, version, checksum }` of `rules` (each checksum recomputed as
+ *    `sha256Hex(canonicalRulePayload(rule))`, a rule without `ruleSet` being local) must equal
+ *    the set in `proof.rules`. Each difference makes it `invalid`, the rule cited by its
+ *    qualified id (D-37): `rule missing: id@version` (in the proof, not given),
  *    `unexpected rule: id@version` (given, not in the proof), `rule checksum mismatch:
  *    id@version`, `duplicate rule: id@version`, `rule invalid: rules[i]: <reason>`.
  *
@@ -132,7 +138,8 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
       const payload = canonicalRulePayload(rule as RuleDefinitionInput);
       // The payload is the canonical JSON of a normalized definition.
       const definition = JSON.parse(payload) as RuleDefinition;
-      key = `${definition.id}@${definition.version}`;
+      const id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
+      key = `${id}@${definition.version}`;
       checksum = sha256Hex(payload);
     } catch (error) {
       invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
@@ -144,7 +151,7 @@ function ruleFindings(p: DecisionProof, rules: unknown): Finding[] {
 
   const cited = new Set<string>();
   for (const ref of p.rules) {
-    const key = `${ref.id}@${ref.version}`;
+    const key = `${qualifyName(ref.ruleSet, ref.id)}@${ref.version}`;
     cited.add(key);
     const checksum = given.get(key);
     if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);

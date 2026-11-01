@@ -1,15 +1,13 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { isCanonicalDecimal } from '../decision/decimal.js';
-import { isReservedOutputName } from '../decision/output.js';
-import { citeName, newSpecError, unreadableMessage } from '../errors.js';
+import { newSpecError, unreadableMessage } from '../errors.js';
 import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
 import { expectPlainObject, readFields, requireFields, runCheck, walkJson } from '../input/read.js';
 import { inputDigestBytes } from '../input/tree.js';
 import { readValidInput } from '../input/validate.js';
 import type { RuleValidationIssue } from '../issues.js';
-import { offDeclarationValues } from './output-values.js';
+import { inconsistencies } from './consistency.js';
 import { readUnsignedProof } from './validate.js';
 import { ownCopy, withValueBudget } from '../values.js';
 
@@ -118,10 +116,13 @@ function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined
  * is validated, hashed and returned, detached from `p` and without `undefined` members. Lists
  * keep their order: the producer sorts them (see `UnsignedProof`).
  *
+ * Each entry carries its own `salt` (D-14): sealing keeps the digest of the whole content, and
+ * the salts make each entry a leaf that a later redaction can hide.
+ *
  * Throws `SpecError` (`INVALID_PROOF`), naming the first problem, when the content is not a
- * valid unsigned proof (see `validateProof`) or is not internally consistent (see
- * `inconsistencies`: `cited rule not listed: ...`, `step stratum mismatch: ...`,
- * `output name reserved: ...`, `decimal value not canonical: ...`).
+ * valid unsigned proof (see `validateProof`) or is not internally consistent (the checks of
+ * `verifyProof`: `cited rule not listed: ...`, `outputs not sorted at 1`, `output value does not
+ * follow from its contributions: ...`, …).
  */
 export function sealProof(p: UnsignedProof): DecisionProof {
   return withValueBudget(() => seal(p));
@@ -146,135 +147,10 @@ export function contentDigest(p: UnsignedProof): string {
   return ownCopy(() => canonicalSha256Hex(proofContent(p)));
 }
 
-/**
- * Internal: every way `p` contradicts itself, each reported once, in this order: its unlisted
- * citations (`unlistedCitations`), its strata problems (`strataProblems`), its reserved output
- * names (`reservedOutputNames`), its non-canonical decimals (`nonCanonicalDecimals`) and its
- * values that contradict their output's declaration (`offDeclarationValues`). `p`
- * must be a plain-JSON snapshot that `validateProof` accepts.
- */
-export function inconsistencies(p: UnsignedProof): string[] {
-  return [
-    ...unlistedCitations(p),
-    ...strataProblems(p),
-    ...reservedOutputNames(p),
-    ...nonCanonicalDecimals(p),
-    ...offDeclarationValues(p),
-  ];
-}
-
-/**
- * Internal: the citations of rules that `p.rules` does not list, each reported once, in this
- * order:
- * - each `ruleId@version` of `applied`, `skipped` and `exceptions`:
- *   `cited rule not listed: id@version`;
- * - each rule id in the `contributors` of `outputs` (by output name) and in the `affected` of
- *   `exceptions`, which name rules by id only: `cited rule not listed: id`.
- */
-export function unlistedCitations(p: UnsignedProof): string[] {
-  const listed = new Set(p.rules.map((rule) => `${rule.id}@${rule.version}`));
-  const listedIds = new Set(p.rules.map((rule) => rule.id));
-  const issues = new Set<string>();
-  for (const cited of [...p.applied, ...p.skipped, ...p.exceptions]) {
-    const key = `${cited.ruleId}@${cited.version}`;
-    if (!listed.has(key)) issues.add(`cited rule not listed: ${citeName(key)}`);
-  }
-  const outputNames = Object.keys(p.outputs).sort();
-  const citedIds = [
-    ...outputNames.flatMap((name) => p.outputs[name]?.contributors ?? []),
-    ...p.exceptions.flatMap((exception) => exception.affected),
-  ];
-  for (const id of citedIds) {
-    if (!listedIds.has(id)) issues.add(`cited rule not listed: ${citeName(id)}`);
-  }
-  return [...issues];
-}
-
 /** A shallow copy of `p` without `digest` and `signature`. */
 function proofContent(p: UnsignedProof): Record<string, unknown> {
   const content: Record<string, unknown> = { ...p };
   delete content.digest;
   delete content.signature;
   return content;
-}
-
-/**
- * Internal: where `p.strata` contradicts the rest of the proof, each problem reported once, in
- * this order:
- * - each name of `strata`, in order: `stratum output unknown: name` (not a key of `outputs`),
- *   `stratum output repeated: name` (in more than one place);
- * - each key of `outputs`, sorted, in no stratum: `output not in strata: name`;
- * - each entry of `applied`, then `skipped`, then `exceptions`, in order: `stratum out of
- *   range: id@version` when its `stratum` is not an index of `strata`, otherwise, for an
- *   applied rule whose `output` is not in `strata[stratum]`, `step stratum mismatch:
- *   id@version`.
- *
- * Linear in the size of the proof: each stratum is turned into a set once.
- */
-export function strataProblems(p: UnsignedProof): string[] {
-  const issues = new Set<string>();
-  const placed = new Set<string>();
-  for (const name of p.strata.flat()) {
-    if (!Object.hasOwn(p.outputs, name)) issues.add(`stratum output unknown: ${citeName(name)}`);
-    if (placed.has(name)) issues.add(`stratum output repeated: ${citeName(name)}`);
-    placed.add(name);
-  }
-  for (const name of Object.keys(p.outputs).sort()) {
-    if (!placed.has(name)) issues.add(`output not in strata: ${citeName(name)}`);
-  }
-  const members = p.strata.map((names) => new Set(names));
-  const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
-    const key = `${entry.ruleId}@${entry.version}`;
-    const names = members[entry.stratum];
-    if (!names) issues.add(`stratum out of range: ${citeName(key)}`);
-    else if (output !== undefined && !names.has(output)) {
-      issues.add(`step stratum mismatch: ${citeName(key)}`);
-    }
-  };
-  for (const step of p.applied) place(step, step.output);
-  for (const entry of [...p.skipped, ...p.exceptions]) place(entry);
-  return [...issues];
-}
-
-/**
- * Internal: each output name starting with `$` (reserved, ruling R36), reported once as
- * `output name reserved: name`, looking at the keys of `outputs` (sorted), then the names of
- * `strata` and the `output` of `applied`, in order.
- */
-export function reservedOutputNames(p: UnsignedProof): string[] {
-  const names = [
-    ...Object.keys(p.outputs).sort(),
-    ...p.strata.flat(),
-    ...p.applied.map((step) => step.output),
-  ];
-  const reserved = new Set(names.filter(isReservedOutputName));
-  return [...reserved].map((name) => `output name reserved: ${citeName(name)}`);
-}
-
-/**
- * Internal: each `decimal` output (by sorted name) whose `value`, or the `contribution` or
- * `unrounded` value of an applied rule feeding it, is not a canonical decimal string
- * (`isCanonicalDecimal`), reported once as `decimal value not canonical: name`.
- *
- * Linear in the size of the proof: the applied list is read once.
- */
-export function nonCanonicalDecimals(p: UnsignedProof): string[] {
-  const canonical = (value: JsonValue): boolean =>
-    typeof value === 'string' && isCanonicalDecimal(value);
-  const isDecimal = (name: string): boolean =>
-    Object.hasOwn(p.outputs, name) && p.outputs[name]?.type === 'decimal';
-  const failing = new Set<string>();
-  for (const step of p.applied) {
-    if (!isDecimal(step.output)) continue;
-    const unrounded = step.unrounded === undefined || canonical(step.unrounded);
-    if (!canonical(step.contribution) || !unrounded) failing.add(step.output);
-  }
-  const issues: string[] = [];
-  for (const name of Object.keys(p.outputs).sort()) {
-    if (!isDecimal(name)) continue;
-    if (!canonical(p.outputs[name]?.value ?? null) || failing.has(name)) {
-      issues.push(`decimal value not canonical: ${citeName(name)}`);
-    }
-  }
-  return issues;
 }
