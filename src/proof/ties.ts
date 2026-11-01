@@ -4,7 +4,8 @@ import { instanceKey } from './output-values.js';
 import { BEFORE_EXCEPTIONS } from './effects.js';
 import { ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
-import type { ProofSkip, UnsignedProof } from './types.js';
+import { full } from './collect.js';
+import type { ProofPending, ProofSkip, UnsignedProof } from './types.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
 // proof shows them (D-7, R15): they put `conflict` on outputs, not on the winners' steps.
@@ -28,11 +29,13 @@ export interface Ties {
   reaches(entry: { ruleId: string; subject?: string }): boolean;
   /**
    * In the order of `exceptions`: `exception of an excluded carrier: id@version[ at subject]`
-   * (its carrier excluded before the exceptions ran or `INHIBITED`: it fired nothing); for a
+   * (its carrier excluded for a reason that stops it: it fired nothing), `exception of a pending
+   * carrier` (pending other than on its own parameters); for a
    * discarded carrier, `exception status differs from its carrier's decision`, and
    * `discarded short circuit affected rules`; `short circuits tied without a loser excluded:
    * id@version` (a second short circuit of an output at the same stratum, precedence and
-   * priority, its carrier not excluded `RULE_CONFLICT`).
+   * priority, its carrier not excluded `RULE_CONFLICT`); then `pending carrier without a
+   * pending carrier: id@version` (`PENDING_CARRIER` while no carrier is pending unfired).
    */
   problems: readonly string[];
 }
@@ -98,14 +101,36 @@ interface Claim {
 }
 
 /**
+ * The exclusions that stop a carrier from firing (core `ExceptionResult`): those decided before
+ * the exceptions ran, and `INHIBITED` and `OUTPUT_MISMATCH` at the exception stage
+ * (`RULE_CONFLICT` stops one too: a discarded carrier, `tiesOf`).
+ */
+function stopsCarrier(reason: string): boolean {
+  return reason === 'INHIBITED' || reason === 'OUTPUT_MISMATCH' || BEFORE_EXCEPTIONS.has(reason);
+}
+
+/**
+ * True when a carrier pending for `entry` still fired its exceptions: pending `ERROR` on its
+ * own parameters (`INVALID_PARAMS: …`, R18, D-8). Pending otherwise (`UNDETERMINED`: its
+ * condition unknown; `ERROR` on its condition or its output, `OUTPUT_MISMATCH: …`; any other
+ * reason), it fired nothing and the rules it would have affected are pending `PENDING_CARRIER`.
+ */
+function pendingFired(entry: ProofPending): boolean {
+  return entry.reason === 'ERROR' && entry.detail.startsWith('INVALID_PARAMS:');
+}
+
+/**
  * The ties the exceptions of `p` show, and the problems of their carriers. A carrier excluded
- * before the exceptions ran (`BEFORE_EXCEPTIONS`) or `INHIBITED` fired nothing. One excluded
- * for its own computation afterwards (`SHORT_CIRCUITED`, `INVALID_PARAMS`, `DOMINATED`, a tie on
- * its own output, any other reason) fired its exceptions first (core `ExceptionResult`).
+ * for a reason that stops it (`stopsCarrier`) fired nothing, as one pending other than on its
+ * own parameters (`pendingFired`). One excluded for its own computation afterwards
+ * (`SHORT_CIRCUITED`, `INVALID_PARAMS`, `DOMINATED`, a tie on its own output, any other
+ * reason) fired its exceptions first (core `ExceptionResult`).
  */
 export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
   const excluded = new Map<string, ProofSkip>();
   for (const skip of p.skipped) excluded.set(instanceKey(skip), skip);
+  const waiting = new Map<string, ProofPending>();
+  for (const entry of p.pending) waiting.set(instanceKey(entry), entry);
   const discarded = new Set<number>();
   const shortCircuits = new Set<string>();
   const problems: string[] = [];
@@ -123,8 +148,14 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     const standing = standings.get(ruleKey(exception));
     const claim = standing === undefined ? undefined : { stratum: exception.stratum, standing };
     const { output } = exception;
-    if (skip !== undefined && (skip.reason === 'INHIBITED' || BEFORE_EXCEPTIONS.has(skip.reason))) {
+    if (skip !== undefined && stopsCarrier(skip.reason)) {
       problems.push(`exception of an excluded carrier: ${cited()}`);
+      discarded.add(index);
+      return;
+    }
+    const pending = waiting.get(instanceKey(exception));
+    if (pending !== undefined && !pendingFired(pending)) {
+      problems.push(`exception of a pending carrier: ${cited()}`);
       discarded.add(index);
       return;
     }
@@ -156,12 +187,30 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     if (list === undefined) claims.set(output, [claim]);
     else list.push(claim);
   });
+  appendPendingCarriers(p, problems);
   return {
     discarded,
     shortCircuits,
     reaches: (entry) => tied.covers(entry),
     problems,
   };
+}
+
+/**
+ * `pending carrier without a pending carrier: id@version[ at subject]`: a rule pending
+ * `PENDING_CARRIER` though no carrier in the proof is pending without firing (D-8).
+ */
+function appendPendingCarriers(p: UnsignedProof, problems: string[]): void {
+  const held = p.pending.some(
+    (entry) => entry.reason !== 'PENDING_CARRIER' && !pendingFired(entry),
+  );
+  if (held) return;
+  for (const entry of p.pending) {
+    if (full(problems)) return;
+    if (entry.reason === 'PENDING_CARRIER') {
+      problems.push(`pending carrier without a pending carrier: ${citeName(instanceKey(entry))}`);
+    }
+  }
 }
 
 /**
