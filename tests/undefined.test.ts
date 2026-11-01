@@ -23,6 +23,7 @@ import type {
 } from '../src/index.js';
 import { BASE_RULE, HUMAN_ASSERTION, proofInput, specError, ueReferential } from './helpers.js';
 import { outputProof } from './proof-builders.js';
+import { unsalted } from './proof-cases.js';
 
 /**
  * Ruling (Round 13): one rule everywhere. A member of an object the format defines whose value
@@ -162,7 +163,7 @@ describe('proofs', () => {
   function expectProofRefused(proof: unknown, path: string): void {
     const sealed = { ...(proof as object), digest: 'c'.repeat(64) };
     expect(validateProof(sealed).issues).toEqual([{ path, message: notJson(path) }]);
-    expect(specError(() => sealProof(proof as UnsignedProof)).message).toBe(
+    expect(specError(() => sealProof(unsalted(proof as UnsignedProof))).message).toBe(
       `Cannot seal the proof: ${notJson(path)}`,
     );
   }
@@ -212,8 +213,8 @@ describe('proofs', () => {
       requested: undefined,
     };
     expect(validateProof({ ...withUndefined, digest: 'c'.repeat(64) }).issues).toEqual([]);
-    const sealed = sealProof(fromJavaScript<UnsignedProof>(withUndefined));
-    expect(sealed.digest).toBe(sealProof(p).digest);
+    const sealed = sealProof(unsalted(fromJavaScript<UnsignedProof>(withUndefined)));
+    expect(sealed.digest).toBe(sealProof(unsalted(p)).digest);
   });
 });
 

@@ -1,8 +1,9 @@
 import { ed25519 } from '@noble/curves/ed25519.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { newSpecError } from '../errors.js';
-import { inconsistencies } from './consistency.js';
+import { contextOf, inconsistencies } from './consistency.js';
 import { contentDigest } from './digest.js';
+import { proofView } from './redact.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
 
@@ -31,7 +32,8 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  * - `INVALID_PROOF` when `p` is malformed (see `validateProof`), its `digest` does not match
  *   its content, or it is not internally consistent (an unlisted rule, or strata that do not
  *   match its outputs and trace; see `sealProof`): a proof is never signed for content it does
- *   not hold;
+ *   not hold. A redacted proof has the digest of the proof it was redacted from: it is checked
+ *   as `verifyProof` checks one;
  * - `INVALID_KEY` when `privateKeyHex` is not 64 hex characters or `keyId` is empty.
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
@@ -43,7 +45,9 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
       'Cannot sign the proof: its digest does not match its content; seal it again',
     );
   }
-  const [inconsistency] = inconsistencies(proof);
+  const { view, redactions } = proofView(proof);
+  const context = contextOf(view, redactions.hidden);
+  const [inconsistency] = inconsistencies(view, context, redactions.positions);
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
   }

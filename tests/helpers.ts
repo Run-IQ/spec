@@ -1,11 +1,12 @@
+import { createHash } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expect } from 'vitest';
 import {
-  canonicalize,
+  merkleRoot,
   normalizeRuleDefinition,
-  sha256Hex,
+  proofLeafHashes,
   SpecError,
   validateRuleDefinition,
 } from '../src/index.js';
@@ -17,6 +18,7 @@ import type {
   ProofInput,
   Referential,
   RuleDefinitionInput,
+  UnsignedProof,
 } from '../src/index.js';
 
 /** The `SpecError` `call` throws; fails the test when it throws anything else, or nothing. */
@@ -352,9 +354,26 @@ export function counted<T extends object>(target: T, counter: { reads: number })
 }
 
 /**
- * `content` sealed by hand, as a faulty producer would (the sha256 of its canonical form,
- * unchecked): `sealProof` refuses what `verifyProof` then reports.
+ * The digest of a proof's content (D-16), from its leaves (`proofLeafHashes`), its root
+ * (`merkleRoot`) and node:crypto: `sha256(0x02 ‖ utf8('run-iq.proof/1') ‖ 0x00 ‖
+ * uint64be(n) ‖ root)`. Its consistency is not checked.
+ */
+export function treeDigestOf(content: object): string {
+  const leaves = proofLeafHashes(content as UnsignedProof);
+  const count = Buffer.alloc(8);
+  count.writeBigUInt64BE(BigInt(leaves.length));
+  return createHash('sha256')
+    .update(Buffer.from([2]))
+    .update('run-iq.proof/1\u0000', 'utf8')
+    .update(count)
+    .update(merkleRoot(leaves))
+    .digest('hex');
+}
+
+/**
+ * `content` sealed by hand, as a faulty producer would (the digest of its leaves, unchecked,
+ * `treeDigestOf`): `sealProof` refuses what `verifyProof` then reports.
  */
 export function handSealed<T extends object>(content: T): T & { digest: string } {
-  return { ...content, digest: sha256Hex(canonicalize(content)) };
+  return { ...content, digest: treeDigestOf(content) };
 }

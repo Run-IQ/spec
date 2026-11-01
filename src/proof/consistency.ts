@@ -22,7 +22,8 @@ import {
 } from './placement.js';
 import { citeItem, outputProblems } from './statuses.js';
 import { sourceProblems, tiesOf } from './ties.js';
-import type { ProofOutput, UnsignedProof } from './types.js';
+import { PROOF_SECTIONS } from './types.js';
+import type { ProofOutput, ProofSection, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
 // `signProof` and `verifyProof` check it. Every check is linear in the size of the proof: each
@@ -83,15 +84,43 @@ function sortProblems<T>(
 const key = (entry: { ruleId: string; version: number }): string =>
   `${entry.ruleId}@${entry.version}`;
 
+/** No section hidden: a proof without redacted entries. */
+const NOTHING_HIDDEN: ReadonlySet<ProofSection> = new Set();
+
 /**
  * Internal: what the checks of `p` share, computed once: its imposed steps (`imposedSteps`),
- * standings (`standingsOf`) and ties (`tiesOf`). `p` must be a plain-JSON snapshot that
- * `validateProof` accepts.
+ * standings (`standingsOf`), ties (`tiesOf`) and the sections that have redacted entries
+ * (`hidden`). `p` must be the view of a plain-JSON snapshot that `validateProof` accepts
+ * (`proofView`).
  */
-export function contextOf(p: UnsignedProof): Context {
+export function contextOf(
+  p: ProofView,
+  hidden: ReadonlySet<ProofSection> = NOTHING_HIDDEN,
+): Context {
   const standings = standingsOf(p);
-  return { imposed: imposedSteps(p), standings, ties: tiesOf(p, standings) };
+  return { imposed: imposedSteps(p), standings, ties: tiesOf(p, standings, hidden), hidden };
 }
+
+/**
+ * Internal: `message` with the place it cites of an entry of a section (`applied not sorted at
+ * 2`, `pending[3].missing …`) turned from its place in the view (`proofView`) into its place in
+ * the proof, where redacted entries count.
+ */
+export function placeInProof(
+  message: string,
+  positions: ReadonlyMap<ProofSection, readonly number[]>,
+): string {
+  if (positions.size === 0) return message;
+  const found = PLACE.exec(message);
+  if (found === null) return message;
+  const [whole, section = '', link = '', index = ''] = found;
+  const place = positions.get(section as ProofSection)?.[Number(index)];
+  if (place === undefined) return message;
+  return `${section}${link}${place}${message.slice(whole.length)}`;
+}
+
+/** A message citing the place of an entry: `<section> not sorted at <i>`, `<section>[<i>]`. */
+const PLACE = new RegExp(`^(${PROOF_SECTIONS.join('|')})( not sorted at |\\[)(\\d+)`);
 
 /**
  * Internal: every way `p` contradicts itself, each reported once, in this order: unlisted
@@ -104,26 +133,29 @@ export function contextOf(p: UnsignedProof): Context {
  * exceptions impose (`exceptionProblems`). `p` must be a plain-JSON snapshot that `validateProof`
  * accepts; `context` is its own (`contextOf`).
  */
-export function inconsistencies(p: UnsignedProof, context: Context = contextOf(p)): string[] {
-  const listed = new Map<string, ProofOutput>();
-  for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
-  const { imposed } = context;
+export function inconsistencies(
+  p: ProofView,
+  context: Context = contextOf(p),
+  positions: ReadonlyMap<ProofSection, readonly number[]> = new Map(),
+): string[] {
+  const listed = listedOutputs(p);
+  const { imposed, hidden } = context;
   const checks: (() => string[])[] = [
-    () => citationProblems(p, listed),
+    () => citationProblems(p, listed, hidden),
     () => ruleSetProblems(p),
-    () => orderProblems(p, listed, context.standings, imposed),
-    () => strataProblems(p, listed),
+    () => orderProblems(p, listed, context.standings, imposed, hidden),
+    () => strataProblems(p, listed, hidden),
     () => feedProblems(p),
     () => modelProblems(p),
     () => nonCanonicalDecimals(p),
-    () => offDeclarationValues(p),
+    () => offDeclarationValues(p, hidden),
     () => outputProblems(p, listed, context),
     () => unroundedProblems(p, listed),
     () => undeclaredReadProblems(p),
-    () => undecidedRules(p),
-    () => decisionProblems(p, imposed),
-    () => exceptionProblems(p, imposed, context.ties),
-    () => sourceProblems(p),
+    () => undecidedRules(p, hidden),
+    () => decisionProblems(p, imposed, hidden),
+    () => exceptionProblems(p, imposed, context.ties, hidden),
+    () => sourceProblems(p, hidden),
   ];
   // Each problem once, in the order found, up to what `verifyProof` lists.
   const issues: string[] = [];
@@ -132,25 +164,67 @@ export function inconsistencies(p: UnsignedProof, context: Context = contextOf(p
     if (full(issues)) break;
     for (const issue of check()) {
       if (full(issues)) break;
-      if (seen.has(issue)) continue;
-      seen.add(issue);
-      issues.push(issue);
+      const message = placeInProof(issue, positions);
+      if (seen.has(message)) continue;
+      seen.add(message);
+      issues.push(message);
     }
   }
   return issues;
 }
 
+/** Each output name of `p`, with its first entry. */
+function listedOutputs(p: ProofView): Map<string, ProofOutput> {
+  const listed = new Map<string, ProofOutput>();
+  for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
+  return listed;
+}
+
 /**
- * Internal: the citations `p` does not resolve, in this order: each rule of a section entry
- * (`cited rule not listed: id@version`, qualified, D-37), each rule named by id in contributors,
- * pending rules, selections and affected rules (`cited rule not listed: id`), each output
- * named by an item or an entry (`cited output not listed: name`), and each rule set of a rule or
- * an output that `ruleSets` does not list as a pack (`rule set not listed: id`).
+ * Internal: what the redacted entries of `p` keep its checks from telling, each said once, in
+ * this order: `cited rule redacted: id@version` (or `: id`), a rule an entry cites that `rules`
+ * does not list while it has a redacted entry, which may be that rule; `cited output redacted:
+ * name`, likewise for an output an entry names while `outputs` has a redacted entry. Without
+ * redacted entry in that section, such a citation is a contradiction (`citationProblems`).
  */
-export function citationProblems(
-  p: UnsignedProof,
+export function redactionNotices(p: ProofView, hidden: ReadonlySet<ProofSection>): string[] {
+  if (!hidden.has('rules') && !hidden.has('outputs')) return [];
+  const notices: string[] = [];
+  const seen = new Set<string>();
+  const notice = (message: string): void => {
+    if (full(notices) || seen.has(message)) return;
+    seen.add(message);
+    notices.push(message);
+  };
+  forEachUnresolved(p, listedOutputs(p), {
+    rule: (cited) => {
+      if (hidden.has('rules')) notice(`cited rule redacted: ${cited}`);
+    },
+    output: (cited) => {
+      if (hidden.has('outputs')) notice(`cited output redacted: ${cited}`);
+    },
+    stop: () => full(notices),
+  });
+  return notices;
+}
+
+/** What `forEachUnresolved` reports: a rule or an output cited and not listed (cited). */
+interface Unresolved {
+  rule: (cited: string) => void;
+  output: (cited: string) => void;
+  stop: () => boolean;
+}
+
+/**
+ * Each citation of `p` that it does not resolve, in this order: each rule of a section entry
+ * (`id@version`, qualified, D-37), each rule named by id in contributors, pending rules,
+ * selections and affected rules, each output named by an item or an entry. Stops when `stop`.
+ */
+function forEachUnresolved(
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
-): string[] {
+  report: Unresolved,
+): void {
   const keys = new Set<string>();
   const ids = new Set<string>();
   for (const rule of p.rules) {
@@ -158,16 +232,15 @@ export function citationProblems(
     ids.add(id);
     keys.add(`${id}@${rule.version}`);
   }
-  const issues: string[] = [];
   const sections = [p.applied, p.skipped, p.pending, p.exceptions, p.readsUndeclared];
   for (const section of sections) {
     for (const entry of section) {
-      if (full(issues)) return issues;
-      if (!keys.has(key(entry))) issues.push(`cited rule not listed: ${citeName(key(entry))}`);
+      if (report.stop()) return;
+      if (!keys.has(key(entry))) report.rule(citeName(key(entry)));
     }
   }
   const cite = (id: string): void => {
-    if (!ids.has(id) && !full(issues)) issues.push(`cited rule not listed: ${citeName(id)}`);
+    if (!ids.has(id) && !report.stop()) report.rule(citeName(id));
   };
   for (const entry of [...p.outputs, ...p.items]) {
     for (const id of entry.contributors) cite(id);
@@ -176,18 +249,43 @@ export function citationProblems(
   }
   for (const exception of p.exceptions) for (const { ruleId } of exception.affected) cite(ruleId);
   const output = (name: string | undefined): void => {
-    if (name !== undefined && !listed.has(name) && !full(issues)) {
-      issues.push(`cited output not listed: ${citeName(name)}`);
-    }
+    if (name !== undefined && !listed.has(name) && !report.stop()) report.output(citeName(name));
   };
   for (const item of p.items) output(item.output);
   for (const step of p.applied) output(step.output);
   for (const entry of p.skipped) output(entry.output);
   for (const entry of p.pending) output(entry.output);
   for (const exception of p.exceptions) output(exception.output);
+}
+
+/**
+ * Internal: the citations `p` does not resolve, in this order: each rule of a section entry
+ * (`cited rule not listed: id@version`, qualified, D-37), each rule named by id in contributors,
+ * pending rules, selections and affected rules (`cited rule not listed: id`), each output
+ * named by an item or an entry (`cited output not listed: name`), and each rule set of a rule or
+ * an output that `ruleSets` does not list as a pack (`rule set not listed: id`). A rule is not
+ * reported while `rules` has a redacted entry (`hidden`), an output while `outputs` has one: the
+ * redacted entry may be the one cited (`redactionNotices`).
+ */
+export function citationProblems(
+  p: ProofView,
+  listed: ReadonlyMap<string, ProofOutput>,
+  hidden: ReadonlySet<ProofSection> = NOTHING_HIDDEN,
+): string[] {
+  const issues: string[] = [];
+  forEachUnresolved(p, listed, {
+    rule: (cited) => {
+      if (!hidden.has('rules')) issues.push(`cited rule not listed: ${cited}`);
+    },
+    output: (cited) => {
+      if (!hidden.has('outputs')) issues.push(`cited output not listed: ${cited}`);
+    },
+    stop: () => full(issues),
+  });
   const packs = new Set(p.ruleSets.flatMap((set) => (set.kind === 'pack' ? [set.id] : [])));
   const sets = [...p.rules.map((rule) => rule.ruleSet), ...[...listed.keys()].map(ruleSetOf)];
   for (const set of sets) {
+    if (full(issues)) break;
     if (set !== LOCAL_RULE_SET && !packs.has(set)) {
       issues.push(`rule set not listed: ${citeName(set)}`);
     }
@@ -200,7 +298,7 @@ export function citationProblems(
  * listed twice (`rule set listed twice: id`, `local` for the local rules), a pack importing
  * itself or a pack not listed, imports not sorted or repeated.
  */
-export function ruleSetProblems(p: UnsignedProof): string[] {
+export function ruleSetProblems(p: ProofView): string[] {
   const issues: string[] = [];
   const seen = new Set<string>();
   const packs = new Set<string>();
@@ -242,10 +340,11 @@ export function ruleSetProblems(p: UnsignedProof): string[] {
  * the inner lists: strata, pending `missing`, `matches` values and groups, `affected`.
  */
 export function orderProblems(
-  p: UnsignedProof,
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
   standings: Standings = standingsOf(p),
   imposed: ReadonlySet<string> = imposedSteps(p),
+  hidden: ReadonlySet<ProofSection> = NOTHING_HIDDEN,
 ): string[] {
   const issues: string[] = [];
   const push = (list: string[]): void => {
@@ -283,7 +382,7 @@ export function orderProblems(
       sortProblems<(typeof list)[number]>(list, byInstance, (i) => `${section} not sorted at ${i}`),
     );
   }
-  push(decidedTwice(p, imposed));
+  push(decidedTwice(p, imposed, hidden.has('exceptions')));
   push(exceptionOrderProblems(p, standings));
   push(
     sortProblems(
@@ -312,16 +411,21 @@ export function orderProblems(
       (i) => `duplicate missing fact: ${citeName(p.missingFacts[i]?.path ?? '')}`,
     ),
   );
-  push(requestedProblems(p, listed));
+  push(requestedProblems(p, listed, hidden.has('outputs')));
   push(innerOrderProblems(p));
   return issues;
 }
 
-/** One rule instance decided twice across `applied`, `skipped` and `pending`. */
-function decidedTwice(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
+/**
+ * One rule instance decided twice across `applied`, `skipped` and `pending`. While `exceptions`
+ * has a redacted entry (`stepsUnknown`), any step may be one a hidden short circuit imposed:
+ * steps are then not counted as decisions.
+ */
+function decidedTwice(p: ProofView, imposed: ReadonlySet<string>, stepsUnknown: boolean): string[] {
   const issues: string[] = [];
   const decided = new Map<string, { whole: boolean; subjects: Set<string> }>();
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending]) {
+  const steps = stepsUnknown ? [] : p.applied;
+  for (const entry of [...steps, ...p.skipped, ...p.pending]) {
     if (full(issues)) break;
     // The step a short circuit imposed is the effect of an exception, not a decision.
     if ('model' in entry && imposed.has(imposedKey(entry, entry.output))) continue;
@@ -342,8 +446,17 @@ function decidedTwice(p: UnsignedProof, imposed: ReadonlySet<string>): string[] 
   return issues;
 }
 
-function requestedProblems(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>): string[] {
+/**
+ * `requested` sorted, without repeat, each output it names listed: while `outputs` has a
+ * redacted entry (`outputsHidden`), an output not listed may be that one.
+ */
+function requestedProblems(
+  p: ProofView,
+  listed: ReadonlyMap<string, ProofOutput>,
+  outputsHidden: boolean,
+): string[] {
   const requested = p.requested ?? [];
+  const absent = outputsHidden ? [] : requested.filter((name) => !listed.has(name));
   return [
     ...sortProblems(
       requested,
@@ -351,13 +464,11 @@ function requestedProblems(p: UnsignedProof, listed: ReadonlyMap<string, ProofOu
       (i) => `requested not sorted at ${i}`,
       (i) => `requested repeats ${citeName(requested[i] ?? '')}`,
     ),
-    ...requested
-      .filter((name) => !listed.has(name))
-      .map((name) => `requested output absent: ${citeName(name)}`),
+    ...absent.map((name) => `requested output absent: ${citeName(name)}`),
   ];
 }
 
-function innerOrderProblems(p: UnsignedProof): string[] {
+function innerOrderProblems(p: ProofView): string[] {
   const issues: string[] = [];
   const components = p.versions.components;
   append(

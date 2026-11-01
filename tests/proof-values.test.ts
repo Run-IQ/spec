@@ -1,10 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, sealProof, sha256Hex, validateProof, verifyProof } from '../src/index.js';
+import { sealProof, validateProof, verifyProof } from '../src/index.js';
 import type { JsonValue, UnsignedProof } from '../src/index.js';
 import { isOnStep, numberToDecimal } from '../src/decision/decimal.js';
 import { specError } from './helpers.js';
 import { outputProof } from './proof-builders.js';
 import type { OutputPart } from './proof-builders.js';
+import { unsalted } from './proof-cases.js';
+import { treeDigestOf } from './helpers.js';
 
 /** A proof of one output `value`, fed by `r0` with `contribution` (and `unrounded`). */
 const proofOf = (output: OutputPart, contribution?: JsonValue, unrounded?: JsonValue) =>
@@ -24,7 +26,7 @@ const FORM_ISSUES = new Set([VALUE_OFF, NOT_ROUNDED, CONTRIBUTION_OFF, CONTRIBUT
  */
 function issuesOf(p: UnsignedProof): string[] {
   expect(validateProof({ ...p, digest: 'c'.repeat(64) }).issues).toEqual([]);
-  return verifyProof({ ...p, digest: sha256Hex(canonicalize(p)) }).issues.filter((issue) =>
+  return verifyProof({ ...p, digest: treeDigestOf(p) }).issues.filter((issue) =>
     FORM_ISSUES.has(issue),
   );
 }
@@ -117,7 +119,7 @@ describe('verifyProof: each output value has the form its declaration gives', ()
 
   it('sealProof refuses what verifyProof finds', () => {
     const proof = proofOf({ type: 'date', combine: 'max', value: 'tomorrow' });
-    expect(specError(() => sealProof(proof))).toMatchObject({
+    expect(specError(() => sealProof(unsalted(proof)))).toMatchObject({
       code: 'INVALID_PROOF',
       message: `Cannot seal the proof: ${VALUE_OFF}`,
     });

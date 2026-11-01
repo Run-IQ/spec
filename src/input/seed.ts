@@ -69,8 +69,11 @@ export function readSeed(seed: Uint8Array): Uint8Array {
   return bytes;
 }
 
-/** What a salt is for (D-14): a leaf's place (`input:`), or its value (`value:`). */
-export type SaltPurpose = 'input:' | 'value:';
+/**
+ * What a salt is for (D-14): an input leaf's place (`input:`), its value (`value:`), or an entry
+ * of a proof (`proof:`, followed by `<section>:<index>`).
+ */
+export type SaltPurpose = 'input:' | 'value:' | 'proof:';
 
 /**
  * Internal: a salt of each input leaf under `seed` (a copy this package owns), D-14:

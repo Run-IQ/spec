@@ -81,6 +81,16 @@ export class PackedHashes {
     return this.count;
   }
 
+  /** A copy of the hash at `index` (below `length`). */
+  copyAt(index: number): Uint8Array {
+    return this.bytes.slice(index * HASH_BYTES, (index + 1) * HASH_BYTES);
+  }
+
+  /** A copy of the hashes held, end to end (32 bytes each). */
+  copyAll(): Uint8Array {
+    return this.bytes.slice(0, this.count * HASH_BYTES);
+  }
+
   /** The 32 bytes where the next hash is to be written; `push` then keeps them. */
   next(): Uint8Array {
     const end = (this.count + 1) * HASH_BYTES;
@@ -157,6 +167,36 @@ export class PackedHashes {
     return { paths, root: at(0).slice() };
   }
 }
+
+/**
+ * Internal: the digest of a tree of `size` leaves (a safe integer) whose RFC 6962 root is
+ * `root`, committed with its size (D-15, D-16): `sha256(0x02 ‖ utf8(tag) ‖ 0x00 ‖
+ * uint64be(size) ‖ root)`. The prefix `0x02` sets it apart from a leaf (`0x00`) and a node
+ * (`0x01`), the tag from the digest of another kind of tree; the count makes the digest commit
+ * to the size of the tree, which an RFC 6962 root alone does not.
+ */
+export function sizedDigest(tag: string, size: number, root: Uint8Array): Uint8Array {
+  const count = new Uint8Array(8);
+  const view = new DataView(count.buffer);
+  // `size` is a safe integer: its high and low 32 bits, big-endian.
+  view.setUint32(0, Math.floor(size / 2 ** 32));
+  view.setUint32(4, size % 2 ** 32);
+  const out = new Uint8Array(HASH_BYTES);
+  createHasherInto()(out, digestPrefix(tag), count, root);
+  return out;
+}
+
+/** The prefix of the digest of a tree tagged `tag`: `0x02 ‖ utf8(tag) ‖ 0x00`, built once. */
+function digestPrefix(tag: string): Uint8Array {
+  let prefix = DIGEST_PREFIXES.get(tag);
+  if (prefix === undefined) {
+    prefix = Uint8Array.from([2, ...new TextEncoder().encode(tag), 0]);
+    DIGEST_PREFIXES.set(tag, prefix);
+  }
+  return prefix;
+}
+
+const DIGEST_PREFIXES = new Map<string, Uint8Array>();
 
 /**
  * The RFC 6962 hash of the tree whose leaves are `leafHashes`, in that order: 32 bytes, a fresh

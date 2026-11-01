@@ -1,12 +1,13 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition } from '../../src/index.js';
-import type { RuleDefinition, RuleDefinitionInput, UnsignedProof } from '../../src/index.js';
+import type { RuleDefinition, RuleDefinitionInput } from '../../src/index.js';
 import { carrierRuleFindings } from '../../src/proof/carrier-rules.js';
 import { contextOf } from '../../src/proof/consistency.js';
 import { Scope } from '../../src/proof/ties.js';
 import { counted } from '../helpers.js';
 import { outputProof } from '../proof-builders.js';
 import { ruleA, unsaltedSalt } from '../proof-cases.js';
+import type { ProofView } from '../../src/proof/types.js';
 
 // The carriers against their definitions (`verifyProof` with `rules`) on hostile proofs: work
 // linear in the decisions, never their product with the pending carriers (counters, not clocks).
@@ -20,7 +21,7 @@ const definition = (input: RuleDefinitionInput): RuleDefinition => normalizeRule
  * target T at `/f/<i>`: no step is in the scope of any carrier instance, so each pair is a
  * question a quadratic check would ask.
  */
-function hostile(n: number): UnsignedProof {
+function hostile(n: number): ProofView {
   const proof = outputProof({ type: 'number', combine: 'sum', value: n });
   proof.outputs[0]!.contributors = ['T'];
   const ref = (id: string) => ({
@@ -70,10 +71,7 @@ const definitions = new Map<string, RuleDefinition>([
  * carrier instances they mark in a trie (`Scope`) and the nodes created, those of a merged
  * trie, and the questions they ask a trie (`covers`); none is found.
  */
-function costOf(
-  proof: UnsignedProof,
-  rules: ReadonlyMap<string, RuleDefinition> = definitions,
-): Cost {
+function costOf(proof: ProofView, rules: ReadonlyMap<string, RuleDefinition> = definitions): Cost {
   // Counted by wrapping the trie's methods, never by a spy: a spy keeps every call's arguments.
   const { mark, covers } = Scope.prototype;
   const cost = { marks: 0, merged: 0, queries: 0, nodes: 0, mergedNodes: 0 };
@@ -110,7 +108,7 @@ interface Cost {
 }
 
 /** The segments of the subjects of the pending entries and decisions of `proof`, plus them. */
-function nodeBudget(proof: UnsignedProof): number {
+function nodeBudget(proof: ProofView): number {
   const entries = [...proof.pending, ...proof.applied, ...proof.skipped];
   const segments = (subject: string | undefined) => subject?.split('/').length ?? 1;
   return entries.reduce((sum, entry) => sum + segments(entry.subject), 0);
@@ -118,11 +116,11 @@ function nodeBudget(proof: UnsignedProof): number {
 
 /** The property reads of `costOf`. */
 function readsOf(
-  proof: UnsignedProof,
+  proof: ProofView,
   rules: ReadonlyMap<string, RuleDefinition> = definitions,
 ): number {
   const counter = { reads: 0 };
-  const watched: UnsignedProof = {
+  const watched: ProofView = {
     ...proof,
     applied: proof.applied.map((step) => counted(step, counter)),
     pending: proof.pending.map((entry) => counted(entry, counter)),
@@ -139,7 +137,7 @@ function readsOf(
  * `vat` (or T by id, every other one), and `n` steps of T, tagged `vat`, at `/f/<i>`: no step
  * is in the scope of a carrier.
  */
-function manyCarriers(k: number, n: number): [UnsignedProof, Map<string, RuleDefinition>] {
+function manyCarriers(k: number, n: number): [ProofView, Map<string, RuleDefinition>] {
   const proof = hostile(n);
   proof.pending = Array.from({ length: k }, (_, i) => ({
     ...proof.pending[0]!,
@@ -179,7 +177,7 @@ function broad(
   n: number,
   m: number,
   shape: 'one' | 'groups' | 'mix',
-): [UnsignedProof, Map<string, RuleDefinition>] {
+): [ProofView, Map<string, RuleDefinition>] {
   const proof = outputProof({ type: 'number', combine: 'sum', value: m });
   proof.applied = Array.from({ length: m }, (_, i) => step(`T${pad(i)}`));
   const carriers = shape === 'groups' ? ['W', 'X'] : ['X'];
@@ -214,7 +212,7 @@ function shared(
   n: number,
   m: number,
   d: number,
-): [UnsignedProof, Map<string, RuleDefinition>] {
+): [ProofView, Map<string, RuleDefinition>] {
   const proof = outputProof({ type: 'number', combine: 'sum', value: m * d });
   proof.applied = Array.from({ length: m * d }, (_, x) => ({
     ...step(`T${pad(Math.floor(x / d))}`),
@@ -244,7 +242,7 @@ function shared(
  * target rules T<i> tagged `vat`, `d` steps each, each also selected by id by Y<i>, pending
  * once: `m` groups {X, Y<i>} sharing X's deep instance. No step is in the scope of a carrier.
  */
-function deep(l: number, m: number, d: number): [UnsignedProof, Map<string, RuleDefinition>] {
+function deep(l: number, m: number, d: number): [ProofView, Map<string, RuleDefinition>] {
   const [proof, rules] = shared(1, 1, m, d);
   proof.pending[0] = { ...proof.pending[0]!, subject: '/e' + '/@1/e'.repeat(l / 2) };
   return [proof, rules];

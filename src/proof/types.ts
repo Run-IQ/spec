@@ -288,25 +288,21 @@ export interface ProofUndeclaredRead {
 }
 
 /**
- * The content of a decision proof, before sealing. The format is closed: no other key is
- * allowed.
- *
- * The header (every field but the ten sections) holds nothing that depends on the input
- * (D-16); each entry of a section is salted. Each section is a list sorted in one order, so one
- * decision has one proof (D-16): `rules` by (rule set, `id`, `version`); `outputs` by `name`;
- * `items` by (`output`, `subject`); `applied`, `skipped` and `pending` by (rule set, `id`,
- * `version`, subject), an entry without subject first; `exceptions` in the order their
- * carriers were processed (stratum, then rule-set precedence, priority descending, identity,
- * subject; the exceptions of one carrier instance in the order of its definition); `factsRead`
- * and `missingFacts` by `path` (`comparePointers`); `readsUndeclared` by (rule set, `id`,
- * `version`). `contributors` and `pending` of an output or item are in contribution order
- * (rule-set precedence, priority descending, identity).
- *
- * `strata` lists the outputs of each evaluation stratum, in evaluation order: every output
- * appears in exactly one stratum, and a stratum may be empty. Every entry of `applied`,
- * `skipped`, `pending` and `exceptions` carries the index of its stratum in `strata`.
+ * An entry of a section hidden by `redactProof` (D-16): the hash of its leaf, 64 lowercase hex
+ * characters, alone. The leaf commits to the section, the place and the salted entry: the entry
+ * cannot be told from its hash without its salt, which a secret seed keeps secret (D-14).
  */
-export interface UnsignedProof {
+export interface Redacted {
+  redacted: string;
+}
+
+/**
+ * The header of a decision proof: every field but the ten sections, `digest` and `signature`.
+ * It is one leaf of the proof (D-16), never redacted, and holds nothing that depends on the
+ * input: each of its fields is justified in D-16 (`evaluatedAt` is the reference date of the
+ * decision, `strata` and `requested` output names from the rules and the options alone).
+ */
+export interface ProofHeader {
   format: typeof PROOF_FORMAT;
   requestId: string;
   /** The reference date of the evaluation, or `null` when it had none. */
@@ -332,6 +328,66 @@ export interface UnsignedProof {
   requested?: string[];
   /** The proof this one replaces, and why, as a code (`correction`). */
   supersedes?: { digest: string; reason: string };
+}
+
+/**
+ * The content of a decision proof, before sealing. The format is closed: no other key is
+ * allowed.
+ *
+ * The header (every field but the ten sections) holds nothing that depends on the input
+ * (D-16); each entry of a section is salted (D-14), and may be replaced by its leaf hash
+ * (`Redacted`, `redactProof`). Each section is a list sorted in one order, so one decision has
+ * one proof (D-16): `rules` by (rule set, `id`, `version`); `outputs` by `name`; `items` by
+ * (`output`, `subject`); `applied`, `skipped` and `pending` by (rule set, `id`, `version`,
+ * subject), an entry without subject first; `exceptions` in the order their carriers were
+ * processed (stratum, then rule-set precedence, priority descending, identity, subject; the
+ * exceptions of one carrier instance in the order of its definition); `factsRead` and
+ * `missingFacts` by `path` (`comparePointers`); `readsUndeclared` by (rule set, `id`,
+ * `version`). `contributors` and `pending` of an output or item are in contribution order
+ * (rule-set precedence, priority descending, identity).
+ *
+ * `strata` lists the outputs of each evaluation stratum, in evaluation order: every output
+ * appears in exactly one stratum, and a stratum may be empty. Every entry of `applied`,
+ * `skipped`, `pending` and `exceptions` carries the index of its stratum in `strata`.
+ */
+export interface UnsignedProof extends ProofHeader {
+  rules: (ProofRuleRef | Redacted)[];
+  outputs: (ProofOutput | Redacted)[];
+  items: (ProofItem | Redacted)[];
+  applied: (ProofStep | Redacted)[];
+  skipped: (ProofSkip | Redacted)[];
+  pending: (ProofPending | Redacted)[];
+  exceptions: (ProofException | Redacted)[];
+  factsRead: (ProofFactRead | Redacted)[];
+  missingFacts: (ProofMissingFact | Redacted)[];
+  readsUndeclared: (ProofUndeclaredRead | Redacted)[];
+}
+
+/** An entry of a section before sealing: without its `salt`, which `sealProof` derives. */
+export type Unsalted<T extends { salt: string }> = Omit<T, 'salt'>;
+
+/**
+ * The content `sealProof` seals (D-14, D-16): an unsigned proof whose entries carry no `salt`
+ * yet (sealing derives each from the seed and the entry's place) and none is redacted.
+ */
+export interface UnsaltedProof extends ProofHeader {
+  rules: Unsalted<ProofRuleRef>[];
+  outputs: Unsalted<ProofOutput>[];
+  items: Unsalted<ProofItem>[];
+  applied: Unsalted<ProofStep>[];
+  skipped: Unsalted<ProofSkip>[];
+  pending: Unsalted<ProofPending>[];
+  exceptions: Unsalted<ProofException>[];
+  factsRead: Unsalted<ProofFactRead>[];
+  missingFacts: Unsalted<ProofMissingFact>[];
+  readsUndeclared: Unsalted<ProofUndeclaredRead>[];
+}
+
+/**
+ * Internal: what the consistency checks read of a proof: its header and the entries of its
+ * sections that are not redacted, each section in its order (`proofView`).
+ */
+export interface ProofView extends ProofHeader {
   rules: ProofRuleRef[];
   outputs: ProofOutput[];
   items: ProofItem[];
@@ -345,9 +401,11 @@ export interface UnsignedProof {
 }
 
 /**
- * A sealed proof. `digest` is the lowercase sha256 hex of the canonical unsigned proof (every
- * key but `digest` and `signature`). `signature`, when present, is the ed25519 signature of
- * the 64 ASCII characters of `digest`, in base64url without padding.
+ * A sealed proof. `digest` commits to its leaves (D-16), in lowercase hex:
+ * `sha256(0x02 ‖ utf8(format) ‖ 0x00 ‖ uint64be(n) ‖ root)`, `root` being the RFC 6962 root of
+ * its `n` leaves (`proofLeafHashes`): its header, then each entry of each section in the order
+ * of `PROOF_SECTIONS`. Redacting entries (`redactProof`) keeps it. `signature`, when present,
+ * is the ed25519 signature of the 64 ASCII characters of `digest`, in base64url without padding.
  */
 export interface DecisionProof extends UnsignedProof {
   digest: string;
@@ -362,8 +420,13 @@ export interface DecisionProof extends UnsignedProof {
  */
 export type ProofStatus = 'authentic' | 'consistent' | 'invalid';
 
-/** The result of `verifyProof`: its status, and every reason it is not `authentic`. */
+/**
+ * The result of `verifyProof`: its status, every reason it is not `authentic` and what it could
+ * not check (redacted entries), and the number of entries redacted when there is one.
+ */
 export interface ProofVerification {
   status: ProofStatus;
   issues: string[];
+  /** The number of redacted entries; absent when there is none. */
+  redacted?: number;
 }

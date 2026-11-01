@@ -1,7 +1,7 @@
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import type { JsonValue } from '../canonical.js';
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
-import { createHasherInto, PackedHashes, rootFromPath } from '../merkle.js';
+import { PackedHashes, rootFromPath, sizedDigest } from '../merkle.js';
 import { parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { ProofInput } from './types.js';
@@ -48,8 +48,6 @@ export interface InputLeaf {
   valueSalt: string;
 }
 
-/** The start of the input digest: `0x02 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
-const DIGEST_PREFIX = Uint8Array.from([2, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
 /** A digest as `computeInputDigest` writes it. */
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
@@ -162,14 +160,7 @@ export function inputDigestBytes(input: ProofInput, seed: Uint8Array): Uint8Arra
  * the size of the tree, which an RFC 6962 root alone does not.
  */
 export function inputDigestOf(size: number, root: Uint8Array): Uint8Array {
-  const count = new Uint8Array(8);
-  const view = new DataView(count.buffer);
-  // `size` is a safe integer: its high and low 32 bits, big-endian.
-  view.setUint32(0, Math.floor(size / 2 ** 32));
-  view.setUint32(4, size % 2 ** 32);
-  const out = new Uint8Array(32);
-  createHasherInto()(out, DIGEST_PREFIX, count, root);
-  return out;
+  return sizedDigest(INPUT_TREE_TAG, size, root);
 }
 
 /**

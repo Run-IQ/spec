@@ -1,8 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
-  canonicalize,
   sealProof,
-  sha256Hex,
   validateOutputDeclaration,
   validateProof,
   valueMatchesOutputType,
@@ -12,6 +10,8 @@ import type { JsonValue, UnsignedProof } from '../src/index.js';
 import { outputProof } from './proof-builders.js';
 import type { OutputPart } from './proof-builders.js';
 import { isOnStep, numberToDecimal, stepWorkDone } from '../src/decision/decimal.js';
+import { unsalted } from './proof-cases.js';
+import { treeDigestOf } from './helpers.js';
 
 const LONE = String.fromCharCode(0xd800);
 
@@ -21,7 +21,7 @@ const proofOf = (output: OutputPart, contributions: JsonValue[] = []): UnsignedP
 
 /** What `verifyProof` reports on `p` sealed by hand, past the digest and the signature. */
 function inconsistencies(p: UnsignedProof): string[] {
-  return verifyProof({ ...p, digest: sha256Hex(canonicalize(p)) }).issues.filter(
+  return verifyProof({ ...p, digest: treeDigestOf(p) }).issues.filter(
     (issue) => issue !== 'unsigned',
   );
 }
@@ -169,7 +169,7 @@ describe('a number output rounds to a scale only (a satisfiable rounding)', () =
           { type: 'number', combine: 'max', value: y, rounding: { scale, mode: 'down' } },
           [y],
         );
-        expect(() => sealProof(proof)).not.toThrow();
+        expect(() => sealProof(unsalted(proof))).not.toThrow();
       }
     }
   });

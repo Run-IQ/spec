@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/decision-proof.schema.json",
   "title": "Run-IQ decision proof",
-  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the sha256 of the canonical proof without digest and signature; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. Every entry of the ten sections carries a salt (D-14). Rules are cited by their qualified id (D-37). This schema checks the shape only; verifyProof checks the digest and the signature. The internal consistency is checked only by verifyProof, sealProof and signProof, never by this schema nor validateProof: the order of every list (rules, outputs, items, applied, skipped, pending, factsRead, missingFacts, readsUndeclared, requested, components, strata, imports, missing pointers, matches, affected) and the identities it must not repeat; contributors and pending in contribution order (rule-set precedence, priority descending, identity), exceptions in the order their carriers were processed (stratum, then that order, then subject); every cited rule, output and rule set is listed; strata place every output once and hold each entry's stratum; a rule feeds an output of its own rule set or of a pack its pack imports; every applied model is in versions.models; every value, bound and contribution has the form of its output's declaration (decimals canonical, rounded values on their step); a value follows from its contributions under its strategy, taken in contribution order (a decimal sum exact; a number sum in decimal to 20 significant digits, each partial sum rounded half away from zero, as @run-iq/core floatSum: 0.1 + 0.2 is 0.3, then rounded at output), and selected names the contribution it came from; a highestPriority output's contributors are the rules at the top precedence and priority, an instance competing for it carries its rank and the one of rank 0 wins; a rule feeds one output; unrounded rounds to its contribution; the status of an output or item is the strongest of its contributions, its candidate exclusions and a tie among exceptions the proof shows (a short circuit tie: its loser excluded RULE_CONFLICT and recorded; an exception precedence tie, R15: a discarded carrier excluded RULE_CONFLICT and recorded), a per output's is that of its items; a provisional status needs a provisional assertion or undeclared reads in the proof, a conflict one a RULE_CONFLICT exclusion; a pending rule makes the output or item it feeds undetermined (except an any with a true contribution, an all with a false one, a highestPriority whose winner, the rule of selected, has a priority in rules strictly above that of every pending rule feeding it), and an undetermined one has a cause (a pending rule, or an all no rule reached without empty); an item is an element of its per collection; each exception agrees with the decisions it produced (an inhibition its INHIBITED exclusions, a short circuit its SHORT_CIRCUITED ones and its carrier step alone on its output, a substitution every later decision of the rules it affected), each of them no weaker than it; an exception has the status of its applied carrier; a carrier excluded before the exceptions ran, INHIBITED or OUTPUT_MISMATCH fired none, a pending one fired exactly when its fired is true, fixed by its reason for some; a rule pending PENDING_CARRIER names in carrier a pending carrier that did not fire, the chain of such carriers ending at one pending for another reason; every listed rule is decided; and a rule with undeclared reads is never determined. Rules NOT expressible in JSON Schema, checked only by validateProof: no two entries of rules have the same qualified id and version; no text holds a lone UTF-16 surrogate; the dates of a time segment of a subject exist and the first is before the second; every free-form value (an output value, a bound, a contribution, unrounded) nests at most 1000 levels of non-empty arrays or objects (MAX_JSON_DEPTH; {\"a\": 1} is 1 level); a proof holds at most 10000000 values in all (MAX_JSON_VALUES, list lengths counted before any element is read).",
+  "description": "A sealed decision proof (format run-iq.proof/1) as checked by validateProof from @run-iq/spec. The format is closed: every object refuses unknown keys. The proof holds the digest of the input, never the input. digest is the digest of the proof tree (D-16): a header leaf (the proof without digest, signature and the ten sections) then one leaf per entry of the ten sections, in the order rules, outputs, items, applied, skipped, pending, exceptions, factsRead, missingFacts, readsUndeclared, hashed as an RFC 6962 tree and committed with its leaf count; signature, when present, is the ed25519 signature of the 64 ASCII characters of digest. Every entry of the ten sections carries a salt (D-14), or is redacted: { redacted } holds the hash of its leaf, which the digest uses as it is (redactProof). Rules are cited by their qualified id (D-37). This schema checks the shape only; verifyProof checks the digest and the signature. The internal consistency is checked only by verifyProof, sealProof and signProof, never by this schema nor validateProof: the order of every list (rules, outputs, items, applied, skipped, pending, factsRead, missingFacts, readsUndeclared, requested, components, strata, imports, missing pointers, matches, affected) and the identities it must not repeat; contributors and pending in contribution order (rule-set precedence, priority descending, identity), exceptions in the order their carriers were processed (stratum, then that order, then subject); every cited rule, output and rule set is listed; strata place every output once and hold each entry's stratum; a rule feeds an output of its own rule set or of a pack its pack imports; every applied model is in versions.models; every value, bound and contribution has the form of its output's declaration (decimals canonical, rounded values on their step); a value follows from its contributions under its strategy, taken in contribution order (a decimal sum exact; a number sum in decimal to 20 significant digits, each partial sum rounded half away from zero, as @run-iq/core floatSum: 0.1 + 0.2 is 0.3, then rounded at output), and selected names the contribution it came from; a highestPriority output's contributors are the rules at the top precedence and priority, an instance competing for it carries its rank and the one of rank 0 wins; a rule feeds one output; unrounded rounds to its contribution; the status of an output or item is the strongest of its contributions, its candidate exclusions and a tie among exceptions the proof shows (a short circuit tie: its loser excluded RULE_CONFLICT and recorded; an exception precedence tie, R15: a discarded carrier excluded RULE_CONFLICT and recorded), a per output's is that of its items; a provisional status needs a provisional assertion or undeclared reads in the proof, a conflict one a RULE_CONFLICT exclusion; a pending rule makes the output or item it feeds undetermined (except an any with a true contribution, an all with a false one, a highestPriority whose winner, the rule of selected, has a priority in rules strictly above that of every pending rule feeding it), and an undetermined one has a cause (a pending rule, or an all no rule reached without empty); an item is an element of its per collection; each exception agrees with the decisions it produced (an inhibition its INHIBITED exclusions, a short circuit its SHORT_CIRCUITED ones and its carrier step alone on its output, a substitution every later decision of the rules it affected), each of them no weaker than it; an exception has the status of its applied carrier; a carrier excluded before the exceptions ran, INHIBITED or OUTPUT_MISMATCH fired none, a pending one fired exactly when its fired is true, fixed by its reason for some; a rule pending PENDING_CARRIER names in carrier a pending carrier that did not fire, the chain of such carriers ending at one pending for another reason; every listed rule is decided; and a rule with undeclared reads is never determined. Rules NOT expressible in JSON Schema, checked only by validateProof: no two entries of rules have the same qualified id and version; no two redacted entries hold the same leaf hash; no text holds a lone UTF-16 surrogate; the dates of a time segment of a subject exist and the first is before the second; every free-form value (an output value, a bound, a contribution, unrounded) nests at most 1000 levels of non-empty arrays or objects (MAX_JSON_DEPTH; {\"a\": 1} is 1 level); a proof holds at most 10000000 values in all (MAX_JSON_VALUES, list lengths counted before any element is read).",
   "type": "object",
   "required": [
     "format",
@@ -129,72 +129,142 @@
     "rules": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/ruleRefEntry"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/ruleRefEntry"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The rules the evaluation received, sorted by (rule set, id, version)."
+      "description": "The rules the evaluation received, sorted by (rule set, id, version). An entry may be redacted."
     },
     "outputs": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/output"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/output"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The outputs, sorted by name."
+      "description": "The outputs, sorted by name. An entry may be redacted."
     },
     "items": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/item"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/item"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The elements of the outputs declared per a collection, sorted by (output, subject)."
+      "description": "The elements of the outputs declared per a collection, sorted by (output, subject). An entry may be redacted."
     },
     "applied": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/step"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/step"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The rules that applied, sorted by (rule set, id, version, subject)."
+      "description": "The rules that applied, sorted by (rule set, id, version, subject). An entry may be redacted."
     },
     "skipped": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/skip"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/skip"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The rules that did not apply, sorted by (rule set, id, version, subject)."
+      "description": "The rules that did not apply, sorted by (rule set, id, version, subject). An entry may be redacted."
     },
     "pending": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/pending"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/pending"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The rules whose decision is not known, sorted by (rule set, id, version, subject)."
+      "description": "The rules whose decision is not known, sorted by (rule set, id, version, subject). An entry may be redacted."
     },
     "exceptions": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/exception"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/exception"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The exceptions that took effect, in the order their carriers were processed."
+      "description": "The exceptions that took effect, in the order their carriers were processed. An entry may be redacted."
     },
     "factsRead": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/factRead"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/factRead"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The facts the rules read, sorted by path (comparePointers)."
+      "description": "The facts the rules read, sorted by path (comparePointers). An entry may be redacted."
     },
     "missingFacts": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/missingFact"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/missingFact"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The facts the rules needed and the input did not hold, sorted by path."
+      "description": "The facts the rules needed and the input did not hold, sorted by path. An entry may be redacted."
     },
     "readsUndeclared": {
       "type": "array",
       "items": {
-        "$ref": "#/$defs/undeclaredRead"
+        "anyOf": [
+          {
+            "$ref": "#/$defs/undeclaredRead"
+          },
+          {
+            "$ref": "#/$defs/redacted"
+          }
+        ]
       },
-      "description": "The rules whose reads are not known (D-39), sorted by (rule set, id, version)."
+      "description": "The rules whose reads are not known (D-39), sorted by (rule set, id, version). An entry may be redacted."
     },
     "digest": {
       "$ref": "#/$defs/sha256Hex"
@@ -1376,6 +1446,17 @@
         "declaredBy": {
           "type": "string",
           "pattern": "^(?:engine|(?:plugin|model):[\\s\\S]+)$"
+        }
+      },
+      "additionalProperties": false
+    },
+    "redacted": {
+      "description": "An entry hidden by redactProof (D-16): the sha256 of its leaf, in lowercase hex. It replaces the entry; the proof keeps its digest and its signature.",
+      "type": "object",
+      "required": ["redacted"],
+      "properties": {
+        "redacted": {
+          "$ref": "#/$defs/sha256Hex"
         }
       },
       "additionalProperties": false

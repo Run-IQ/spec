@@ -188,15 +188,16 @@ The JSON schema `@run-iq/spec/schema/rule-definition.schema.json` (draft 2020-12
 
 ## Decision proofs
 
-A proof records one decision without its input: the digest of the input, the rules received with their checksums, the engine and plugin versions, the outputs, and the trace (rules applied, rules skipped, exceptions). `@run-iq/core` builds it; `verifyProof` checks it without running anything.
+A proof records one decision without its input: the digest of the input, the rules received with their checksums, the engine and plugin versions, the outputs, and the trace (rules applied, rules skipped, rules pending, exceptions, facts read). `@run-iq/core` builds it; `verifyProof` checks it without running anything.
 
 ```js
 import {
-  computeInputDigest, computeRuleChecksum, createSigningKeyPair, deriveInputSeed, sealProof,
-  signProof, verifyProof,
+  computeInputDigest, computeRuleChecksum, createSigningKeyPair, deriveInputSeed, redactProof,
+  sealProof, signProof, verifyProof,
 } from '@run-iq/spec';
 
 // The secret stays with the producer (32 bytes or more); never put it or the seed in a proof.
+const secret = crypto.getRandomValues(new Uint8Array(32));
 const seed = deriveInputSeed(secret, 'order-42');
 
 const proof = sealProof({
@@ -211,14 +212,27 @@ const proof = sealProof({
       context: {}, assertions: {},
     },
   }, seed),
-  rules: [{ id: 'shipping-fee', version: 1, checksum: computeRuleChecksum(rule) }],
-  versions: { engine: '1.0.0-next.1', plugins: {}, dsls: {} },
-  strata: [['value']],
-  outputs: { value: { type: 'number', combine: 'sum', value: 10, contributors: ['shipping-fee'] } },
-  applied: [{ ruleId: 'shipping-fee', version: 1, model: 'PERCENTAGE', output: 'value', contribution: 10, stratum: 0 }],
-  skipped: [],
-  exceptions: [],
-});
+  inputSalted: true,
+  timeZone: 'UTC',
+  ruleSets: [{ kind: 'local' }],
+  versions: {
+    engine: '1.0.0-next.1', plugins: {}, dsls: {}, models: { PERCENTAGE: '1.0.0' }, components: [],
+  },
+  strata: [['fee']],
+  rules: [{ id: 'shipping-fee', version: 1, checksum: computeRuleChecksum(rule), ruleSet: 'local', priority: 1 }],
+  outputs: [{
+    name: 'fee', type: 'number', combine: 'sum', status: 'determined', value: 10,
+    contributors: ['shipping-fee'], pending: [],
+  }],
+  items: [],
+  applied: [{
+    ruleId: 'shipping-fee', version: 1, model: 'PERCENTAGE', output: 'fee', contribution: 10,
+    status: 'determined', stratum: 0,
+  }],
+  skipped: [], pending: [], exceptions: [],
+  factsRead: [{ path: '/orderTotal' }],
+  missingFacts: [], readsUndeclared: [],
+}, seed);
 verifyProof(proof); // { status: 'consistent', issues: ['unsigned'] }
 
 const { privateKey, publicKey } = createSigningKeyPair();
@@ -227,16 +241,23 @@ const trustedKeys = { 'shop-server': publicKey };
 verifyProof(signed, { trustedKeys, rules: [rule] }); // { status: 'authentic', issues: [] }
 verifyProof(signed, { trustedKeys, rules: [] });     // { status: 'invalid', issues: ['rule missing: shipping-fee@1'] }
 
-signed.outputs.value.value = 0;
-verifyProof(signed, { trustedKeys });                // { status: 'invalid', issues: ['digest mismatch'] }
+// Hide the facts read: the digest, and so the signature, still hold.
+const shared = redactProof(signed, (section) => section === 'factsRead');
+shared.factsRead;                                    // [{ redacted: '<the hash of its leaf>' }]
+verifyProof(shared, { trustedKeys });                // { status: 'authentic', issues: ['redacted entries: 1'], redacted: 1 }
+
+signed.outputs[0].value = 0;
+verifyProof(signed, { trustedKeys });
+// { status: 'invalid', issues: ['digest mismatch', 'output value does not follow from its contributions: fee'] }
 ```
 
 - `computeInputDigest(input, seed)` commits to the leaf count and the root of a Merkle tree (RFC 6962) with one salted leaf per value of the input: a scalar, a list or an empty object, at its JSON pointer. `deriveInputSeed(secret, requestId)` gives each request its own seed; with `UNSALTED_SEED` (32 zero bytes) the salts are public and anyone holding the input can recompute the digest. `inputLeaves` and `inputLeafHash` expose the leaves; `merkleRoot`, `inclusionPath` and `verifyInclusion` build and check the tree; `verifyInputInclusion` checks a disclosed leaf against the digest. `computeIdempotencyDigest({ input, options })` is the unsalted digest a decision store keeps to recognise a retry; it is never published.
-- `sealProof` sets `digest`, the sha256 of the canonical proof without `digest` and `signature`. It hashes lists in the order given: the producer sorts them.
+- `sealProof(content, seed)` salts each entry of the ten sections (the first 16 bytes of `HMAC-SHA256(seed, 'proof:' + section + ':' + index)`) and sets `digest`: the leaf count and RFC 6962 root of a tree whose first leaf is the header (the proof without its sections, `digest` and `signature`) and whose other leaves are the entries, section by section (`proofLeafHashes`). `seed` defaults to `UNSALTED_SEED`; `inputSalted` must say which. It hashes lists in the order given: the producer sorts them.
+- `redactProof(proof, hide)` replaces each entry `hide(section, index)` picks with `{ redacted: <hash of its leaf> }`: the digest and the signature still hold, and `verifyProof` checks what is left (`redacted: n`, the notice `redacted entries: n`). Only a proof sealed with a secret seed can be redacted. `proofLeafHash` and `verifyProofInclusion` check one entry against the signed digest without the other leaves.
 - `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
-- `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`.
-- `strata` lists the outputs of each evaluation stratum, in order: `[['value']]` when no rule reads an output. Each entry of `applied`, `skipped` and `exceptions` carries its `stratum`, the index in `strata`. An output's `rounding` and a rounded contribution's `unrounded` value are kept. A proof is `invalid`, and `sealProof` and `signProof` refuse it, when an output is in no stratum or in two, a stratum names an unknown output, a `stratum` is out of range, or an applied rule's output is not in its stratum (`step stratum mismatch: id@version`). The same goes for an output name starting with `$` (`output name reserved: name`) and for a `decimal` output whose value, or an applied contribution or `unrounded` value for it, is not a canonical decimal string (`decimal value not canonical: name`).
-- `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except that it cannot refuse a rule listed twice. A proof's output rounding is written in the normal form of `normalizeOutputDeclaration`.
+- `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`; with redacted rules, they are compared by number and the proof is at best `consistent`.
+- `strata` lists the outputs of each evaluation stratum, in order: `[['fee']]` when no rule reads an output. Each entry of `applied`, `skipped`, `pending` and `exceptions` carries its `stratum`, the index in `strata`. A proof is `invalid`, and `sealProof` and `signProof` refuse it, when an output is in no stratum or in two, a stratum names an unknown output, a `stratum` is out of range, or an applied rule's output is not in its stratum (`step stratum mismatch: id@version`); likewise for a `decimal` output whose value, or an applied contribution or `unrounded` value for it, is not a canonical decimal string (`decimal value not canonical: name`).
+- `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except for what its description lists (a rule listed twice, a redacted leaf repeated, lone surrogates, the dates of a time segment, the depth and count of values).
 
 ## Browser entry
 

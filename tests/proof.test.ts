@@ -28,7 +28,9 @@ import {
   TRUSTED,
   unsigned,
 } from './proof-cases.js';
-import { handSealed, specError } from './helpers.js';
+import { handSealed, specError, treeDigestOf } from './helpers.js';
+import { unsalted } from './proof-cases.js';
+import type { PlainProof } from './proof-cases.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -59,7 +61,7 @@ describe('PROOF_FORMATS', () => {
     });
     // The type allows only PROOF_FORMAT; a JavaScript caller can pass any other format.
     const later = { ...unsigned(), format: 'run-iq.proof/2' } as unknown as UnsignedProof;
-    expect(specError(() => sealProof(later)).message).toBe(
+    expect(specError(() => sealProof(unsalted(later))).message).toBe(
       'Cannot seal the proof: unknown format: run-iq.proof/2',
     );
   });
@@ -168,24 +170,26 @@ describe('computeInputDigest', () => {
 });
 
 describe('sealProof', () => {
-  it('sets digest to the sha256 of the canonical unsigned proof', () => {
+  it('sets digest to the tree digest of the unsigned proof (D-16)', () => {
     const proof = sealed();
-    expect(proof.digest).toBe(sha256Hex(canonicalize(unsigned())));
-    expect(proof.digest).toBe(nodeSha256(canonicalize(unsigned())));
+    // By an independent Python implementation of JCS and of the proof tree.
+    expect(proof.digest).toBe('a1c733e257321b58e80ceb5c980147149668707e0ad5933a6b43a2ba068ee841');
+    expect(proof.digest).toBe(treeDigestOf(unsigned()));
+    expect(proof.digest).not.toBe(sha256Hex(canonicalize(unsigned())));
     expect(proof).toEqual({ ...unsigned(), digest: proof.digest });
   });
 
   it('is deterministic, whatever the key order', () => {
     // Object.fromEntries loses the type; the entries are those of an UnsignedProof.
     const reversed = Object.fromEntries(Object.entries(unsigned()).reverse()) as UnsignedProof;
-    expect(sealProof(reversed)).toEqual(sealed());
-    expect(sealProof(reversed).digest).toBe(sealed().digest);
+    expect(sealProof(unsalted(reversed))).toEqual(sealed());
+    expect(sealProof(unsalted(reversed)).digest).toBe(sealed().digest);
   });
 
   it('refuses lists out of their order: the producer sorts them, one decision one proof', () => {
     const swapped = unsigned();
     swapped.rules.reverse();
-    expect(specError(() => sealProof(swapped)).message).toBe(
+    expect(specError(() => sealProof(unsalted(swapped))).message).toBe(
       'Cannot seal the proof: rules not sorted at 1',
     );
   });
@@ -194,28 +198,28 @@ describe('sealProof', () => {
     // A JavaScript caller can pass an `undefined` member, which the types do not allow.
     const source = { ...unsigned(), ruleSet: undefined } as unknown as UnsignedProof;
     const before = structuredClone(source);
-    const proof = sealProof(source);
+    const proof = sealProof(unsalted(source)) as PlainProof;
     expect(source).toStrictEqual(before);
     expect(Object.hasOwn(proof, 'ruleSet')).toBe(false);
     proof.rules[0]!.id = 'changed';
-    expect(source.rules[0]!.id).toBe('r1');
+    expect((source as PlainProof).rules[0]!.id).toBe('r1');
   });
 
   it('drops a previous digest and signature', () => {
-    const resealed = sealProof(signed());
+    const resealed = sealProof(unsalted(signed()));
     expect(resealed).toEqual(sealed());
     expect(resealed.signature).toBeUndefined();
   });
 
   it('refuses an invalid proof with INVALID_PROOF', () => {
-    const error = specError(() => sealProof({ ...unsigned(), requestId: '' }));
+    const error = specError(() => sealProof(unsalted({ ...unsigned(), requestId: '' })));
     expect(error.code).toBe('INVALID_PROOF');
     expect(error.message).toBe('Cannot seal the proof: requestId must be a non-empty string');
   });
 
   it('refuses an unknown key, which the digest would otherwise cover', () => {
     const error = specError(() =>
-      sealProof({ ...unsigned(), inputs: input.data } as unknown as UnsignedProof),
+      sealProof(unsalted({ ...unsigned(), inputs: input.data } as unknown as UnsignedProof)),
     );
     expect(error.message).toBe('Cannot seal the proof: proof has an unknown key "inputs"');
   });
@@ -366,7 +370,7 @@ describe('verifyProof: authentic', () => {
   it('recomputes each checksum as sha256Hex(canonicalRulePayload(rule))', () => {
     const proof = unsigned();
     proof.rules[0]!.checksum = sha256Hex(canonicalRulePayload(ruleA));
-    const resigned = signProof(sealProof(proof), RFC_SECRET, 'executor-1');
+    const resigned = signProof(sealProof(unsalted(proof)), RFC_SECRET, 'executor-1');
     expect(verifyProof(resigned, { trustedKeys: TRUSTED, rules: RULES }).status).toBe('authentic');
   });
 

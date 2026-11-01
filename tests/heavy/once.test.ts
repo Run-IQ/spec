@@ -10,6 +10,9 @@ import {
   inputLeaves,
   normalizeRuleDefinition,
   PROOF_FORMAT,
+  proofLeafHash,
+  proofLeafHashes,
+  redactProof,
   sealProof,
   signProof,
   toExecutableRule,
@@ -21,16 +24,13 @@ import {
   verifyProof,
   verifyRuleChecksum,
 } from '../../src/index.js';
-import type {
-  DecisionProof,
-  JsonValue,
-  ProofInput,
-  RuleDefinitionInput,
-  UnsignedProof,
-} from '../../src/index.js';
+import type { DecisionProof, JsonValue, ProofInput, RuleDefinitionInput } from '../../src/index.js';
 import { lastValuesSpent, MAX_JSON_VALUES } from '../../src/values.js';
 import { BASE_RULE, countValues, HUMAN_ASSERTION, proofInput, specError } from '../helpers.js';
 import { unsaltedSalt } from '../proof-cases.js';
+import { unsalted } from '../proof-cases.js';
+import type { PlainProof } from '../proof-cases.js';
+import type { ProofView } from '../../src/proof/types.js';
 
 /** A rule with every part the readers walk: free-form values, lists, specs, exceptions. */
 const RICH_RULE: RuleDefinitionInput = {
@@ -79,7 +79,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
   const declared = Array.isArray(value)
     ? ({ type: 'list', combine: 'union' } as const)
     : ({ type: 'object', combine: 'highestPriority' } as const);
-  const proof: UnsignedProof = {
+  const proof: ProofView = {
     format: PROOF_FORMAT,
     requestId: 'req-1',
     evaluatedAt: '2025-06-01T00:00:00.000Z',
@@ -191,10 +191,10 @@ describe('a value is counted once: the spend counter', () => {
         salt: unsaltedSalt('exceptions', 0),
       },
     ];
-    sealProof(unsigned);
+    sealProof(unsalted(unsigned));
     // The digest sealing adds is counted with the content.
     expect(lastValuesSpent()).toBe(countValues(unsigned) + 1);
-    const sealed = sealProof(unsigned);
+    const sealed = sealProof(unsalted(unsigned));
     for (const call of [() => validateProof(sealed), () => verifyProof(sealed)]) {
       call();
       expect(lastValuesSpent()).toBe(countValues(sealed));
@@ -208,6 +208,19 @@ describe('a value is counted once: the spend counter', () => {
     expect(countValues(signed)).toBe(countValues(sealed) + 4);
     verifyProof(signed, { trustedKeys: { k1: keys.publicKey } });
     expect(lastValuesSpent()).toBe(countValues(signed));
+    // The tree (D-16): the leaves of a proof, one leaf, a redaction.
+    // The signature is ignored: counted as one member, never read.
+    proofLeafHashes(signed);
+    expect(lastValuesSpent()).toBe(countValues({ ...signed, signature: null }));
+    const leaf = { s: 'exceptions' as const, i: 0, e: sealed.exceptions[0]! };
+    proofLeafHash(leaf as never);
+    expect(lastValuesSpent()).toBe(countValues(leaf));
+    const seed = new Uint8Array(32).fill(9);
+    const salted = sealProof({ ...unsalted(unsigned), inputSalted: true }, seed);
+    const redacted = redactProof(salted, (section) => section === 'applied');
+    expect(lastValuesSpent()).toBe(countValues(salted));
+    verifyProof(redacted);
+    expect(lastValuesSpent()).toBe(countValues(redacted));
   });
 
   it('inputs: validated and hashed from one read, shared objects counted on every path', () => {
@@ -258,40 +271,50 @@ describe(`the boundary of ${MAX_JSON_VALUES} values is the same for every functi
   }, 120_000);
 
   it('proofs: validateProof, sealProof and verifyProof agree at 10M and 10M + 1 values', () => {
-    const skeleton = sealProof(unsignedProof(BASE_RULE, [], []));
+    const skeleton = sealProof(unsalted(unsignedProof(BASE_RULE, [], [])));
     const room = MAX_JSON_VALUES - countValues(skeleton);
     const half = Math.floor(room / 2);
     const unsigned = unsignedProof(BASE_RULE, distinct(half), withRepeats(half, room - half));
-    const sealed = sealProof(unsigned);
+    const sealed = sealProof(unsalted(unsigned));
     expect(countValues(sealed)).toBe(MAX_JSON_VALUES);
     expect(validateProof(sealed).issues).toEqual([]);
-    expect(sealProof(sealed).digest).toBe(sealed.digest);
+    expect(sealProof(unsalted(sealed)).digest).toBe(sealed.digest);
     expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
     expect(lastValuesSpent()).toBe(MAX_JSON_VALUES);
 
-    const value = sealed.outputs[0]?.value;
+    const value = (sealed as PlainProof).outputs[0]?.value;
     if (!Array.isArray(value)) throw new Error('the output value is the array');
     value.push(1);
     const tooLarge = 'applied[0].contribution is too large: more than 10000000 values';
     expect(validateProof(sealed).issues).toEqual([
       { path: 'applied[0].contribution', message: tooLarge },
     ]);
-    expect(specError(() => sealProof(sealed)).message).toBe(`Cannot seal the proof: ${tooLarge}`);
+    // Without its salts it is read; with the salts sealing adds, it would pass the budget.
+    expect(specError(() => sealProof(unsalted(sealed))).message).toBe(
+      'Cannot seal the proof: proof is too large: more than 10000000 values',
+    );
     expect(verifyProof(sealed)).toEqual({ status: 'invalid', issues: [tooLarge] });
     // An unsigned proof of exactly 10M values cannot be sealed: its digest would be one more.
+    // Its salts are counted by sealProof, after it is read.
     const full = unsignedProof(BASE_RULE, distinct(half), withRepeats(half, room - half + 1));
     expect(countValues(full)).toBe(MAX_JSON_VALUES);
     expect(validateProof({ ...full, digest: sealed.digest }).issues).toEqual([
       { path: 'applied[0].contribution', message: tooLarge },
     ]);
-    expect(specError(() => sealProof(full)).message).toBe(`Cannot seal the proof: ${tooLarge}`);
+    // Without its salts it fits; sealing adds them and its digest, which do not.
+    expect(specError(() => sealProof(unsalted(full))).message).toBe(
+      'Cannot seal the proof: proof is too large: more than 10000000 values',
+    );
+    // A content that fits with the salts and digest sealing adds is sealed.
+    const fits = unsignedProof(BASE_RULE, distinct(half), withRepeats(half, room - half));
+    expect(countValues(sealProof(unsalted(fits)))).toBe(MAX_JSON_VALUES);
   }, 120_000);
 
   it('whatever sealProof and signProof produce, verifyProof accepts: 9.9M values', () => {
     const third = 3_300_000;
     const rule = bigRule(third);
     const unsigned = unsignedProof(rule, distinct(third), distinct(third));
-    const sealed = sealProof(unsigned);
+    const sealed = sealProof(unsalted(unsigned));
     expect(countValues(sealed) + countValues([rule])).toBeGreaterThan(9_900_000);
     expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
     expect(verifyProof(sealed, { rules: [rule] })).toEqual({

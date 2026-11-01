@@ -4,7 +4,7 @@ import { matchesValue } from '../decision/output.js';
 import type { OutputDeclaration } from '../decision/output.js';
 import type { JsonValue } from '../canonical.js';
 import { extend } from './collect.js';
-import type { ProofBounds, ProofOutput, ProofStep, UnsignedProof } from './types.js';
+import type { ProofBounds, ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
 
 /** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
 export function declarationOf(output: ProofOutput): OutputDeclaration {
@@ -42,7 +42,7 @@ interface Fed {
  * it, in the order of `p.outputs`. `imposed` holds the steps whose contribution a
  * `shortCircuit` imposed: a value of the output, never a count's boolean.
  */
-function fedOutputs(p: UnsignedProof): Fed[] {
+function fedOutputs(p: ProofView): Fed[] {
   const byName = new Map<string, Fed>();
   for (const output of p.outputs) {
     if (!byName.has(output.name)) byName.set(output.name, { output, held: [], steps: [] });
@@ -78,7 +78,7 @@ export function imposedKey(
  * The applied steps whose contribution a `shortCircuit` exception of their rule imposed: the
  * step of its carrier instance on the output it targets (`imposedKey`), not another step of it.
  */
-export function imposedSteps(p: UnsignedProof): Set<string> {
+export function imposedSteps(p: ProofView): Set<string> {
   const imposed = new Set<string>();
   for (const exception of p.exceptions) {
     if (exception.kind === 'shortCircuit' && exception.output !== undefined) {
@@ -100,15 +100,21 @@ export function imposedSteps(p: UnsignedProof): Set<string> {
  *   contribution is left to the combination check (`combinationProblems`);
  * - `contribution does not match its output declaration: name`: an applied contribution, or
  *   its `unrounded` value, is not a value of the output (a boolean for a `count`, unless a
- *   `shortCircuit` imposed it: then a value of the output);
+ *   `shortCircuit` imposed it: then a value of the output; while `exceptions` has a redacted
+ *   entry, `hidden`, any step of a `count` may be one a hidden short circuit imposed: either
+ *   form is then accepted);
  * - `contribution not rounded as declared: name`: with `at: 'contribution'`, an applied
  *   contribution is not on the step.
  *
  * Linear in the size of the proof: each list is read once, and each value is checked against
  * its step in time linear in its digits (`isOnStep`).
  */
-export function offDeclarationValues(p: UnsignedProof): string[] {
+export function offDeclarationValues(
+  p: ProofView,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const imposed = imposedSteps(p);
+  const imposedUnknown = hidden.has('exceptions');
   const issues: string[] = [];
   for (const { output, held, steps } of fedOutputs(p)) {
     const declaration = declarationOf(output);
@@ -121,7 +127,9 @@ export function offDeclarationValues(p: UnsignedProof): string[] {
     const contributionForm = (step: ProofStep): boolean => {
       const asValue = imposed.has(imposedKey(step, step.output)) || declaration.combine !== 'count';
       const form = (value: JsonValue): boolean =>
-        asValue ? hasForm(value, declaration) : typeof value === 'boolean';
+        asValue
+          ? hasForm(value, declaration)
+          : typeof value === 'boolean' || (imposedUnknown && hasForm(value, declaration));
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
     };
     if (steps.some((step) => !contributionForm(step))) {
@@ -142,7 +150,7 @@ export function offDeclarationValues(p: UnsignedProof): string[] {
  * canonical decimal string (`isCanonicalDecimal`), reported once as
  * `decimal value not canonical: name`. A count of a decimal output does not exist.
  */
-export function nonCanonicalDecimals(p: UnsignedProof): string[] {
+export function nonCanonicalDecimals(p: ProofView): string[] {
   const canonical = (value: JsonValue): boolean =>
     typeof value === 'string' && isCanonicalDecimal(value);
   const issues: string[] = [];

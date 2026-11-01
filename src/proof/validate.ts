@@ -4,10 +4,23 @@ import type { RuleValidationIssue } from '../issues.js';
 import { isRuleVersion } from '../rule/definition.js';
 import { isRuleSetId, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, withValueBudget } from '../values.js';
-import { checkObject } from './checks.js';
+import { checkObject, scalarCheck } from './checks.js';
 import type { Add, Shape } from './checks.js';
-import { DECISION_PROOF, UNSIGNED_PROOF } from './shape.js';
-import type { DecisionProof, UnsignedProof } from './types.js';
+import {
+  DECISION_PROOF,
+  PROOF_HEADER,
+  SECTION_ENTRY,
+  UNSALTED_PROOF,
+  UNSIGNED_PROOF,
+} from './shape.js';
+import { PROOF_SECTIONS } from './types.js';
+import type {
+  DecisionProof,
+  ProofHeader,
+  ProofSection,
+  UnsaltedProof,
+  UnsignedProof,
+} from './types.js';
 
 const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
 
@@ -102,18 +115,97 @@ export function readDecisionProof(value: unknown, forSigning = false): ProofRead
 }
 
 /**
- * Internal: like `readDecisionProof`, for the content `sealProof` hashes: `digest` and
- * `signature` are ignored and left out of the snapshot, since sealing replaces them. The
- * `digest` that sealing adds is counted too, so the sealed proof stays within the budget.
+ * Internal: like `readDecisionProof`, for the content a proof's leaves are made of
+ * (`proofLeafHashes`): `digest` and `signature` are ignored and left out of the snapshot.
  */
-export function readUnsignedProof(value: unknown): ProofRead<UnsignedProof> {
-  const { issues, snapshot } = withValueBudget(() =>
-    collect(value, UNSIGNED_PROOF, SEAL_KEYS, digestReserve),
-  );
+export function readProofContent(value: unknown): ProofRead<UnsignedProof> {
+  const { issues, snapshot } = withValueBudget(() => collect(value, UNSIGNED_PROOF, SEAL_KEYS));
   return conforms<UnsignedProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
     : { proof: undefined, errors: issues.map((issue) => issue.message) };
 }
+
+/**
+ * Internal: like `readDecisionProof`, for the content `sealProof` seals: entries without `salt`,
+ * none redacted; `digest` and `signature` are ignored and left out of the snapshot, since
+ * sealing replaces them. The `digest` that sealing adds is counted too (the salts are counted by
+ * `sealProof`), so the sealed proof stays within the budget.
+ */
+export function readUnsaltedProof(value: unknown): ProofRead<UnsaltedProof> {
+  const { issues, snapshot } = withValueBudget(() =>
+    collect(value, UNSALTED_PROOF, SEAL_KEYS, digestReserve),
+  );
+  return conforms<UnsaltedProof>(snapshot, issues)
+    ? { proof: snapshot, errors: [] }
+    : { proof: undefined, errors: issues.map((issue) => issue.message) };
+}
+
+/**
+ * A leaf of a proof as `proofLeafHash` reads it: the header (the proof without `digest`,
+ * `signature` and the ten sections), or entry `i` of section `s`, salted or redacted.
+ */
+export type ProofLeaf =
+  | { s: 'header'; e: ProofHeader }
+  | { [S in ProofSection]: { s: S; i: number; e: UnsignedProof[S][number] } }[ProofSection];
+
+/**
+ * Internal: a validated, plain-JSON snapshot of a leaf (`ProofLeaf`), read once, or the
+ * validation messages: `s` is `header` or a section of `PROOF_SECTIONS`; a header leaf has no
+ * `i` and its `e` is a header as `validateProof` checks one (no section, `digest` nor
+ * `signature`); an entry leaf has `i`, a safe integer from 0, and its `e` is an entry of its
+ * section, salted or redacted.
+ */
+export function readProofLeaf(value: unknown): { leaf?: ProofLeaf; errors: string[] } {
+  const issues = new IssueList();
+  const add: Add = (path, message) => {
+    issues.add(path, message);
+  };
+  let leaf: ProofLeaf | undefined;
+  try {
+    withValueBudget(() => {
+      const read = checkObject(value, '', LEAF, add, new Set());
+      if (read === undefined) return;
+      const { s, i } = read.copy;
+      const isSection = PROOF_SECTIONS.some((section) => section === s);
+      if (s !== 'header' && !isSection) {
+        add('s', `s must be header or a section: ${PROOF_SECTIONS.join(', ')}`);
+        return;
+      }
+      if (s === 'header' && i !== undefined) add('i', 'i applies only to an entry of a section');
+      if (s !== 'header' && i === undefined) add('i', 'i is required for an entry of a section');
+      const entry = read.members.get('e');
+      if (entry === undefined) return;
+      const copy =
+        s === 'header'
+          ? checkObject(entry, 'e', PROOF_HEADER, add, new Set())?.copy
+          : SECTION_ENTRY[s as ProofSection](entry, 'e', add);
+      // Checked: a plain copy of a header or of an entry of `s`.
+      leaf = { ...read.copy, e: copy } as ProofLeaf;
+    });
+  } catch (error) {
+    return { errors: [unreadableMessage('leaf', error)] };
+  }
+  const errors = issues.toArray().map((issue) => issue.message);
+  return errors.length === 0 && leaf !== undefined ? { leaf, errors } : { errors };
+}
+
+/** A leaf: its kind `s`, its index `i` in its section, its content `e` (read apart). */
+const LEAF: Shape = {
+  summary: '{ s, i?, e }',
+  fields: {
+    s: scalarCheck((value, path, add) => {
+      if (typeof value !== 'string') add(path, `${citeName(path)} must be a string`);
+    }),
+    i: scalarCheck((value, path, add) => {
+      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+        add(path, `${citeName(path)} must be a non-negative integer`);
+      }
+    }),
+    // Read here, checked as the header or an entry of `s` by `readProofLeaf`.
+    e: () => undefined,
+  },
+  optional: ['i'],
+};
 
 /** The values sealing adds to a proof whose root members are `members`: its `digest`. */
 function digestReserve(members: ReadonlyMap<string, unknown>): number {
@@ -156,6 +248,7 @@ function collect(
     }
     const read = checkObject(value, '', shape, add, ignored, reserve);
     checkUniqueRules(read?.copy.rules, add);
+    checkRepeatedLeaves(read?.copy, add);
     return { issues: issues.toArray(), snapshot: read?.copy };
   } catch (error) {
     // A hostile value (a throwing getter, a Proxy trap) never escapes as a raw error.
@@ -189,4 +282,25 @@ function checkUniqueRules(rules: unknown, add: Add): void {
     if (seen.has(key)) add(`rules[${i}]`, `rules[${i}] repeats ${citeName(key)}`);
     seen.add(key);
   });
+}
+
+/**
+ * Validator-only: a redacted leaf hash that two entries carry. Each leaf commits to its section
+ * and its place (D-16): two entries never have the same leaf, so a proof that repeats one was
+ * not made by redacting a sealed proof. Read on the copy, each hash kept once.
+ */
+function checkRepeatedLeaves(content: Record<string, unknown> | undefined, add: Add): void {
+  if (content === undefined) return;
+  const first = new Map<string, string>();
+  for (const section of PROOF_SECTIONS) {
+    const list = content[section];
+    if (!Array.isArray(list)) continue;
+    list.forEach((entry: unknown, i) => {
+      if (!isPlainObject(entry) || typeof entry.redacted !== 'string') return;
+      const at = `${section}[${i}]`;
+      const seen = first.get(entry.redacted);
+      if (seen === undefined) first.set(entry.redacted, at);
+      else add(at, `${at} repeats the redacted leaf of ${seen}`);
+    });
+  }
 }

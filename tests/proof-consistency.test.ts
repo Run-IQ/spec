@@ -1,24 +1,26 @@
 import { describe, expect, it } from 'vitest';
 import { sealProof, verifyProof } from '../src/index.js';
-import type { UnsignedProof } from '../src/index.js';
 import { baseContent, entries, unsaltedSalt } from './proof-cases.js';
 import { problems, withEntry, withSection } from './proof-builders.js';
 import type { Content, Entry } from './proof-builders.js';
 import { omit } from './helpers.js';
+import { unsalted } from './proof-cases.js';
+import type { PlainProof } from './proof-cases.js';
+import type { ProofView } from '../src/proof/types.js';
 
 describe('the base proof', () => {
   it('is consistent: sealed, verified, sealed again to the same digest', () => {
     expect(problems(baseContent())).toEqual([]);
-    const sealed = sealProof(baseContent() as unknown as UnsignedProof);
+    const sealed = sealProof(unsalted(baseContent() as unknown as ProofView));
     expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
-    expect(sealProof(sealed).digest).toBe(sealed.digest);
+    expect(sealProof(unsalted(sealed)).digest).toBe(sealed.digest);
   });
 
   it('carries the D-14 salts of UNSALTED_SEED (re-review N1)', () => {
     expect(unsaltedSalt('rules', 0)).toBe('4f6b739dbae8bd24e9b989ba83ac1ce8');
     expect(unsaltedSalt('outputs', 0)).toBe('6cbe209d3d49721370cf22381dbcfaeb');
     expect(unsaltedSalt('applied', 0)).toBe('dca0cd90dd33d120447c09da86ae29b1');
-    const sealed = sealProof(baseContent() as unknown as UnsignedProof);
+    const sealed = sealProof(unsalted(baseContent() as unknown as ProofView)) as PlainProof;
     expect(sealed.rules[0]?.salt).toBe('4f6b739dbae8bd24e9b989ba83ac1ce8');
     expect(sealed.outputs[0]?.salt).toBe('6cbe209d3d49721370cf22381dbcfaeb');
     expect(sealed.applied[0]?.salt).toBe('dca0cd90dd33d120447c09da86ae29b1');

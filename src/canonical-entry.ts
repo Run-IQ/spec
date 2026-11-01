@@ -99,6 +99,7 @@ export type {
   ProofComponent,
   ProofException,
   ProofFactRead,
+  ProofHeader,
   ProofInput,
   ProofItem,
   ProofMissingFact,
@@ -113,10 +114,16 @@ export type {
   ProofStep,
   ProofUndeclaredRead,
   ProofVerification,
+  Redacted,
   SettledStatus,
+  Unsalted,
+  UnsaltedProof,
   UnsignedProof,
 } from './proof/types.js';
 export { computeIdempotencyDigest, computeInputDigest, sealProof } from './proof/digest.js';
+export { proofLeafHash, proofLeafHashes, verifyProofInclusion } from './proof/tree.js';
+export type { ProofLeaf } from './proof/tree.js';
+export { redactProof } from './proof/redact.js';
 export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
 export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
 export { INPUT_TREE_TAG, inputLeafHash, inputLeaves, verifyInputInclusion } from './input/tree.js';

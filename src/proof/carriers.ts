@@ -3,7 +3,7 @@ import { subjectContains } from '../path/subject.js';
 import type { Subject } from '../path/subject.js';
 import { full } from './collect.js';
 import { instanceKey } from './output-values.js';
-import type { ProofPending, UnsignedProof } from './types.js';
+import type { ProofPending, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: what the pending entries of a proof say of its pending carriers
 // (R18, D-8): whether each fired its exceptions, and which pending carrier holds a rule
@@ -93,7 +93,7 @@ function firedOf(entry: ProofPending): boolean | undefined {
  * `fired contradicts its reason: id@version[ at subject]`, in the order of `pending`: a
  * pending entry whose `fired` is not the value its reason fixes (`firedOf`).
  */
-export function firedProblems(p: UnsignedProof, problems: string[]): void {
+export function firedProblems(p: ProofView, problems: string[]): void {
   for (const entry of p.pending) {
     if (full(problems)) return;
     if (entry.fired === undefined) continue;
@@ -117,11 +117,16 @@ type Hold = 'root' | 'none' | 'rootless';
  * (`pending carrier without a root`). A carrier never runs after its target, nor out of its
  * scope (D-21: one subject contains the other, or one has none): `pending carrier after its
  * target`, `pending carrier out of scope`. Each entry is followed once: linear in `pending`.
+ *
+ * While `pending` has a redacted entry (`carriersHidden`), a carrier not found, or a chain that
+ * ends at one, may end at that entry (D-16, R18): `pending carrier without a pending carrier`
+ * and `… without a root` are not reported; a carrier found is still checked.
  */
 export function pendingCarrierProblems(
-  p: UnsignedProof,
+  p: ProofView,
   waiting: ReadonlyMap<string, ProofPending>,
   problems: string[],
+  carriersHidden = false,
 ): void {
   const holds = new Map<ProofPending, Hold | 'open'>();
   const follow = (start: ProofPending): void => {
@@ -160,7 +165,9 @@ export function pendingCarrierProblems(
     if (!holds.has(entry)) follow(entry);
     const hold = holds.get(entry);
     const at = citeName(instanceKey(entry));
-    if (hold === 'none') problems.push(`pending carrier without a pending carrier: ${at}`);
+    if (carriersHidden) {
+      // The carrier or the root may be the redacted entry.
+    } else if (hold === 'none') problems.push(`pending carrier without a pending carrier: ${at}`);
     else if (hold === 'rootless') problems.push(`pending carrier without a root: ${at}`);
     const carrier =
       entry.carrier === undefined ? undefined : waiting.get(instanceKey(entry.carrier));

@@ -7,7 +7,9 @@
  * statuses (`OutputStatus`, `joinStatus`) and exact decimals (`isCanonicalDecimal`,
  * `toCanonicalDecimal`); the decision proof format
  * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
- * `schema/decision-proof.schema.json`; `PROOF_FORMATS`, `ERROR_CAUSES`); JSON pointers
+ * `schema/decision-proof.schema.json`; `PROOF_FORMATS`, `ERROR_CAUSES`), its tree of salted
+ * leaves (`proofLeafHashes`, `proofLeafHash`, `verifyProofInclusion`) and the redaction of its
+ * entries (`redactProof`); JSON pointers
  * (`parsePointer`, `comparePointers`), subjects (`isSubject`, `subjectContains`) and the
  * reserved `$` names (`ENGINE_VARIABLES`, `isReservedName`); civil time (`CivilDate`, `Instant`,
  * `toReferenceDate`, `isTimeZone`, `CivilCalendar`), rule windows (`windowContains`) and
@@ -128,6 +130,7 @@ export type {
   ProofComponent,
   ProofException,
   ProofFactRead,
+  ProofHeader,
   ProofInput,
   ProofItem,
   ProofMissingFact,
@@ -142,10 +145,16 @@ export type {
   ProofStep,
   ProofUndeclaredRead,
   ProofVerification,
+  Redacted,
   SettledStatus,
+  Unsalted,
+  UnsaltedProof,
   UnsignedProof,
 } from './proof/types.js';
 export { computeIdempotencyDigest, computeInputDigest, sealProof } from './proof/digest.js';
+export { proofLeafHash, proofLeafHashes, verifyProofInclusion } from './proof/tree.js';
+export type { ProofLeaf } from './proof/tree.js';
+export { redactProof } from './proof/redact.js';
 export { inclusionPath, merkleRoot, verifyInclusion } from './merkle.js';
 export { deriveInputSeed, UNSALTED_SEED } from './input/seed.js';
 export { INPUT_TREE_TAG, inputLeafHash, inputLeaves, verifyInputInclusion } from './input/tree.js';

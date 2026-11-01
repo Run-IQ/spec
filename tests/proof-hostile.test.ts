@@ -16,6 +16,8 @@ import type { DecisionProof, RuleDefinitionInput, UnsignedProof } from '../src/i
 import { input, RFC_SECRET, ruleA, sealed, signed, TRUSTED, unsigned } from './proof-cases.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-shape-cases.js';
 import { nested, specError, tooDeepIssue } from './helpers.js';
+import { unsalted } from './proof-cases.js';
+import type { PlainProof } from './proof-cases.js';
 
 describe('verifyProof: hostile input', () => {
   /**
@@ -24,7 +26,7 @@ describe('verifyProof: hostile input', () => {
    */
   function forged(cut: number): DecisionProof {
     const genuine = signed();
-    const content = sealProof({ ...unsigned(), requestId: 'req-forged' });
+    const content = sealProof(unsalted({ ...unsigned(), requestId: 'req-forged' }));
     const proof: DecisionProof = { ...content, signature: genuine.signature! };
     let reads = 0;
     Object.defineProperty(proof, 'digest', {
@@ -48,7 +50,7 @@ describe('verifyProof: hostile input', () => {
     'a signature getter that changes after %i reads is never authentic',
     (cut) => {
       const genuine = signed();
-      const content = sealProof({ ...unsigned(), requestId: 'req-2' });
+      const content = sealProof(unsalted({ ...unsigned(), requestId: 'req-2' }));
       const own = signProof(content, RFC_SECRET, 'other');
       let reads = 0;
       const proof: DecisionProof = { ...content };
@@ -263,7 +265,7 @@ describe('validateProof', () => {
     ],
     [
       'inside rounding',
-      (p: DecisionProof) => {
+      (p: PlainProof) => {
         p.outputs[0]!.rounding = { scale: 2, mode: 'up' };
         Object.defineProperty(p.outputs[0]!.rounding, 'scale', {
           enumerable: true,
@@ -278,7 +280,7 @@ describe('validateProof', () => {
     const proof = sealed();
     poison(proof);
     expect(validateProof(proof)).toEqual({ errors: [message], issues: [{ path: '', message }] });
-    const sealError = specError(() => sealProof(proof));
+    const sealError = specError(() => sealProof(unsalted(proof)));
     expect(sealError.code).toBe('INVALID_PROOF');
     expect(sealError.message).toBe(`Cannot seal the proof: ${message}`);
     const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
@@ -294,7 +296,7 @@ describe('validateProof', () => {
     expect(validateProof(old).errors).toEqual(['outputs must be a list']);
     expect(verifyProof(old)).toEqual({ status: 'invalid', issues: ['outputs must be a list'] });
     // The cast lets a JavaScript caller's malformed value reach sealProof, which checks it.
-    expect(specError(() => sealProof(old as unknown as UnsignedProof)).message).toBe(
+    expect(specError(() => sealProof(unsalted(old as unknown as UnsignedProof))).message).toBe(
       'Cannot seal the proof: outputs must be a list',
     );
   });
@@ -316,7 +318,7 @@ describe('both entries', () => {
     expect(canonicalEntry.PROOF_SECTIONS).toBe(PROOF_SECTIONS);
     expect(canonicalEntry.verifyProof(signed(), { trustedKeys: TRUSTED }).status).toBe('authentic');
     const proof = canonicalEntry.signProof(
-      canonicalEntry.sealProof(unsigned()),
+      canonicalEntry.sealProof(unsalted(unsigned())),
       RFC_SECRET,
       'executor-1',
     );

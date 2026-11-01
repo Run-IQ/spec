@@ -4,7 +4,7 @@ import { LOCAL_RULE_SET } from '../rule/ruleSet.js';
 import { roundDecimal, roundNumber } from './arithmetic.js';
 import { declarationOf, instanceKey } from './output-values.js';
 import { ruleKey as key } from './precedence.js';
-import type { ProofOutput, ProofStep, UnsignedProof } from './types.js';
+import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: where the entries of a proof sit (their stratum, the rule set of
 // the output they feed), what they name (models, undeclared reads) and their rounding. Linear in
@@ -19,8 +19,9 @@ function ruleSetOf(name: string): string {
 /**
  * Internal: where `p.strata` contradicts the rest of the proof, each problem reported once, in
  * this order:
- * - each name of `strata`, in order: `stratum output unknown: name` (not a listed output),
- *   `stratum output repeated: name` (in more than one place);
+ * - each name of `strata`, in order: `stratum output unknown: name` (not a listed output, unless
+ *   `outputs` has a redacted entry, `hidden`: that may be it), `stratum output repeated: name`
+ *   (in more than one place);
  * - each listed output, in no stratum: `output not in strata: name`;
  * - each entry of `applied`, `skipped`, `pending` and `exceptions`, in order:
  *   `stratum out of range: id@version` when its `stratum` is not an index of `strata`,
@@ -30,13 +31,17 @@ function ruleSetOf(name: string): string {
  * Linear in the size of the proof: each stratum is turned into a set once.
  */
 export function strataProblems(
-  p: UnsignedProof,
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
+  hidden: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
   const issues: string[] = [];
   const placed = new Set<string>();
+  const outputsHidden = hidden.has('outputs');
   for (const name of p.strata.flat()) {
-    if (!listed.has(name)) issues.push(`stratum output unknown: ${citeName(name)}`);
+    if (!listed.has(name) && !outputsHidden) {
+      issues.push(`stratum output unknown: ${citeName(name)}`);
+    }
     if (placed.has(name)) issues.push(`stratum output repeated: ${citeName(name)}`);
     placed.add(name);
   }
@@ -62,7 +67,7 @@ export function strataProblems(
  * nothing and are imported by nothing. `rule feeds an output of a rule set it does not import:
  * id@version`.
  */
-export function feedProblems(p: UnsignedProof): string[] {
+export function feedProblems(p: ProofView): string[] {
   const imports = new Map<string, Set<string>>();
   for (const set of p.ruleSets) {
     if (set.kind === 'pack') imports.set(set.id, new Set(set.imports ?? []));
@@ -79,7 +84,7 @@ export function feedProblems(p: UnsignedProof): string[] {
 }
 
 /** Internal: each model of an applied step that `versions.models` does not list. */
-export function modelProblems(p: UnsignedProof): string[] {
+export function modelProblems(p: ProofView): string[] {
   return p.applied
     .filter((step) => !Object.hasOwn(p.versions.models, step.model))
     .map((step) => `model not in versions: ${citeName(step.model)}`);
@@ -92,7 +97,7 @@ export function modelProblems(p: UnsignedProof): string[] {
  * contribution`): it is kept only when rounding changed the contribution.
  */
 export function unroundedProblems(
-  p: UnsignedProof,
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
 ): string[] {
   const issues: string[] = [];
@@ -129,7 +134,7 @@ function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1])
  * Internal: each rule whose reads are not known (`readsUndeclared`, D-39) whose step, exclusion
  * or exception is `determined`: it is at best `provisional`.
  */
-export function undeclaredReadProblems(p: UnsignedProof): string[] {
+export function undeclaredReadProblems(p: ProofView): string[] {
   const undeclared = new Set(p.readsUndeclared.map(key));
   return [...p.applied, ...p.skipped, ...p.exceptions]
     .filter((entry) => entry.status === 'determined' && undeclared.has(key(entry)))

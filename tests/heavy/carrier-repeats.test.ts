@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition } from '../../src/index.js';
-import type { RuleDefinition, UnsignedProof } from '../../src/index.js';
+import type { RuleDefinition } from '../../src/index.js';
 import { carrierRuleFindings } from '../../src/proof/carrier-rules.js';
 import { contextOf } from '../../src/proof/consistency.js';
 import { outputProof } from '../proof-builders.js';
 import { ruleA, unsaltedSalt } from '../proof-cases.js';
+import type { ProofView } from '../../src/proof/types.js';
 
 // The carriers against their definitions on proofs repeating one rule: what derives from the
 // rules alone (a carrier's exception signatures, whether it selects a target) is computed once
@@ -16,7 +17,7 @@ const salt = unsaltedSalt('rules', 0);
  * `n` applied instances of the carrier X, and `n` entries of T pending behind the carrier Y;
  * X and Y carry `e` exceptions each (Y one more, selecting T).
  */
-function repeated(n: number, e: number): [UnsignedProof, Map<string, RuleDefinition>] {
+function repeated(n: number, e: number): [ProofView, Map<string, RuleDefinition>] {
   const proof = outputProof({ type: 'number', combine: 'sum', value: 0 });
   proof.applied = Array.from({ length: n }, (_, i) => ({
     ruleId: 'X',

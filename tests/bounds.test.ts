@@ -12,6 +12,9 @@ import {
   matchesSelector,
   merkleRoot,
   normalizeRuleDefinition,
+  proofLeafHash,
+  proofLeafHashes,
+  redactProof,
   sealProof,
   UNSALTED_SEED,
   compareOutputValues,
@@ -32,7 +35,6 @@ import type {
   FactAssertion,
   OutputDeclaration,
   RuleDefinitionInput,
-  UnsignedProof,
   VersionedRuleWindow,
 } from '../src/index.js';
 import { MAX_JSON_VALUES } from '../src/values.js';
@@ -46,6 +48,7 @@ import {
   specError,
 } from './helpers.js';
 import { outputProof } from './proof-builders.js';
+import { unsalted } from './proof-cases.js';
 
 const SEED = UNSALTED_SEED;
 
@@ -78,7 +81,9 @@ function claiming(length: number, holeAt?: number): unknown[] {
 }
 
 /** A consistent proof with no rule, output nor step: each list under test is its only content. */
-const PROOF: UnsignedProof = outputProof({ type: 'number', combine: 'sum', value: 0 });
+const PROOF = outputProof({ type: 'number', combine: 'sum', value: 0 });
+/** A secret seed: what a salted proof is sealed under. */
+const SALTED = new Uint8Array(32).fill(7);
 PROOF.outputs = [];
 PROOF.strata = [];
 
@@ -247,12 +252,57 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ],
   [
     'sealProof rules',
-    (list) => specError(() => sealProof({ ...PROOF, rules: list as never })).message,
+    (list) => specError(() => sealProof(unsalted({ ...PROOF, rules: list as never }))).message,
     'Cannot seal the proof: rules',
   ],
   [
+    'sealProof factsRead (salted seed)',
+    (list) =>
+      specError(() =>
+        sealProof(unsalted({ ...PROOF, inputSalted: true, factsRead: list as never }), SALTED),
+      ).message,
+    'Cannot seal the proof: factsRead',
+  ],
+  [
+    'proofLeafHashes applied',
+    (list) => specError(() => proofLeafHashes({ ...PROOF, applied: list as never })).message,
+    'Cannot hash the proof: applied',
+  ],
+  [
+    'proofLeafHash entry list',
+    (list) =>
+      specError(() =>
+        proofLeafHash({
+          s: 'outputs',
+          i: 0,
+          e: {
+            name: 'value',
+            type: 'number',
+            combine: 'sum',
+            status: 'determined',
+            value: 0,
+            contributors: list,
+            pending: [],
+            salt: 'a'.repeat(32),
+          },
+        } as never),
+      ).message,
+    'invalid proof leaf: e.contributors',
+  ],
+  [
+    'redactProof missingFacts',
+    (list) =>
+      specError(() =>
+        redactProof({ ...PROOF, digest: 'b'.repeat(64), missingFacts: list as never }, () => true),
+      ).message,
+    'Cannot redact the proof: missingFacts',
+  ],
+  [
     'verifyProof rules option',
-    (list) => verifyProof(sealProof(PROOF), { rules: list as RuleDefinitionInput[] }).issues.at(-1),
+    (list) =>
+      verifyProof(sealProof(unsalted(PROOF)), { rules: list as RuleDefinitionInput[] }).issues.at(
+        -1,
+      ),
     'rules',
   ],
   [
@@ -457,6 +507,7 @@ describe('under a 1 GB heap (built dist)', () => {
       const seed = s.deriveInputSeed(new Uint8Array(32).fill(1), 'r1');
       const input = { data: { a: 1 }, meta: { tenantId: 't', dates: {}, tags: [], dimensions: {},
         context: {}, assertions: {} } };
+      const proof = ${JSON.stringify(sealProof(unsalted(PROOF)))};
       console.log(JSON.stringify([
         s.validateRuleDefinition({ ...base, params: sp() }).errors[0],
         message(() => s.normalizeRuleDefinition({ ...base, params: sp() })),
@@ -476,6 +527,9 @@ describe('under a 1 GB heap (built dist)', () => {
           '0'.repeat(64)).issues[0],
         message(() => s.discloseFacts(input, seed, sp(), [])),
         message(() => s.discloseFacts(input, seed, [], sp())),
+        message(() => s.proofLeafHashes({ ...proof, applied: sp() })),
+        message(() => s.redactProof({ ...proof, applied: sp() }, () => true)),
+        s.verifyProofInclusion('0'.repeat(64), 2, 0, new Uint8Array(32), sp()),
       ]));`;
     const out = execFileSync(
       process.execPath,
@@ -497,6 +551,9 @@ describe('under a 1 GB heap (built dist)', () => {
       '/facts/0/leaves holds 4294967295 leaves, more than the size of the tree (10000000)',
       'present is too large: more than 10000000 values',
       'absent is too large: more than 10000000 values',
+      'Cannot hash the proof: applied is too large: more than 10000000 values',
+      'Cannot redact the proof: applied is too large: more than 10000000 values',
+      false,
     ]);
   }, 60_000);
 });

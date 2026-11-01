@@ -7,10 +7,11 @@ import {
   validateProof,
   verifyProof,
 } from '../src/index.js';
-import type { DecisionProof, UnsignedProof } from '../src/index.js';
+import type { DecisionProof, UnsaltedProof, UnsignedProof } from '../src/index.js';
 import { isOwnError } from '../src/errors.js';
 import { allTrapsThrow, omit, revokedProxy, specError } from './helpers.js';
 import { baseContent, BASE_PROOF, RFC_SECRET } from './proof-cases.js';
+import { unsalted } from './proof-cases.js';
 
 /** Throws an error a caller built: cited, never trusted. */
 function throwForged(): never {
@@ -85,11 +86,13 @@ describe('a hostile member of any entry of any section', () => {
       const { issues } = validateProof(proof);
       expect(issues.length).toBeGreaterThan(0);
       expect(verifyProof(proof).status).toBe('invalid');
-      expect(ownOrNothing(() => sealProof(proof as unknown as UnsignedProof))).toBe(true);
+      // sealProof takes entries without salt: a hostile salt is given to it as it is.
+      const toSeal = (key === 'salt' ? proof : unsalted(proof)) as unknown as UnsaltedProof;
+      expect(ownOrNothing(() => sealProof(toSeal))).toBe(true);
       expect(
         ownOrNothing(() => signProof(proof as unknown as DecisionProof, RFC_SECRET, 'k')),
       ).toBe(true);
-      expect(() => sealProof(proof as unknown as UnsignedProof)).toThrow();
+      expect(() => sealProof(toSeal)).toThrow();
     }
   });
 });
@@ -97,9 +100,9 @@ describe('a hostile member of any entry of any section', () => {
 /** The digest `sealProof` gives `content`, or the message it refuses it with. */
 function sealed(content: Record<string, unknown>): string {
   try {
-    return sealProof(content as unknown as UnsignedProof).digest;
+    return sealProof(unsalted(content as unknown as UnsignedProof)).digest;
   } catch {
-    return specError(() => sealProof(content as unknown as UnsignedProof)).message;
+    return specError(() => sealProof(unsalted(content as unknown as UnsignedProof))).message;
   }
 }
 

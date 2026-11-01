@@ -6,7 +6,7 @@ import type { Target } from './combination.js';
 import { instanceKey } from './output-values.js';
 import { inStandingOrder, outranks, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
-import type { ProofPending, ProofStep } from './types.js';
+import type { ProofPending, ProofSection, ProofStep } from './types.js';
 
 // Internal to `@run-iq/spec`: what an output or item owes its trace beyond its value: its
 // completeness (D-7, the table of Task 9M2), the order of its pending rules (D-5), the ranks of
@@ -14,6 +14,9 @@ import type { ProofPending, ProofStep } from './types.js';
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
 const CONFLICT = rankOf('conflict');
+
+/** The sections whose entries are the causes of a status (`causeProblems`). */
+const CAUSE_SECTIONS: readonly ProofSection[] = ['rules', 'applied', 'skipped', 'exceptions'];
 
 /** What feeds one output or item: its steps, its pending rules, its strongest exclusion. */
 export interface Feed {
@@ -77,15 +80,25 @@ function outranksPending(target: Target, feed: Feed, standings: Standings): bool
 
 /**
  * The completeness of an output or item: `undetermined output without a cause` (undetermined,
- * though no pending rule nor emptiness makes it so), `settled output with pending rules`.
+ * though no pending rule nor emptiness makes it so; not reported while `pending` has a redacted
+ * entry, `hidden`, which may be its cause), `settled output with pending rules` (not reported
+ * while `applied` or `rules` has one: a hidden decisive step, or the winner of a
+ * `highestPriority` and the standings of its rules, may settle it).
  */
-export function completenessProblems(target: Target, feed: Feed, standings: Standings): string[] {
+export function completenessProblems(
+  target: Target,
+  feed: Feed,
+  standings: Standings,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const byTrace = undeterminedByTrace(target, feed, standings);
   if (target.status === 'undetermined') {
-    return byTrace ? [] : [`undetermined output without a cause: ${target.cite()}`];
+    if (byTrace || hidden.has('pending')) return [];
+    return [`undetermined output without a cause: ${target.cite()}`];
   }
   // An `all` no rule reached is reported by `combinationProblems`.
   const pending = feed.pending.length > 0;
+  if (hidden.has('applied') || hidden.has('rules')) return [];
   return byTrace && pending ? [`settled output with pending rules: ${target.cite()}`] : [];
 }
 
@@ -116,10 +129,14 @@ export function pendingInOrder(
 /**
  * The ranks of the steps of a target (D-21): each step with a subject feeding a
  * `highestPriority` output without `per` carries one (`rank missing: id@version at subject`),
- * below the number of instances of its rule there (`rank out of range`); no other step carries
- * one (`rank on a step that does not compete`).
+ * below the number of instances of its rule there (`rank out of range`; not reported while
+ * `applied` has a redacted entry, `hidden`: the other instances may be hidden); no other step
+ * carries one (`rank on a step that does not compete`).
  */
-export function rankProblems(target: Target): string[] {
+export function rankProblems(
+  target: Target,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const competing = target.whole && target.declaration.combine === 'highestPriority';
   const issues: string[] = [];
   const instances = new Map<string, number>();
@@ -136,7 +153,7 @@ export function rankProblems(target: Target): string[] {
       if (step.rank !== undefined) issues.push(`rank on a step that does not compete: ${cited()}`);
     } else if (step.rank === undefined) {
       issues.push(`rank missing: ${cited()}`);
-    } else if (step.rank >= (instances.get(ruleKey(step)) ?? 0)) {
+    } else if (step.rank >= (instances.get(ruleKey(step)) ?? 0) && !hidden.has('applied')) {
       issues.push(`rank out of range: ${cited()}`);
     }
   }
@@ -150,9 +167,15 @@ export function rankProblems(target: Target): string[] {
  * than the strongest of them (`output status stronger than its causes`): a `conflict` comes
  * from the decisions a tie settled or from a tie among exceptions the proof shows (two short
  * circuits at the top, a discarded carrier), `provisional` from the decisions an assertion
- * made so.
+ * made so. The causes seen are a part of them while `rules`, `applied`, `skipped` or
+ * `exceptions` has a redacted entry (`hidden`): a status stronger than those seen is then not
+ * reported, one weaker still is.
  */
-export function causeProblems(target: Target, feed: Feed): string[] {
+export function causeProblems(
+  target: Target,
+  feed: Feed,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const issues: string[] = [];
   const rank = rankOf(target.status);
   let steps = -1;
@@ -164,7 +187,8 @@ export function causeProblems(target: Target, feed: Feed): string[] {
   const tie = feed.tie ? CONFLICT : -1;
   if (tie > rank) issues.push(`output status weaker than its tie: ${target.cite()}`);
   const settled = target.status !== 'undetermined';
-  if (settled && rank > Math.max(0, steps, feed.candidates, tie)) {
+  const partial = CAUSE_SECTIONS.some((section) => hidden.has(section));
+  if (settled && !partial && rank > Math.max(0, steps, feed.candidates, tie)) {
     issues.push(`output status stronger than its causes: ${target.cite()}`);
   }
   return issues;

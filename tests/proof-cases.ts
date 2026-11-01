@@ -14,19 +14,23 @@
  * node:crypto.
  */
 import { createHmac } from 'node:crypto';
+import { types } from 'node:util';
 import {
   computeInputDigest,
   computeRuleChecksum,
   PROOF_FORMAT,
+  PROOF_SECTIONS,
   sealProof,
   signProof,
   UNSALTED_SEED,
 } from '../src/index.js';
+import type { ProofView } from '../src/proof/types.js';
+import { MAX_JSON_VALUES } from '../src/values.js';
 import type {
   DecisionProof,
   ProofInput,
   RuleDefinitionInput,
-  UnsignedProof,
+  UnsaltedProof,
 } from '../src/index.js';
 
 const hex = (c: string): string => c.repeat(64);
@@ -51,6 +55,49 @@ const SALTS = new Map<string, string>();
 /** `entries` with the salt of their place in `section`. */
 export function salted<T extends object>(section: string, entries: T[]): (T & { salt: string })[] {
   return entries.map((entry, i) => ({ ...entry, salt: unsaltedSalt(section, i) }));
+}
+
+/**
+ * `content` (a proof's content, salted) as `sealProof` takes it: each entry of each section
+ * without its `salt` (`UnsaltedProof`), `digest` and `signature` kept (sealing drops them).
+ * Members are copied as property descriptors: a getter is copied, not called, so a hostile
+ * member reaches `sealProof` as it is. What is not a plain array of plain objects, or holds
+ * more than `MAX_JSON_VALUES` entries, is kept.
+ */
+export function unsalted(content: object): UnsaltedProof {
+  if (!isPlainEntry(content)) return content as unknown as UnsaltedProof;
+  const copy = withoutMember(content, '');
+  for (const section of PROOF_SECTIONS) {
+    const descriptor = Object.getOwnPropertyDescriptor(copy, section);
+    const list: unknown = descriptor?.value;
+    // A list too large for the format is given as it is: sealProof refuses it by its size.
+    if (types.isProxy(list) || !Array.isArray(list) || list.length > MAX_JSON_VALUES) continue;
+    // Holes stay holes, and an entry given by a getter is kept as it is.
+    const entries: unknown[] = new Array(list.length);
+    for (let i = 0; i < list.length; i++) {
+      const entry = Object.getOwnPropertyDescriptor(list, i);
+      if (entry === undefined) continue;
+      if (entry.get || entry.set) Object.defineProperty(entries, i, entry);
+      else
+        entries[i] = isPlainEntry(entry.value) ? withoutMember(entry.value, 'salt') : entry.value;
+    }
+    copy[section] = entries;
+  }
+  return copy as unknown as UnsaltedProof;
+}
+
+const isPlainEntry = (value: unknown): value is object =>
+  value !== null &&
+  typeof value === 'object' &&
+  !Array.isArray(value) &&
+  !types.isProxy(value) &&
+  Object.getPrototypeOf(value) === Object.prototype;
+
+/** A copy of `value`'s own members, getters included as getters, without `key`. */
+function withoutMember(value: object, key: string): Record<string, unknown> {
+  const descriptors = Object.getOwnPropertyDescriptors(value);
+  delete descriptors[key];
+  return Object.defineProperties({}, descriptors) as Record<string, unknown>;
 }
 
 /** A signature value of the right shape: 86 base64url characters, 64 bytes. */
@@ -372,7 +419,7 @@ export const input: ProofInput = {
  * A small consistent decision of the rules `ruleA` (applied, output `value` 150) and `ruleB`
  * (its condition false), with their real checksums: the proof the signing tests seal and sign.
  */
-export function unsigned(): UnsignedProof {
+export function unsigned(): ProofView {
   return {
     format: PROOF_FORMAT,
     requestId: 'req-1',
@@ -449,5 +496,8 @@ export function unsigned(): UnsignedProof {
   };
 }
 
-export const sealed = (): DecisionProof => sealProof(unsigned());
-export const signed = (): DecisionProof => signProof(sealed(), RFC_SECRET, 'executor-1');
+/** A decision proof none of whose entries is redacted: the tests read its entries. */
+export type PlainProof = ProofView & Pick<DecisionProof, 'digest' | 'signature'>;
+
+export const sealed = (): PlainProof => sealProof(unsalted(unsigned())) as PlainProof;
+export const signed = (): PlainProof => signProof(sealed(), RFC_SECRET, 'executor-1') as PlainProof;

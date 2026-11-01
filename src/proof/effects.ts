@@ -7,7 +7,14 @@ import { full } from './collect.js';
 import { imposedKey, instanceKey } from './output-values.js';
 import { ruleKey } from './precedence.js';
 import type { Ties } from './ties.js';
-import type { ProofException, ProofPending, ProofSkip, ProofStep, UnsignedProof } from './types.js';
+import type {
+  ProofException,
+  ProofPending,
+  ProofSection,
+  ProofSkip,
+  ProofStep,
+  ProofView,
+} from './types.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
 // that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
@@ -15,12 +22,20 @@ import type { ProofException, ProofPending, ProofSkip, ProofStep, UnsignedProof 
 
 const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
 
+/** The sections whose entries decide a rule (`undecidedRules`). */
+const DECIDING: readonly ProofSection[] = ['applied', 'skipped', 'pending', 'exceptions'];
+
 /**
  * Internal: each listed rule that no entry decides (D-8: every rule ends applied, excluded or
  * pending), `rule not decided: id@version`, in the order of `rules`. A rule is decided by an
- * entry of `applied`, `skipped` or `pending`, or as the carrier of an exception.
+ * entry of `applied`, `skipped` or `pending`, or as the carrier of an exception. Not checked
+ * while one of these sections has a redacted entry (`hidden`): it may be the decision.
  */
-export function undecidedRules(p: UnsignedProof): string[] {
+export function undecidedRules(
+  p: ProofView,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
+  if (DECIDING.some((section) => hidden.has(section))) return [];
   const decided = new Set<string>();
   for (const list of [p.applied, p.skipped, p.pending, p.exceptions]) {
     for (const entry of list) decided.add(ruleKey(entry));
@@ -39,10 +54,16 @@ export function undecidedRules(p: UnsignedProof): string[] {
  * - `rule feeds two outputs: id@version`: its steps, exclusions and pending entries name more
  *   than one output (D-21: a rule has one output). The step its short circuit imposed on
  *   another output is the effect of its exception (`imposedSteps`), not one of its decisions;
+ *   while `exceptions` has a redacted entry (`hidden`), any step may be one, and steps are not
+ *   compared;
  * - `tie loser not in conflict: id@version[ at subject]`: an exclusion `RULE_CONFLICT` (a tie
  *   settled by `onConflict: 'first'`) is `conflict` (D-7).
  */
-export function decisionProblems(p: UnsignedProof, imposed: ReadonlySet<string>): string[] {
+export function decisionProblems(
+  p: ProofView,
+  imposed: ReadonlySet<string>,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const issues: string[] = [];
   const outputs = new Map<string, string>();
   const reported = new Set<string>();
@@ -56,7 +77,8 @@ export function decisionProblems(p: UnsignedProof, imposed: ReadonlySet<string>)
       issues.push(`rule feeds two outputs: ${citeName(key)}`);
     }
   };
-  for (const step of p.applied) {
+  const steps = hidden.has('exceptions') ? [] : p.applied;
+  for (const step of steps) {
     if (!imposed.has(imposedKey(step, step.output))) feeds(step, step.output);
   }
   for (const skip of p.skipped) feeds(skip, skip.output);
@@ -161,18 +183,28 @@ function groupOf(decision: Decision, imposed: ReadonlySet<string>): string[] {
  * - `decision before the exception that affected it: id@version[ at subject]`: a decision of
  *   a rule an exception affects, at its subject or under it, of a stratum before the
  *   exception's (a carrier never runs after its target: core `carrierAfterTarget`).
+ *
+ * With redacted entries (`hidden`), what a hidden entry could make true is not reported: a short
+ * circuit's step (`applied`); the decisions an exception produced (`applied`, `skipped`,
+ * `pending`); the exception behind an exclusion (`exceptions`); and whatever needs to know
+ * which exceptions fired (`skipped`, `exceptions`: a hidden exclusion `RULE_CONFLICT`, or an
+ * earlier hidden exception, may make a visible one a discarded tie record, R15):
+ * `inhibited rule applied`, `decision weaker than …`, `decision before …`.
  */
 export function exceptionProblems(
-  p: UnsignedProof,
+  p: ProofView,
   imposed: ReadonlySet<string>,
   ties: Ties,
+  hidden: ReadonlySet<ProofSection> = new Set(),
 ): string[] {
   const issues: string[] = [];
   const push = (issue: string): void => {
     if (!full(issues)) issues.push(issue);
   };
+  const firedUnknown = hidden.has('skipped') || hidden.has('exceptions');
+  const producedUnknown = firedUnknown || hidden.has('applied') || hidden.has('pending');
   for (const problem of ties.problems) push(problem);
-  carrierProblems(p, imposed, ties, push);
+  carrierProblems(p, imposed, ties, push, hidden.has('applied'));
   const tries = new Map<string, Node>();
   p.exceptions.forEach((exception, index) => {
     if (ties.discarded.has(index)) return;
@@ -228,14 +260,14 @@ export function exceptionProblems(
       visit(node);
     }
     const cited = (): string => citeName(instanceKey(decision));
-    if (inhibited) push(`inhibited rule applied: ${cited()}`);
+    if (inhibited && !firedUnknown) push(`inhibited rule applied: ${cited()}`);
     // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
     // short circuit imposed is its carrier's, not a target's.
     const own = 'model' in decision && imposed.has(imposedKey(decision, decision.output));
-    if (!own && decision.stratum < latest) {
+    if (!own && decision.stratum < latest && !firedUnknown) {
       early.push(`decision before the exception that affected it: ${cited()}`);
     }
-    if (!reached && 'status' in decision && !('model' in decision)) {
+    if (!reached && 'status' in decision && !('model' in decision) && !hidden.has('exceptions')) {
       if (decision.reason === 'INHIBITED') {
         uncovered.push(`inhibited without an exception: ${cited()}`);
       }
@@ -244,12 +276,12 @@ export function exceptionProblems(
       }
     }
     // A pending decision is undetermined: never weaker.
-    if (reached && 'status' in decision && rankOf(decision.status) < strongest) {
+    if (reached && 'status' in decision && rankOf(decision.status) < strongest && !firedUnknown) {
       weaker.push(`decision weaker than the exception that affected it: ${cited()}`);
     }
   }
   const unproduced: [number, string][] = [];
-  const stack = [...tries.values()];
+  const stack = producedUnknown ? [] : [...tries.values()];
   for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
     for (const child of node.children.values()) stack.push(child);
     for (const group of node.groups.values()) {
@@ -273,12 +305,16 @@ export function exceptionProblems(
   return issues;
 }
 
-/** The status of each exception against its carrier's step, and the carriers of short circuits. */
+/**
+ * The status of each exception against its carrier's step, and the carriers of short circuits
+ * (not reported missing while `applied` has a redacted entry, `stepsHidden`).
+ */
 function carrierProblems(
-  p: UnsignedProof,
+  p: ProofView,
   imposed: ReadonlySet<string>,
   ties: Ties,
   push: (issue: string) => void,
+  stepsHidden: boolean,
 ): void {
   const steps = new Map<string, ProofStep>();
   for (const step of p.applied) {
@@ -305,6 +341,7 @@ function carrierProblems(
     if (exception.kind !== 'shortCircuit' || output === undefined || carrier !== undefined) {
       return;
     }
+    if (stepsHidden) return;
     // A carrier whose claim on the output another won affected nothing (R18).
     if (exception.affected.length > 0 || !won.has(output)) {
       push(`short circuit without its carrier applied: ${cited}`);

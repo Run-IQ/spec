@@ -8,6 +8,7 @@ import {
   holeMessage,
   isPlainObject,
   MAX_JSON_DEPTH,
+  ownCopy,
   spendValues,
   tooLargeMessage,
   undefinedMessage,
@@ -84,6 +85,15 @@ export function canonicalSha256Hex(value: unknown): string {
       withValueBudget(() => write(value, '', CANONICAL, new StreamSink(stream)));
     }),
   );
+}
+
+/**
+ * Internal: writes the canonical text of `value` into `out`, piece by piece (it is never built
+ * whole). `value` is a plain-JSON copy this package made (a snapshot), whose values were counted
+ * when they were read: walking it spends nothing.
+ */
+export function writeCanonical(out: TextOut, value: unknown): void {
+  ownCopy(() => write(value, '', CANONICAL, new StreamSink(out)));
 }
 
 /**

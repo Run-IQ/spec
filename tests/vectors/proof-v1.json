@@ -1,0 +1,336 @@
+{
+  "format": "run-iq.proof/1",
+  "description": "Frozen vectors of the proof tree (D-14, D-16), from the plan (Task 9K1), recomputed by this file's generator (Python stdlib only). T = utf8('run-iq.proof/1') || 0x00. Header leaf = sha256(0x00 || T || utf8(JCS({ s: 'header', e: H }))), H the proof without digest, signature and the ten sections. Entry leaf = sha256(0x00 || T || utf8(JCS({ s: section, i: index, e: salted entry }))), sections in the order rules, outputs, items, applied, skipped, pending, exceptions, factsRead, missingFacts, readsUndeclared; a redacted entry { redacted } gives its hash as it is. Salt of entry i of section s = first 16 bytes of HMAC-SHA256(seed, utf8('proof:' + s + ':' + i)), hex. merkleRoot = RFC 6962 hash of the leaves; digest = sha256(0x02 || T || uint64be(leafCount) || merkleRoot).",
+  "seed": "f9b972f50267915261e884526c8553bdf4a353eb2e4e9e78ee65716aeceaacfb",
+  "sealed": {
+    "proof": {
+      "format": "run-iq.proof/1",
+      "requestId": "r1",
+      "evaluatedAt": "2026-01-01",
+      "sealedAt": "2026-11-01T10:00:00.000Z",
+      "inputDigest": "e6085682c2b0c916134bb969f28cc18ac43aa80f90aea10307363ffbb89311ea",
+      "inputSalted": true,
+      "timeZone": "UTC",
+      "ruleSets": [
+        {
+          "kind": "local"
+        }
+      ],
+      "versions": {
+        "engine": "1.0.0-next.1",
+        "plugins": {},
+        "dsls": {},
+        "models": {
+          "M": "1.0.0"
+        },
+        "components": []
+      },
+      "strata": [["value"]],
+      "rules": [
+        {
+          "id": "R1",
+          "version": 1,
+          "checksum": "abababababababababababababababababababababababababababababababab",
+          "ruleSet": "local",
+          "priority": 0
+        }
+      ],
+      "outputs": [
+        {
+          "name": "value",
+          "type": "number",
+          "combine": "sum",
+          "status": "determined",
+          "value": 1,
+          "contributors": ["R1"],
+          "pending": []
+        }
+      ],
+      "items": [],
+      "applied": [
+        {
+          "ruleId": "R1",
+          "version": 1,
+          "model": "M",
+          "output": "value",
+          "contribution": 1,
+          "status": "determined",
+          "stratum": 0
+        }
+      ],
+      "skipped": [],
+      "pending": [],
+      "exceptions": [],
+      "factsRead": [],
+      "missingFacts": [],
+      "readsUndeclared": []
+    },
+    "salts": {
+      "rules/0": "eeb1fb8c8bbadeb41f9e5fb24d53fb61",
+      "outputs/0": "411126e7422e4ed1e28b10394cb63e4e",
+      "applied/0": "650dd718f4a92c013cb0ea073039dff3"
+    },
+    "leaves": [
+      "6a522a369b704793673676b2ba8decce7d4c739db15066065544b9afde74bf85",
+      "8fa32abe30293993f81b1ca473ac4c52861a743464ada648d94bf7b21dc6fc85",
+      "deae2a8e2ed38a9d36c5e4ee765229806ffdd32ebfebcbe5046a585bef7923f8",
+      "58f27d7ef5824335c14a073a5495679ea869de798baf9b17b98e0cd663c882ce"
+    ],
+    "leafCount": 4,
+    "merkleRoot": "03caacf22a00266524fd170fe8e2f1a8cb16eb6d1d189e2b54dc67b011f8c622",
+    "digest": "b4aa4310c91558e68890c2d242053829b41f09194e94de8b860f6431c7b5cb34",
+    "plan": {
+      "inputDigest": "ed75157664fd1dd502ac3953e8f69fa41e74d56da05af625085c68f8b8089148",
+      "headerLeaf": "9552348910ee15465b77128c44bc269725da0641577d7a4a227c4160b20fbba0",
+      "rule": {
+        "id": "R1",
+        "version": 1,
+        "checksum": "abababababababababababababababababababababababababababababababab",
+        "ruleSet": "local",
+        "salt": "eeb1fb8c8bbadeb41f9e5fb24d53fb61"
+      },
+      "ruleLeaf": "cb99c513b2a1722a75de92bb56fb658c097ff85012af65abddc9efd4478abe1f",
+      "merkleRoot": "34e56aff10f280f71329210a6b7feaa259fba62bec6271614f71f8d504af4ca6"
+    },
+    "note": "The proof sealed by sealProof(proof, seed). 'plan' rebuilds the values the plan gave (header leaf 95523489..., rule leaf cb99c513..., digest 34e56aff...): its header leaf was computed with the input digest of input-v1 before Task 9H2 (round 3), its rule without the priority Task 9J made required, and its digest is the bare merkleRoot, before the digest committed to the leaf count (Task 9H1 review). The salts and the leaves of outputs/0 and applied/0 are the plan's; the header leaf, the rule leaf and the digest are recomputed for the current format."
+  },
+  "redacted": {
+    "proof": {
+      "format": "run-iq.proof/1",
+      "requestId": "r~0/~1-😀",
+      "evaluatedAt": "2026-03-01T12:30:00.000Z",
+      "sealedAt": "2026-11-01T10:00:00.000Z",
+      "inputDigest": "e6085682c2b0c916134bb969f28cc18ac43aa80f90aea10307363ffbb89311ea",
+      "inputSalted": true,
+      "timeZone": "Europe/Paris",
+      "ruleSets": [
+        {
+          "kind": "local"
+        }
+      ],
+      "versions": {
+        "engine": "1.0.0-next.1",
+        "plugins": {},
+        "dsls": {},
+        "models": {
+          "M": "1.0.0"
+        },
+        "components": []
+      },
+      "strata": [["list", "value"]],
+      "rules": [
+        {
+          "id": "r00",
+          "version": 1,
+          "checksum": "0000000000000000000000000000000000000000000000000000000000000000",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "eeb1fb8c8bbadeb41f9e5fb24d53fb61"
+        },
+        {
+          "id": "r01",
+          "version": 1,
+          "checksum": "1111111111111111111111111111111111111111111111111111111111111111",
+          "ruleSet": "local",
+          "priority": 0,
+          "sourceRef": "art. 9 ~0 é 😀",
+          "salt": "b7e41956efeece4dedb71bed775f8992"
+        },
+        {
+          "id": "r02",
+          "version": 1,
+          "checksum": "2222222222222222222222222222222222222222222222222222222222222222",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "439229081dfe60ba41349d523fc3ff16"
+        },
+        {
+          "id": "r03",
+          "version": 1,
+          "checksum": "3333333333333333333333333333333333333333333333333333333333333333",
+          "ruleSet": "local",
+          "priority": 2.5,
+          "salt": "2cdba5c1a6ae5f7db86bb19160fe7b34"
+        },
+        {
+          "id": "r04",
+          "version": 1,
+          "checksum": "4444444444444444444444444444444444444444444444444444444444444444",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "1acdb2d61265c8bbd804a138222b83c0"
+        },
+        {
+          "id": "r05",
+          "version": 1,
+          "checksum": "5555555555555555555555555555555555555555555555555555555555555555",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "f50c02e5eb28b72bda9ab89ba5ba11d2"
+        },
+        {
+          "id": "r06",
+          "version": 1,
+          "checksum": "6666666666666666666666666666666666666666666666666666666666666666",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "cb9904560292256d8d145a46c1501f9c"
+        },
+        {
+          "id": "r07",
+          "version": 1,
+          "checksum": "7777777777777777777777777777777777777777777777777777777777777777",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "ac3ab6c570bf129f4fefb798654175c9"
+        },
+        {
+          "id": "r08",
+          "version": 1,
+          "checksum": "8888888888888888888888888888888888888888888888888888888888888888",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "eee278bf98e8a5d1ceb5d638b347f205"
+        },
+        {
+          "id": "r09",
+          "version": 1,
+          "checksum": "9999999999999999999999999999999999999999999999999999999999999999",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "f382fbf50004bba5a1d6e23833bac971"
+        },
+        {
+          "id": "r10",
+          "version": 1,
+          "checksum": "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "22a9b9ae2ce70dc87e3aba967068a0e6"
+        },
+        {
+          "id": "r11",
+          "version": 1,
+          "checksum": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb",
+          "ruleSet": "local",
+          "priority": 0,
+          "salt": "33f827fac5ee30fa13a89906ca0a34cb"
+        }
+      ],
+      "outputs": [
+        {
+          "name": "list",
+          "type": "list",
+          "combine": "union",
+          "status": "determined",
+          "value": [
+            [1.5, [2, [3, -0.25]]],
+            "a~0/~1😀",
+            {
+              "k😀": [true, null, 1e21]
+            }
+          ],
+          "contributors": ["r00"],
+          "pending": [],
+          "salt": "411126e7422e4ed1e28b10394cb63e4e"
+        },
+        {
+          "name": "value",
+          "type": "number",
+          "combine": "sum",
+          "status": "determined",
+          "value": 0.30000000000000004,
+          "contributors": ["r01", "r02"],
+          "pending": [],
+          "salt": "43d7177ff5a88faead3a62c3ba8512dd"
+        }
+      ],
+      "items": [],
+      "applied": [
+        {
+          "ruleId": "r00",
+          "version": 1,
+          "model": "M",
+          "output": "list",
+          "contribution": [
+            [1.5, [2, [3, -0.25]]],
+            "a~0/~1😀",
+            {
+              "k😀": [true, null, 1e21]
+            }
+          ],
+          "status": "determined",
+          "stratum": 0,
+          "salt": "650dd718f4a92c013cb0ea073039dff3"
+        },
+        {
+          "ruleId": "r01",
+          "version": 1,
+          "model": "M",
+          "output": "value",
+          "contribution": 0.1,
+          "status": "determined",
+          "stratum": 0,
+          "salt": "b7d29780829c43affa1d6af7d2e9b043"
+        },
+        {
+          "ruleId": "r02",
+          "version": 1,
+          "model": "M",
+          "output": "value",
+          "contribution": 0.2,
+          "status": "determined",
+          "stratum": 0,
+          "salt": "2fe6ca557350460fadcf60d478f67b46"
+        }
+      ],
+      "skipped": [],
+      "pending": [],
+      "exceptions": [],
+      "factsRead": [
+        {
+          "path": "/a~0b/~1c",
+          "salt": "cd7c67157a2982de675752af5e2a5f13"
+        },
+        {
+          "path": "/😀",
+          "salt": "bcf4ff908e3ddc55c2d357a747325c2e"
+        }
+      ],
+      "missingFacts": [
+        {
+          "redacted": "4ad223fb7d11f66281e124a4cf48e0cf334dd5c37df840aab9c22b13cd9d8e7d"
+        }
+      ],
+      "readsUndeclared": [],
+      "requested": ["list", "value"]
+    },
+    "leaves": [
+      "8cde6dde3e0b4b041b03043ffd69c9dfa5fef33afb21cf2f22c3815939b35848",
+      "da1475e9336ddf0a58538b13ac222a862179413ae4f724f420bd32d1dfd73c91",
+      "c125d77ffc6e42da4ec3faf2cab8827e7f78ffa8725513f1cd84a0a7302aa29a",
+      "0ae062a68cda166d8bd52f710b494aa7fb62e535ea1c4dc47dec7edd168659f5",
+      "e736b8f42a672ea8f08ba56d5dff141e57e9db7953361472dba1907f0b991719",
+      "84bbe17eaa0c37be96fceef9bc7275a07693fa0ceebecce72f087fe15bba2e94",
+      "d5563ef594aa3d201d222455907cd70e0c75b17bd19d226c6868bcd7c0385df5",
+      "08fe85a82bef29c22f5c08ad25fe5ace104e28865bae5c994cefdf2d52fdf033",
+      "9bc59853db004c7d1528209947ec21b62c68d752cea26339732df23c993991d9",
+      "c59c505c20f6c4a693aadc54b4c4d6875f81c04797dcc92b2bfc61b33f70541b",
+      "c975623998cfa35f46a866373630b0463ac2611f0fece525bfd43acf0b06726d",
+      "c2f0e7b0401c814dab1680dc6da9a259ccc8d54312a6bd2b27fa3d653fc8ce24",
+      "0959f9c56b9f4344cf32bdc2d663e49e61974e87996adde8eb6eb97b1861f908",
+      "0cedbd62995d53deb1222e7ad68fa5b0da58f20c3c6309388f95a2e043a8ac73",
+      "c721784393ea632528ccf3cb942bbed9c06558687faf164bc7e936b2de32c01c",
+      "5bbd8f231020b0b9ba865d11ef1c722c953b07c0169a6d3e2212987b34261b26",
+      "70d76f0ec52cb1e0777b1d002f8e69fe2813c2c95910757bd9e3f4a3f3918687",
+      "a2380638da64bd90c6870d7019d68998a60fff87003f1e451eab8adcf7b79bcf",
+      "c7a28f6e81be50202ef248b59021470014d27b8b4743f88b5af761ecaa94c0c4",
+      "64abd42db5c1b0b1907f5ff8feb3f6084118e7b363d956ad447e57655eb9d6bd",
+      "4ad223fb7d11f66281e124a4cf48e0cf334dd5c37df840aab9c22b13cd9d8e7d"
+    ],
+    "leafCount": 21,
+    "merkleRoot": "cf233982f707fdd53b13bd3bb87639f675d3c912075db39fb50dc6d7716fe5b4",
+    "digest": "0faca0f921ecf7d5c4ae4a97c3d2c29de65b3c7da5478ac4b882cd18e3357995",
+    "note": "A salted proof with escapes, astral characters, non-integer numbers, nested lists, twelve rules (index 10 after 9) and a redacted missing fact: its leaves and digest only (it is not a consistent decision)."
+  }
+}

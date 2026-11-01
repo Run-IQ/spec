@@ -8,18 +8,25 @@ import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
 import type { Context } from './combination.js';
-import { contextOf, inconsistencies } from './consistency.js';
+import { contextOf, inconsistencies, redactionNotices } from './consistency.js';
 import { instanceKey } from './output-values.js';
-import { contentDigest } from './digest.js';
+import { proofView } from './redact.js';
+import type { Redactions } from './redact.js';
+import { treeDigest } from './tree.js';
 import { publicKeyBytes, signatureMatches } from './sign.js';
-import type { DecisionProof, ProofVerification } from './types.js';
+import type { DecisionProof, ProofVerification, ProofView } from './types.js';
 import { readDecisionProof } from './validate.js';
 
-/** An issue and whether it makes the proof `invalid` or only keeps it from being `authentic`. */
+/**
+ * An issue, and what it does: `invalid` makes the proof invalid, `warning` keeps it from being
+ * `authentic`, `notice` says what could not be checked (redacted entries) and changes nothing.
+ */
 interface Finding {
   message: string;
-  invalid: boolean;
+  level: 'invalid' | 'warning' | 'notice';
 }
+
+const invalidFinding = (message: string): Finding => ({ message, level: 'invalid' });
 
 /**
  * Verifies a decision proof without executing anything, and never throws: any malformed input
@@ -30,7 +37,8 @@ interface Finding {
  *    issue `unknown format: <format>`: this version cannot read a later format. The proof is
  *    read once (each property read and counted exactly once) into a plain-JSON snapshot built
  *    from the very values checked, and every later check runs on that snapshot only.
- * 2. The digest, recomputed from the content: `digest mismatch` makes it `invalid`.
+ * 2. The digest, recomputed from the leaves (`proofLeafHashes`, D-16): `digest mismatch` makes
+ *    it `invalid`. A redacted entry gives its leaf as it is: redacting keeps the digest.
  * 3. Internal consistency (`inconsistencies`), each contradiction an issue that makes it
  *    `invalid`, in this order: citations (`cited rule not listed: id@version`, qualified, or
  *    `: id`; `cited output not listed: name`; `rule set not listed: id`); rule sets (listed
@@ -72,6 +80,12 @@ interface Finding {
  *    its target`, `target decided as if its carrier were not pending`, `carrier exceptions
  *    differ from its definition`.
  *
+ *    With redacted entries of `rules`, the rules given that the proof does not show are compared
+ *    by number: `rules check incomplete: n redacted rule(s)` keeps it at best `consistent`;
+ *    `unexpected rules: u given, not in the proof (n redacted)` or `rules missing: m redacted,
+ *    not given` make it `invalid` when the numbers differ. The checks of the exception records
+ *    of carriers are not made while `skipped` or `exceptions` has a redacted entry.
+ *
  * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
  * `invalid` too, rather than being ignored.
  *
@@ -79,7 +93,8 @@ interface Finding {
  * (`IssueList`, shared by every validator of the package).
  *
  * `authentic` needs a matching digest, a valid signature by a trusted key, and no difference
- * in `rules`. A proof that is only `consistent` must not be used for audit.
+ * in `rules`; notices aside, it has no issue. A proof that is only `consistent` must not be
+ * used for audit.
  *
  * The verdict is about the data read during the call. Act on verified data: take a JSON copy
  * first (`JSON.parse(JSON.stringify(p))`), verify the copy and use it, never a live object whose
@@ -102,16 +117,30 @@ function verify(p: unknown, options: unknown): ProofVerification {
   if (!proof) return { status: 'invalid', issues: boundMessages(errors) };
 
   const findings: Finding[] = [];
-  if (contentDigest(proof) !== proof.digest) {
-    findings.push({ message: 'digest mismatch', invalid: true });
+  if (treeDigest(proof) !== proof.digest) findings.push(invalidFinding('digest mismatch'));
+  const { view, redactions } = proofView(proof);
+  const context = contextOf(view, redactions.hidden);
+  for (const message of inconsistencies(view, context, redactions.positions)) {
+    findings.push(invalidFinding(message));
   }
-  const context = contextOf(proof);
-  for (const message of inconsistencies(proof, context)) findings.push({ message, invalid: true });
-  extend(findings, optionFindings(proof, options, context));
+  if (redactions.count > 0) {
+    findings.push({ message: `redacted entries: ${redactions.count}`, level: 'notice' });
+    if (!proof.inputSalted) {
+      findings.push({ message: 'redacted entries in an unsalted proof', level: 'warning' });
+    }
+    for (const message of redactionNotices(view, redactions.hidden)) {
+      findings.push({ message, level: 'notice' });
+    }
+  }
+  extend(findings, optionFindings(view, proof, options, context, redactions));
 
   const issues = boundMessages(findings.map((finding) => finding.message));
-  if (findings.some((finding) => finding.invalid)) return { status: 'invalid', issues };
-  return { status: findings.length > 0 ? 'consistent' : 'authentic', issues };
+  const status = findings.some((finding) => finding.level === 'invalid')
+    ? 'invalid'
+    : findings.some((finding) => finding.level === 'warning')
+      ? 'consistent'
+      : 'authentic';
+  return redactions.count > 0 ? { status, issues, redacted: redactions.count } : { status, issues };
 }
 
 /**
@@ -120,9 +149,15 @@ function verify(p: unknown, options: unknown): ProofVerification {
  * options problem (`options could not be read: <reason>`, `options.rules could not be read:
  * <reason>`, …), never one of the proof.
  */
-function optionFindings(proof: DecisionProof, options: unknown, context: Context): Finding[] {
+function optionFindings(
+  view: ProofView,
+  proof: DecisionProof,
+  options: unknown,
+  context: Context,
+  redactions: Redactions,
+): Finding[] {
   const unreadable = (subject: string, error: unknown): Finding[] => [
-    { message: unreadableMessage(subject, error), invalid: true },
+    invalidFinding(unreadableMessage(subject, error)),
   ];
   let record: Record<string, unknown> | undefined;
   try {
@@ -132,7 +167,7 @@ function optionFindings(proof: DecisionProof, options: unknown, context: Context
   }
   const findings: Finding[] = [];
   if (options !== undefined && record === undefined) {
-    findings.push({ message: 'options must be an object { trustedKeys?, rules? }', invalid: true });
+    findings.push(invalidFinding('options must be an object { trustedKeys?, rules? }'));
   }
   let trustedKeys: unknown;
   let rules: unknown;
@@ -153,7 +188,7 @@ function optionFindings(proof: DecisionProof, options: unknown, context: Context
   }
   if (rules === undefined) return findings;
   try {
-    extend(findings, ruleFindings(proof, rules, context));
+    extend(findings, ruleFindings(view, rules, context, redactions));
   } catch (error) {
     extend(findings, unreadable('options.rules', error));
   }
@@ -161,31 +196,35 @@ function optionFindings(proof: DecisionProof, options: unknown, context: Context
 }
 
 function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
+  const warning = (message: string): Finding[] => [{ message, level: 'warning' }];
   if (trustedKeys !== undefined && !isPlainObject(trustedKeys)) {
-    return [{ message: 'trustedKeys must be an object of hex public keys', invalid: true }];
+    return [invalidFinding('trustedKeys must be an object of hex public keys')];
   }
-  if (!p.signature) return [{ message: 'unsigned', invalid: false }];
+  if (!p.signature) return warning('unsigned');
   const { keyId, value } = p.signature;
-  if (!trustedKeys || !Object.hasOwn(trustedKeys, keyId)) {
-    return [{ message: 'untrusted key', invalid: false }];
-  }
+  if (!trustedKeys || !Object.hasOwn(trustedKeys, keyId)) return warning('untrusted key');
   const publicKey = publicKeyBytes(trustedKeys[keyId]);
-  if (!publicKey) return [{ message: 'trusted key malformed', invalid: false }];
+  if (!publicKey) return warning('trusted key malformed');
   if (!signatureMatches(p.digest, value, publicKey)) {
-    return [{ message: 'signature invalid', invalid: true }];
+    return [invalidFinding('signature invalid')];
   }
   return [];
 }
 
-function ruleFindings(p: DecisionProof, rules: unknown, context: Context): Finding[] {
-  if (!Array.isArray(rules)) return [{ message: 'rules must be an array', invalid: true }];
+function ruleFindings(
+  p: ProofView,
+  rules: unknown,
+  context: Context,
+  redactions: Redactions,
+): Finding[] {
+  if (!Array.isArray(rules)) return [invalidFinding('rules must be an array')];
   const findings: Finding[] = [];
   const invalid = (message: string): void => {
-    findings.push({ message, invalid: true });
+    findings.push(invalidFinding(message));
   };
 
   const items = readList(rules, 'rules');
-  if (!Array.isArray(items)) return [{ message: items.message, invalid: true }];
+  if (!Array.isArray(items)) return [invalidFinding(items.message)];
   const given = new Map<string, string>();
   const priorities = new Map<string, number>();
   const carriers = new Set<string>();
@@ -232,8 +271,25 @@ function ruleFindings(p: DecisionProof, rules: unknown, context: Context): Findi
       invalid(`rule priority mismatch: ${citeName(key)}`);
     }
   }
-  for (const key of given.keys()) {
-    if (!cited.has(key)) invalid(`unexpected rule: ${citeName(key)}`);
+  // A rule given that the proof does not show may be one of its redacted rules: those are
+  // compared by number (D-16).
+  const hiddenRules = redactions.bySection.get('rules') ?? 0;
+  const uncited = [...given.keys()].filter((key) => !cited.has(key));
+  if (hiddenRules === 0) {
+    for (const key of uncited) invalid(`unexpected rule: ${citeName(key)}`);
+  } else {
+    const plural = hiddenRules === 1 ? 'rule' : 'rules';
+    findings.push({
+      message: `rules check incomplete: ${hiddenRules} redacted ${plural}`,
+      level: 'warning',
+    });
+    if (uncited.length > hiddenRules) {
+      invalid(
+        `unexpected rules: ${uncited.length} given, not in the proof (${hiddenRules} redacted)`,
+      );
+    } else if (uncited.length < hiddenRules) {
+      invalid(`rules missing: ${hiddenRules - uncited.length} redacted, not given`);
+    }
   }
   // `fired` is on the pending entries of the rules that carry exceptions, only (R18):
   // only their definitions say which rules those are.

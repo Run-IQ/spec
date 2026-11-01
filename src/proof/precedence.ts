@@ -1,6 +1,6 @@
 import { comparePointers } from '../path/pointer.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
-import type { ProofException, UnsignedProof } from './types.js';
+import type { ProofException, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: the contribution order of D-5 and D-23 (precedence, priority
 // descending, rule identity, subject), from the rule sets and the priorities a proof records.
@@ -25,7 +25,7 @@ export const ruleKey = (entry: { ruleId: string; version: number }): string =>
 const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The standings of the rules of `p` (the first entry of a rule listed twice). */
-export function standingsOf(p: UnsignedProof): Map<string, Standing> {
+export function standingsOf(p: ProofView): Map<string, Standing> {
   const places = new Map<string, number>();
   p.ruleSets.forEach((set, i) => {
     const name = set.kind === 'pack' ? set.id : set.kind === 'local' ? LOCAL_RULE_SET : undefined;
@@ -95,7 +95,7 @@ export function inStandingOrder(
  * first); the exceptions of one carrier instance stay in the order of its definition
  * (`exceptions not sorted at i`).
  */
-export function exceptionOrderProblems(p: UnsignedProof, standings: Standings): string[] {
+export function exceptionOrderProblems(p: ProofView, standings: Standings): string[] {
   const issues: string[] = [];
   let previous: { standing: Standing; exception: ProofException } | undefined;
   p.exceptions.forEach((exception, i) => {

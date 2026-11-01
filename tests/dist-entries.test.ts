@@ -10,6 +10,7 @@ import { unsigned } from './proof-cases.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 import disclosures from './vectors/disclosure-v1.json';
+import { unsalted } from './proof-cases.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
 // copies of `SpecError` (tsup `splitting: false`). Each test fails without the build, saying
@@ -219,7 +220,7 @@ describe('built entries: one SpecError identity', () => {
     const content = unsigned();
     for (const signer of entries) {
       const { privateKey, publicKey } = signer.createSigningKeyPair();
-      const proof = signer.signProof(signer.sealProof(content), privateKey, 'k');
+      const proof = signer.signProof(signer.sealProof(unsalted(content)), privateKey, 'k');
       for (const verifier of entries) {
         expect(verifier.verifyProof(proof, { trustedKeys: { k: publicKey } })).toEqual({
           status: 'authentic',

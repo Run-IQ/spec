@@ -6,7 +6,7 @@ import { ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import { firedProblems, pendingCarrierProblems } from './carriers.js';
 import { full } from './collect.js';
-import type { ProofPending, ProofSkip, UnsignedProof } from './types.js';
+import type { ProofPending, ProofSection, ProofSkip, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
 // proof shows them (D-7, R15): they put `conflict` on outputs, not on the winners' steps.
@@ -139,7 +139,11 @@ export function stopsCarrier(reason: string): boolean {
  * `DOMINATED`, a tie on its own output, any other reason) fired its exceptions first (core
  * `ExceptionResult`).
  */
-export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
+export function tiesOf(
+  p: ProofView,
+  standings: Standings,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): Ties {
   const excluded = new Map<string, ProofSkip>();
   for (const skip of p.skipped) excluded.set(instanceKey(skip), skip);
   const waiting = new Map<string, ProofPending>();
@@ -200,7 +204,8 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
     }
     fired.mark(exception);
     if (exception.kind !== 'shortCircuit' || output === undefined || claim === undefined) return;
-    if (tiedClaim(output, claim)) {
+    // The loser's exclusion `RULE_CONFLICT` may be redacted.
+    if (tiedClaim(output, claim) && !hidden.has('skipped')) {
       problems.push(`short circuits tied without a loser excluded: ${cited()}`);
     }
     const list = claims.get(output);
@@ -219,7 +224,8 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
       problems.push(`tie loser recorded other exceptions: ${citeName(key)}`);
     }
   }
-  for (const entry of p.pending) {
+  // The exceptions of a carrier that fired may be redacted.
+  for (const entry of hidden.has('exceptions') ? [] : p.pending) {
     if (full(problems)) break;
     if (entry.fired === true && !recorded.has(instanceKey(entry))) {
       problems.push(
@@ -227,7 +233,7 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
       );
     }
   }
-  pendingCarrierProblems(p, waiting, problems);
+  pendingCarrierProblems(p, waiting, problems, hidden.has('pending'));
   return {
     discarded,
     losers,
@@ -246,8 +252,14 @@ export function tiesOf(p: UnsignedProof, standings: Standings): Ties {
  *   bounds of an undetermined output) passes on a status that one of these started;
  * - `conflict status without a tie in the proof`: one is `conflict`, though no exclusion is
  *   `RULE_CONFLICT` (every tie `onConflict: 'first'` settles excludes its losers so).
+ *
+ * A redacted entry of a section that holds sources may be the source (`hidden`): the first is
+ * not reported while `factsRead` or `readsUndeclared` has one, the second while `skipped` has.
  */
-export function sourceProblems(p: UnsignedProof): string[] {
+export function sourceProblems(
+  p: ProofView,
+  hidden: ReadonlySet<ProofSection> = new Set(),
+): string[] {
   const statuses = [p.applied, p.skipped, p.exceptions, p.outputs, p.items];
   let provisional = false;
   let conflict = false;
@@ -262,10 +274,12 @@ export function sourceProblems(p: UnsignedProof): string[] {
       fact.status === 'proposed' || fact.status === 'contested' || fact.method === 'presumed',
   );
   const issues: string[] = [];
-  if (provisional && !asserted && p.readsUndeclared.length === 0) {
+  const sourceHidden = hidden.has('factsRead') || hidden.has('readsUndeclared');
+  if (provisional && !asserted && p.readsUndeclared.length === 0 && !sourceHidden) {
     issues.push('provisional status without a source in the proof');
   }
-  if (conflict && !p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT')) {
+  const tieHidden = hidden.has('skipped');
+  if (conflict && !tieHidden && !p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT')) {
     issues.push('conflict status without a tie in the proof');
   }
   return issues;

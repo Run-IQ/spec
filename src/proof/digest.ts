@@ -2,14 +2,23 @@ import { bytesToHex } from '@noble/hashes/utils.js';
 import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { newSpecError, unreadableMessage } from '../errors.js';
-import type { DecisionProof, ProofInput, UnsignedProof } from './types.js';
+import { PROOF_SECTIONS } from './types.js';
+import type {
+  DecisionProof,
+  ProofInput,
+  ProofView,
+  UnsaltedProof,
+  UnsignedProof,
+} from './types.js';
 import { expectPlainObject, readFields, requireFields, runCheck, walkJson } from '../input/read.js';
 import { inputDigestBytes } from '../input/tree.js';
 import { readValidInput } from '../input/validate.js';
 import type { RuleValidationIssue } from '../issues.js';
 import { inconsistencies } from './consistency.js';
-import { readUnsignedProof } from './validate.js';
-import { ownCopy, withValueBudget } from '../values.js';
+import { readUnsaltedProof } from './validate.js';
+import { treeDigest } from './tree.js';
+import { inputSalter, readSeed, UNSALTED_SEED } from '../input/seed.js';
+import { ownCopy, spendValues, tooLargeMessage, withValueBudget } from '../values.js';
 
 /**
  * The digest a proof keeps in place of its input (D-15), lowercase hex:
@@ -108,49 +117,83 @@ function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined
 }
 
 /**
- * Seals a proof: returns a copy with `digest = sha256Hex(canonicalize(content))`, where the
- * content is every key but `digest` and `signature`. A `digest` or `signature` already on `p`
- * is dropped, so sealing again gives a fresh, unsigned proof.
+ * Seals a proof (D-14, D-16): returns a copy whose every entry carries its `salt`, and whose
+ * `digest` commits to its leaves (`proofLeafHashes`): `sha256(0x02 ‖ utf8(format) ‖ 0x00 ‖
+ * uint64be(n) ‖ root)`, `root` the RFC 6962 root of its `n` leaves, the header first, then each
+ * entry of each section in the order of `PROOF_SECTIONS`. The salt of entry `index` of
+ * `section` is the first 16 bytes of `HMAC-SHA256(seed, utf8('proof:' + section + ':' +
+ * index))`, in lowercase hex: under a secret seed (`deriveInputSeed`, the seed of the input
+ * digest), an entry can later be redacted (`redactProof`) without its leaf giving it away.
+ *
+ * `seed` defaults to `UNSALTED_SEED` (salts anyone can compute: such a proof cannot be
+ * redacted). `inputSalted` must say which: `true` with a secret seed, `false` with
+ * `UNSALTED_SEED`. A `digest` or `signature` already on `p` is dropped, so sealing gives a fresh,
+ * unsigned proof.
  *
  * `p` is read once into a plain-JSON copy (each property read exactly once); that copy is what
- * is validated, hashed and returned, detached from `p` and without `undefined` members. Lists
- * keep their order: the producer sorts them (see `UnsignedProof`).
+ * is validated, salted, hashed and returned, detached from `p` and without `undefined` members.
+ * Lists keep their order: the producer sorts them (see `UnsignedProof`). Its entries carry no
+ * `salt` and none is redacted (`UnsaltedProof`).
  *
- * Each entry carries its own `salt` (D-14): sealing keeps the digest of the whole content, and
- * the salts make each entry a leaf that a later redaction can hide.
- *
- * Throws `SpecError` (`INVALID_PROOF`), naming the first problem, when the content is not a
- * valid unsigned proof (see `validateProof`) or is not internally consistent (the checks of
- * `verifyProof`: `cited rule not listed: ...`, `outputs not sorted at 1`, `output value does not
- * follow from its contributions: ...`, …).
+ * Throws `SpecError`:
+ * - `INVALID_KEY` when `seed` is not a `Uint8Array` of 32 bytes (checked first);
+ * - `INVALID_PROOF`, `Cannot seal the proof: <first problem>`, when the content is not a valid
+ *   unsalted proof (see `validateProof`; an entry with a `salt` or redacted is refused), when
+ *   `inputSalted does not match the seed`, or when it is not internally consistent (the checks
+ *   of `verifyProof`: `cited rule not listed: ...`, `outputs not sorted at 1`, `output value does
+ *   not follow from its contributions: ...`, …).
  */
-export function sealProof(p: UnsignedProof): DecisionProof {
-  return withValueBudget(() => seal(p));
+export function sealProof(p: UnsaltedProof, seed: Uint8Array = UNSALTED_SEED): DecisionProof {
+  return withValueBudget(() => seal(p, seed));
 }
 
-function seal(p: UnsignedProof): DecisionProof {
-  const { proof, errors } = readUnsignedProof(p);
+function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
+  const bytes = readSeed(seed);
+  const { proof, errors } = readUnsaltedProof(p);
   if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
-  const [inconsistency] = inconsistencies(proof);
+  if (proof.inputSalted === bytes.every((byte) => byte === 0)) {
+    throw newSpecError(
+      'INVALID_PROOF',
+      'Cannot seal the proof: inputSalted does not match the seed',
+    );
+  }
+  const salted = saltEntries(proof, bytes);
+  if (salted === undefined) {
+    throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${tooLargeMessage('proof')}`);
+  }
+  const [inconsistency] = inconsistencies(salted);
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
-  return { ...proof, digest: contentDigest(proof) };
+  return { ...salted, digest: treeDigest(salted) };
 }
 
 /**
- * Internal: the digest `p` should carry, computed from its content. `p` must be a plain-JSON
- * snapshot (`readDecisionProof`, `readUnsignedProof`), never a caller's live object.
+ * `proof` (a snapshot) with the salt of its place on each entry (D-14), or `undefined` when the
+ * salts do not fit the value budget: each is a value of the sealed proof, counted here.
  */
-export function contentDigest(p: UnsignedProof): string {
-  // The snapshot's values were counted when they were read from the caller.
-  return ownCopy(() => canonicalSha256Hex(proofContent(p)));
+function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | undefined {
+  let entries = 0;
+  for (const section of PROOF_SECTIONS) entries += proof[section].length;
+  if (!spendValues(entries)) return undefined;
+  const salter = inputSalter(seed, 'proof:');
+  const salted = { ...proof } as unknown as Record<string, unknown>;
+  for (const section of PROOF_SECTIONS) {
+    salted[section] = proof[section].map((entry: object, i) => ({
+      ...entry,
+      salt: bytesToHex(salter(`${section}:${i}`).subarray(0, SALT_BYTES)),
+    }));
+  }
+  return salted as unknown as ProofView;
 }
 
-/** A shallow copy of `p` without `digest` and `signature`. */
-function proofContent(p: UnsignedProof): Record<string, unknown> {
-  const content: Record<string, unknown> = { ...p };
-  delete content.digest;
-  delete content.signature;
-  return content;
+/** The bytes of the salt of a proof entry (D-14): the first 16 of its HMAC. */
+const SALT_BYTES = 16;
+
+/**
+ * Internal: the digest `p` should carry, computed from its content (`treeDigest`). `p` must be
+ * a plain-JSON snapshot (`readDecisionProof`), never a caller's live object.
+ */
+export function contentDigest(p: UnsignedProof): string {
+  return treeDigest(p);
 }

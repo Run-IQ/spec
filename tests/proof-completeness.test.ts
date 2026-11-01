@@ -5,6 +5,7 @@ import { entries, ruleA, unsaltedSalt } from './proof-cases.js';
 import { outputProof, problems, withEntry, withSection } from './proof-builders.js';
 import { traceProof } from './proof-trace.js';
 import type { Content, Entry, OutputPart } from './proof-builders.js';
+import { unsalted } from './proof-cases.js';
 
 /**
  * A proof of one output `value` fed by `r0`, `r1`… with `contributions` (priority `winner` for
@@ -126,7 +127,7 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
         ...ref,
         checksum: computeRuleChecksum(rules[i]!),
       }));
-      return sealProof({ ...content, rules: listed } as unknown as UnsignedProof);
+      return sealProof(unsalted({ ...content, rules: listed } as unknown as UnsignedProof));
     };
     const honest = [definition('r0', 5000), definition('w', 1000)];
     expect(verifyProof(proofWith(honest), { rules: honest }).issues).toEqual(['unsigned']);
@@ -162,19 +163,21 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
     const content = outputProof(highest, [2, 2]);
     content.rules[0]!.priority = 7;
     content.rules[1]!.priority = -3;
-    // sha256 of the RFC 8785 text of the content, by an independent Python implementation of
-    // JCS (refrozen in Task 9J round 4: round 3 named the lower rule a contributor).
-    const FROZEN = '3770246076f87e5ccc00a90381a7d7f4193d9cd4121f42ab861057d9aadb6d42';
-    expect(sealProof(content).digest).toBe(FROZEN);
+    // The tree digest of the content (D-16), by an independent Python implementation of JCS
+    // and of the proof tree (refrozen in Task 9K1, from the sha256 of the canonical text).
+    const FROZEN = '72d3eb51fa1a0320b64d25ba952d0ed6350a88d3f06efa9b13ae3d0ce8ac7ab8';
+    expect(sealProof(unsalted(content)).digest).toBe(FROZEN);
     content.rules[1]!.priority = -4;
-    expect(sealProof(content).digest).not.toBe(FROZEN);
+    expect(sealProof(unsalted(content)).digest).not.toBe(FROZEN);
   });
 
   it('given the rules, a recorded -0 is the priority 0 of a definition', () => {
     const content = outputProof({ type: 'number', combine: 'sum', value: 1 }, [1]);
     const rule: RuleDefinitionInput = { ...ruleA, id: 'r0', priority: 0 };
     content.rules[0] = { ...content.rules[0]!, checksum: computeRuleChecksum(rule), priority: -0 };
-    expect(verifyProof(sealProof(content), { rules: [rule] }).issues).toEqual(['unsigned']);
+    expect(verifyProof(sealProof(unsalted(content)), { rules: [rule] }).issues).toEqual([
+      'unsigned',
+    ]);
   });
 
   it('refuses a rule without its priority', () => {

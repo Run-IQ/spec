@@ -9,7 +9,7 @@ import { BEFORE_EXCEPTIONS } from './effects.js';
 import { imposedKey, instanceKey } from './output-values.js';
 import { ruleKey } from './precedence.js';
 import { Scope, stopsCarrier } from './ties.js';
-import type { ProofPending, ProofSkip, ProofStep, UnsignedProof } from './types.js';
+import type { ProofPending, ProofSkip, ProofStep, ProofView } from './types.js';
 
 // Internal to `@run-iq/spec`: the carriers of a proof against the rule definitions `verifyProof`
 // was given (`rules`): which rules each targets (`matchesSelector`, as core resolves targets
@@ -135,10 +135,11 @@ function definedSignatures(definition: RuleDefinition): string[] {
  *   that fired (applied, its step imposed or not, pending with `fired: true`, excluded after
  *   the exceptions ran) whose exception records are not exactly the exceptions its definition
  *   carries (one record each, `affected` possibly empty), or a tie loser whose one record is
- *   of a kind it does not carry.
+ *   of a kind it does not carry. Not checked while `skipped` or `exceptions` has a redacted
+ *   entry (`context.hidden`): a record, or what makes a carrier a tie loser, may be hidden.
  */
 export function carrierRuleFindings(
-  p: UnsignedProof,
+  p: ProofView,
   definitions: ReadonlyMap<string, RuleDefinition>,
   context: Context,
   invalid: (message: string) => void,
@@ -161,6 +162,7 @@ export function carrierRuleFindings(
     if (!selected) invalid(`carrier does not select its target: ${citeName(instanceKey(entry))}`);
   }
   waitingTargets(p, definitions, context.imposed, invalid);
+  if (context.hidden.has('skipped') || context.hidden.has('exceptions')) return;
   recordedExceptions(p, definitions, context.ties.losers, invalid);
 }
 
@@ -241,7 +243,7 @@ function selectedBy(
  * budget.
  */
 function waitingTargets(
-  p: UnsignedProof,
+  p: ProofView,
   definitions: ReadonlyMap<string, RuleDefinition>,
   imposed: ReadonlySet<string>,
   invalid: (message: string) => void,
@@ -385,7 +387,7 @@ function waitingTargets(
  * and records its tie record only, of a kind its definition carries.
  */
 function recordedExceptions(
-  p: UnsignedProof,
+  p: ProofView,
   definitions: ReadonlyMap<string, RuleDefinition>,
   losers: ReadonlySet<string>,
   invalid: (message: string) => void,

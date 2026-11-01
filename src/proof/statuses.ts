@@ -23,9 +23,10 @@ import type {
   ProofOutput,
   ProofPending,
   ProofSelection,
+  ProofSection,
   ProofSkip,
   ProofStep,
-  UnsignedProof,
+  ProofView,
 } from './types.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
@@ -143,7 +144,7 @@ interface Feeds {
   strays: string[];
 }
 
-function feedsOf(p: UnsignedProof, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
+function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
   const outputs = new Map<string, Feed>();
   const items = new Map<ProofItem, Feed>();
   const tries = new Map<string, ItemTrie>();
@@ -272,9 +273,16 @@ function boundsProblems(
  * pending rules are those of the `pending` section; then the statuses: a per output's is the
  * strongest of its items' (determined without item), and no output or item is weaker than a
  * contribution or a candidate exclusion that feeds it.
+ *
+ * With redacted entries (`context.hidden`), what a hidden entry could make true is not reported:
+ * a step or pending rule feeding no item (`items`), pending rules missing from the trace
+ * (`pending`), a per output's status above its items' (`items`), and the checks of
+ * `combinationProblems`, `completenessProblems`, `rankProblems` and `causeProblems` that need
+ * every step, exclusion, exception or rule. A visible output whose steps are all redacted is
+ * then accepted; one weaker than a visible contribution is still refused.
  */
 export function outputProblems(
-  p: UnsignedProof,
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
   context: Context,
 ): string[] {
@@ -311,20 +319,24 @@ export function outputProblems(
       issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
     }
   }
+  const { hidden } = context;
   const feeds = feedsOf(p, listed, context.ties);
-  append(issues, feeds.strays);
+  // The item a stray step or pending rule feeds may be redacted.
+  if (!hidden.has('items')) append(issues, feeds.strays);
   const targets = targetsOf(p, listed, feeds);
   for (const { target, feed, pending } of targets) {
     append(issues, combinationProblems(target, context));
+    // A pending rule of the target may be redacted: its own pending rules are then a superset.
     if (!samePending(pending, feed.pending)) {
-      issues.push(`pending differ from pending rules: ${target.cite()}`);
+      if (!hidden.has('pending'))
+        issues.push(`pending differ from pending rules: ${target.cite()}`);
     } else if (!pendingInOrder(pending, feed, context.standings)) {
       issues.push(`pending not in contribution order: ${target.cite()}`);
     }
-    append(issues, completenessProblems(target, feed, context.standings));
-    append(issues, rankProblems(target));
+    append(issues, completenessProblems(target, feed, context.standings, hidden));
+    append(issues, rankProblems(target, hidden));
   }
-  append(issues, statusProblems(p, listed, feeds, targets));
+  append(issues, statusProblems(p, listed, feeds, targets, hidden));
   return issues;
 }
 
@@ -335,11 +347,7 @@ interface Fed {
 }
 
 /** The outputs without `per` and the items, as targets of combination, with their feeds. */
-function targetsOf(
-  p: UnsignedProof,
-  listed: ReadonlyMap<string, ProofOutput>,
-  feeds: Feeds,
-): Fed[] {
+function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds: Feeds): Fed[] {
   const itemsOf = new Map<string, ProofItem[]>();
   for (const item of p.items) {
     const list = itemsOf.get(item.output);
@@ -381,10 +389,11 @@ function targetsOf(
 }
 
 function statusProblems(
-  p: UnsignedProof,
+  p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
   feeds: Feeds,
   targets: readonly Fed[],
+  hidden: ReadonlySet<ProofSection>,
 ): string[] {
   const issues: string[] = [];
   const strongest = new Map<string, number>();
@@ -392,12 +401,13 @@ function statusProblems(
     if (!feeds.items.has(item)) continue;
     strongest.set(item.output, Math.max(strongest.get(item.output) ?? 0, rankOf(item.status)));
   }
+  // A redacted item may be the strongest.
   for (const [name, output] of listed) {
-    if (output.per === undefined) continue;
+    if (output.per === undefined || hidden.has('items')) continue;
     if (rankOf(output.status) !== (strongest.get(name) ?? 0)) {
       issues.push(`per output status differs from its items: ${citeName(name)}`);
     }
   }
-  for (const { target, feed } of targets) append(issues, causeProblems(target, feed));
+  for (const { target, feed } of targets) append(issues, causeProblems(target, feed, hidden));
   return issues;
 }

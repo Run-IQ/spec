@@ -23,6 +23,8 @@ import {
 import type { Add, Check, Shape } from './checks.js';
 import { hasErrorCause } from './carriers.js';
 import { isProofFormat, PROOF_FORMATS } from './formats.js';
+import { PROOF_SECTIONS } from './types.js';
+import type { ProofSection } from './types.js';
 import {
   citedRule,
   code,
@@ -183,7 +185,7 @@ const OUTPUT: Shape = {
     pending: listOf(citedRule),
     bounds: objectOf(BOUNDS),
     selected: objectOf(SELECTION),
-    // Read here, checked as a declaration by `output`.
+    // Read here, checked as a declaration by `outputOf`.
     ...Object.fromEntries(DECLARATION_KEYS.map((key) => [key, document])),
     salt,
   },
@@ -202,31 +204,34 @@ const OUTPUT: Shape = {
 };
 
 /**
- * An output: its declaration members are checked as an output declaration
- * (`validateOutputDeclaration`), on their copies, and must be written in its normal form
- * (`normalizeOutputDeclaration`): no `empty: false`, no `rounding.at: 'output'`, no increment
- * that is a scale.
+ * An output of `shape` (salted or not): its declaration members are checked as an output
+ * declaration (`validateOutputDeclaration`), on their copies, and must be written in its normal
+ * form (`normalizeOutputDeclaration`): no `empty: false`, no `rounding.at: 'output'`, no
+ * increment that is a scale. A redacted output (its gate gave `REDACTED`) has none.
  */
-const output: Check = (value, path, add) => {
-  const read = checkObject(value, path, OUTPUT, add, new Set());
-  if (read === undefined) return undefined;
-  const { copy } = read;
-  const declaration: Record<string, unknown> = {};
-  for (const key of DECLARATION_KEYS) {
-    if (copy[key] !== undefined) declaration[key] = copy[key];
-  }
-  // A missing type or strategy was reported as required.
-  if (copy.type === undefined || copy.combine === undefined) return copy;
-  // The copy was counted when it was read.
-  const { issues, normal } = ownCopy(() => readDeclaration(declaration, path));
-  for (const issue of issues) add(issue.path, issue.message);
-  if (normal === undefined) return copy;
-  if (copy.empty === false) {
-    add(`${path}.empty`, `${citeName(path)}.empty must be absent: false is the default`);
-  }
-  checkNormalRounding(copy.rounding, normal.rounding?.scale, `${path}.rounding`, add);
-  return copy;
-};
+function outputOf(shape: Shape): Check {
+  return (value, path, add) => {
+    const read = checkObject(value, path, shape, add, new Set());
+    if (read === undefined) return undefined;
+    const { copy } = read;
+    if (read.members.get('redacted') !== undefined) return copy;
+    const declaration: Record<string, unknown> = {};
+    for (const key of DECLARATION_KEYS) {
+      if (copy[key] !== undefined) declaration[key] = copy[key];
+    }
+    // A missing type or strategy was reported as required.
+    if (copy.type === undefined || copy.combine === undefined) return copy;
+    // The copy was counted when it was read.
+    const { issues, normal } = ownCopy(() => readDeclaration(declaration, path));
+    for (const issue of issues) add(issue.path, issue.message);
+    if (normal === undefined) return copy;
+    if (copy.empty === false) {
+      add(`${path}.empty`, `${citeName(path)}.empty must be absent: false is the default`);
+    }
+    checkNormalRounding(copy.rounding, normal.rounding?.scale, `${path}.rounding`, add);
+    return copy;
+  };
+}
 
 /** The rounding `rounding` (valid) in its normal form: `at` not `output`, a scale as a scale. */
 function checkNormalRounding(
@@ -462,7 +467,65 @@ function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue 
   return { path: 'format', message: `unknown format: ${citeName(format)}` };
 }
 
-const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
+/**
+ * A redacted entry (D-16): the hash of its leaf alone, in place of the entry. An entry of a
+ * section with a `redacted` member is one, and has no other member.
+ */
+const REDACTED: Shape = {
+  summary: '{ redacted }',
+  fields: {
+    redacted: scalarCheck((value, path, add) => {
+      if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+        add(path, `${citeName(path)} must be a leaf hash: 64 lowercase hex characters`);
+      }
+    }),
+  },
+};
+
+/** `shape` as an entry of a sealed proof: salted, or redacted (`REDACTED`) instead. */
+function redactable(shape: Shape): Shape {
+  return {
+    ...shape,
+    gate: (members) => (members.get('redacted') !== undefined ? REDACTED : undefined),
+  };
+}
+
+/** `shape` as an entry of a proof not yet sealed: without its `salt`, never redacted. */
+function unsalted(shape: Shape): Shape {
+  const fields = { ...shape.fields };
+  delete fields.salt;
+  return { ...shape, summary: shape.summary.replace(', salt }', ' }'), fields };
+}
+
+/** The entry shapes of the ten sections (`outputs` aside: `outputOf`), salted. */
+const ENTRIES: Readonly<Record<Exclude<ProofSection, 'outputs'>, Shape>> = {
+  rules: RULE_REF,
+  items: ITEM,
+  applied: STEP,
+  skipped: SKIP,
+  pending: PENDING,
+  exceptions: EXCEPTION,
+  factsRead: FACT_READ,
+  missingFacts: MISSING_FACT,
+  readsUndeclared: UNDECLARED_READ,
+};
+
+/** The check of an entry of each section, as `variant` reads it. */
+function entryChecks(variant: (shape: Shape) => Shape): Record<ProofSection, Check> {
+  const checks = { outputs: outputOf(variant(OUTPUT)) } as Record<ProofSection, Check>;
+  for (const [section, shape] of Object.entries(ENTRIES)) {
+    checks[section as ProofSection] = objectOf(variant(shape));
+  }
+  return checks;
+}
+
+/** Internal: the check of an entry of each section of a sealed proof (salted or redacted). */
+export const SECTION_ENTRY: Readonly<Record<ProofSection, Check>> = entryChecks(redactable);
+
+const UNSALTED_ENTRY = entryChecks(unsalted);
+
+/** The fields of the header (D-16): every field but the ten sections, `digest`, `signature`. */
+const HEADER_FIELDS: Readonly<Record<string, Check>> = {
   format: proofFormat,
   requestId: nonEmptyString,
   evaluatedAt,
@@ -475,28 +538,49 @@ const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
   strata: listOf(listOf(outputName)),
   requested: listOf(outputName, 'absent requests every output'),
   supersedes: objectOf(SUPERSEDES),
-  rules: listOf(objectOf(RULE_REF)),
-  outputs: listOf(output),
-  items: listOf(objectOf(ITEM)),
-  applied: listOf(objectOf(STEP)),
-  skipped: listOf(objectOf(SKIP)),
-  pending: listOf(objectOf(PENDING)),
-  exceptions: listOf(objectOf(EXCEPTION)),
-  factsRead: listOf(objectOf(FACT_READ)),
-  missingFacts: listOf(objectOf(MISSING_FACT)),
-  readsUndeclared: listOf(objectOf(UNDECLARED_READ)),
 };
 
+/** The section fields: each a list of entries checked by `entries`. */
+function sectionFields(entries: Readonly<Record<ProofSection, Check>>): Record<string, Check> {
+  return Object.fromEntries(
+    PROOF_SECTIONS.map((section) => [section, listOf(entries[section])]),
+  ) as Record<string, Check>;
+}
+
+const CONTENT_FIELDS: Readonly<Record<string, Check>> = {
+  ...HEADER_FIELDS,
+  ...sectionFields(SECTION_ENTRY),
+};
+
+const OPTIONAL_HEADER = ['requested', 'supersedes'];
+
+/** Internal: the header of a proof alone (a leaf, `proofLeafHash`). */
+export const PROOF_HEADER: Shape = {
+  summary: '',
+  fields: HEADER_FIELDS,
+  optional: OPTIONAL_HEADER,
+  gate: formatGate,
+};
+
+/** Internal: the content of a sealed proof (`digest` and `signature` read apart). */
 export const UNSIGNED_PROOF: Shape = {
   summary: '',
   fields: CONTENT_FIELDS,
-  optional: ['requested', 'supersedes'],
+  optional: OPTIONAL_HEADER,
+  gate: formatGate,
+};
+
+/** Internal: the content `sealProof` seals: entries without `salt`, none redacted. */
+export const UNSALTED_PROOF: Shape = {
+  summary: '',
+  fields: { ...HEADER_FIELDS, ...sectionFields(UNSALTED_ENTRY) },
+  optional: OPTIONAL_HEADER,
   gate: formatGate,
 };
 
 export const DECISION_PROOF: Shape = {
   summary: '',
   fields: { ...CONTENT_FIELDS, digest: sha256, signature: objectOf(SIGNATURE) },
-  optional: ['requested', 'supersedes', 'signature'],
+  optional: [...OPTIONAL_HEADER, 'signature'],
   gate: formatGate,
 };

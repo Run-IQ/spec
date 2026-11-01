@@ -1,13 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { sealProof, signProof, verifyProof } from '../src/index.js';
-import type { UnsignedProof } from '../src/index.js';
 import { RFC_PUBLIC, RFC_SECRET, RULES, TRUSTED, unsaltedSalt, unsigned } from './proof-cases.js';
 import { handSealed, specError } from './helpers.js';
+import { unsalted } from './proof-cases.js';
+import type { PlainProof } from './proof-cases.js';
+import type { ProofView } from '../src/proof/types.js';
 
 const salt = unsaltedSalt('rules', 0);
 
 /** r1 feeds `risk` in stratum 0; r2 reads it and feeds `fine` in stratum 1. */
-function staged(): UnsignedProof {
+function staged(): ProofView {
   const content = unsigned();
   const [step] = content.applied;
   return {
@@ -56,7 +58,7 @@ function staged(): UnsignedProof {
 
 describe('strata, decimals and rounding in a proof', () => {
   it('seals, signs and verifies a proof of several strata', () => {
-    const proof = signProof(sealProof(staged()), RFC_SECRET, 'executor-1');
+    const proof = signProof(sealProof(unsalted(staged())), RFC_SECRET, 'executor-1');
     expect(proof.strata).toEqual([['risk'], ['fine']]);
     expect(proof.applied[1]).toMatchObject({ stratum: 1, unrounded: '100.125' });
     expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
@@ -68,11 +70,14 @@ describe('strata, decimals and rounding in a proof', () => {
   it('accepts an empty stratum', () => {
     const content = { ...staged(), strata: [['risk'], [], ['fine']] };
     content.applied[1]!.stratum = 2;
-    expect(verifyProof(sealProof(content))).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealProof(unsalted(content)))).toEqual({
+      status: 'consistent',
+      issues: ['unsigned'],
+    });
   });
 
   it('the strata and the stratum numbers are covered by the digest', () => {
-    const moved = signProof(sealProof(staged()), RFC_SECRET, 'executor-1');
+    const moved = signProof(sealProof(unsalted(staged())), RFC_SECRET, 'executor-1') as PlainProof;
     moved.strata = [['fine', 'risk']];
     moved.applied[1]!.stratum = 0;
     expect(verifyProof(moved, { trustedKeys: TRUSTED })).toEqual({
@@ -84,7 +89,7 @@ describe('strata, decimals and rounding in a proof', () => {
   it.each([
     [
       'an output in no stratum',
-      (p: UnsignedProof) =>
+      (p: ProofView) =>
         p.outputs.unshift({
           name: 'extra',
           type: 'boolean',
@@ -99,27 +104,27 @@ describe('strata, decimals and rounding in a proof', () => {
     ],
     [
       'an output in two strata',
-      (p: UnsignedProof) => (p.strata = [['risk'], ['fine', 'risk']]),
+      (p: ProofView) => (p.strata = [['risk'], ['fine', 'risk']]),
       'stratum output repeated: risk',
     ],
     [
       'an output twice in one stratum',
-      (p: UnsignedProof) => (p.strata = [['risk', 'risk'], ['fine']]),
+      (p: ProofView) => (p.strata = [['risk', 'risk'], ['fine']]),
       'stratum output repeated: risk',
     ],
     [
       'a stratum naming an unknown output',
-      (p: UnsignedProof) => (p.strata = [['risk', 'tax'], ['fine']]),
+      (p: ProofView) => (p.strata = [['risk', 'tax'], ['fine']]),
       'stratum output unknown: tax',
     ],
     [
       'an applied step beyond the strata',
-      (p: UnsignedProof) => (p.applied[1]!.stratum = 2),
+      (p: ProofView) => (p.applied[1]!.stratum = 2),
       'stratum out of range: r2@2',
     ],
     [
       'a skip beyond the strata',
-      (p: UnsignedProof) => {
+      (p: ProofView) => {
         p.rules.push({
           id: 'r3',
           version: 1,
@@ -141,7 +146,7 @@ describe('strata, decimals and rounding in a proof', () => {
     ],
     [
       'an exception beyond the strata',
-      (p: UnsignedProof) =>
+      (p: ProofView) =>
         p.exceptions.push({
           ruleId: 'r1',
           version: 1,
@@ -155,12 +160,12 @@ describe('strata, decimals and rounding in a proof', () => {
     ],
     [
       'an applied step whose output is in another stratum',
-      (p: UnsignedProof) => (p.applied[1]!.stratum = 0),
+      (p: ProofView) => (p.applied[1]!.stratum = 0),
       'step stratum mismatch: r2@2',
     ],
     [
       'a skip whose output is in another stratum',
-      (p: UnsignedProof) => {
+      (p: ProofView) => {
         p.rules.push({
           id: 'r3',
           version: 1,
@@ -194,7 +199,7 @@ describe('strata, decimals and rounding in a proof', () => {
       status: 'invalid',
       issues: [issue, 'signature invalid'],
     });
-    const sealError = specError(() => sealProof(content));
+    const sealError = specError(() => sealProof(unsalted(content)));
     expect(sealError.code).toBe('INVALID_PROOF');
     expect(sealError.message).toBe(`Cannot seal the proof: ${issue}`);
     const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
@@ -203,7 +208,7 @@ describe('strata, decimals and rounding in a proof', () => {
   });
 
   it('a proof without any stratum is consistent only without outputs and trace', () => {
-    const empty: UnsignedProof = {
+    const empty: ProofView = {
       ...unsigned(),
       strata: [],
       rules: [],
@@ -211,7 +216,7 @@ describe('strata, decimals and rounding in a proof', () => {
       applied: [],
       skipped: [],
     };
-    expect(verifyProof(sealProof(empty)).issues).toEqual(['unsigned']);
+    expect(verifyProof(sealProof(unsalted(empty))).issues).toEqual(['unsigned']);
     expect(verifyProof(handSealed({ ...unsigned(), strata: [] })).issues).toEqual([
       'output not in strata: value',
       'stratum out of range: r1@1',
@@ -221,14 +226,14 @@ describe('strata, decimals and rounding in a proof', () => {
   });
 
   it.each([
-    ['a non-canonical value', (p: UnsignedProof) => (p.outputs[0]!.value = '100.130')],
-    ['a number value', (p: UnsignedProof) => (p.outputs[0]!.value = 100.13)],
-    ['a null value', (p: UnsignedProof) => (p.outputs[0]!.value = null)],
-    ['a "-0" value', (p: UnsignedProof) => (p.outputs[0]!.value = '-0')],
-    ['a non-canonical contribution', (p: UnsignedProof) => (p.applied[1]!.contribution = '1e2')],
-    ['a number contribution', (p: UnsignedProof) => (p.applied[1]!.contribution = 100.13)],
-    ['a non-canonical unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = '100.1250')],
-    ['a number unrounded', (p: UnsignedProof) => (p.applied[1]!.unrounded = 100.125)],
+    ['a non-canonical value', (p: ProofView) => (p.outputs[0]!.value = '100.130')],
+    ['a number value', (p: ProofView) => (p.outputs[0]!.value = 100.13)],
+    ['a null value', (p: ProofView) => (p.outputs[0]!.value = null)],
+    ['a "-0" value', (p: ProofView) => (p.outputs[0]!.value = '-0')],
+    ['a non-canonical contribution', (p: ProofView) => (p.applied[1]!.contribution = '1e2')],
+    ['a number contribution', (p: ProofView) => (p.applied[1]!.contribution = 100.13)],
+    ['a non-canonical unrounded', (p: ProofView) => (p.applied[1]!.unrounded = '100.1250')],
+    ['a number unrounded', (p: ProofView) => (p.applied[1]!.unrounded = 100.125)],
   ])('refuses a decimal output with %s', (_name, change) => {
     const content = staged();
     change(content);
@@ -237,7 +242,7 @@ describe('strata, decimals and rounding in a proof', () => {
       status: 'invalid',
       issues: ['decimal value not canonical: fine', 'unsigned'],
     });
-    expect(specError(() => sealProof(content)).message).toBe(
+    expect(specError(() => sealProof(unsalted(content))).message).toBe(
       'Cannot seal the proof: decimal value not canonical: fine',
     );
     expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
@@ -262,7 +267,7 @@ describe('strata, decimals and rounding in a proof', () => {
     const content = staged();
     content.outputs[1]!.value = 150.5;
     content.applied[0]!.contribution = 150.5;
-    expect(verifyProof(sealProof(content)).issues).toEqual(['unsigned']);
+    expect(verifyProof(sealProof(unsalted(content))).issues).toEqual(['unsigned']);
     content.applied[0]!.unrounded = '150.50';
     expect(verifyProof(handSealed(content)).issues).toEqual([
       'contribution does not match its output declaration: risk',

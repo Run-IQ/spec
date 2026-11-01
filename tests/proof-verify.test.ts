@@ -6,7 +6,7 @@ import {
   signProof,
   verifyProof,
 } from '../src/index.js';
-import type { RuleDefinitionInput, UnsignedProof } from '../src/index.js';
+import type { RuleDefinitionInput } from '../src/index.js';
 import {
   baseContent,
   RFC_SECRET,
@@ -20,6 +20,8 @@ import {
   unsigned,
 } from './proof-cases.js';
 import { handSealed, specError } from './helpers.js';
+import { unsalted } from './proof-cases.js';
+import type { ProofView } from '../src/proof/types.js';
 
 describe('verifyProof: invalid, with a readable issue', () => {
   it('a field changed after sealing', () => {
@@ -64,12 +66,12 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it.each([
     [
       'applied',
-      (p: UnsignedProof) => p.applied.push({ ...p.applied[0]!, version: 2, contribution: 0 }),
+      (p: ProofView) => p.applied.push({ ...p.applied[0]!, version: 2, contribution: 0 }),
       'r1@2',
     ],
     [
       'skipped',
-      (p: UnsignedProof) =>
+      (p: ProofView) =>
         p.skipped.push({
           ruleId: 'r3',
           version: 1,
@@ -82,7 +84,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
     ],
     [
       'exceptions',
-      (p: UnsignedProof) =>
+      (p: ProofView) =>
         p.exceptions.push({
           ruleId: 'r4',
           version: 1,
@@ -107,7 +109,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
       status: 'invalid',
       issues: [`cited rule not listed: ${key}`, 'signature invalid'],
     });
-    const error = specError(() => sealProof(content));
+    const error = specError(() => sealProof(unsalted(content)));
     expect(error.code).toBe('INVALID_PROOF');
     expect(error.message).toBe(`Cannot seal the proof: cited rule not listed: ${key}`);
   });
@@ -115,12 +117,12 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it.each([
     [
       'outputs contributors',
-      (p: UnsignedProof) => p.outputs[0]!.contributors.push('r7'),
+      (p: ProofView) => p.outputs[0]!.contributors.push('r7'),
       ['cited rule not listed: r7', 'contributors differ from applied steps: value'],
     ],
     [
       'exceptions affected',
-      (p: UnsignedProof) =>
+      (p: ProofView) =>
         p.exceptions.push({
           ruleId: 'r1',
           version: 1,
@@ -137,7 +139,9 @@ describe('verifyProof: invalid, with a readable issue', () => {
     cite(content);
     const proof = handSealed(content);
     expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [...issues, 'unsigned'] });
-    expect(specError(() => sealProof(content)).message).toBe(`Cannot seal the proof: ${issues[0]}`);
+    expect(specError(() => sealProof(unsalted(content))).message).toBe(
+      `Cannot seal the proof: ${issues[0]}`,
+    );
     expect(specError(() => signProof(proof, RFC_SECRET, 'executor-1')).message).toBe(
       `Cannot sign the proof: ${issues[0]}`,
     );
@@ -157,7 +161,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it('a digest recomputed after tampering, without a new signature', () => {
     const proof = signed();
     proof.requestId = 'req-x';
-    const tampered = { ...proof, digest: sealProof(proof).digest };
+    const tampered = { ...proof, digest: sealProof(unsalted(proof)).digest };
     expect(verifyProof(tampered, { trustedKeys: TRUSTED })).toEqual({
       status: 'invalid',
       issues: ['signature invalid'],
@@ -166,7 +170,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
 
   it('the signature of another digest', () => {
     const other = signProof(
-      sealProof({ ...unsigned(), requestId: 'req-2' }),
+      sealProof(unsalted({ ...unsigned(), requestId: 'req-2' })),
       RFC_SECRET,
       'executor-1',
     );
@@ -252,7 +256,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
       checksum: computeRuleChecksum(definitions[i]!),
       priority: ruleA.priority,
     }));
-    const proof = sealProof({ ...content, rules } as unknown as UnsignedProof);
+    const proof = sealProof(unsalted({ ...content, rules } as unknown as ProofView));
     expect(verifyProof(proof, { rules: definitions })).toEqual({
       status: 'consistent',
       issues: ['unsigned'],

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { canonicalize, sealProof, sha256Hex, validateProof, verifyProof } from '../src/index.js';
+import { sealProof, validateProof, verifyProof } from '../src/index.js';
 import type { JsonValue, UnsignedProof } from '../src/index.js';
 import { specError } from './helpers.js';
 import { unsaltedSalt } from './proof-cases.js';
+import { unsalted } from './proof-cases.js';
+import { treeDigestOf } from './helpers.js';
 
 type Entry = Record<string, unknown>;
 
@@ -100,10 +102,10 @@ function isPair(value: unknown[]): value is [JsonValue, JsonValue] {
 /** What verifyProof finds in the proof of `c`; sealProof refuses with the first, or seals. */
 function problems(c: Case): string[] {
   const content = proofOf(c);
-  const proof = { ...content, digest: sha256Hex(canonicalize(content)) };
+  const proof = { ...content, digest: treeDigestOf(content) };
   expect(validateProof(proof).issues).toEqual([]);
   const found = verifyProof(proof).issues.filter((issue) => issue !== 'unsigned');
-  const seal = (): unknown => sealProof(content as unknown as UnsignedProof);
+  const seal = (): unknown => sealProof(unsalted(content as unknown as UnsignedProof));
   const [first] = found;
   if (first === undefined) expect(seal).not.toThrow();
   else expect(specError(seal).message).toBe(`Cannot seal the proof: ${first}`);
@@ -389,7 +391,7 @@ describe('each strategy, its value computed from its contributions', () => {
     const content = proofOf(c);
     const outputs = content.outputs as Entry[];
     outputs[0] = { ...outputs[0], contributors: ['r0'] };
-    const proof = { ...content, digest: sha256Hex(canonicalize(content)) };
+    const proof = { ...content, digest: treeDigestOf(content) };
     expect(verifyProof(proof).issues).toEqual([
       'contributors differ from applied steps: value',
       'unsigned',

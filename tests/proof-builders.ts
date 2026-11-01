@@ -4,17 +4,13 @@
  * producer would seal it (`problems`, `withSection`, `withEntry`).
  */
 import { expect } from 'vitest';
-import {
-  canonicalize,
-  PROOF_FORMAT,
-  sealProof,
-  sha256Hex,
-  validateProof,
-  verifyProof,
-} from '../src/index.js';
+import { PROOF_FORMAT, sealProof, validateProof, verifyProof } from '../src/index.js';
 import type { JsonValue, ProofOutput, ProofStep, UnsignedProof } from '../src/index.js';
+import type { ProofView } from '../src/proof/types.js';
 import { specError } from './helpers.js';
 import { baseContent, entries, salted, unsaltedSalt } from './proof-cases.js';
+import { unsalted } from './proof-cases.js';
+import { treeDigestOf } from './helpers.js';
 
 const hex = (c: string): string => c.repeat(64);
 
@@ -26,11 +22,11 @@ export type Entry = Record<string, unknown>;
  * signature; `sealProof` refuses it with the first one, or seals it when there is none.
  */
 export function problems(content: Content): string[] {
-  const proof = { ...content, digest: sha256Hex(canonicalize(content)) };
+  const proof = { ...content, digest: treeDigestOf(content) };
   expect(validateProof(proof).issues).toEqual([]);
   const found = verifyProof(proof).issues.filter((issue) => issue !== 'unsigned');
   // The cast lets a hand-built value reach sealProof, which checks it.
-  const seal = (): unknown => sealProof(content as unknown as UnsignedProof);
+  const seal = (): unknown => sealProof(unsalted(content as unknown as UnsignedProof));
   const [first] = found;
   if (first === undefined) expect(seal).not.toThrow();
   else expect(specError(seal).message).toBe(`Cannot seal the proof: ${first}`);
@@ -69,7 +65,7 @@ export function outputProof(
   output: OutputPart,
   contributions: readonly JsonValue[] = [],
   unrounded?: JsonValue,
-): UnsignedProof {
+): ProofView {
   const ids = contributions.map((_, i) => `r${i}`);
   const applied = contributions.map((contribution, i): ProofStep => ({
     ruleId: `r${i}`,
@@ -129,7 +125,7 @@ const pad = (i: number): string => String(i).padStart(7, '0');
  * `s<i>` (inhibited by `x`), and of one output `per` element `/e` with `n` items, each fed by
  * the rule `k` at its subject; `n` facts read. The lists are sorted, as the format requires.
  */
-export function wideProof(n: number, type: 'number' | 'decimal'): UnsignedProof {
+export function wideProof(n: number, type: 'number' | 'decimal'): ProofView {
   const value = type === 'decimal' ? '1.5' : 1.5;
   const proof = outputProof({ type: 'number', combine: 'sum', value: 0 });
   const salt = unsaltedSalt('rules', 0);
@@ -192,7 +188,7 @@ export function wideProof(n: number, type: 'number' | 'decimal'): UnsignedProof 
       output: 'per',
       salt,
     })),
-  ] as UnsignedProof['applied'];
+  ] as ProofView['applied'];
   proof.skipped = indices.map((i) => ({
     ruleId: `s${pad(i)}`,
     version: 1,

@@ -1,10 +1,11 @@
 import { describe, expect, it } from 'vitest';
 import { normalizeRuleDefinition } from '../src/index.js';
-import type { RuleDefinition, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
+import type { RuleDefinition, RuleDefinitionInput } from '../src/index.js';
 import { carrierRuleFindings } from '../src/proof/carrier-rules.js';
 import { contextOf } from '../src/proof/consistency.js';
 import { outputProof } from './proof-builders.js';
 import { ruleA, unsaltedSalt } from './proof-cases.js';
+import type { ProofView } from '../src/proof/types.js';
 
 // The targets of carriers pending without firing, each judged against exactly the carriers its
 // definition says select it, whether their instances are asked one carrier at a time or merged.
@@ -40,7 +41,7 @@ const definition = (id: string, extra: Partial<RuleDefinitionInput>): RuleDefini
  * /e/2, V at /e/3, each also at `far` subjects under /z, out of every step's scope.
  */
 function found(far: number): string[] {
-  const proof: UnsignedProof = outputProof({ type: 'number', combine: 'sum', value: 0 });
+  const proof: ProofView = outputProof({ type: 'number', combine: 'sum', value: 0 });
   const subjects = ['/e/1', '/e/2', '/e/3', '/e/4'];
   proof.applied = [
     ...['A', 'B', 'C', 'D'].flatMap((id) => subjects.map((subject) => step(id, subject))),

@@ -14,7 +14,7 @@ import { imposedKey } from './output-values.js';
 import { inStandingOrder, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { Ties } from './ties.js';
-import type { ProofSelection, ProofStep } from './types.js';
+import type { ProofSection, ProofSelection, ProofStep } from './types.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
 export interface Target {
@@ -38,7 +38,18 @@ export interface Context {
   standings: Standings;
   /** The ties settled among exceptions that the proof shows (D-7, R15). */
   ties: Ties;
+  /**
+   * The sections whose redacted entries the checks cannot see (D-16): a check that a hidden
+   * entry could satisfy is not made while its section has one (`proofView`).
+   */
+  hidden: ReadonlySet<ProofSection>;
 }
+
+/** The sections whose entries the combination of a target follows from. */
+const COMBINED_SECTIONS: readonly ProofSection[] = ['rules', 'applied', 'exceptions'];
+
+/** The problem of a rule none of whose visible instances has rank 0 (`topOf`). */
+const NO_FIRST = 'no instance at rank 0: ';
 
 /** The strategies whose value is one contribution, named by `selected` (D-27). */
 export const SELECTING: ReadonlySet<string> = new Set(['max', 'min', 'highestPriority']);
@@ -264,6 +275,11 @@ function contributorStanding(target: Target, standings: Standings) {
  *
  * The contribution order is that of `contributors`, then that of `applied`. Contributions off
  * their declaration are reported by `offDeclarationValues`, and not combined.
+ *
+ * While `rules`, `applied` or `exceptions` has a redacted entry (`context.hidden`), the visible
+ * steps may be a part of the target's: only `steps beside a short circuit`, `contributors not in
+ * contribution order` and the ties among the visible instances (`topOf`, but `no instance at
+ * rank 0`) are checked.
  */
 export function combinationProblems(target: Target, context: Context): string[] {
   const { declaration } = target;
@@ -277,13 +293,22 @@ export function combinationProblems(target: Target, context: Context): string[] 
     declaration.combine === 'highestPriority' && carrier === undefined
       ? topOf(target.steps, context.standings, target.whole, cite)
       : undefined;
-  if (!contributorsMatch(target, top))
+  // A step, the short circuit that imposed one, or the standing of a rule may be redacted: what
+  // follows from all of them is not checked, what the visible ones contradict still is.
+  const partial = COMBINED_SECTIONS.some((section) => context.hidden.has(section));
+  if (!partial && !contributorsMatch(target, top)) {
     issues.push(`contributors differ from applied steps: ${cite()}`);
+  }
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {
     issues.push(`contributors not in contribution order: ${cite()}`);
   }
-  if (top !== undefined) append(issues, top.problems);
-  if (target.status === 'undetermined') return issues;
+  if (top !== undefined) {
+    append(
+      issues,
+      partial ? top.problems.filter((problem) => !problem.startsWith(NO_FIRST)) : top.problems,
+    );
+  }
+  if (target.status === 'undetermined' || partial) return issues;
   const fed =
     carrier !== undefined
       ? [carrier]
