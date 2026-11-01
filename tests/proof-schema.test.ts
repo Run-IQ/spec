@@ -1,7 +1,7 @@
 import { readFileSync } from 'node:fs';
 import Ajv2020 from 'ajv/dist/2020.js';
 import { describe, expect, it } from 'vitest';
-import { validateProof } from '../src/index.js';
+import { ERROR_CAUSES, validateProof } from '../src/index.js';
 import { entryWith, proofWith, SIGNATURE_VALUE } from './proof-cases.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-shape-cases.js';
 import { stringsOf } from './helpers.js';
@@ -27,6 +27,12 @@ function agree(texts: readonly unknown[], proofOf: (text: unknown) => unknown): 
 }
 
 describe('validateProof and the decision proof JSON schema agree', () => {
+  it('lists the ERROR causes spec exports, in its order', () => {
+    // The schema writes them as the alternation of the pattern an ERROR detail starts with.
+    const patterns = [...JSON.stringify(schema).matchAll(/"pattern":"\^\(\?:([A-Z_|]+)\):"/g)];
+    expect(patterns.map((match) => match[1]!.split('|'))).toEqual([[...ERROR_CAUSES]]);
+  });
+
   it('has at least 15 valid and 100 refused cases', () => {
     expect(VALID_PROOFS.length).toBeGreaterThanOrEqual(15);
     expect(REFUSED_PROOFS.length).toBeGreaterThanOrEqual(100);

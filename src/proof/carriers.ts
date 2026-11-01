@@ -9,9 +9,10 @@ import type { ProofPending, UnsignedProof } from './types.js';
 
 /**
  * The causes of a pending `ERROR` (D-8): its `detail` is `<CAUSE>: <message>`, its cause (the
- * text before the first `:`) exactly one of these. A new cause is a change of the format.
+ * text before the first `:`) exactly one of these. A new cause is a change of the format. The
+ * one list: core imports it, and `schema/decision-proof.schema.json` is generated from it.
  */
-export const ERROR_CAUSES: readonly string[] = [
+export const ERROR_CAUSES = Object.freeze([
   'DSL_ERROR',
   'TIMEOUT',
   'DSL_NOT_FOUND',
@@ -25,8 +26,12 @@ export const ERROR_CAUSES: readonly string[] = [
   'INVALID_ORDER_VALUE',
   'INVALID_GROUP_VALUE',
   'TZDATA_UNKNOWN',
-];
-const CAUSES: ReadonlySet<string> = new Set(ERROR_CAUSES);
+] as const);
+
+/** One cause of `ERROR_CAUSES`. */
+export type ErrorCause = (typeof ERROR_CAUSES)[number];
+
+const CAUSES: ReadonlySet<string> = new Set<string>(ERROR_CAUSES);
 
 /** The cause of an `ERROR` `detail`: the text before its first `:`, if any. */
 function causeOf(detail: string): string | undefined {
@@ -41,14 +46,14 @@ export function hasErrorCause(detail: string): boolean {
 }
 
 /** The causes of a pending `ERROR` after which a carrier fired: its condition held (R18). */
-const FIRING_CAUSES: ReadonlySet<string> = new Set(['INVALID_PARAMS', 'MODEL_ERROR']);
+const FIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>(['INVALID_PARAMS', 'MODEL_ERROR']);
 
 /**
  * The causes of a pending `ERROR` after which a carrier did not fire: its condition failed
  * (`DSL_ERROR`, `TIMEOUT`, `DSL_NOT_FOUND`) or was never reached (`CHECKSUM_MISMATCH`,
  * `INVALID_RULE`, `TEMPORAL_OVERLAP`; `NOT_A_COLLECTION`, its instances not formed).
  */
-const UNFIRING_CAUSES: ReadonlySet<string> = new Set([
+const UNFIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>([
   'DSL_ERROR',
   'TIMEOUT',
   'DSL_NOT_FOUND',

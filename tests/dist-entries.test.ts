@@ -47,6 +47,7 @@ type Entry = {
   contributionMatchesDeclaration: (v: unknown, d: object) => boolean;
   isCanonicalDecimal: (text: string) => boolean;
   PROOF_FORMATS: readonly string[];
+  ERROR_CAUSES: readonly string[];
   ENGINE_VARIABLES: readonly string[];
   isReservedName: (name: string) => boolean;
   parsePointer: (pointer: string) => string[];
@@ -139,6 +140,23 @@ async function esm(file: string): Promise<Entry> {
   return (await import(/* @vite-ignore */ pathToFileURL(builtFile(file)).href)) as Entry;
 }
 const cjs = (file: string): Entry => createRequire(import.meta.url)(builtFile(file)) as Entry;
+
+/** The causes of a pending ERROR (D-8), as the plan lists them. */
+const CAUSES = [
+  'DSL_ERROR',
+  'TIMEOUT',
+  'DSL_NOT_FOUND',
+  'INVALID_PARAMS',
+  'CHECKSUM_MISMATCH',
+  'INVALID_RULE',
+  'MODEL_ERROR',
+  'OUTPUT_MISMATCH',
+  'NOT_A_COLLECTION',
+  'TEMPORAL_OVERLAP',
+  'INVALID_ORDER_VALUE',
+  'INVALID_GROUP_VALUE',
+  'TZDATA_UNKNOWN',
+];
 
 describe('built entries: one SpecError identity', () => {
   it('the two ESM entries bundle distinct classes that recognise each other', async () => {
@@ -279,6 +297,8 @@ describe('built entries: one SpecError identity', () => {
     ];
     for (const entry of entries) {
       expect(entry.PROOF_FORMATS).toEqual(['run-iq.proof/1']);
+      expect(entry.ERROR_CAUSES).toEqual(CAUSES);
+      expect(Object.isFrozen(entry.ERROR_CAUSES)).toBe(true);
       expect(entry.ENGINE_VARIABLES).toHaveLength(14);
       expect(entry.isReservedName('$x')).toBe(true);
       expect(entry.parsePointer('/a~1b/~0c')).toEqual(['a/b', '~c']);

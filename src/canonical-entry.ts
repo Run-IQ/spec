@@ -91,6 +91,8 @@ export { compareOutputValues } from './decision/compare.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT, PROOF_SECTIONS } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';
+export { ERROR_CAUSES } from './proof/carriers.js';
+export type { ErrorCause } from './proof/carriers.js';
 export type {
   DecisionProof,
   ProofBounds,

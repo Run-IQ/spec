@@ -7,9 +7,9 @@
  * statuses (`OutputStatus`, `joinStatus`) and exact decimals (`isCanonicalDecimal`,
  * `toCanonicalDecimal`); the decision proof format
  * (`sealProof`, `signProof`, `verifyProof`, and `validateProof`, which agrees with
- * `schema/decision-proof.schema.json`; `PROOF_FORMATS`); JSON pointers (`parsePointer`,
- * `comparePointers`), subjects (`isSubject`, `subjectContains`) and the reserved `$` names
- * (`ENGINE_VARIABLES`, `isReservedName`); civil time (`CivilDate`, `Instant`,
+ * `schema/decision-proof.schema.json`; `PROOF_FORMATS`, `ERROR_CAUSES`); JSON pointers
+ * (`parsePointer`, `comparePointers`), subjects (`isSubject`, `subjectContains`) and the
+ * reserved `$` names (`ENGINE_VARIABLES`, `isReservedName`); civil time (`CivilDate`, `Instant`,
  * `toReferenceDate`, `isTimeZone`, `CivilCalendar`), rule windows (`windowContains`) and
  * coexisting versions (`findOverlappingVersions`); structured dimensions (`DimensionSpec`,
  * `matchDimension`) and dated referentials (`Referential`, `validateReferential`, which agrees
@@ -120,6 +120,8 @@ export { compareOutputValues } from './decision/compare.js';
 export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
 export { PROOF_FORMAT, PROOF_SECTIONS } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';
+export { ERROR_CAUSES } from './proof/carriers.js';
+export type { ErrorCause } from './proof/carriers.js';
 export type {
   DecisionProof,
   ProofBounds,
