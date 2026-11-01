@@ -228,15 +228,9 @@ export function tiesOf(
   // The exceptions of a carrier that fired may be redacted.
   for (const entry of p.pending) {
     if (full(problems)) break;
-    if (
-      entry.fired === true &&
-      !recorded.has(instanceKey(entry)) &&
-      !isLifted(hidden, LIFTS.pendingCarrierFired)
-    ) {
-      problems.push(
-        `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`,
-      );
-    }
+    if (entry.fired !== true || recorded.has(instanceKey(entry))) continue;
+    const message = `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`;
+    if (!isLifted(hidden, LIFTS.pendingCarrierFired, { message })) problems.push(message);
   }
   pendingCarrierProblems(p, waiting, problems, () => isLifted(hidden, LIFTS.pendingCarrierChain));
   return {

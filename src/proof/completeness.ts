@@ -96,8 +96,9 @@ export function completenessProblems(
   }
   // An `all` no rule reached is reported by `combinationProblems`.
   const pending = feed.pending.length > 0;
-  if (!byTrace || !pending || isLifted(hidden, LIFTS.settledPending)) return [];
-  return [`settled output with pending rules: ${target.cite()}`];
+  if (!byTrace || !pending) return [];
+  const message = `settled output with pending rules: ${target.cite()}`;
+  return isLifted(hidden, LIFTS.settledPending, { message }) ? [] : [message];
 }
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
@@ -189,8 +190,9 @@ export function causeProblems(
   if (tie > rank) issues.push(`output status weaker than its tie: ${target.cite()}`);
   const settled = target.status !== 'undetermined';
   const stronger = settled && rank > Math.max(0, steps, feed.candidates, tie);
-  if (stronger && !isLifted(hidden, LIFTS.causes)) {
-    issues.push(`output status stronger than its causes: ${target.cite()}`);
+  const message = `output status stronger than its causes: ${target.cite()}`;
+  if (stronger && !isLifted(hidden, LIFTS.causes, { message })) {
+    issues.push(message);
   }
   return issues;
 }

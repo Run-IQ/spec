@@ -524,7 +524,6 @@ export const SECTION_ENTRY: Readonly<Record<ProofSection, Check>> = entryChecks(
 
 const UNSALTED_ENTRY = entryChecks(unsalted);
 
-/** The fields of the header (D-16): every field but the ten sections, `digest`, `signature`. */
 /** `counts`: the number of entries of each section, each a safe integer from 0. */
 const COUNTS: Shape = {
   summary: `{ ${PROOF_SECTIONS.join(', ')} }`,
@@ -547,6 +546,7 @@ const UNSALTED_HEADER_FIELDS: Readonly<Record<string, Check>> = {
   supersedes: objectOf(SUPERSEDES),
 };
 
+/** The fields of the header (D-16): every field but the ten sections, `digest`, `signature`. */
 const HEADER_FIELDS: Readonly<Record<string, Check>> = {
   ...UNSALTED_HEADER_FIELDS,
   counts: objectOf(COUNTS),

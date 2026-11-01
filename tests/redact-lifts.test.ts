@@ -630,3 +630,413 @@ describe('each lift, both ways (review of 9K1, I3)', () => {
     expect(result.lifted).toEqual([]);
   });
 });
+
+/** `content` with `n` made-up markers in `section`, sealed by hand as salted. */
+function forgedMany(content: Content, section: ProofSection, n: number): DecisionProof {
+  return forged(content, ...Array.from({ length: n }, () => section));
+}
+
+/**
+ * The bounded checks (review of 9K1, N1): one redacted entry explains at most one problem. Each
+ * case has two problems: one marker lifts neither, both are reported; two markers lift both.
+ */
+/** A second output `other` of the trace, settled unless `extra` says otherwise. */
+const other = (extra: Entry): Entry => ({
+  name: 'other',
+  type: 'number',
+  combine: 'sum',
+  status: 'determined',
+  contributors: [],
+  pending: [],
+  ...extra,
+});
+
+/** A provisional per output `name` over `per`. */
+const perOutput = (name: string, per: string): Entry => ({
+  name,
+  type: 'decimal',
+  combine: 'sum',
+  per,
+  status: 'provisional',
+  contributors: [],
+  pending: [],
+});
+
+/** Carriers Y and Y2 whose definitions inhibit Z, with no exception recorded. */
+const CARRIERS = [
+  rule('Y', { exceptions: [{ kind: 'inhibit', targets: { ids: ['Z'] } }] }),
+  rule('Y2', { exceptions: [{ kind: 'inhibit', targets: { ids: ['Z'] } }] }),
+];
+
+const BOUNDED: {
+  check: string;
+  content: () => Content;
+  sections: ProofSection[];
+  messages: string[];
+  options?: object;
+}[] = [
+  {
+    check: 'every listed rule decided',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'] },
+        rules: [{ id: 'A' }, { id: 'B' }, { id: 'C' }],
+        steps: [{ ruleId: 'A', contribution: 1 }],
+      }),
+    sections: ['applied', 'skipped', 'pending', 'exceptions'],
+    messages: ['rule not decided: B@1', 'rule not decided: C@1'],
+  },
+  {
+    check: 'cited rules listed',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 1, contributors: ['A', 'W', 'Z'] },
+        rules: [{ id: 'A' }],
+        steps: [{ ruleId: 'A', contribution: 1 }],
+      }),
+    sections: ['rules'],
+    messages: ['cited rule not listed: W', 'cited rule not listed: Z'],
+  },
+  {
+    check: 'cited outputs listed',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 0 },
+        rules: [{ id: 'A' }],
+        skipped: [
+          { ruleId: 'A', subject: '/x', output: 'ghost', reason: 'CONDITION_FALSE' },
+          { ruleId: 'A', subject: '/y', output: 'spirit', reason: 'CONDITION_FALSE' },
+        ],
+      }),
+    sections: ['outputs'],
+    messages: ['cited output not listed: ghost', 'cited output not listed: spirit'],
+  },
+  {
+    check: 'stratum outputs listed',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 0 },
+        rules: [],
+        strata: [['ghost', 'spirit', 'value']],
+      }),
+    sections: ['outputs'],
+    messages: ['stratum output unknown: ghost', 'stratum output unknown: spirit'],
+  },
+  {
+    check: 'requested outputs listed',
+    content: () => ({
+      ...traceProof({ output: { type: 'number', combine: 'sum', value: 0 }, rules: [] }),
+      requested: ['ghost', 'spirit', 'value'],
+    }),
+    sections: ['outputs'],
+    messages: ['requested output absent: ghost', 'requested output absent: spirit'],
+  },
+  {
+    check: 'output value from its contributions',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 999, contributors: ['A'] },
+        outputs: [
+          {
+            name: 'other',
+            type: 'number',
+            combine: 'sum',
+            status: 'determined',
+            value: 999,
+            contributors: ['B'],
+            pending: [],
+          },
+        ],
+        rules: [{ id: 'A' }, { id: 'B' }],
+        steps: [
+          { ruleId: 'A', contribution: 1 },
+          { ruleId: 'B', contribution: 1, output: 'other' },
+        ],
+      }),
+    sections: ['applied'],
+    messages: [
+      'output value does not follow from its contributions: other',
+      'output value does not follow from its contributions: value',
+    ],
+  },
+  {
+    check: 'pending carrier fired with its exceptions',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', status: 'undetermined', pending: ['X', 'Y'] },
+        rules: [{ id: 'X' }, { id: 'Y' }],
+        pending: ['X', 'Y'].map((ruleId) => ({
+          ruleId,
+          output: 'value',
+          reason: 'UNDETERMINED',
+          detail: 'x',
+          fired: true,
+        })),
+      }),
+    sections: ['exceptions'],
+    messages: [
+      'pending carrier fired without its exceptions: X@1',
+      'pending carrier fired without its exceptions: Y@1',
+    ],
+  },
+  {
+    check: 'settled output without pending rules',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 1, contributors: ['A'], pending: ['B'] },
+        outputs: [other({ value: 1, contributors: ['C'], pending: ['D'] })],
+        rules: [{ id: 'A' }, { id: 'B' }, { id: 'C' }, { id: 'D' }],
+        steps: [
+          { ruleId: 'A', contribution: 1 },
+          { ruleId: 'C', contribution: 1, output: 'other' },
+        ],
+        pending: [
+          { ruleId: 'B', output: 'value', reason: 'UNDETERMINED', detail: 'x' },
+          { ruleId: 'D', output: 'other', reason: 'UNDETERMINED', detail: 'x' },
+        ],
+      }),
+    sections: ['applied'],
+    messages: [
+      'settled output with pending rules: other',
+      'settled output with pending rules: value',
+    ],
+  },
+  {
+    check: 'output status no stronger than its causes',
+    content: () =>
+      traceProof({
+        output: {
+          type: 'number',
+          combine: 'sum',
+          value: 1,
+          contributors: ['A'],
+          status: 'conflict',
+        },
+        outputs: [other({ value: 1, contributors: ['B'], status: 'conflict' })],
+        rules: [{ id: 'A' }, { id: 'B' }],
+        steps: [
+          { ruleId: 'A', contribution: 1 },
+          { ruleId: 'B', contribution: 1, output: 'other' },
+        ],
+      }),
+    sections: ['applied'],
+    messages: [
+      'output status stronger than its causes: other',
+      'output status stronger than its causes: value',
+    ],
+  },
+  {
+    check: 'form of a count',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'count', value: 1, contributors: ['A'] },
+        outputs: [other({ combine: 'count', value: 1, contributors: ['B'] })],
+        rules: [{ id: 'A' }, { id: 'B' }],
+        steps: [
+          { ruleId: 'A', contribution: 1 },
+          { ruleId: 'B', contribution: 1, output: 'other' },
+        ],
+      }),
+    sections: ['exceptions'],
+    messages: [
+      'contribution does not match its output declaration: other',
+      'contribution does not match its output declaration: value',
+    ],
+  },
+  {
+    check: 'per output against its items',
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 0 },
+        outputs: [perOutput('kids', '/e'), perOutput('pets', '/p')],
+        rules: [{ id: 'A' }, { id: 'B' }],
+        steps: [
+          { ruleId: 'A', contribution: '1', output: 'kids', subject: '/e/@1' },
+          { ruleId: 'B', contribution: '1', output: 'pets', subject: '/p/@1' },
+        ],
+        items: [
+          {
+            output: 'kids',
+            subject: '/e/@1',
+            status: 'determined',
+            value: '1',
+            contributors: ['A'],
+            pending: [],
+          },
+          {
+            output: 'pets',
+            subject: '/p/@1',
+            status: 'determined',
+            value: '1',
+            contributors: ['B'],
+            pending: [],
+          },
+        ],
+      }),
+    sections: ['items'],
+    messages: [
+      'per output status differs from its items: kids',
+      'per output status differs from its items: pets',
+    ],
+  },
+  {
+    check: 'short circuit with its carrier applied',
+    // X and Y, pending on `third` though they fired, short-circuit `value` and `other`.
+    content: () =>
+      traceProof({
+        output: { type: 'number', combine: 'sum', value: 0 },
+        outputs: [
+          other({ value: 0 }),
+          other({ name: 'third', status: 'undetermined', pending: ['X', 'Y'] }),
+        ],
+        rules: [{ id: 'A' }, { id: 'B' }, { id: 'X', priority: 5 }, { id: 'Y', priority: 5 }],
+        skipped: [
+          { ruleId: 'A', output: 'value', reason: 'SHORT_CIRCUITED' },
+          { ruleId: 'B', output: 'other', reason: 'SHORT_CIRCUITED' },
+        ],
+        pending: [
+          { ruleId: 'X', output: 'third', reason: 'UNDETERMINED', detail: 'x', fired: true },
+          { ruleId: 'Y', output: 'third', reason: 'UNDETERMINED', detail: 'x', fired: true },
+        ],
+        exceptions: [
+          { ruleId: 'X', kind: 'shortCircuit', output: 'value', affected: [{ ruleId: 'A' }] },
+          { ruleId: 'Y', kind: 'shortCircuit', output: 'other', affected: [{ ruleId: 'B' }] },
+        ],
+      }),
+    sections: ['applied'],
+    messages: [
+      'short circuit without its carrier applied: X@1',
+      'short circuit without its carrier applied: Y@1',
+    ],
+  },
+  {
+    // Found with the rules given: `verifyProof` reports what overran past its own checks.
+    check: 'carrier exception records against definitions',
+    content: () =>
+      withDefinitions(
+        {
+          output: { type: 'number', combine: 'sum', value: 0, contributors: ['Y', 'Y2'] },
+          rules: [{ id: 'Y' }, { id: 'Y2' }],
+          steps: [
+            { ruleId: 'Y', contribution: 0 },
+            { ruleId: 'Y2', contribution: 0 },
+          ],
+          exceptions: [],
+        },
+        CARRIERS,
+      ),
+    sections: ['skipped', 'exceptions'],
+    messages: [
+      'carrier exceptions differ from its definition: Y@1',
+      'carrier exceptions differ from its definition: Y2@1',
+    ],
+    options: { rules: CARRIERS },
+  },
+];
+
+describe('a bounded check lifts no more problems than entries redacted (review of 9K1, N1)', () => {
+  for (const { check, content, sections, messages, options } of BOUNDED) {
+    it.each(sections)(`${check}: markers of %s`, (section) => {
+      const plain = verifyProof(handSealed({ ...content(), inputSalted: true }) as never, options);
+      for (const message of messages) expect(plain.issues).toContain(message);
+      // One marker, two problems: each reported once, the check not lifted.
+      const one = verifyProof(forgedMany(content(), section, 1), options);
+      expect(one.status).toBe('invalid');
+      const reported = one.issues.filter((issue) => messages.includes(issue));
+      expect([...reported].sort()).toEqual([...messages].sort());
+      expect(one.lifted?.map((lift) => lift.check)).not.toContain(check);
+      // Two markers: both lifted.
+      const two = verifyProof(forgedMany(content(), section, 2), options);
+      for (const message of messages) expect(two.issues).not.toContain(message);
+      expect(two.lifted?.map((lift) => lift.check)).toContain(check);
+    });
+    if (sections.length < 2) continue;
+    it(`${check}: the markers of its sections add up`, () => {
+      const proof = forged(content(), sections[0]!, sections[1]!);
+      const result = verifyProof(proof, options);
+      for (const message of messages) expect(result.issues).not.toContain(message);
+      expect(result.lifted?.map((lift) => lift.check)).toContain(check);
+    });
+  }
+
+  it('the problems of one target are one: one step marker lifts them all', () => {
+    const content = traceProof({
+      output: { type: 'number', combine: 'sum', value: 999, contributors: ['A', 'B'] },
+      rules: [{ id: 'A' }, { id: 'B' }],
+      steps: [{ ruleId: 'A', contribution: 1 }],
+      skipped: [{ ruleId: 'B', output: 'value', reason: 'CONDITION_FALSE' }],
+    });
+    const plain = verifyProof(handSealed({ ...content, inputSalted: true }) as never).issues;
+    const messages = [
+      'contributors differ from applied steps: value',
+      'output value does not follow from its contributions: value',
+    ];
+    for (const message of messages) expect(plain).toContain(message);
+    const one = verifyProof(forged(content, 'applied'));
+    for (const message of messages) expect(one.issues).not.toContain(message);
+    expect(one.lifted?.map((lift) => lift.check)).toContain('output value from its contributions');
+  });
+
+  it('a rule cited with and without its version is one rule: one marker lifts both', () => {
+    const content = traceProof({
+      output: { type: 'number', combine: 'sum', value: 1, contributors: ['Z'] },
+      rules: [],
+      steps: [{ ruleId: 'Z', contribution: 1 }],
+    });
+    const plain = verifyProof(handSealed({ ...content, inputSalted: true }) as never).issues;
+    expect(plain).toContain('cited rule not listed: Z@1');
+    expect(plain).toContain('cited rule not listed: Z');
+    const one = verifyProof(forged(content, 'rules'));
+    expect(one.issues.filter((issue) => issue.startsWith('cited rule not listed'))).toEqual([]);
+    expect(one.lifted?.map((lift) => lift.check)).toContain('cited rules listed');
+  });
+
+  it('signProof refuses a proof whose bounded check overran', () => {
+    const proof = forgedMany(BOUNDED[0]!.content(), 'pending', 1);
+    expect(() => signProof(proof, RFC_SECRET, 'executor-1')).toThrow(
+      'Cannot sign the proof: rule not decided: B@1',
+    );
+  });
+
+  it('an unbounded check: a hidden rule may explain the value of every output it reaches', () => {
+    // A highestPriority value follows from the standings, the priorities of `rules` (N3).
+    const content = traceProof({
+      output: {
+        type: 'number',
+        combine: 'highestPriority',
+        value: 2,
+        contributors: ['A'],
+        selected: { ruleId: 'A' },
+      },
+      rules: [
+        { id: 'A', priority: 7 },
+        { id: 'B', priority: 1 },
+      ],
+      steps: [
+        { ruleId: 'A', contribution: 2 },
+        { ruleId: 'B', contribution: 1 },
+      ],
+    });
+    const proof = sealProof({ ...unsalted(content), inputSalted: true } as UnsaltedProof, SEED);
+    expect(verifyProof(proof).issues).toEqual(['unsigned']);
+    const redacted = verifyProof(redactProof(proof, (s, i) => s === 'rules' && i === 0));
+    expect(redacted.status).toBe('consistent-redacted');
+    expect(redacted.lifted).toContainEqual({
+      check: 'output value from its contributions',
+      redacted: ['rules'],
+    });
+  });
+});
+
+describe('every section is counted (review of 9K1, N2)', () => {
+  it.each([...PROOF_SECTIONS])('%s: one entry more than its count is refused', (section) => {
+    const proof = sealProof({ ...unsalted(unsigned()), inputSalted: true } as UnsaltedProof, SEED);
+    const record = proof as unknown as Record<string, unknown[]>;
+    const length = record[section]!.length;
+    const grown = { ...proof, [section]: [...record[section]!, FAKE(1)] };
+    const entries = (n: number): string => `${n} ${n === 1 ? 'entry' : 'entries'}`;
+    const message = `counts.${section} is ${length}, ${section} has ${entries(length + 1)}`;
+    expect(validateProof(grown).issues).toEqual([{ path: `counts.${section}`, message }]);
+    expect(verifyProof(grown)).toEqual({ status: 'invalid', issues: [message] });
+  });
+});

@@ -62,7 +62,7 @@ export function proofView(p: UnsignedProof): { view: ProofView; redactions: Reda
   }
   return {
     view: view as unknown as ProofView,
-    redactions: { count, hidden: hiddenSections(hidden), bySection, positions },
+    redactions: { count, hidden: hiddenSections(bySection), bySection, positions },
   };
 }
 

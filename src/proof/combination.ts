@@ -293,22 +293,24 @@ export function combinationProblems(target: Target, context: Context): string[] 
       : undefined;
   // A step, the short circuit that imposed one, or the standing of a rule may be redacted: what
   // follows from all of them is not checked, what the visible ones contradict still is.
-  const lifted = (): boolean => isLifted(context.hidden, LIFTS.outputValue);
-  if (!contributorsMatch(target, top) && !lifted()) {
-    issues.push(`contributors differ from applied steps: ${cite()}`);
-  }
+  // One step feeds one target: the unit of the problems, bounded by the steps redacted.
+  const lifted = (message: string): boolean =>
+    isLifted(context.hidden, LIFTS.outputValue, { message, unit: cite() });
+  const differ = `contributors differ from applied steps: ${cite()}`;
+  if (!contributorsMatch(target, top) && !lifted(differ)) issues.push(differ);
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {
     issues.push(`contributors not in contribution order: ${cite()}`);
   }
   if (top !== undefined) {
     append(
       issues,
-      top.problems.filter((problem) => !problem.startsWith(NO_FIRST) || !lifted()),
+      top.problems.filter((problem) => !problem.startsWith(NO_FIRST) || !lifted(problem)),
     );
   }
   if (target.status === 'undetermined') return issues;
   const following = valueProblems(target, context, carrier, top);
-  return following.length > 0 && lifted() ? issues : [...issues, ...following];
+  const hidden = following.length > 0 && following.map(lifted).every(Boolean);
+  return hidden ? issues : [...issues, ...following];
 }
 
 /**

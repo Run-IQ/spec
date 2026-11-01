@@ -408,8 +408,9 @@ function statusProblems(
   for (const [name, output] of listed) {
     if (output.per === undefined) continue;
     const differs = rankOf(output.status) !== (strongest.get(name) ?? 0);
-    if (differs && !isLifted(hidden, LIFTS.perOutputItems)) {
-      issues.push(`per output status differs from its items: ${citeName(name)}`);
+    const message = `per output status differs from its items: ${citeName(name)}`;
+    if (differs && !isLifted(hidden, LIFTS.perOutputItems, { message })) {
+      issues.push(message);
     }
   }
   for (const { target, feed } of targets) append(issues, causeProblems(target, feed, hidden));

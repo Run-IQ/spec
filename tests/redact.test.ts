@@ -69,7 +69,6 @@ describe('redactProof: an entry becomes the hash of its leaf, the digest stays (
       status: 'authentic-redacted',
       issues: [
         'redacted entries: 2',
-        'cited output redacted: value',
         'check lifted: cited outputs listed (outputs redacted)',
         'check lifted: stratum outputs listed (outputs redacted)',
         'check lifted: every listed rule decided (applied redacted)',
@@ -263,16 +262,12 @@ describe('checks on the entries left', () => {
     });
   });
 
-  it('a citation of a redacted rule is a notice, not a problem', () => {
+  it('a citation of a redacted rule lifts the check, not a problem', () => {
     const proof = signed(salty(unsigned()));
     const redacted = hiding(proof, ['rules', 1]);
     expect(verifyProof(redacted, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic-redacted',
-      issues: [
-        'redacted entries: 1',
-        'cited rule redacted: r2@2',
-        'check lifted: cited rules listed (rules redacted)',
-      ],
+      issues: ['redacted entries: 1', 'check lifted: cited rules listed (rules redacted)'],
       redacted: 1,
       lifted: [{ check: 'cited rules listed', redacted: ['rules'] }],
     });
@@ -290,7 +285,9 @@ describe('checks on the entries left', () => {
     const result = found(redacted);
     expect(result.invalid).toBe(true);
     expect(result.issues).toContain('cited rule not listed: Z');
-    expect(result.issues).not.toContain('cited rule redacted: Z');
+    expect(result.issues.some((issue) => issue.startsWith('check lifted: cited rules'))).toBe(
+      false,
+    );
   });
 
   it('hiding one item of a per output leaves the other items of that output visible (I19)', () => {
@@ -479,7 +476,6 @@ describe('verifyProof(p, { rules }) on a redacted proof', () => {
       status: 'consistent-redacted',
       issues: [
         'redacted entries: 1',
-        'cited rule redacted: r2@2',
         'rules check incomplete: 1 redacted rule',
         'check lifted: cited rules listed (rules redacted)',
         'check lifted: rules given against the proof (rules redacted)',

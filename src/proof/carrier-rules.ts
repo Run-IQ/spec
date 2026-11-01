@@ -166,8 +166,9 @@ export function carrierRuleFindings(
   // The exception records of a carrier, or its exclusion, may be redacted.
   const records: string[] = [];
   recordedExceptions(p, definitions, context.ties.losers, (message) => records.push(message));
-  if (records.length > 0 && isLifted(context.hidden, LIFTS.carrierRecords)) return;
-  for (const message of records) invalid(message);
+  for (const message of records) {
+    if (!isLifted(context.hidden, LIFTS.carrierRecords, { message })) invalid(message);
+  }
 }
 
 /**

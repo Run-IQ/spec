@@ -43,7 +43,8 @@ export function undecidedRules(
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
     if (!decided.has(key)) issues.push(`rule not decided: ${citeName(key)}`);
   }
-  return issues.length > 0 && isLifted(hidden, LIFTS.everyRuleDecided) ? [] : issues;
+  // One entry decides one rule: the unit of the problems, bounded by the entries redacted.
+  return issues.filter((message) => !isLifted(hidden, LIFTS.everyRuleDecided, { message }));
 }
 
 /**
@@ -214,7 +215,9 @@ export function exceptionProblems(
   };
   const firedUnknown = (): boolean => isLifted(hidden, LIFTS.firedExceptions);
   for (const problem of ties.problems) push(problem);
-  carrierProblems(p, imposed, ties, push, () => isLifted(hidden, LIFTS.shortCircuitCarrier));
+  carrierProblems(p, imposed, ties, push, (message) =>
+    isLifted(hidden, LIFTS.shortCircuitCarrier, { message }),
+  );
   const tries = new Map<string, Node>();
   p.exceptions.forEach((exception, index) => {
     if (ties.discarded.has(index)) return;
@@ -326,7 +329,7 @@ function carrierProblems(
   imposed: ReadonlySet<string>,
   ties: Ties,
   push: (issue: string) => void,
-  stepsHidden: () => boolean,
+  stepsHidden: (message: string) => boolean,
 ): void {
   const steps = new Map<string, ProofStep>();
   for (const step of p.applied) {
@@ -354,8 +357,9 @@ function carrierProblems(
       return;
     }
     // A carrier whose claim on the output another won affected nothing (R18).
-    if ((exception.affected.length > 0 || !won.has(output)) && !stepsHidden()) {
-      push(`short circuit without its carrier applied: ${cited}`);
+    const missing = `short circuit without its carrier applied: ${cited}`;
+    if ((exception.affected.length > 0 || !won.has(output)) && !stepsHidden(missing)) {
+      push(missing);
     }
   });
 }

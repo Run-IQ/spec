@@ -8,8 +8,8 @@ import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
 import type { Context } from './combination.js';
-import { contextOf, inconsistencies, redactionNotices } from './consistency.js';
-import { isLifted, liftedChecks, LIFTS } from './lifts.js';
+import { contextOf, inconsistencies } from './consistency.js';
+import { isLifted, liftedChecks, LIFTS, overrunProblems } from './lifts.js';
 import { instanceKey } from './output-values.js';
 import { proofView } from './redact.js';
 import type { Redactions } from './redact.js';
@@ -129,11 +129,10 @@ function verify(p: unknown, options: unknown): ProofVerification {
     if (!proof.inputSalted) {
       findings.push({ message: 'redacted entries in an unsalted proof', level: 'warning' });
     }
-    for (const message of redactionNotices(view, redactions.hidden)) {
-      findings.push({ message, level: 'notice' });
-    }
   }
   extend(findings, optionFindings(view, proof, options, context, redactions));
+  // The checks with the rules given that lifted more problems than the redactions explain.
+  for (const message of overrunProblems(redactions.hidden)) findings.push(invalidFinding(message));
   const lifted = liftedChecks(redactions.hidden);
   for (const { check, redacted } of lifted) {
     const message = `check lifted: ${check} (${redacted.join(', ')} redacted)`;

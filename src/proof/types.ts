@@ -456,6 +456,9 @@ export interface ProofVerification {
   issues: string[];
   /** The number of redacted entries; absent when there is none. */
   redacted?: number;
-  /** The checks the redacted entries lifted, possibly none; absent when there is none. */
+  /**
+   * The checks the redacted entries lifted: absent when no entry is redacted; `[]` when entries
+   * are redacted but no check was lifted.
+   */
   lifted?: LiftedCheck[];
 }

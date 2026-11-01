@@ -130,7 +130,10 @@ export function offDeclarationValues(
         asValue
           ? hasForm(value, declaration)
           : typeof value === 'boolean' ||
-            (hasForm(value, declaration) && isLifted(hidden, LIFTS.countForm));
+            (hasForm(value, declaration) &&
+              isLifted(hidden, LIFTS.countForm, {
+                message: `contribution does not match its output declaration: ${cited}`,
+              }));
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
     };
     if (steps.some((step) => !contributionForm(step))) {
