@@ -72,9 +72,9 @@ describe('the frozen proof-v1 vector (D-14, D-16), recomputed by an independent 
       Object.entries(PLAN.proof).filter(([key]) => !isSection(key)),
     );
     // The header had no counts then (review of 9K1): proofLeafHash refuses it, by hand.
-    expect(() => proofLeafHash({ s: 'header', e: header } as unknown as ProofLeaf)).toThrow(
-      'invalid proof leaf: e.counts is required',
-    );
+    expect(() =>
+      proofLeafHash({ s: 'header', e: header } as unknown as ProofLeaf, 'run-iq.proof/1'),
+    ).toThrow('invalid proof leaf: e.counts is required');
     const oldHeader = leafOf({ s: 'header', e: { ...header, inputDigest: PLAN.plan.inputDigest } });
     expect(hex(oldHeader)).toBe('9552348910ee15465b77128c44bc269725da0641577d7a4a227c4160b20fbba0');
     expect(PLAN.plan.headerLeaf).toBe(hex(oldHeader));

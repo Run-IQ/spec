@@ -222,7 +222,7 @@ describe('a value is counted once: the spend counter', () => {
     proofLeafHashes(signed);
     expect(lastValuesSpent()).toBe(countValues({ ...signed, signature: null }));
     const leaf = { s: 'exceptions' as const, i: 0, e: sealed.exceptions[0]! };
-    proofLeafHash(leaf as never);
+    proofLeafHash(leaf as never, 'run-iq.proof/1');
     expect(lastValuesSpent()).toBe(countValues(leaf));
     const seed = new Uint8Array(32).fill(9);
     const salted = sealProof({ ...unsalted(unsigned), inputSalted: true }, seed);

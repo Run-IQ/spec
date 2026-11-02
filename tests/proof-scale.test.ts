@@ -111,8 +111,10 @@ describe('the proof tree is linear, and one leaf is checked in O(log n) (D-16)',
     });
     const before = hashWork.calls;
     const entry = (sealed.outputs as object[])[3]!;
-    const leaf = proofLeafHash({ s: 'outputs', i: 3, e: entry } as ProofLeaf);
-    expect(verifyProofInclusion(sealed.digest, leaves.length, index, leaf, watched)).toBe(true);
+    const leaf = proofLeafHash({ s: 'outputs', i: 3, e: entry } as ProofLeaf, 'run-iq.proof/1');
+    expect(
+      verifyProofInclusion(sealed.digest, leaves.length, index, leaf, watched, 'run-iq.proof/1'),
+    ).toBe(true);
     expect(reads).toBe(Math.ceil(Math.log2(leaves.length)));
     // One leaf hash, one node hash per level, the digest: never another leaf.
     expect(hashWork.calls - before).toBe(1 + path.length + 1);

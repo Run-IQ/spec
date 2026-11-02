@@ -194,16 +194,36 @@ describe('one leaf among 200 000, checked alone (volume addendum)', () => {
           return Reflect.get(object, key, receiver) as unknown;
         },
       });
-    const headerLeaf = proofLeafHash(watch('header', { s: 'header', e: header } as ProofLeaf));
-    const entryLeaf = proofLeafHash(watch('entry', { s: 'applied' as const, i: 54_321, e: entry }));
+    const headerLeaf = proofLeafHash(
+      watch('header', { s: 'header', e: header } as ProofLeaf),
+      'run-iq.proof/1',
+    );
+    const entryLeaf = proofLeafHash(
+      watch('entry', { s: 'applied' as const, i: 54_321, e: entry }),
+      'run-iq.proof/1',
+    );
     expect(headerLeaf).toEqual(leaves[0]);
     const watchedPath = watch('path', path);
     expect(
-      verifyProofInclusion(sealed.digest, leaves.length, 0, headerLeaf, inclusionPath(leaves, 0)),
+      verifyProofInclusion(
+        sealed.digest,
+        leaves.length,
+        0,
+        headerLeaf,
+        inclusionPath(leaves, 0),
+        'run-iq.proof/1',
+      ),
     ).toBe(true);
-    expect(verifyProofInclusion(sealed.digest, leaves.length, index, entryLeaf, watchedPath)).toBe(
-      true,
-    );
+    expect(
+      verifyProofInclusion(
+        sealed.digest,
+        leaves.length,
+        index,
+        entryLeaf,
+        watchedPath,
+        'run-iq.proof/1',
+      ),
+    ).toBe(true);
     // Each member of the two leaves once; each hash of the path once, and no other leaf.
     expect([...reads].filter(([name, count]) => !name.startsWith('path.') && count !== 1)).toEqual(
       [],

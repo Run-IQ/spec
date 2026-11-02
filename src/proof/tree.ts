@@ -1,19 +1,20 @@
 import { sha256 } from '@noble/hashes/sha2.js';
 import { bytesToHex, hexToBytes, utf8ToBytes } from '@noble/hashes/utils.js';
 import { writeCanonical } from '../canonical.js';
-import { newSpecError } from '../errors.js';
+import { citeName, newSpecError } from '../errors.js';
 import { PackedHashes, rootFromPath, sizedDigest } from '../merkle.js';
 import { hashWork, withSha256 } from '../stream.js';
 import { withValueBudget } from '../values.js';
-import { PROOF_FORMAT, PROOF_SECTIONS } from './types.js';
+import { isProofFormat, PROOF_FORMATS } from './formats.js';
+import { PROOF_SECTIONS } from './types.js';
 import type { DecisionProof, Redacted, UnsignedProof } from './types.js';
 import { readProofContent, readProofLeaf } from './validate.js';
 import type { ProofLeaf } from './validate.js';
 
 export type { ProofLeaf } from './validate.js';
 
-// Internal to `@run-iq/spec`: the leaves of a proof and its digest (D-16), the one place that
-// encodes them. A short leaf is written as one text and hashed at once; a longer one is hashed
+// Internal to `@run-iq/spec`: the leaves of a proof and its digest (D-16), all encoded by
+// `hashLeafInto` and `sizedDigest` under the proof's own format. A short leaf is written as one text and hashed at once; a longer one is hashed
 // as it is written (`withSha256`, `writeCanonical`): no long canonical text is ever built.
 
 /** A digest as `sealProof` writes it. */
@@ -217,30 +218,47 @@ export function proofLeafHashes(p: DecisionProof | UnsignedProof): Uint8Array[] 
  * The hash of one leaf of a proof (D-16), 32 bytes, as `proofLeafHashes` gives it: `leaf` is
  * the header (`{ s: 'header', e: header }`, `header` the proof without `digest`, `signature`
  * and the ten sections) or one entry (`{ s: section, i: index, e: entry }`, `entry` salted, or
- * redacted: its hash is then returned as it is). An entry is hashed under the format
- * `run-iq.proof/1` (`PROOF_FORMAT`), the header under its own `format`.
+ * redacted: its hash is then returned as it is), hashed under `format`, the format of the proof
+ * it comes from (D-16: the domain tag is the proof's format). `format` must be one of
+ * `PROOF_FORMATS`, and a header's own `format` must be `format`.
  *
  * With `verifyProofInclusion`, a verifier checks the header and some entries of a proof against
  * its signed digest without reading the other leaves: each leaf, its audit path
  * (`inclusionPath(proofLeafHashes(p), at)`) and the number of leaves.
  *
  * `leaf` is read once; the header is checked as `validateProof` checks one, an entry as an
- * entry of its section. Throws `SpecError` (`INVALID_PROOF`, `invalid proof leaf: <first
- * problem>`) when it is malformed.
+ * entry of its section. Throws `SpecError` (`INVALID_PROOF`): `invalid proof leaf: <first
+ * problem>` when it is malformed, `invalid proof leaf: unknown format: <format>` (or `format
+ * must be one of …` for a value that is not a string) when `format` is not listed, and
+ * `invalid proof leaf: the header is of format <f>, not <format>` for a header of another
+ * format.
  */
-export function proofLeafHash(leaf: ProofLeaf): Uint8Array {
+export function proofLeafHash(leaf: ProofLeaf, format: string): Uint8Array {
   return withValueBudget(() => {
+    const tag: unknown = format;
+    if (!isProofFormat(tag)) {
+      const problem =
+        typeof tag === 'string'
+          ? `unknown format: ${citeName(tag)}`
+          : `format must be one of ${PROOF_FORMATS.join(', ')}`;
+      throw newSpecError('INVALID_PROOF', `invalid proof leaf: ${problem}`);
+    }
     const { leaf: read, errors } = readProofLeaf(leaf);
     if (read === undefined) {
       throw newSpecError('INVALID_PROOF', `invalid proof leaf: ${errors[0] ?? 'unreadable'}`);
     }
     const out = new Uint8Array(32);
     if (read.s === 'header') {
-      hashLeafInto(out, String(read.e.format), 'header', undefined, read.e);
+      const own = String(read.e.format);
+      if (own !== format) {
+        const message = `invalid proof leaf: the header is of format ${own}, not ${format}`;
+        throw newSpecError('INVALID_PROOF', message);
+      }
+      hashLeafInto(out, format, 'header', undefined, read.e);
     } else if (isRedacted(read.e)) {
       out.set(hexToBytes(read.e.redacted));
     } else {
-      hashLeafInto(out, PROOF_FORMAT, read.s, read.i, read.e);
+      hashLeafInto(out, format, read.s, read.i, read.e);
     }
     return out;
   });
@@ -248,13 +266,13 @@ export function proofLeafHash(leaf: ProofLeaf): Uint8Array {
 
 /**
  * True when `path` proves that `leafHash` (`proofLeafHash`) is the leaf at `index` of the tree
- * of `size` leaves of a proof whose digest is `digest` (`run-iq.proof/1`, D-16): the RFC 6962
+ * of `size` leaves of a proof of format `format` whose digest is `digest` (D-16): the RFC 6962
  * root rebuilt from the leaf and its audit path (`inclusionPath`), committed with `size`, gives
  * `digest`. The digest commits to the number of leaves, so a leaf cannot be shown under another
  * size. The header is leaf 0; the entries follow, section by section.
  *
- * Never throws: false for anything else, in particular a `digest` that is not 64 lowercase hex
- * characters, and every case where `verifyInclusion` is false (`size` not an integer from 1 to
+ * Never throws: false for anything else, in particular a `format` not listed in
+ * `PROOF_FORMATS`, a `digest` that is not 64 lowercase hex characters, and every case where `verifyInclusion` is false (`size` not an integer from 1 to
  * 2^53 - 1, `index` not below it, a hash that is not 32 bytes, a path of another length, its
  * length checked before any element is read). It reads the digest, the leaf and the
  * ⌈log2 size⌉ hashes of the path at most: never the other leaves.
@@ -265,9 +283,12 @@ export function verifyProofInclusion(
   index: number,
   leafHash: Uint8Array,
   path: readonly Uint8Array[],
+  format: string,
 ): boolean {
+  const tag: unknown = format;
+  if (!isProofFormat(tag)) return false;
   const expected: unknown = digest;
   if (typeof expected !== 'string' || !DIGEST_HEX.test(expected)) return false;
   const root = rootFromPath(leafHash, index, size, path);
-  return root !== undefined && bytesToHex(sizedDigest(PROOF_FORMAT, size, root)) === expected;
+  return root !== undefined && bytesToHex(sizedDigest(format, size, root)) === expected;
 }

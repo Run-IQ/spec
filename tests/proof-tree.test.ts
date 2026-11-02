@@ -93,8 +93,8 @@ describe('sealProof(p, seed): salted entries, a tree digest (D-14, D-16)', () =>
     expect(treeDigestOf(swapped)).not.toBe(sealed.digest);
     const [first] = sealed.rules;
     if (!first) throw new Error('a rule');
-    expect(hex(proofLeafHash({ s: 'rules', i: 0, e: first }))).not.toBe(
-      hex(proofLeafHash({ s: 'rules', i: 1, e: first })),
+    expect(hex(proofLeafHash({ s: 'rules', i: 0, e: first }, 'run-iq.proof/1'))).not.toBe(
+      hex(proofLeafHash({ s: 'rules', i: 1, e: first }, 'run-iq.proof/1')),
     );
     expect(verifyProof({ ...swapped, digest: sealed.digest }).issues).toContain('digest mismatch');
   });
@@ -159,16 +159,22 @@ describe('proofLeafHashes and proofLeafHash', () => {
         ([key]) => key !== 'digest' && !PROOF_SECTIONS.includes(key as never),
       ),
     );
-    expect(hex(proofLeafHash({ s: 'header', e: header } as never))).toBe(hex(leaves[0]!));
+    expect(hex(proofLeafHash({ s: 'header', e: header } as never, 'run-iq.proof/1'))).toBe(
+      hex(leaves[0]!),
+    );
     let at = 1;
     for (const section of PROOF_SECTIONS) {
       (sealed[section] as object[]).forEach((e, i) => {
-        expect(hex(proofLeafHash({ s: section, i, e } as ProofLeaf))).toBe(hex(leaves[at]!));
+        expect(hex(proofLeafHash({ s: section, i, e } as ProofLeaf, 'run-iq.proof/1'))).toBe(
+          hex(leaves[at]!),
+        );
         at += 1;
       });
     }
     const redacted = { redacted: hex(leaves[1]!) };
-    expect(hex(proofLeafHash({ s: 'rules', i: 0, e: redacted }))).toBe(redacted.redacted);
+    expect(hex(proofLeafHash({ s: 'rules', i: 0, e: redacted }, 'run-iq.proof/1'))).toBe(
+      redacted.redacted,
+    );
   });
 
   it.each([
@@ -181,7 +187,7 @@ describe('proofLeafHashes and proofLeafHash', () => {
     ['a short redacted hash', { s: 'rules', i: 0, e: { redacted: 'ab' } }, /^invalid proof leaf: /],
     ['an unknown member', { s: 'rules', i: 0, e: {}, x: 1 }, /^invalid proof leaf: /],
   ])('refuses a leaf: %s', (_name, leaf, message) => {
-    const error = specError(() => proofLeafHash(leaf as never));
+    const error = specError(() => proofLeafHash(leaf as never, 'run-iq.proof/1'));
     expect(error.code).toBe('INVALID_PROOF');
     expect(error.message).toMatch(message);
   });
@@ -193,9 +199,13 @@ describe('verifyProofInclusion: one leaf against the signed digest', () => {
     const leaves = proofLeafHashes(sealed);
     leaves.forEach((leaf, index) => {
       const path = inclusionPath(leaves, index);
-      expect(verifyProofInclusion(sealed.digest, leaves.length, index, leaf, path)).toBe(true);
+      expect(
+        verifyProofInclusion(sealed.digest, leaves.length, index, leaf, path, 'run-iq.proof/1'),
+      ).toBe(true);
       const other = (index + 1) % leaves.length;
-      expect(verifyProofInclusion(sealed.digest, leaves.length, other, leaf, path)).toBe(false);
+      expect(
+        verifyProofInclusion(sealed.digest, leaves.length, other, leaf, path, 'run-iq.proof/1'),
+      ).toBe(false);
     });
   });
 
@@ -204,20 +214,48 @@ describe('verifyProofInclusion: one leaf against the signed digest', () => {
     const leaves = proofLeafHashes(sealed);
     const path = inclusionPath(leaves, 1);
     const n = leaves.length;
-    expect(verifyProofInclusion(sealed.digest, n + 1, 1, leaves[1]!, path)).toBe(false);
-    expect(verifyProofInclusion('0'.repeat(64), n, 1, leaves[1]!, path)).toBe(false);
-    expect(verifyProofInclusion(sealed.digest.toUpperCase(), n, 1, leaves[1]!, path)).toBe(false);
-    expect(verifyProofInclusion(sealed.digest, n, 1, leaves[1]!, path.slice(1))).toBe(false);
+    expect(verifyProofInclusion(sealed.digest, n + 1, 1, leaves[1]!, path, 'run-iq.proof/1')).toBe(
+      false,
+    );
+    expect(verifyProofInclusion('0'.repeat(64), n, 1, leaves[1]!, path, 'run-iq.proof/1')).toBe(
+      false,
+    );
+    expect(
+      verifyProofInclusion(sealed.digest.toUpperCase(), n, 1, leaves[1]!, path, 'run-iq.proof/1'),
+    ).toBe(false);
+    expect(
+      verifyProofInclusion(sealed.digest, n, 1, leaves[1]!, path.slice(1), 'run-iq.proof/1'),
+    ).toBe(false);
     for (const hostile of [null, undefined, 1.5, -1, {}, [], 'x', Symbol('s'), 1n]) {
-      expect(verifyProofInclusion(hostile as never, n, 1, leaves[1]!, path)).toBe(false);
-      expect(verifyProofInclusion(sealed.digest, hostile as never, 1, leaves[1]!, path)).toBe(
+      expect(verifyProofInclusion(hostile as never, n, 1, leaves[1]!, path, 'run-iq.proof/1')).toBe(
         false,
       );
-      expect(verifyProofInclusion(sealed.digest, n, hostile as never, leaves[1]!, path)).toBe(
-        false,
-      );
-      expect(verifyProofInclusion(sealed.digest, n, 1, hostile as never, path)).toBe(false);
-      expect(verifyProofInclusion(sealed.digest, n, 1, leaves[1]!, hostile as never)).toBe(false);
+      expect(
+        verifyProofInclusion(
+          sealed.digest,
+          hostile as never,
+          1,
+          leaves[1]!,
+          path,
+          'run-iq.proof/1',
+        ),
+      ).toBe(false);
+      expect(
+        verifyProofInclusion(
+          sealed.digest,
+          n,
+          hostile as never,
+          leaves[1]!,
+          path,
+          'run-iq.proof/1',
+        ),
+      ).toBe(false);
+      expect(
+        verifyProofInclusion(sealed.digest, n, 1, hostile as never, path, 'run-iq.proof/1'),
+      ).toBe(false);
+      expect(
+        verifyProofInclusion(sealed.digest, n, 1, leaves[1]!, hostile as never, 'run-iq.proof/1'),
+      ).toBe(false);
     }
   });
 
@@ -225,13 +263,30 @@ describe('verifyProofInclusion: one leaf against the signed digest', () => {
     const sealed = sealedUnder();
     const leaves = proofLeafHashes(sealed);
     const [rule] = sealed.rules;
-    const leaf = proofLeafHash({ s: 'rules', i: 0, e: rule! });
+    const leaf = proofLeafHash({ s: 'rules', i: 0, e: rule! }, 'run-iq.proof/1');
     expect(
-      verifyProofInclusion(sealed.digest, leaves.length, 1, leaf, inclusionPath(leaves, 1)),
+      verifyProofInclusion(
+        sealed.digest,
+        leaves.length,
+        1,
+        leaf,
+        inclusionPath(leaves, 1),
+        'run-iq.proof/1',
+      ),
     ).toBe(true);
-    const forged = proofLeafHash({ s: 'rules', i: 0, e: { ...rule!, priority: 99 } as never });
+    const forged = proofLeafHash(
+      { s: 'rules', i: 0, e: { ...rule!, priority: 99 } as never },
+      'run-iq.proof/1',
+    );
     expect(
-      verifyProofInclusion(sealed.digest, leaves.length, 1, forged, inclusionPath(leaves, 1)),
+      verifyProofInclusion(
+        sealed.digest,
+        leaves.length,
+        1,
+        forged,
+        inclusionPath(leaves, 1),
+        'run-iq.proof/1',
+      ),
     ).toBe(false);
   });
 });
@@ -263,7 +318,7 @@ describe('every leaf is the sha256 of its canonical text, short or long', () => 
     ['null, booleans, an empty object', [null, true, false, {}]],
   ])('%s', (_name, contribution) => {
     const leaf = { s: 'applied', i: 10, e: step(contribution) } as const;
-    expect(hex(proofLeafHash(leaf as never))).toBe(reference(leaf));
+    expect(hex(proofLeafHash(leaf as never, 'run-iq.proof/1'))).toBe(reference(leaf));
   });
 
   // A short text with control characters and neither quote nor backslash: the fast path still
@@ -281,7 +336,9 @@ describe('every leaf is the sha256 of its canonical text, short or long', () => 
         `{"e":{"checksum":"${rule.checksum}","id":"R1","priority":0,"ruleSet":"local",` +
         `"salt":"${'a'.repeat(32)}","sourceRef":${JSON.stringify(sourceRef)},"version":1},` +
         `"i":0,"s":"rules"}`;
-      expect(hex(proofLeafHash(leaf as never))).toBe(hex(nodeSha256(new Uint8Array([0]), T, text)));
+      expect(hex(proofLeafHash(leaf as never, 'run-iq.proof/1'))).toBe(
+        hex(nodeSha256(new Uint8Array([0]), T, text)),
+      );
     },
   );
 });

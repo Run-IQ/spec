@@ -276,20 +276,23 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
     'proofLeafHash entry list',
     (list) =>
       specError(() =>
-        proofLeafHash({
-          s: 'outputs',
-          i: 0,
-          e: {
-            name: 'value',
-            type: 'number',
-            combine: 'sum',
-            status: 'determined',
-            value: 0,
-            contributors: list,
-            pending: [],
-            salt: 'a'.repeat(32),
-          },
-        } as never),
+        proofLeafHash(
+          {
+            s: 'outputs',
+            i: 0,
+            e: {
+              name: 'value',
+              type: 'number',
+              combine: 'sum',
+              status: 'determined',
+              value: 0,
+              contributors: list,
+              pending: [],
+              salt: 'a'.repeat(32),
+            },
+          } as never,
+          'run-iq.proof/1',
+        ),
       ).message,
     'invalid proof leaf: e.contributors',
   ],
@@ -533,7 +536,7 @@ describe('under a 1 GB heap (built dist)', () => {
         message(() => s.discloseFacts(input, seed, [], sp())),
         message(() => s.proofLeafHashes({ ...proof, applied: sp() })),
         message(() => s.redactProof({ ...proof, applied: sp() }, () => true)),
-        s.verifyProofInclusion('0'.repeat(64), 2, 0, new Uint8Array(32), sp()),
+        s.verifyProofInclusion('0'.repeat(64), 2, 0, new Uint8Array(32), sp(), 'run-iq.proof/1'),
       ]));`;
     const out = execFileSync(
       process.execPath,
