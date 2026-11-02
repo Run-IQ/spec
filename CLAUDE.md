@@ -57,6 +57,7 @@ Decisions of 2 November 2026 that apply to spec. Items marked "from <task>" are 
 - From 9K5: unknown rule fields are refused, and extensions go under `extensions`.
 - From 9K5: `null` in a rule is refused where an author writes it (every optional field, `effectiveUntil` and `checksum` included, and inside `dimensions`): `<field> is null: omit the field instead`. "No end" is written by omitting `effectiveUntil`. The normalized and stored form keeps `effectiveUntil: null` as its internal encoding of "no end", so no checksum changes, and the functions that read that form (`computeRuleChecksum`, `toExecutableRule`, `fromStoredRecord`) accept it (ruling of 2 November, on M8).
 - Tags absent means no tag filter (D-38). A given list is complete unless the caller declares otherwise.
+- A commit with another author is never pushed. If one is made by mistake, stop and report it before pushing (decision on commit `47efeaa`, 2 November; it applies to every repo).
 
 ## 5. Rule for future decisions
 
