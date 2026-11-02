@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://github.com/Run-IQ/spec/schema/attestation.schema.json",
   "title": "Run-IQ attestation",
-  "description": "A detached attestation (run-iq.attestation/1, D-29) as createAttestation from @run-iq/spec writes it and verifyAttestation reads it: a statement about a sealed proof (subject.proofDigest) or a key (subject.keyId), signed apart from the proof. The envelope is closed; kind is an open non-empty string, and this version verifies cosignature alone (a cosignature names a proof digest). signature is the ed25519 signature (RFC 8032) of the UTF-8 bytes of the canonical JSON (RFC 8785) of the attestation without signature, by the key keyId names, in base64url without padding. Checks NOT expressible in JSON Schema, made only by verifyAttestation: no text holds a lone UTF-16 surrogate; the subject digest is the digest of the proof verified; the signature verifies under the trusted key of keyId.",
+  "description": "A detached attestation (run-iq.attestation/1, D-29) as createAttestation from @run-iq/spec writes it and verifyAttestation reads it: a statement about a sealed proof (subject.proofDigest) or a key (subject.keyId), signed apart from the proof. The envelope is closed; kind is an open non-empty string, and this version verifies cosignature alone (a cosignature names a proof digest and takes no claims). claims, the one member reserved for later kinds, is a plain JSON object covered by the signature and never interpreted by this version. signature is the ed25519 signature (RFC 8032) of the UTF-8 bytes of the canonical JSON (RFC 8785) of the attestation without signature, by the key keyId names, in base64url without padding. Checks NOT expressible in JSON Schema, made only by verifyAttestation: no text holds a lone UTF-16 surrogate, in claims too; a number in claims is below 2^53 in absolute value, and claims nest at most 1000 levels and hold at most 10000000 values; the subject digest is the digest of the proof verified; the signature verifies under the trusted key of keyId.",
   "type": "object",
   "required": ["format", "kind", "subject", "keyId", "at", "signature"],
   "additionalProperties": false,
@@ -33,6 +33,10 @@
       "description": "The capacity in which the signer attests (human-review).",
       "$ref": "#/$defs/nonEmptyString"
     },
+    "claims": {
+      "description": "What a later kind states beyond the envelope (a timestamp token, a revocation reason): a plain JSON object, signed, never interpreted by this version. A cosignature takes none.",
+      "type": "object"
+    },
     "at": {
       "$ref": "#/$defs/instant"
     },
@@ -54,7 +58,8 @@
       "subject": {
         "description": "A cosignature is about a proof.",
         "$ref": "#/$defs/proofSubject"
-      }
+      },
+      "claims": false
     }
   },
   "$defs": {

@@ -1,4 +1,5 @@
 import { canonicalize } from '../canonical.js';
+import type { JsonValue } from '../canonical.js';
 import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { boundMessages } from '../issues.js';
 import {
@@ -8,6 +9,7 @@ import {
   readFields,
   requireFields,
   runCheck,
+  walkJson,
 } from '../input/read.js';
 import type { Add, Reader } from '../input/read.js';
 import { SIGNATURE_BASE64URL } from '../proof/fields.js';
@@ -24,10 +26,20 @@ export const HEX_DIGEST = /^[0-9a-f]{64}$/;
 /** The kinds this version verifies (D-29); any other is at best `consistent`. */
 const VERIFIED_KINDS: readonly string[] = ['cosignature'];
 
-const KEYS: readonly string[] = ['format', 'kind', 'subject', 'keyId', 'role', 'at', 'signature'];
-const REQUIRED: readonly string[] = KEYS.filter((key) => key !== 'role');
+const KEYS: readonly string[] = [
+  'format',
+  'kind',
+  'subject',
+  'keyId',
+  'role',
+  'claims',
+  'at',
+  'signature',
+];
+const OPTIONAL: ReadonlySet<string> = new Set(['role', 'claims']);
+const REQUIRED: readonly string[] = KEYS.filter((key) => !OPTIONAL.has(key));
 const SUBJECT_KEYS: readonly string[] = ['proofDigest', 'keyId'];
-const SHAPE = 'an object { format, kind, subject, keyId, role?, at, signature }';
+const SHAPE = 'an object { format, kind, subject, keyId, role?, claims?, at, signature }';
 const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ';
 
 /**
@@ -98,6 +110,7 @@ function verify(a: unknown, proofDigest: unknown, trustedKeys: unknown): ProofVe
       else copy = read;
     },
     (error) => ({ path: '', message: unreadableMessage('attestation', error) }),
+    { copy: true },
   );
   if (unknownFormat !== undefined) return invalid([`unknown format: ${unknownFormat}`]);
   if (issues.length > 0 || copy === undefined) {
@@ -185,6 +198,7 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
   }
   if (has('keyId')) checkText(field('keyId'), '/keyId', add);
   if (has('role')) checkText(field('role'), '/role', add);
+  const claims = has('claims') ? readClaims(field('claims'), kind, reader) : undefined;
   if (has('at')) checkInstant(field('at'), '/at', add);
   const signature = field('signature');
   if (has('signature') && (typeof signature !== 'string' || !SIGNATURE_BASE64URL.test(signature))) {
@@ -201,9 +215,31 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
     subject,
     keyId: field('keyId') as string,
     ...(role === undefined ? {} : { role: role as string }),
+    ...(claims === undefined ? {} : { claims }),
     at: field('at') as string,
     signature: signature as string,
   };
+}
+
+/**
+ * The claims at `/claims`, read once into a plain copy (ruling 9K2-8): refused on a
+ * `cosignature` (`cosignature takes no claims`, its content not read); otherwise a plain JSON
+ * object, checked as input values are (`walkJson`: no lone surrogate, numbers below 2^53, at
+ * most 1000 levels, every value counted in the budget) and never interpreted.
+ */
+function readClaims(
+  value: unknown,
+  kind: unknown,
+  reader: Reader,
+): { [key: string]: JsonValue } | undefined {
+  const path = '/claims';
+  if (kind === 'cosignature') {
+    reader.add(path, 'cosignature takes no claims');
+    return undefined;
+  }
+  if (!expectPlainObject(value, path, 'a plain JSON object', reader.add)) return undefined;
+  const copy = walkJson(value, path, reader).copy;
+  return copy as { [key: string]: JsonValue } | undefined;
 }
 
 /** The subject at `/subject`, read once: exactly one of its two members, checked. */

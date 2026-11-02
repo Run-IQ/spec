@@ -1,3 +1,4 @@
+import type { JsonValue } from '../canonical.js';
 import type { Instant } from '../time/civil.js';
 
 /**
@@ -8,9 +9,12 @@ import type { Instant } from '../time/civil.js';
  * checks one (src/attestation/verify.ts).
  *
  * The envelope is closed, its `kind` open (D-6): a later kind (`timestamp`, `revocation`) is a
- * new value of `kind` in the same format, never a new format. This version verifies
- * `cosignature` alone; any other kind is at best `consistent`, with the issue
- * `attestation kind not supported: <kind>`.
+ * new value of `kind` in the same format, never a new format. What such a kind needs beyond the
+ * members below (a timestamp token, a revocation reason) goes in `claims`, the one member
+ * reserved for it: a plain JSON object, covered by the signature. This version verifies
+ * `cosignature` alone, which takes no `claims`; any other kind is at best `consistent`, with
+ * the issue `attestation kind not supported: <kind>`, its `claims` checked as JSON and signed,
+ * never interpreted. Every other member is refused.
  *
  * The signature is ed25519 (RFC 8032) over `utf8(canonicalize(a))`, `a` the attestation without
  * its `signature` (RFC 8785, keys sorted), by the key `keyId` names, in base64url without
@@ -41,6 +45,13 @@ export interface Attestation {
   keyId: string;
   /** The capacity in which the signer attests (`human-review`), a non-empty string. */
   role?: string;
+  /**
+   * What a later kind states beyond the members of the envelope: a plain JSON object (strings
+   * without lone surrogate, numbers of absolute value below 2^53, at most 1000 levels deep),
+   * covered by the signature, read but never interpreted by this version. A `cosignature`
+   * takes none.
+   */
+  claims?: { [key: string]: JsonValue };
   /** When it was signed: an instant in its canonical form (`isInstant`). */
   at: Instant;
   /** The ed25519 signature of its canonical text without `signature`, unpadded base64url. */

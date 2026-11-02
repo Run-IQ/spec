@@ -207,9 +207,88 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
       expect(result.status, key).toBe('invalid');
     }
     expect(verify(claiming).issues).toEqual([
-      'attestation must be an object { format, kind, subject, keyId, role?, at, signature }',
+      'attestation must be an object { format, kind, subject, keyId, role?, claims?, at, signature }',
     ]);
     expect(reads).toBe(0);
+  });
+});
+
+describe('hostile claims: a named invalid, never a throw, read once', () => {
+  /** A timestamp over a key carrying `claims`, signed when `sign` is true. */
+  function withClaims(claims: unknown, sign = false): Record<string, unknown> {
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+      copy.subject = { keyId: 'executor-1' };
+    });
+    a.claims = claims;
+    if (sign) a.signature = signAttestationBody({ ...a, signature: undefined }, RFC_SECRET);
+    return a;
+  }
+
+  it('a getter that throws, on the member or inside it', () => {
+    const a = withClaims({});
+    throwAt(a, 'claims');
+    expect(verify(a)).toEqual(invalid(['/claims could not be read: boom']));
+    const inner = { token: 'x' };
+    throwAt(inner, 'token');
+    expect(verify(withClaims(inner))).toEqual(invalid(['/claims/token could not be read: boom']));
+  });
+
+  it('a Proxy whose traps throw, a revoked Proxy', () => {
+    expect(verify(withClaims(throwingProxy({})))).toEqual(
+      invalid(['/claims could not be read: boom']),
+    );
+    expect(verify(withClaims(revokedProxy()))).toEqual(
+      invalid([
+        "/claims could not be read: Cannot perform 'IsArray' on a proxy that has been revoked",
+      ]),
+    );
+  });
+
+  it('nesting 10 000 levels deep: one issue at the first container past the limit', () => {
+    const result = verify(withClaims(nested(10_000)));
+    expect(result).toEqual(
+      invalid([
+        `/claims${'/a'.repeat(1000)}`.slice(0, 256) + '… is nested deeper than 1000 levels',
+      ]),
+    );
+  });
+
+  it('over the value budget: a list claiming 2^32 - 1 elements, none read', () => {
+    let reads = 0;
+    const claiming = new Proxy<unknown[]>([], {
+      get(target, key) {
+        if (key === 'length') return 2 ** 32 - 1;
+        if (typeof key === 'string' && /^\d+$/.test(key)) reads += 1;
+        return Reflect.get(target, key) as unknown;
+      },
+    });
+    expect(verify(withClaims({ list: claiming }))).toEqual(
+      invalid(['/claims/list is too large: more than 10000000 values']),
+    );
+    expect(reads).toBe(0);
+  });
+
+  it('not an object', () => {
+    for (const claims of [null, 7, 'x', [], [{}], new Map()]) {
+      expect(verify(withClaims(claims)), String(claims)).toEqual(
+        invalid(['/claims must be a plain JSON object']),
+      );
+    }
+  });
+
+  it('each property of the claims is read once, and counted', () => {
+    const counter = { reads: 0 };
+    const a = withClaims({ a: 1, inner: { b: 2 }, list: [1, 2] }, true);
+    a.claims = counted({ a: 1, inner: counted({ b: 2 }, counter), list: [1, 2] }, counter);
+    expect(verify(a)).toEqual({
+      status: 'consistent',
+      issues: ['attestation kind not supported: timestamp'],
+    });
+    // a, inner, list, then b: four member reads, each once.
+    expect(counter.reads).toBe(4);
+    // Seven members, claims, the subject's one, then a, inner, list, b and two elements.
+    expect(lastValuesSpent()).toBe(8 + 1 + 6);
   });
 });
 

@@ -314,6 +314,87 @@ describe('the kind is open (D-6, D-29): only cosignature is verified now', () =>
   });
 });
 
+describe('claims: the one signed member reserved for later kinds (ruling 9K2-8)', () => {
+  const CLAIMS = { token: 'MIIB', reasons: ['key-compromise'], serial: 7 };
+  const timestamp = signedBody(
+    bodyWith({ kind: 'timestamp', subject: { keyId: 'executor-1' }, claims: CLAIMS }),
+  );
+
+  it('an unsupported kind with claims: consistent, the kind named', () => {
+    expect(verify(timestamp)).toEqual({
+      status: 'consistent',
+      issues: ['attestation kind not supported: timestamp'],
+    });
+  });
+
+  it('the signature covers the claims, in their canonical form', () => {
+    const { signature, ...body } = timestamp;
+    expect(canonicalize(body)).toBe(
+      `{"at":"${AT}","claims":{"reasons":["key-compromise"],"serial":7,"token":"MIIB"},` +
+        '"format":"run-iq.attestation/1","keyId":"reviewer","kind":"timestamp",' +
+        '"role":"human-review","subject":{"keyId":"executor-1"}}',
+    );
+    expect(signature).toBe(signAttestationBody(body, RFC_SECRET));
+    const changed = { ...timestamp, claims: { ...CLAIMS, serial: 8 } };
+    expect(verify(changed)).toEqual({
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+    });
+    const dropped = { ...timestamp, claims: undefined };
+    expect(verify(dropped)).toEqual({
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+    });
+  });
+
+  it('a cosignature takes no claims, even empty', () => {
+    for (const claims of [{}, CLAIMS]) {
+      expect(verify(signedBody(bodyWith({ claims })))).toEqual({
+        status: 'invalid',
+        issues: ['cosignature takes no claims'],
+      });
+    }
+  });
+
+  it('claims are a plain JSON object', () => {
+    for (const claims of [[], 'x', 7, null, true, new Date(0)]) {
+      const a = signedBody(bodyWith({ kind: 'timestamp', claims }));
+      expect(verify(a), String(claims)).toEqual({
+        status: 'invalid',
+        issues: ['/claims must be a plain JSON object'],
+      });
+    }
+    const values: [unknown, string][] = [
+      [{ n: 2 ** 53 }, 'number beyond 2^53 at /claims/n'],
+      [{ n: Number.NaN }, '/claims/n is not JSON: NaN'],
+      [{ t: 'a\ud800' }, '/claims/t contains a lone UTF-16 surrogate'],
+      [{ l: [1, undefined] }, '/claims/l/1 is not JSON: undefined'],
+    ];
+    for (const [claims, issue] of values) {
+      const a = { ...timestamp, claims };
+      expect(verify(a), issue).toEqual({ status: 'invalid', issues: [issue] });
+    }
+  });
+
+  it('every other unknown member is still refused: the envelope stays closed', () => {
+    expect(verify({ ...timestamp, evidence: 'x' })).toEqual({
+      status: 'invalid',
+      issues: ['attestation has an unknown key "evidence"'],
+    });
+  });
+
+  it('an attestation without claims signs the same bytes as before: the vector holds', () => {
+    expect('claims' in COSIGNATURE).toBe(false);
+    const made = createAttestation(vector.proofDigest, vector.secret, vector.keyId, {
+      role: vector.role,
+      at: vector.at,
+    });
+    expect(made.signature).toBe(vector.attestation.signature);
+    expect(canonicalize({ ...made, signature: undefined })).toBe(vector.message);
+    expect(vector.message).not.toContain('claims');
+  });
+});
+
 describe('the format of an attestation', () => {
   it('an unknown format is the only issue', () => {
     expect(verify({ ...COSIGNATURE, format: 'run-iq.attestation/2', kind: 7 })).toEqual({
@@ -333,12 +414,16 @@ describe('the format of an attestation', () => {
       [
         'not an object',
         [],
-        ['attestation must be an object { format, kind, subject, keyId, role?, at, signature }'],
+        [
+          'attestation must be an object { format, kind, subject, keyId, role?, claims?, at, signature }',
+        ],
       ],
       [
         'null',
         null,
-        ['attestation must be an object { format, kind, subject, keyId, role?, at, signature }'],
+        [
+          'attestation must be an object { format, kind, subject, keyId, role?, claims?, at, signature }',
+        ],
       ],
       [
         'no member',
@@ -456,6 +541,11 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
     ['a leap day', signedBody(bodyWith({ at: '2028-02-29T23:59:59.999Z' }))],
     ['year 0000, a leap year', signedBody(bodyWith({ at: '0000-02-29T00:00:00.000Z' }))],
     ['a role of any text', signedBody(bodyWith({ role: 'réviseur 🧾' }))],
+    [
+      'a timestamp with claims',
+      signedBody(bodyWith({ kind: 'timestamp', claims: { token: 'MIIB', n: [1, { a: null }] } })),
+    ],
+    ['empty claims on a revocation', signedBody(bodyWith({ kind: 'revocation', claims: {} }))],
   ];
 
   /** Refused by both. */
@@ -495,6 +585,10 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
     ['trailing bits', { ...COSIGNATURE, signature: `${COSIGNATURE.signature.slice(0, 85)}B` }],
     ['a base64 signature', { ...COSIGNATURE, signature: `+${COSIGNATURE.signature.slice(1)}` }],
     ['no signature', { ...COSIGNATURE, signature: undefined }],
+    ['claims on a cosignature', { ...COSIGNATURE, claims: {} }],
+    ['claims a list', { ...COSIGNATURE, kind: 'timestamp', claims: [] }],
+    ['claims a string', { ...COSIGNATURE, kind: 'timestamp', claims: 'x' }],
+    ['claims null', { ...COSIGNATURE, kind: 'timestamp', claims: null }],
   ];
 
   /** Refused by the verifier alone: what JSON Schema cannot express. */
@@ -506,6 +600,8 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
       'a lone surrogate in the subject key',
       { ...COSIGNATURE, kind: 'x', subject: { keyId: '\ud800' } },
     ],
+    ['a lone surrogate in claims', { ...COSIGNATURE, kind: 'x', claims: { t: '\ud800' } }],
+    ['a number of 2^53 in claims', { ...COSIGNATURE, kind: 'x', claims: { n: 2 ** 53 } }],
   ];
 
   it.each(ACCEPTED)('accepts %s', (_name, value) => {
