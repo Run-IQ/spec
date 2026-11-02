@@ -320,6 +320,48 @@ describe('hostile claims: a named invalid, never a throw, read once', () => {
   });
 });
 
+describe('an object shared by the subject and the claims is read once', () => {
+  it('one read, and the same value in both members', () => {
+    let reads = 0;
+    const shared = {
+      get keyId(): string {
+        reads++;
+        return `k${reads}`;
+      },
+    };
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+    });
+    a.subject = shared;
+    a.claims = { s: shared };
+    // What a single read gives: k1 in the subject and in the claims, signed by the reviewer.
+    const once = { ...a, subject: { keyId: 'k1' }, claims: { s: { keyId: 'k1' } } };
+    a.signature = signAttestationBody({ ...once, signature: undefined }, RFC_SECRET);
+    expect(verify(a)).toEqual({
+      status: 'consistent',
+      issues: ['attestation kind not supported: timestamp'],
+    });
+    expect(reads).toBe(1);
+  });
+
+  it('a subject that cannot be read is reported once, and not read again as claims', () => {
+    let reads = 0;
+    const shared = {
+      get keyId(): string {
+        reads++;
+        throw new Error('boom');
+      },
+    };
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+    });
+    a.subject = shared;
+    a.claims = { s: shared };
+    expect(verify(a)).toEqual(invalid(['/subject/keyId could not be read: boom']));
+    expect(reads).toBe(1);
+  });
+});
+
 describe('read once, at a bounded cost (counted)', () => {
   it('each property of the attestation is read exactly once', () => {
     const counter = { reads: 0 };

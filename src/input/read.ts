@@ -351,6 +351,23 @@ export function checkText(value: unknown, path: string, add: Add): value is stri
   return true;
 }
 
+/**
+ * Internal: records that `node`, an object already read member by member by the caller (not by
+ * `walkJson`), holds the single scalar member `key`, so that a later `walkJson` reaching it by
+ * another path counts its value again but does not read it again. With `copy`, that later walk
+ * also gives this copy, so every path holds the value read once; without, the object has no
+ * copy (the caller reported a problem about it).
+ */
+export function markRead(
+  reader: Reader,
+  node: object,
+  key: string,
+  copy: { [key: string]: JsonValue } | undefined,
+): void {
+  reader.walked.set(node, { height: 1, size: 1, leaves: 1, units: 1 + escapedLength(key) });
+  if (copy !== undefined) reader.copies?.set(node, copy);
+}
+
 /** One object or list being walked by `walkJson`. */
 interface Frame {
   readonly node: object;

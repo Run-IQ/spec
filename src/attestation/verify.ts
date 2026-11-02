@@ -6,12 +6,13 @@ import {
   checkText,
   childPointer,
   expectPlainObject,
+  markRead,
   readFields,
   requireFields,
   runCheck,
   walkJson,
 } from '../input/read.js';
-import type { Add, Reader } from '../input/read.js';
+import type { Add, Fields, Reader } from '../input/read.js';
 import { SIGNATURE_BASE64URL } from '../proof/fields.js';
 import { publicKeyBytes, signatureMatches } from '../proof/sign.js';
 import type { ProofVerification } from '../proof/types.js';
@@ -51,15 +52,20 @@ const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ'
  *    `undefined` (no key trusted).
  * 2. The shape. `a` is read once (each property read and counted exactly once) into a plain
  *    copy, and every later check runs on that copy: a closed object `{ format, kind, subject,
- *    keyId, role?, at, signature }`; a `format` other than `run-iq.attestation/1` gives the
- *    single issue `unknown format: <format>`; `kind`, `keyId` and `role` non-empty strings
- *    without lone surrogate; `subject` exactly one of `{ proofDigest }` (64 lowercase hex
+ *    keyId, role?, claims?, at, signature }`; a `format` other than `run-iq.attestation/1`
+ *    gives the single issue `unknown format: <format>`; `kind`, `keyId` and `role` non-empty
+ *    strings without lone surrogate; `subject` exactly one of `{ proofDigest }` (64 lowercase hex
  *    characters) and `{ keyId }` (a non-empty string); `at` a canonical instant; `signature` an
  *    ed25519 signature in unpadded base64url (86 characters). A `cosignature` needs
- *    `subject.proofDigest` (`cosignature needs subject.proofDigest`). Each problem is named with
+ *    `subject.proofDigest` (`cosignature needs subject.proofDigest`). `claims`, when present, is
+ *    a plain JSON object checked as input values are (no lone surrogate, numbers below 2^53, at
+ *    most 1000 levels, every value counted) and never interpreted; a cosignature takes none
+ *    (`cosignature takes no claims`, its content not read). An object reachable from both
+ *    `subject` and `claims` is read once, and both hold the same value. Each problem is named with
  *    its path (`/at must be …`, `/subject could not be read: <reason>`).
  * 3. The kind: one this version does not verify keeps it at best `consistent`
- *    (`attestation kind not supported: <kind>`). Its envelope and signature are still checked.
+ *    (`attestation kind not supported: <kind>`). Its envelope is still checked, and its
+ *    signature when its key is trusted (step 5).
  * 4. The subject: a `subject.proofDigest` other than `proofDigest` makes it `invalid`
  *    (`attestation for another proof`).
  * 5. The signature, against `canonicalize` of the attestation without `signature`: `untrusted
@@ -254,7 +260,25 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
     return undefined;
   }
   const fields = readFields(value, path, path, SUBJECT_KEYS, reader);
-  if (fields === undefined) return undefined;
+  if (fields === undefined) {
+    markRead(reader, value, 'proofDigest', undefined);
+    return undefined;
+  }
+  const subject = checkSubject(fields, path, add);
+  // The subject may be reachable from `claims` too: the claims walk takes this read, and the
+  // same copy of it, instead of reading it a second time.
+  const [only] = [...fields.values.keys()];
+  markRead(
+    reader,
+    value,
+    only ?? 'proofDigest',
+    subject === undefined ? undefined : { ...subject },
+  );
+  return subject;
+}
+
+/** The subject held by `fields`, checked; `undefined` after reporting a problem. */
+function checkSubject(fields: Fields, path: string, add: Add): AttestationSubject | undefined {
   if (fields.values.size + fields.failed.size !== 1) {
     add(path, `${path} must hold exactly one of proofDigest and keyId`);
     return undefined;
