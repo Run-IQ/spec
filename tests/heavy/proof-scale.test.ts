@@ -16,6 +16,7 @@ import { outputProof, wideProof } from '../proof-builders.js';
 import { unsalted } from '../proof-cases.js';
 import { hashWork } from '../../src/stream.js';
 import type { ProofView } from '../../src/proof/types.js';
+import { UNCHECKED } from '../notices.js';
 
 type Entry = Record<string, JsonValue>;
 type Compare = (a: Entry, b: Entry) => number;
@@ -87,7 +88,7 @@ describe('a proof stored entry by entry', () => {
     expect(sealProof(unsalted(sorted)).digest).toBe(proof.digest);
     expect(verifyProof({ ...sorted, digest: proof.digest })).toEqual({
       status: 'consistent',
-      issues: ['unsigned'],
+      issues: ['unsigned', ...UNCHECKED],
     });
     // Unsorted, the same entries are not a proof: one order only, so one digest.
     expect(specError(() => sealProof(unsalted(reloaded(proof, leaves, false)))).message).toMatch(
@@ -140,7 +141,10 @@ describe('sealing and verifying at scale: counted work (D-26, pre-flight I30)', 
     const seal = counted(() => sealProof(content));
     const sealed = seal.result;
     const verify = counted(() => verifyProof(sealed));
-    expect(verify.result).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verify.result).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expect(sealed.applied).toHaveLength(n);
     // The header, n rules, one output, n steps.
     const leaves = 2 * n + 2;
