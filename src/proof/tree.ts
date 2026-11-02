@@ -276,8 +276,8 @@ export function proofLeafHash(leaf: ProofLeaf, format: string): Uint8Array {
  * `PROOF_FORMATS`, a `digest` that is not 64 lowercase hex characters, and every case where
  * `verifyInclusion` is false (`size` not an integer from 1 to 2^53 - 1, `index` not below it,
  * a hash that is not 32 bytes, a path of another length, its length checked before any element
- * is read). It reads the digest, the leaf and the
- * ⌈log2 size⌉ hashes of the path at most: never the other leaves.
+ * is read). It reads the digest, the leaf and the ⌈log2 size⌉ hashes of the path at most: never
+ * the other leaves.
  */
 export function verifyProofInclusion(
   digest: string,
