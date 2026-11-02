@@ -4,6 +4,7 @@ import { withSha256, writeJsonString } from './stream.js';
 import type { TextOut } from './stream.js';
 import {
   dateTimeOf,
+  hasDateSlot,
   hasLoneSurrogate,
   holeMessage,
   isPlainObject,
@@ -376,6 +377,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
       sink.leaf(new Date(time).toISOString());
       return;
     }
+    if (read(path, () => hasDateSlot(node))) fail(path, 'a Date with a plain prototype');
     if (ancestors.has(node)) fail(path, 'a circular reference');
     let keys: string[] | undefined;
     let length: number;

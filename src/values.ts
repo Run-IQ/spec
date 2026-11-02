@@ -156,16 +156,40 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
 
 /**
  * The time value of a real `Date` from any realm (`NaN` for an invalid Date), or `undefined`
- * when `value` is not a Date. `Object.prototype.toString` pre-filters; `Date.prototype.getTime`
- * then checks the internal date slot, so a fake with `Symbol.toStringTag = 'Date'` is refused.
+ * when `value` is not a Date. `Date.prototype.getTime` checks the internal date slot (it reads
+ * nothing else), so a fake with `Symbol.toStringTag = 'Date'` is refused; so is a Date under a
+ * plain prototype (`hasDateSlot`).
  */
 export function dateTimeOf(value: unknown): number | undefined {
-  if (Object.prototype.toString.call(value) !== '[object Date]') return undefined;
+  if (typeof value !== 'object' || value === null) return undefined;
+  // Throws for a revoked Proxy, which `readReferenceDate` reports as unreadable.
+  const plain = hasPlainPrototype(value);
+  const time = dateSlotOf(value);
+  // A Date whose prototype is `Object.prototype` or `null` is not a Date here: see `hasDateSlot`.
+  return plain ? undefined : time;
+}
+
+/** The time value held by the internal date slot of `value`, or `undefined` when it has none. */
+function dateSlotOf(value: unknown): number | undefined {
+  // No `Object.prototype.toString` here: it reads `Symbol.toStringTag`, which a Proxy or an
+  // accessor would see. `getTime` reads the internal slot and nothing else, and throws without it.
+  if (typeof value !== 'object' || value === null) return undefined;
   try {
     return Date.prototype.getTime.call(value);
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Whether `value` holds the internal slot of a Date, whatever its prototype. An object is a
+ * `Date` only if it has that slot AND the prototype of a Date (or of a subclass); one with the
+ * slot under a plain prototype (`Object.setPrototypeOf(new Date(0), Object.prototype)`) is
+ * neither a `Date` nor a plain object: it is refused, with its pointer, wherever a value is read.
+ * One with no slot is plain, whatever its `Symbol.toStringTag` says.
+ */
+export function hasDateSlot(value: unknown): boolean {
+  return dateSlotOf(value) !== undefined;
 }
 
 /**
@@ -175,6 +199,11 @@ export function dateTimeOf(value: unknown): number | undefined {
  */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  return hasPlainPrototype(value) && !hasDateSlot(value);
+}
+
+/** True when the prototype of `value` is `null` or some realm's `Object.prototype`. */
+function hasPlainPrototype(value: object): boolean {
   const proto: unknown = Object.getPrototypeOf(value);
   return proto === null || proto === Object.prototype || isForeignObjectPrototype(proto);
 }

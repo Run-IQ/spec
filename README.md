@@ -87,6 +87,8 @@ Every other top-level key is refused: `unknown rule field: dominancegroup (did y
 
 `canonicalize` writes JSON with keys sorted at every depth. `NaN`, `Infinity`, `bigint`, `Map`, `Set`, class instances and cycles throw `NON_SERIALIZABLE` instead of being written as `null` or `{}`. Convert values such as `Decimal` to JSON first. Strings are not Unicode-normalized.
 
+One definition of a `Date` holds everywhere (`canonicalize`, rules, inputs, `isPlainObject`, the dates of a window): an object is a `Date` only if it holds the internal slot of a Date AND has the prototype of a Date, a subclass or a Date of another realm included. An object with no slot is plain whatever its `Symbol.toStringTag` says, and is written as a plain object. An object with the slot under a plain prototype (`Object.setPrototypeOf(new Date(0), Object.prototype)`, or `null`) is neither: it is refused with its pointer (`a Date with a plain prototype`), never written as `{}` nor read as a date.
+
 ## Outputs and exceptions
 
 A rule contributes to one named output. Its calculation model declares the output's type and how the contributions of several rules combine:

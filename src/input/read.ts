@@ -7,6 +7,7 @@ import { withSha256, writeJsonString } from '../stream.js';
 import type { HashStream } from '../stream.js';
 import {
   dateTimeOf,
+  hasDateSlot,
   hasLoneSurrogate,
   isPlainObject,
   holeMessage,
@@ -663,9 +664,11 @@ function openValue(
   try {
     if (!Array.isArray(node) && !isPlainObject(node)) {
       return notJson(
-        dateTimeOf(node) === undefined
-          ? 'an object that is neither plain nor an array'
-          : 'a Date: write it as a string',
+        hasDateSlot(node)
+          ? dateTimeOf(node) === undefined
+            ? 'a Date with a plain prototype'
+            : 'a Date: write it as a string'
+          : 'an object that is neither plain nor an array',
       );
     }
   } catch (error) {
