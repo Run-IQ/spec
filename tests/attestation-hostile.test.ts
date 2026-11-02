@@ -51,6 +51,16 @@ function throwingProxy(target: object): object {
 
 const invalid = (issues: string[]): ProofVerification => ({ status: 'invalid', issues });
 
+const SHAPE_ISSUES: Record<string, string> = {
+  format: '/format must be a string',
+  kind: '/kind must be a non-empty string',
+  keyId: '/keyId must be a non-empty string',
+  role: '/role must be a non-empty string',
+  at: '/at must be an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ',
+  signature: '/signature must be an ed25519 signature in unpadded base64url (86 characters)',
+  subject: '/subject must be an object { proofDigest } or { keyId }',
+};
+
 describe('verifyAttestation never throws: a hostile value is a named invalid', () => {
   it('a getter that throws, wherever it is read', () => {
     for (const key of ['format', 'kind', 'subject', 'keyId', 'role', 'at', 'signature']) {
@@ -95,26 +105,26 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
     const twice = new Proxy(copy, {
       ownKeys: () => [...Object.keys(copy), 'kind'],
     });
-    const result = verify(twice);
-    expect(result.status).toBe('invalid');
-    expect(result.issues).toEqual([
-      expect.stringMatching(/^attestation could not be read: .*duplicate/) as unknown as string,
-    ]);
+    expect(verify(twice)).toEqual(
+      invalid([
+        "attestation could not be read: 'ownKeys' on proxy: trap returned duplicate entries",
+      ]),
+    );
     const subject = { proofDigest: DIGEST };
     const doubled = changed(
       (c) => (c.subject = new Proxy(subject, { ownKeys: () => ['proofDigest', 'proofDigest'] })),
     );
-    expect(verify(doubled).issues).toEqual([
-      expect.stringMatching(/^\/subject could not be read: .*duplicate/) as unknown as string,
-    ]);
+    expect(verify(doubled)).toEqual(
+      invalid(["/subject could not be read: 'ownKeys' on proxy: trap returned duplicate entries"]),
+    );
   });
 
   it('nesting 10 000 levels deep wherever a text or a subject is expected', () => {
     const deep = nested(10_000);
     for (const key of ['format', 'kind', 'keyId', 'role', 'at', 'signature']) {
-      const result = verify(changed((copy) => (copy[key] = deep)));
-      expect(result.status, key).toBe('invalid');
-      expect(result.issues, key).toHaveLength(1);
+      expect(verify(changed((copy) => (copy[key] = deep))), key).toEqual(
+        invalid([SHAPE_ISSUES[key] as string]),
+      );
     }
     expect(verify(changed((copy) => (copy.subject = { proofDigest: deep })))).toEqual(
       invalid(['/subject/proofDigest must be 64 lowercase hex characters']),
@@ -203,8 +213,9 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
       },
     });
     for (const key of ['subject', 'kind', 'at', 'signature']) {
-      const result = verify(changed((copy) => (copy[key] = claiming)));
-      expect(result.status, key).toBe('invalid');
+      expect(verify(changed((copy) => (copy[key] = claiming))), key).toEqual(
+        invalid([SHAPE_ISSUES[key] as string]),
+      );
     }
     expect(verify(claiming).issues).toEqual([
       'attestation must be an object { format, kind, subject, keyId, role?, claims?, at, signature }',
@@ -361,6 +372,9 @@ describe('read once, at a bounded cost (counted)', () => {
     const digest = specError(() =>
       createAttestation(throwingProxy({}) as unknown as string, RFC_SECRET, 'reviewer'),
     );
-    expect(digest.code).toBe('INVALID_ATTESTATION');
+    expect([digest.code, digest.message]).toEqual([
+      'INVALID_ATTESTATION',
+      'proofDigest must be 64 lowercase hex characters',
+    ]);
   });
 });

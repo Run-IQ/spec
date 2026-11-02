@@ -80,6 +80,8 @@ export function verifyAttestation(
   trustedKeys: Record<string, string>,
 ): ProofVerification {
   try {
+    // Defensive: `runCheck` opens the only budget spent today; this one keeps a later read
+    // added outside it inside one budget per call (an equivalent mutant, kept on purpose).
     return withValueBudget(() => verify(a, proofDigest, trustedKeys));
   } catch (error) {
     // Never reached by a value read under guard; a last net, still never a throw.
@@ -207,6 +209,8 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
       '/signature must be an ed25519 signature in unpadded base64url (86 characters)',
     );
   }
+  // Defensive: `verify` refuses any issue too; this keeps a copy from ever being built out of a
+  // malformed read (an equivalent mutant, kept on purpose).
   if (reader.issues.length > 0 || subject === undefined) return undefined;
   const role = field('role');
   return {

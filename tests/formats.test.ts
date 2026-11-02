@@ -3,9 +3,9 @@ import {
   ATTESTATION_FORMAT,
   canonicalize,
   DISCLOSURE_FORMAT,
-  merkleRoot,
   PROOF_FORMAT,
   PROOF_FORMATS,
+  PROOF_SECTIONS,
   proofLeafHashes,
   REFERENTIAL_FORMAT,
   sealProof,
@@ -16,7 +16,7 @@ import {
   verifyProof,
 } from '../src/index.js';
 import type { UnsaltedProof } from '../src/index.js';
-import { hex, nodeSha256 } from './hashing.js';
+import { hex, nodeSha256, referenceRoot } from './hashing.js';
 import { specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, unsalted, unsigned } from './proof-cases.js';
 
@@ -78,9 +78,20 @@ describe('the format policy (D-6)', () => {
     expect(hex(leaves[1] as Uint8Array)).toBe(
       hex(nodeSha256(new Uint8Array([0]), T, canonicalize({ s: 'rules', i: 0, e: rules[0] }))),
     );
+    // Every leaf, then the RFC 6962 root (`referenceRoot`, node:crypto), rebuilt here alone.
+    const nodeLeaves = [
+      nodeSha256(new Uint8Array([0]), T, canonicalize({ s: 'header', e: header })),
+    ];
+    for (const section of PROOF_SECTIONS) {
+      (proof[section] as unknown[]).forEach((e, i) =>
+        nodeLeaves.push(nodeSha256(new Uint8Array([0]), T, canonicalize({ s: section, i, e }))),
+      );
+    }
+    expect(nodeLeaves.map(hex)).toEqual(leaves.map(hex));
     const count = new Uint8Array(8);
-    new DataView(count.buffer).setBigUint64(0, BigInt(leaves.length));
-    expect(proof.digest).toBe(hex(nodeSha256(new Uint8Array([2]), T, count, merkleRoot(leaves))));
+    new DataView(count.buffer).setBigUint64(0, BigInt(nodeLeaves.length));
+    const root = referenceRoot(nodeLeaves);
+    expect(proof.digest).toBe(hex(nodeSha256(new Uint8Array([2]), T, count, root)));
   });
 
   it('a format not listed is read by no function: one issue, nothing else checked', () => {

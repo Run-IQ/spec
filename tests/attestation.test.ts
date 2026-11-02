@@ -132,15 +132,15 @@ describe('createAttestation: a detached cosignature of a proof (D-29)', () => {
       'INVALID_ATTESTATION',
       'proofDigest must be 64 lowercase hex characters',
     ]);
-    for (const digest of [`x${DIGEST}`, `${DIGEST}0`]) {
-      expect(specError(() => createAttestation(digest, RFC_SECRET, 'r')).code).toBe(
+    for (const digest of [`x${DIGEST}`, `${DIGEST}0`, DIGEST.toUpperCase()]) {
+      const error = specError(() => createAttestation(digest, RFC_SECRET, 'r'));
+      expect([error.code, error.message], digest).toEqual([
         'INVALID_ATTESTATION',
-      );
+        'proofDigest must be 64 lowercase hex characters',
+      ]);
     }
     const nullOptions = specError(() => createAttestation(DIGEST, RFC_SECRET, 'r', null as never));
     expect(nullOptions.message).toBe('Cannot attest: options must be an object { role?, at? }');
-    const upper = specError(() => createAttestation(DIGEST.toUpperCase(), RFC_SECRET, 'r'));
-    expect(upper.code).toBe('INVALID_ATTESTATION');
     const key = specError(() => createAttestation(DIGEST, 'xyz', 'reviewer'));
     expect([key.code, key.message]).toEqual([
       'INVALID_KEY',
