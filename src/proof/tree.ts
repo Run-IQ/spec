@@ -14,8 +14,9 @@ import type { ProofLeaf } from './validate.js';
 export type { ProofLeaf } from './validate.js';
 
 // Internal to `@run-iq/spec`: the leaves of a proof and its digest (D-16), all encoded by
-// `hashLeafInto` and `sizedDigest` under the proof's own format. A short leaf is written as one text and hashed at once; a longer one is hashed
-// as it is written (`withSha256`, `writeCanonical`): no long canonical text is ever built.
+// `hashLeafInto` and `sizedDigest` under the proof's own format. A short leaf is written as one
+// text and hashed at once; a longer one is hashed as it is written (`withSha256`,
+// `writeCanonical`): no long canonical text is ever built.
 
 /** A digest as `sealProof` writes it. */
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
@@ -272,9 +273,10 @@ export function proofLeafHash(leaf: ProofLeaf, format: string): Uint8Array {
  * size. The header is leaf 0; the entries follow, section by section.
  *
  * Never throws: false for anything else, in particular a `format` not listed in
- * `PROOF_FORMATS`, a `digest` that is not 64 lowercase hex characters, and every case where `verifyInclusion` is false (`size` not an integer from 1 to
- * 2^53 - 1, `index` not below it, a hash that is not 32 bytes, a path of another length, its
- * length checked before any element is read). It reads the digest, the leaf and the
+ * `PROOF_FORMATS`, a `digest` that is not 64 lowercase hex characters, and every case where
+ * `verifyInclusion` is false (`size` not an integer from 1 to 2^53 - 1, `index` not below it,
+ * a hash that is not 32 bytes, a path of another length, its length checked before any element
+ * is read). It reads the digest, the leaf and the
  * ⌈log2 size⌉ hashes of the path at most: never the other leaves.
  */
 export function verifyProofInclusion(
