@@ -138,13 +138,15 @@ describe('proofs as large as the format allows', () => {
     );
     const result = verifyProof({ ...withCounts(proof), digest: '0'.repeat(64) });
     expect(result.status).toBe('invalid');
-    expect(result.issues.length).toBe(101);
+    expect(result.issues.length).toBe(100);
     expect(result.issues.slice(0, 3)).toEqual([
       'digest mismatch',
       'factsRead not sorted at 1',
       'factsRead not sorted at 2',
     ]);
-    expect(result.issues.at(-1)).toBe('further problems not listed (limit 100)');
+    expect(result.issues.at(-1)).toMatch(
+      /^further problems not listed \(limit 100\): \d+ left out$/,
+    );
   }, 600_000);
 
   it('200 000 affected rules: sealed and verified, in linear work', () => {
