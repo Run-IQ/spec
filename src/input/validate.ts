@@ -15,6 +15,7 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  notADateMessage,
   MAX_INPUT_LEAF_TEXT,
 } from '../values.js';
 import { assertionKeyProblem, DATE_FORMS, readAssertion } from './assertions.js';
@@ -318,7 +319,13 @@ function readDates(
     if (isUnnamable(key)) reader.add(path, unnamableNameMessage(path, 'date', key));
     else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(at));
     else if (!isCivilDate(date) && !isInstant(date)) {
-      reader.add(at, `${citeName(at)} must be ${DATE_FORMS}`);
+      const notDate = notADateMessage(date);
+      reader.add(
+        at,
+        notDate === undefined
+          ? `${citeName(at)} must be ${DATE_FORMS}`
+          : `${citeName(at)} must be ${DATE_FORMS}; got ${notDate}`,
+      );
     } else {
       countText(reader, at.length);
       return date;

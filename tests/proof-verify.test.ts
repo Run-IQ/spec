@@ -351,7 +351,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
     });
   });
 
-  it('options that cannot be read: an options problem, never one of the proof', () => {
+  it('options that cannot be read throw, naming the option: a mistake of the caller, not of the proof', () => {
     type Options = Parameters<typeof verifyProof>[1];
     const throwing = (reason: string): never => {
       throw new Error(reason);
@@ -368,17 +368,21 @@ describe('verifyProof: invalid, with a readable issue', () => {
         return throwing('keys');
       },
     };
-    // The options read, the signature is checked before the rules are.
-    const cases: [unknown, string[]][] = [
-      [opaque, ['options could not be read: opt']],
-      [getter, ['options.rules could not be read: getter']],
-      [keys, ['options.trustedKeys could not be read: keys']],
-      [{ rules }, ['untrusted key', 'options.rules could not be read: arr']],
+    const thrown: [unknown, string][] = [
+      [opaque, 'options could not be read: opt'],
+      [getter, 'options.rules could not be read: getter'],
+      [keys, 'options.trustedKeys could not be read: keys'],
     ];
-    for (const [options, issues] of cases) {
+    for (const [options, message] of thrown) {
       // Hostile options, outside the declared type on purpose.
-      expect(verifyProof(signed(), options as Options)).toEqual({ status: 'invalid', issues });
+      const error = specError(() => verifyProof(signed(), options as Options));
+      expect(error).toMatchObject({ code: 'INVALID_PROOF', message });
     }
+    // The rules themselves, read while they are compared with the proof, are a verdict.
+    expect(verifyProof(signed(), { rules } as Options)).toEqual({
+      status: 'invalid',
+      issues: ['untrusted key', 'options.rules could not be read: arr'],
+    });
   });
 
   it('never throws, whatever the input', () => {

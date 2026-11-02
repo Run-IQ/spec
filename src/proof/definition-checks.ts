@@ -6,7 +6,12 @@ import { windowContains } from '../rule/window.js';
 import { fixedOffsetCalendar, isCivilDate } from '../time/civil.js';
 import type { CivilCalendar } from '../time/civil.js';
 import { BEFORE_EXCEPTIONS } from './effects.js';
-import { intlCalendar, isKnownZone } from './intl-calendar.js';
+import {
+  intlCalendar,
+  isKnownZone,
+  RuntimeCannotReadOffsets,
+  runtimeTzdata,
+} from './intl-calendar.js';
 import { instanceKey } from './output-values.js';
 import { ruleKey } from './precedence.js';
 import type { ProofView } from './types.js';
@@ -37,6 +42,8 @@ const CHECKED_REASONS: ReadonlySet<string> = new Set([
 const MAX_NAMED_REASONS = 20;
 /** Rules named in an aggregated window notice; the rest are counted. */
 const MAX_NAMED_RULES = 5;
+/** Zones or releases named in an aggregated window notice. */
+const MAX_NAMED_DETAILS = 3;
 
 /** What the checks report: contradictions, and what they could not decide. */
 export interface DefinitionFindings {
@@ -123,6 +130,7 @@ function windowHolds(
   proof: ProofView,
   definition: RuleDefinition,
   calendar: CivilCalendar | undefined,
+  tzdata: string | undefined,
 ): boolean | string {
   if (definition.effectiveOn !== undefined)
     return `effectiveOn is ${citeName(definition.effectiveOn)}`;
@@ -136,15 +144,64 @@ function windowHolds(
   }
   const byBounds = decidedByBounds(at, definition.effectiveFrom, definition.effectiveUntil);
   if (byBounds !== undefined) return byBounds;
-  if (!isKnownZone(effective)) return `zone ${citeName(effective)} unknown to this verifier`;
-  return decided(windowContains(definition, at, zone, intlCalendar));
+  try {
+    if (!isKnownZone(effective)) return `zone ${citeName(effective)} unknown to this verifier`;
+    // The exact offset comes from the time zone database of this runtime: it decides only when
+    // that database is the one the proof was made with. A bound far from the instant never
+    // reaches here, and needs no database.
+    const recorded = proof.versions.components.find((entry) => entry.name === 'tzdata')?.version;
+    if (recorded === undefined) return 'no tzdata in the proof';
+    if (tzdata === undefined) return 'this runtime does not name its tzdata';
+    if (recorded !== tzdata)
+      return `tzdata ${citeName(recorded)} of the proof, ${citeName(tzdata)} here`;
+    // `windowContains` wraps what a calendar throws: note here that the runtime could not read.
+    let unreadable = false;
+    const watched = (call: () => string): string => {
+      try {
+        return call();
+      } catch (error) {
+        if (error instanceof RuntimeCannotReadOffsets) unreadable = true;
+        throw error;
+      }
+    };
+    const exact: CivilCalendar = {
+      toCivilDate: (instant, name) => watched(() => intlCalendar.toCivilDate(instant, name)),
+      startOfDay: (day, name) => watched(() => intlCalendar.startOfDay(day, name)),
+    };
+    try {
+      return decided(windowContains(definition, at, zone, exact));
+    } catch (error) {
+      if (unreadable) return CANNOT_READ_OFFSETS;
+      throw error;
+    }
+  } catch (error) {
+    // A limit of the runtime is a notice, never a fault of the proof.
+    if (error instanceof RuntimeCannotReadOffsets) return CANNOT_READ_OFFSETS;
+    throw error;
+  }
 }
 
-/** The kind of a cause of an undecided window: the pointer or the zone is not part of it. */
-function windowKind(why: string): string {
-  if (why.startsWith('effectiveOn is ')) return 'effectiveOn is not the decision date';
-  if (why.startsWith('zone ')) return 'zone unknown to this verifier';
-  return why;
+const CANNOT_READ_OFFSETS = 'this runtime cannot read time zone offsets';
+
+/**
+ * The kind of a cause of an undecided window, and what tells its causes apart (a zone, two
+ * releases): the pointer or the zone is not part of the kind.
+ */
+function windowKind(why: string): { kind: string; detail?: string } {
+  if (why.startsWith('effectiveOn is ')) return { kind: 'effectiveOn is not the decision date' };
+  if (why.startsWith('zone ')) {
+    return {
+      kind: 'zone unknown to this verifier',
+      detail: why.slice(5, -' unknown to this verifier'.length),
+    };
+  }
+  if (why.startsWith('tzdata ')) {
+    return { kind: "tzdata of the proof differs from this runtime's", detail: why.slice(7) };
+  }
+  if (why === 'no tzdata in the proof' || why === 'this runtime does not name its tzdata') {
+    return { kind: why };
+  }
+  return { kind: why };
 }
 
 /** The answer of `windowContains`, `'unknown'` being a day that holds an instant bound. */
@@ -179,6 +236,7 @@ export function definitionFindings(
   matched: ReadonlyMap<string, RuleDefinition>,
   report: DefinitionFindings,
   calendar?: CivilCalendar,
+  runtime: { tzdata: string | undefined } = { tzdata: runtimeTzdata() },
 ): void {
   const windows = new Map<string, boolean | string>();
   const undecided = new Map<string, string[]>();
@@ -187,7 +245,7 @@ export function definitionFindings(
     let held = windows.get(key);
     if (held === undefined) {
       try {
-        held = windowHolds(proof, definition, calendar);
+        held = windowHolds(proof, definition, calendar, runtime.tzdata);
       } catch (error) {
         report.invalid(`window check failed: ${reasonOf(error)} (${citeName(key)})`);
         held = 'the check failed';
@@ -265,22 +323,30 @@ export function definitionFindings(
 
   // One notice per kind of cause, whatever the number of rules: the number of notices of a
   // verdict is fixed, and none is ever cut.
-  const kinds = new Map<string, { causes: Set<string>; keys: string[] }>();
+  const kinds = new Map<string, { causes: Set<string>; details: Set<string>; keys: string[] }>();
   for (const [why, keys] of undecided) {
-    const kind = windowKind(why);
-    const group = kinds.get(kind) ?? { causes: new Set<string>(), keys: [] };
+    const { kind, detail } = windowKind(why);
+    const group = kinds.get(kind) ?? {
+      causes: new Set<string>(),
+      details: new Set<string>(),
+      keys: [],
+    };
     group.causes.add(why);
+    if (detail !== undefined) group.details.add(detail);
     group.keys.push(...keys);
     kinds.set(kind, group);
   }
-  for (const [kind, { causes, keys }] of kinds) {
+  for (const [kind, { causes, details, keys }] of kinds) {
     if (keys.length === 1) {
       report.unchecked(`window not checked: ${citeName(keys[0]!)} (${[...causes][0]})`);
       continue;
     }
     const named = keys.slice(0, MAX_NAMED_RULES).map(citeName).join(', ');
     const more = keys.length > MAX_NAMED_RULES ? ` and ${keys.length - MAX_NAMED_RULES} more` : '';
-    report.unchecked(`window not checked for ${keys.length} rules (${kind}): ${named}${more}`);
+    const shown = [...details].slice(0, MAX_NAMED_DETAILS);
+    const extra = details.size > shown.length ? `, and ${details.size - shown.length} more` : '';
+    const what = shown.length > 0 ? `${kind}: ${shown.join(', ')}${extra}` : kind;
+    report.unchecked(`window not checked for ${keys.length} rules (${what}): ${named}${more}`);
   }
   for (const reason of unnamed.slice(0, MAX_NAMED_REASONS)) {
     report.unchecked(`reason not checked: ${citeName(reason)}`);

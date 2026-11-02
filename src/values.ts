@@ -163,10 +163,10 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
 export function dateTimeOf(value: unknown): number | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   // Throws for a revoked Proxy, which `readReferenceDate` reports as unreadable.
-  const plain = hasPlainPrototype(value);
+  const real = hasDatePrototype(value);
   const time = dateSlotOf(value);
-  // A Date whose prototype is `Object.prototype` or `null` is not a Date here: see `hasDateSlot`.
-  return plain ? undefined : time;
+  // The slot under another prototype is not a Date here: see `hasDateSlot`.
+  return real ? time : undefined;
 }
 
 /** The time value held by the internal date slot of `value`, or `undefined` when it has none. */
@@ -182,11 +182,46 @@ function dateSlotOf(value: unknown): number | undefined {
 }
 
 /**
+ * Whether the prototype chain of `value` reaches the `Date.prototype` of some realm: an object
+ * whose own `constructor` is a function named `Date` with this very object as `prototype`.
+ */
+function hasDatePrototype(value: object): boolean {
+  let proto: unknown = Object.getPrototypeOf(value);
+  while (proto !== null && typeof proto === 'object') {
+    const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+    if (
+      typeof ctor === 'function' &&
+      ctor.name === 'Date' &&
+      (ctor as { prototype?: unknown }).prototype === proto
+    ) {
+      return true;
+    }
+    proto = Object.getPrototypeOf(proto);
+  }
+  return false;
+}
+
+/**
+ * The refusal of a value that holds the internal slot of a Date without being a `Date`:
+ * `a Date with a plain prototype` (`Object.prototype`, `null`) or `a Date with a foreign
+ * prototype` (any other that is not a Date's). `undefined` for a real Date and for a value with
+ * no slot. One text everywhere a value is read: canonical form, rules, inputs, windows.
+ */
+export function notADateMessage(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || !hasDateSlot(value)) return undefined;
+  if (hasDatePrototype(value)) return undefined;
+  return hasPlainPrototype(value)
+    ? 'a Date with a plain prototype'
+    : 'a Date with a foreign prototype';
+}
+
+/**
  * Whether `value` holds the internal slot of a Date, whatever its prototype. An object is a
- * `Date` only if it has that slot AND the prototype of a Date (or of a subclass); one with the
- * slot under a plain prototype (`Object.setPrototypeOf(new Date(0), Object.prototype)`) is
- * neither a `Date` nor a plain object: it is refused, with its pointer, wherever a value is read.
- * One with no slot is plain, whatever its `Symbol.toStringTag` says.
+ * `Date` only if it has that slot AND the prototype of a Date (a subclass or a Date of another
+ * realm included); one with the slot under any other prototype
+ * (`Object.setPrototypeOf(new Date(0), Object.prototype)`, `Map.prototype`, ...) is neither a
+ * `Date` nor a plain object: it is refused, with its pointer, wherever a value is read
+ * (`notADateMessage`). One with no slot is plain, whatever its `Symbol.toStringTag` says.
  */
 export function hasDateSlot(value: unknown): boolean {
   return dateSlotOf(value) !== undefined;

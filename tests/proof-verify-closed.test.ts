@@ -12,6 +12,7 @@ import {
   verifyProof,
 } from '../src/index.js';
 import { fixedCalendar } from './helpers.js';
+import { withRuntimeTzdata } from './notices.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import type { ProofView } from '../src/proof/types.js';
@@ -359,6 +360,7 @@ describe('I11: what the definitions decide without execution', () => {
       verifyProof(
         forRules([paris, ruleB], (c) => {
           c.evaluatedAt = instant;
+          withRuntimeTzdata(c);
         }),
         { trustedKeys: TRUSTED, rules: [paris, ruleB], ...options },
       );

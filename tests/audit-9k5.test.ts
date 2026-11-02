@@ -32,7 +32,7 @@ import { boundWithFixed } from '../src/issues.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import type { ProofView } from '../src/proof/types.js';
 import { fixedCalendar, specError } from './helpers.js';
-import { NOT_REPLAYED } from './notices.js';
+import { NOT_REPLAYED, withRuntimeTzdata } from './notices.js';
 import {
   baseContent,
   input,
@@ -438,7 +438,7 @@ describe('findings 3 and 12: the cases the first tests left open', () => {
       effectiveFrom: '2025-06-01T06:00:00.000Z',
       effectiveUntil: '2025-12-01T00:00:00.000Z',
     };
-    const content = unsigned();
+    const content = withRuntimeTzdata(unsigned());
     content.evaluatedAt = '2025-06-01';
     content.rules[0]!.checksum = computeRuleChecksum(cut);
     const proof = signProof(sealProof(unsalted(content)), RFC_SECRET, 'executor-1');

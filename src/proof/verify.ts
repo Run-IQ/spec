@@ -1,4 +1,4 @@
-import { citeName, reasonOf, unreadableMessage } from '../errors.js';
+import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages, boundWithFixed } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
@@ -120,23 +120,37 @@ export function verifyProof(
     trustedKeys?: Record<string, string>;
     rules?: ReadonlyArray<RuleDefinitionInput>;
     calendar?: CivilCalendar;
+    maxProofTimeZones?: number;
   },
 ): ProofVerification {
+  // The options are the caller's: an unknown or unreadable one is a mistake of the caller, not a
+  // fault of the proof, so it throws (the key named) instead of blaming a correct proof.
+  const options = readOptions(o);
   try {
-    return withValueBudget(() => verify(p, o));
+    return withValueBudget(() => verify(p, options));
   } catch (error) {
     // A hostile value (a Proxy, a throwing getter) can still throw while being read.
     return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
   }
 }
 
-function verify(p: unknown, options: unknown): ProofVerification {
+function verify(p: unknown, options: Options): ProofVerification {
   const { proof, errors } = readDecisionProof(p);
   if (!proof) return { status: 'invalid', issues: boundMessages(errors) };
 
   const findings: Finding[] = [];
   if (treeDigest(proof) !== proof.digest) findings.push(invalidFinding('digest mismatch'));
   const { view, redactions } = proofView(proof);
+  const zones = new Set<string>([proof.timeZone]);
+  for (const set of proof.ruleSets)
+    if (set.kind !== 'referential' && set.timeZone) zones.add(set.timeZone);
+  if (zones.size > options.maxProofTimeZones) {
+    findings.push(
+      invalidFinding(
+        `proof names ${zones.size} time zones, more than maxProofTimeZones (${options.maxProofTimeZones})`,
+      ),
+    );
+  }
   const context = contextOf(view, redactions.hidden);
   for (const message of inconsistencies(view, context, redactions.positions)) {
     findings.push(invalidFinding(message));
@@ -182,8 +196,76 @@ function verify(p: unknown, options: unknown): ProofVerification {
   return { status, issues, redacted: redactions.count, lifted };
 }
 
+/** The options of a call, read once. */
+interface Options {
+  /** False when the argument is given but is not an object: a verdict, as it always was. */
+  shapeOk: boolean;
+  trustedKeys: unknown;
+  rules: unknown;
+  calendar: unknown;
+  maxProofTimeZones: number;
+}
+
+/** The distinct time zones a proof may name (`maxProofTimeZones`, by default). */
+export const MAX_PROOF_TIME_ZONES = 64;
+
+/**
+ * Reads the options once. An unknown key (a typo: `calender`), an option that cannot be read, or
+ * a `maxProofTimeZones` that is not a positive integer throws `SpecError` (`INVALID_PROOF`) with
+ * the option named: a mistake of the caller, never a verdict on the proof.
+ */
+function readOptions(o: unknown): Options {
+  const fail = (message: string): never => {
+    throw newSpecError('INVALID_PROOF', message);
+  };
+  const empty: Options = {
+    shapeOk: true,
+    trustedKeys: undefined,
+    rules: undefined,
+    calendar: undefined,
+    maxProofTimeZones: MAX_PROOF_TIME_ZONES,
+  };
+  if (o === undefined) return empty;
+  let record: Record<string, unknown> | undefined;
+  try {
+    record = isPlainObject(o) ? o : undefined;
+  } catch (error) {
+    return fail(unreadableMessage('options', error));
+  }
+  if (record === undefined) return { ...empty, shapeOk: false };
+  try {
+    for (const key of Reflect.ownKeys(record)) {
+      if (typeof key === 'string' && OPTION_KEYS.includes(key)) continue;
+      const name = typeof key === 'symbol' ? key.toString() : key;
+      const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
+      const hint = wanted === undefined ? '' : ` (did you mean ${wanted}?)`;
+      fail(`options.${citeName(name)} is not an option${hint}`);
+    }
+  } catch (error) {
+    return isOwnError(error) ? fail(error.message) : fail(unreadableMessage('options', error));
+  }
+  const read = (name: string): unknown => {
+    try {
+      return record[name];
+    } catch (error) {
+      return fail(unreadableMessage(`options.${name}`, error));
+    }
+  };
+  const max = read('maxProofTimeZones');
+  if (max !== undefined && !(typeof max === 'number' && Number.isSafeInteger(max) && max > 0)) {
+    fail('options.maxProofTimeZones must be a positive integer');
+  }
+  return {
+    shapeOk: true,
+    trustedKeys: read('trustedKeys'),
+    rules: read('rules'),
+    calendar: read('calendar'),
+    maxProofTimeZones: (max as number | undefined) ?? MAX_PROOF_TIME_ZONES,
+  };
+}
+
 /** The options `verifyProof` reads: any other key is a mistake, never ignored. */
-const OPTION_KEYS: readonly string[] = ['trustedKeys', 'rules', 'calendar'];
+const OPTION_KEYS: readonly string[] = ['trustedKeys', 'rules', 'calendar', 'maxProofTimeZones'];
 const OPTION_NAMES = OPTION_KEYS.map((name) => [name, name.toLowerCase()] as const);
 
 /**
@@ -195,7 +277,7 @@ const OPTION_NAMES = OPTION_KEYS.map((name) => [name, name.toLowerCase()] as con
 function optionFindings(
   view: ProofView,
   proof: DecisionProof,
-  options: unknown,
+  options: Options,
   context: Context,
   redactions: Redactions,
   unchecked: string[],
@@ -203,47 +285,12 @@ function optionFindings(
   const unreadable = (subject: string, error: unknown): Finding[] => [
     invalidFinding(unreadableMessage(subject, error)),
   ];
-  let record: Record<string, unknown> | undefined;
-  try {
-    record = isPlainObject(options) ? options : undefined;
-  } catch (error) {
-    return unreadable('options', error);
-  }
   const findings: Finding[] = [];
-  if (options !== undefined && record === undefined) {
+  if (!options.shapeOk) {
     findings.push(invalidFinding('options must be an object { trustedKeys?, rules?, calendar? }'));
   }
-  if (record !== undefined) {
-    try {
-      for (const key of Reflect.ownKeys(record)) {
-        if (typeof key === 'string' && OPTION_KEYS.includes(key)) continue;
-        const name = typeof key === 'symbol' ? key.toString() : key;
-        const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
-        const hint = wanted === undefined ? '' : ` (did you mean ${wanted}?)`;
-        findings.push(invalidFinding(`options.${citeName(name)} is not an option${hint}`));
-      }
-    } catch (error) {
-      return [...findings, ...unreadable('options', error)];
-    }
-  }
-  let trustedKeys: unknown;
-  let rules: unknown;
-  let calendar: unknown;
-  try {
-    trustedKeys = record?.trustedKeys;
-  } catch (error) {
-    return [...findings, ...unreadable('options.trustedKeys', error)];
-  }
-  try {
-    rules = record?.rules;
-  } catch (error) {
-    return [...findings, ...unreadable('options.rules', error)];
-  }
-  try {
-    calendar = record?.calendar;
-  } catch (error) {
-    return [...findings, ...unreadable('options.calendar', error)];
-  }
+  const { trustedKeys, rules } = options;
+  let calendar: unknown = options.calendar;
   if (calendar !== undefined && !isCalendar(calendar)) {
     findings.push(
       invalidFinding('options.calendar must be a calendar { toCivilDate, startOfDay }'),

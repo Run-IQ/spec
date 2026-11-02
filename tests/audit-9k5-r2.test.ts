@@ -19,7 +19,8 @@ import { definitionFindings } from '../src/proof/definition-checks.js';
 import { intlCalendar } from '../src/proof/intl-calendar.js';
 import type { ProofView } from '../src/proof/types.js';
 import { handSealed } from './helpers.js';
-import { NOT_REPLAYED } from './notices.js';
+import { NOT_REPLAYED, withRuntimeTzdata } from './notices.js';
+import { specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, ruleA, ruleB, signed, unsalted, unsigned } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 
@@ -31,7 +32,7 @@ function proofOf(
   evaluatedAt: string,
   change: (content: ProofView) => void = () => undefined,
 ): DecisionProof {
-  const content = unsigned();
+  const content = withRuntimeTzdata(unsigned());
   content.evaluatedAt = evaluatedAt;
   content.rules[0]!.checksum = computeRuleChecksum(rule);
   change(content);
@@ -293,33 +294,41 @@ describe('U5: a NOT_REQUESTED without its output is malformed', () => {
   });
 });
 
-describe('U8: an option that is not an option is refused, and named', () => {
-  const run = (options: object) => verifyProof(signed(), options);
+describe('U8: an option that is not an option throws, and is named', () => {
+  const run = (options: object) => () => verifyProof(signed(), options);
 
   it('a typo of calendar', () => {
-    expect(run({ trustedKeys: TRUSTED, calender: {} })).toEqual({
-      status: 'invalid',
-      issues: ['options.calender is not an option (did you mean calendar?)'],
-    });
+    const error = specError(run({ trustedKeys: TRUSTED, calender: {} }));
+    expect(error.code).toBe('INVALID_PROOF');
+    expect(error.message).toBe('options.calender is not an option (did you mean calendar?)');
   });
 
   it('rule for rules, and a name close to nothing', () => {
-    expect(run({ trustedKeys: TRUSTED, rule: [] }).issues).toEqual([
+    expect(specError(run({ trustedKeys: TRUSTED, rule: [] })).message).toBe(
       'options.rule is not an option (did you mean rules?)',
-    ]);
-    expect(run({ trustedKeys: TRUSTED, whatever: 1 }).issues).toEqual([
+    );
+    expect(specError(run({ trustedKeys: TRUSTED, whatever: 1 })).message).toBe(
       'options.whatever is not an option',
-    ]);
+    );
   });
 
   it('a symbol key', () => {
-    expect(run({ trustedKeys: TRUSTED, [Symbol('x')]: 1 }).issues).toEqual([
+    expect(specError(run({ trustedKeys: TRUSTED, [Symbol('x')]: 1 })).message).toBe(
       'options.Symbol(x) is not an option',
-    ]);
+    );
   });
 
-  it('the three real options are accepted', () => {
-    expect(run({ trustedKeys: TRUSTED, rules: [ruleA, ruleB] }).status).toBe('authentic');
+  it('maxProofTimeZones must be a positive integer', () => {
+    for (const bad of [0, -1, 1.5, '64', Number.NaN]) {
+      expect(specError(run({ maxProofTimeZones: bad })).message).toBe(
+        'options.maxProofTimeZones must be a positive integer',
+      );
+    }
+  });
+
+  it('the real options are accepted', () => {
+    const ok = verifyProof(signed(), { trustedKeys: TRUSTED, rules: [ruleA, ruleB] });
+    expect(ok.status).toBe('authentic');
   });
 });
 

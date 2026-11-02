@@ -1,5 +1,5 @@
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from '../errors.js';
-import { dateTimeOf, typeName } from '../values.js';
+import { dateTimeOf, notADateMessage, typeName } from '../values.js';
 
 /**
  * A civil date: a day of the calendar, `YYYY-MM-DD` (proleptic Gregorian, years 0000 to 9999),
@@ -119,7 +119,9 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
     }
     return new Date(time).toISOString();
   }
-  if (typeof value !== 'string') invalidDate(field, `a value of type ${typeName(value)}`);
+  if (typeof value !== 'string') {
+    invalidDate(field, notADateMessage(value) ?? `a value of type ${typeName(value)}`);
+  }
   if (isCivilDate(value)) return value;
 
   const match = DATE_TIME.exec(value);

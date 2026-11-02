@@ -149,8 +149,8 @@ export interface RuleDefinitionInputBase {
   readonly sourceRef?: string | undefined;
   /** Whatever a plugin or a pack adds, by name: a plain object, covered by the checksum. */
   readonly extensions?: Readonly<Record<string, unknown>> | undefined;
-  /** Ignored: removed by normalization. `null` is refused as authored, accepted read back. */
-  readonly checksum?: string | null | undefined;
+  /** Ignored: removed by normalization. A `null` is refused in every form: omit the field. */
+  readonly checksum?: string | undefined;
 }
 
 export type RuleDefinitionInput = RuleDefinitionInputBase;
