@@ -73,7 +73,7 @@ type Issues = IssueList;
  * `(did you mean <field>?)` for a misspelling), whatever its value: what a plugin adds goes under
  * `extensions`, a plain object of free-form JSON. It refuses `null` in an optional field
  * (`<field> is null: omit the field instead`) and in `dimensions` (`dimensions.<name> is null:
- * ...`), `effectiveUntil` excepted, as normalize does.
+ * ...`), `effectiveUntil` and `checksum` included, as `normalizeRuleDefinition` does.
  *
  * `checksum` is ignored, as in normalize.
  *
@@ -150,6 +150,8 @@ function definitionIssues(value: unknown): {
 
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
   const untilValue = value.effectiveUntil;
+  if (untilValue === null) errors.add('effectiveUntil', nullFieldMessage('effectiveUntil'));
+  if (value.checksum === null) errors.add('checksum', nullFieldMessage('checksum'));
   const until = untilValue == null ? null : checkDate(untilValue, 'effectiveUntil', errors);
   if (from !== undefined && until !== undefined) {
     const problem = windowShapeProblem(from, until);

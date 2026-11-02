@@ -72,7 +72,7 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  *   member whose value is `undefined` in an object the format defines (`condition`, a dimension
  *   spec, an exception, a selector, `forEach`) is absent, known or not. `null` is refused in an
  *   optional field (`<field> is null: omit the field instead`) and in `dimensions`
- *   (`dimensions.<name> is null: ...`), `effectiveUntil` excepted (see `RuleDefinition`);
+ *   (`dimensions.<name> is null: ...`), `effectiveUntil` and `checksum` included (see `RuleDefinition`);
  * - a top-level key that is not a reserved field is refused (`unknown rule field: <key>`, with
  *   `(did you mean <field>?)` for a misspelling); what a plugin adds goes under `extensions`,
  *   a plain object whose values are free-form JSON, kept as it is and dropped when empty;
@@ -111,8 +111,23 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * exactly as `validateRuleDefinition` cuts its issues: both give the same first message.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  return normalizeForm(input, false);
+}
+
+/**
+ * Internal: `normalizeRuleDefinition` for a rule read back in its normalized or stored form, as
+ * `computeRuleChecksum`, `toExecutableRule` and `fromStoredRecord` read it. The one difference:
+ * `effectiveUntil: null`, the internal encoding of "no end" that a normalized definition holds,
+ * is accepted, and so is a `null` `checksum`, which is ignored. What an author writes
+ * (`normalizeRuleDefinition`, `validateRuleDefinition`) refuses both: omit the field.
+ */
+export function normalizeStoredRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  return normalizeForm(input, true);
+}
+
+function normalizeForm(input: RuleDefinitionInput, stored: boolean): RuleDefinition {
   try {
-    return withValueBudget(() => normalize(input));
+    return withValueBudget(() => normalize(input, stored));
   } catch (error) {
     // Cut as `validateRuleDefinition` cuts its issues, so both give the same first message.
     if (isOwnError(error)) {
@@ -126,7 +141,7 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
   }
 }
 
-function normalize(input: RuleDefinitionInput): RuleDefinition {
+function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
   if (!spendValues(Object.keys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
@@ -134,7 +149,12 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
   for (const key of Object.keys(input)) {
     if (!RESERVED.has(key)) invalidRule(unknownRuleFieldMessage(key));
   }
-  const { from, until } = readRuleWindow(input.effectiveFrom, input.effectiveUntil);
+  const untilInput = input.effectiveUntil;
+  if (!stored) {
+    if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
+    if (input.checksum === null) invalidRule(nullFieldMessage('checksum'));
+  }
+  const { from, until } = readRuleWindow(input.effectiveFrom, untilInput);
 
   const ruleSet = readRuleSet(input.ruleSet);
   const out: Record<string, unknown> = {

@@ -87,6 +87,8 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
   const declared = Array.isArray(value)
     ? ({ type: 'list', combine: 'union' } as const)
     : ({ type: 'object', combine: 'highestPriority' } as const);
+  // The trace says what the rule says: its model and its output.
+  const name = rule.output ?? 'value';
   const proof: ProofView = {
     format: PROOF_FORMAT,
     requestId: 'req-1',
@@ -96,8 +98,14 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     inputSalted: false,
     timeZone: 'UTC',
     ruleSets: [],
-    versions: { engine: '1', plugins: {}, dsls: {}, models: { FLAT: '1' }, components: [] },
-    strata: [['value']],
+    versions: {
+      engine: '1',
+      plugins: {},
+      dsls: {},
+      models: { [rule.model]: '1' },
+      components: [],
+    },
+    strata: [[name]],
     rules: [
       {
         id: 'r1',
@@ -110,7 +118,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     ],
     outputs: [
       {
-        name: 'value',
+        name,
         ...declared,
         status: 'determined',
         value,
@@ -125,8 +133,8 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
       {
         ruleId: 'r1',
         version: 1,
-        model: 'FLAT',
-        output: 'value',
+        model: rule.model,
+        output: name,
         contribution,
         status: 'determined',
         stratum: 0,

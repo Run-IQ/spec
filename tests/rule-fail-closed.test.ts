@@ -9,12 +9,16 @@ import { describe, expect, it } from 'vitest';
 import {
   computeRuleChecksum,
   computeRuleFingerprint,
+  fromStoredRecord,
   normalizeRuleDefinition,
+  toExecutableRule,
+  toStoredPayload,
   RESERVED_RULE_FIELDS,
   validateRuleDefinition,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import { parseRuleDate } from '../src/rule/date.js';
+import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 import { specError } from './helpers.js';
 
 const base = {
@@ -65,18 +69,33 @@ describe('frozen checksums: a rule with no extension and no null keeps its check
     expect(computeRuleChecksum(rule)).toBe(checksum);
   });
 
-  it('the only null a rule accepts, effectiveUntil, gives the same checksum as its absence', () => {
-    expect(computeRuleChecksum({ ...base, effectiveUntil: null })).toBe(
-      '9e0794daa99ac486a3deb903c5e21b5a6cf45303aa69f42c997b32e48bb718f3',
-    );
+  const MINIMAL = '9e0794daa99ac486a3deb903c5e21b5a6cf45303aa69f42c997b32e48bb718f3';
+
+  it('as authored, `effectiveUntil: null` is refused and the omitted field keeps the checksum', () => {
+    const authored = { ...base, effectiveUntil: null } as unknown as RuleDefinitionInput;
+    const message = 'effectiveUntil is null: omit the field instead';
+    expect(validateRuleDefinition(authored).errors).toEqual([message]);
+    expect(specError(() => normalizeRuleDefinition(authored)).message).toBe(message);
+    expect(computeRuleChecksum(base)).toBe(MINIMAL);
+  });
+
+  it('read back in its normalized form, `effectiveUntil: null` keeps the same checksum', () => {
+    const normalized = normalizeRuleDefinition(base);
+    expect(normalized.effectiveUntil).toBeNull();
+    expect(computeRuleChecksum(normalized)).toBe(MINIMAL);
+    expect(computeRuleChecksum({ ...base, effectiveUntil: null } as never)).toBe(MINIMAL);
+    expect(computeRuleFingerprint(normalized)).toBe(computeRuleFingerprint(base));
+    expect(toExecutableRule(normalized).checksum).toBe(MINIMAL);
+    expect(toExecutableRule(normalized).effectiveUntil).toBeNull();
+    const record = { id: 'r1', version: 1, ...toStoredPayload(normalized) };
+    expect(fromStoredRecord(record).checksum).toBe(MINIMAL);
   });
 
   it('a normalized rule is read again as it is', () => {
     const once = normalizeRuleDefinition(full);
-    expect(normalizeRuleDefinition(once as unknown as RuleDefinitionInput)).toEqual(once);
+    expect(normalizeStoredRuleDefinition(once as unknown as RuleDefinitionInput)).toEqual(once);
     const open = normalizeRuleDefinition(base);
-    expect(open.effectiveUntil).toBeNull();
-    expect(normalizeRuleDefinition(open as unknown as RuleDefinitionInput)).toEqual(open);
+    expect(normalizeStoredRuleDefinition(open as unknown as RuleDefinitionInput)).toEqual(open);
   });
 });
 
@@ -315,8 +334,17 @@ describe('M8: null is refused in a rule, the field to omit is named', () => {
     expect(validateRuleDefinition(withField('effectiveFrom', null)).valid).toBe(false);
   });
 
-  it('`effectiveUntil: null` is the canonical "no end" and stays accepted', () => {
-    expect(validateRuleDefinition(withField('effectiveUntil', null)).valid).toBe(true);
+  it('`effectiveUntil` and `checksum` are refused too, as authored', () => {
+    for (const field of ['effectiveUntil', 'checksum']) {
+      const message = `${field} is null: omit the field instead`;
+      expect(validateRuleDefinition(withField(field, null)).errors).toEqual([message]);
+      expect(validateRuleDefinition(withField(field, null)).issues).toEqual([
+        { path: field, message },
+      ]);
+      expect(specError(() => normalizeRuleDefinition(withField(field, null))).message).toBe(
+        message,
+      );
+    }
   });
 
   it('a null in `dimensions` is refused, its dimension named', () => {
@@ -341,8 +369,7 @@ describe('M8: null is refused in a rule, the field to omit is named', () => {
     );
   });
 
-  it('the ignored `checksum` may still be null', () => {
-    expect(validateRuleDefinition(withField('checksum', null)).valid).toBe(true);
+  it('read back, the ignored `checksum` may be null', () => {
     expect(computeRuleChecksum(withField('checksum', null))).toBe(computeRuleChecksum(base));
   });
 

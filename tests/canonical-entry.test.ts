@@ -51,7 +51,6 @@ const rules = [
     params: { amount: 1000 },
     priority: 0,
     effectiveFrom: '2025-06-01T12:30:00Z',
-    effectiveUntil: null,
     checksum: 'ignored',
   },
 ];

@@ -9,6 +9,7 @@ import {
 import type { ForEach, OrderKey, RuleDefinitionInput } from '../src/index.js';
 import { ACCEPTED_FOR_EACH, REFUSED_FOR_EACH, VALIDATOR_ONLY_FOR_EACH } from './forEach-cases.js';
 import { BASE_RULE, expectRuleRefused, specError } from './helpers.js';
+import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 
 const rule = (forEach: unknown): RuleDefinitionInput => ({ ...BASE_RULE, forEach });
 
@@ -198,7 +199,7 @@ describe('forEach: normalization', () => {
   it('is idempotent', () => {
     for (const [, forEach] of ACCEPTED_FOR_EACH) {
       const once = normalizeRuleDefinition(rule(forEach));
-      expect(normalizeRuleDefinition(once)).toEqual(once);
+      expect(normalizeStoredRuleDefinition(once)).toEqual(once);
     }
   });
 

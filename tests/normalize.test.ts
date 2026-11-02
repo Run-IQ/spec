@@ -9,6 +9,7 @@ import {
 import type { JsonValue, RuleDefinitionInput } from '../src/index.js';
 import { MAX_JSON_DEPTH } from '../src/values.js';
 import { nested, specError, tooDeepIssue } from './helpers.js';
+import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
 function without(obj: object, key: string): RuleDefinitionInput {
@@ -308,11 +309,18 @@ describe('normalizeRuleDefinition: validity window [from, until)', () => {
     }
   });
 
-  it('a null effectiveUntil goes with both forms', () => {
-    expect(normalizeRuleDefinition({ ...base, effectiveUntil: null }).effectiveUntil).toBeNull();
+  it('a null effectiveUntil is refused as authored, and accepted read back', () => {
+    const authored = { ...base, effectiveUntil: null } as unknown as RuleDefinitionInput;
+    expect(() => normalizeRuleDefinition(authored)).toThrow(
+      'effectiveUntil is null: omit the field instead',
+    );
+    expect(normalizeStoredRuleDefinition(authored).effectiveUntil).toBeNull();
     expect(
-      normalizeRuleDefinition({ ...base, effectiveFrom: new Date(0), effectiveUntil: null })
-        .effectiveUntil,
+      normalizeStoredRuleDefinition({
+        ...base,
+        effectiveFrom: new Date(0),
+        effectiveUntil: null,
+      } as unknown as RuleDefinitionInput).effectiveUntil,
     ).toBeNull();
   });
 });
@@ -460,8 +468,8 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     const out = normalizeRuleDefinition(rule);
     expect(reads).toBe(1);
     expect(out.forEach).toEqual({ path: '/x', key: 'id' });
-    expect(normalizeRuleDefinition(out)).toEqual(out);
-    expect(validateRuleDefinition(out).valid).toBe(true);
+    expect(normalizeStoredRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition({ ...out, effectiveUntil: undefined }).valid).toBe(true);
     reads = 0;
     expect(validateRuleDefinition(rule).valid).toBe(true);
   });
@@ -479,8 +487,8 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     expect(reads).toBe(1);
     expect(out.forEach).toEqual({ segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } });
     expect(out.effectiveOn).toBe('/$segment/from');
-    expect(normalizeRuleDefinition(out)).toEqual(out);
-    expect(validateRuleDefinition(out).valid).toBe(true);
+    expect(normalizeStoredRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition({ ...out, effectiveUntil: undefined }).valid).toBe(true);
   });
 
   it('timeZone and effectiveOn enter the checksum', () => {

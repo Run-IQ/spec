@@ -5,7 +5,7 @@ import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
-import { normalizeRuleDefinition } from './normalize.js';
+import { normalizeStoredRuleDefinition } from './normalize.js';
 import { canonicalRulePayload } from './payload.js';
 import type { StoredRuleRecord } from './stored.js';
 
@@ -35,7 +35,7 @@ export function toStoredPayload(input: RuleDefinitionInput): { payload: string; 
  */
 export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
   return withValueBudget(() => {
-    const definition = normalizeRuleDefinition(input);
+    const definition = normalizeStoredRuleDefinition(input);
     // The normalized copy's values were counted when they were read from `input`.
     return executableOf(
       definition,
@@ -90,7 +90,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let definition: RuleDefinition;
   try {
-    definition = normalizeRuleDefinition(parsed as unknown as RuleDefinitionInput);
+    definition = normalizeStoredRuleDefinition(parsed as unknown as RuleDefinitionInput);
   } catch (error) {
     // The error of `normalizeRuleDefinition` is its own: its message, already cited, as it is.
     return fail(`invalid definition: ${reasonOf(error)}`);

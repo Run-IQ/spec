@@ -90,11 +90,14 @@ export interface RuleDefinitionBase {
  * `checksum` is never part of it.
  *
  * Null at the top level: the format has no `null` to write, so `null` is refused for
- * every optional field (`<field> is null: omit the field instead`), and so is a `null`
- * dimension in `dimensions`: a lost column never widens a rule. `undefined` and absence are
- * the same input, and normalization writes the defaults (`dimensions: {}`, `tags: []`). One
- * `null` stays: `effectiveUntil: null` is the written form of "no end", and a normalized
- * definition is read again as it is. An empty `exceptions` list or `extensions` object is
+ * every optional field, `effectiveUntil` and `checksum` included (`<field> is null: omit the
+ * field instead`), and so is a `null` dimension in `dimensions`: a lost column never widens a
+ * rule. "No end" is written by omitting `effectiveUntil`. `undefined` and absence are the same
+ * input, and normalization writes the defaults (`dimensions: {}`, `tags: []`). Two forms: what
+ * an author writes (`validateRuleDefinition`, `normalizeRuleDefinition`) never holds `null`; the
+ * normalized form (`RuleDefinition`) holds `effectiveUntil: null` as its internal encoding of
+ * "no end", and the functions that read a normalized or stored rule (`computeRuleChecksum`,
+ * `computeRuleFingerprint`, `toExecutableRule`, `fromStoredRecord`) accept it. An empty `exceptions` list or `extensions` object is
  * absent too, and so is `ruleSet: 'local'`. Below the top level (inside `params`,
  * `condition.value`, `forEach`, `exceptions` and the values of `extensions`), and for the
  * required `params` itself, `null` is data and is kept (and refused where the format has no
@@ -105,7 +108,7 @@ export type RuleDefinition = RuleDefinitionBase;
 /**
  * Named fields accepted by `normalizeRuleDefinition`, before defaults and date conversion.
  * Every optional field accepts `undefined` or absence, which mean the same thing; `null` is
- * refused, `effectiveUntil` excepted: see `RuleDefinition`.
+ * refused, `effectiveUntil` and `checksum` included: see `RuleDefinition`.
  */
 export interface RuleDefinitionInputBase {
   readonly id: string;
@@ -121,7 +124,8 @@ export interface RuleDefinitionInputBase {
   readonly effectiveFrom: Date | string;
   /**
    * Same forms as `effectiveFrom`, and the same form as it (both civil or both instants);
-   * absent, `undefined` or `null` means no end: the only field where `null` is accepted.
+   * absent or `undefined` means no end. `null` is refused as authored (omit the field); it is
+   * the internal form of a normalized rule, accepted where one is read back.
    */
   readonly effectiveUntil?: Date | string | null | undefined;
   /** `UTC`, `±HH:MM` or an IANA name; `+00:00` and `-00:00` are written `UTC`. */
@@ -145,7 +149,7 @@ export interface RuleDefinitionInputBase {
   readonly sourceRef?: string | undefined;
   /** Whatever a plugin or a pack adds, by name: a plain object, covered by the checksum. */
   readonly extensions?: Readonly<Record<string, unknown>> | undefined;
-  /** Ignored: removed by normalization. May be `null`, as a database column of it would be. */
+  /** Ignored: removed by normalization. `null` is refused as authored, accepted read back. */
   readonly checksum?: string | null | undefined;
 }
 

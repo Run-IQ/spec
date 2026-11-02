@@ -61,10 +61,6 @@ const VALID: [string, unknown][] = [
       extensions: { jurisdiction: 'NATIONAL', meta: { nested: [1, 'a', null] }, gone: null },
     },
   ],
-  [
-    'effectiveUntil null (the written form of no end) and a null checksum',
-    { ...base, effectiveUntil: null, checksum: null },
-  ],
   ['an empty extensions object', { ...base, extensions: {} }],
   [
     'structured dimensions',
@@ -139,6 +135,8 @@ const INVALID: [string, unknown][] = [
     'forEach',
     'extensions',
   ].map((field): [string, unknown] => [`a null ${field}`, { ...base, [field]: null }]),
+  ['a null effectiveUntil (omit it for no end)', { ...base, effectiveUntil: null }],
+  ['a null checksum', { ...base, checksum: null }],
   ['a null dimension value', { ...base, dimensions: { a: 'TG', b: null } }],
   ['an unknown top-level field', { ...base, jurisdiction: 'NATIONAL' }],
   ['a misspelled top-level field', { ...base, dominancegroup: 'g' }],
