@@ -24,6 +24,7 @@ import {
   parseOffset,
 } from '../src/proof/intl-calendar.js';
 import type { ProofView } from '../src/proof/types.js';
+import { LIFTS } from '../src/proof/lifts.js';
 import { MAX_PROOF_TIME_ZONES } from '../src/proof/verify.js';
 import { dateTimeOf, hasDateSlot, isPlainObject, notADateMessage } from '../src/values.js';
 import { specError } from './helpers.js';
@@ -423,5 +424,19 @@ describe('W7: the guards that had no test', () => {
       message: 'options could not be read: nope',
     });
     expect(NOT_REPLAYED).toBeDefined();
+  });
+});
+
+describe('the bound of the notices of a verdict that is not invalid', () => {
+  it('stays far below the 100-message limit, whatever the proof', () => {
+    // Window kinds: effectiveOn, no evaluatedAt, unknown zone, tzdata differs, no tzdata in the
+    // proof, runtime does not name its tzdata, the day holds the bound, runtime cannot read: 8.
+    const windowKinds = 8;
+    const reasons = 20 + 1;
+    const redactions = 3 + 1;
+    const global = 2;
+    const warnings = 3;
+    const lifted = Object.keys(LIFTS).length;
+    expect(windowKinds + reasons + redactions + global + warnings + lifted).toBeLessThan(100);
   });
 });
