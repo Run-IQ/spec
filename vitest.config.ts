@@ -24,7 +24,14 @@ export default defineConfig({
         extends: true,
         // `npm run test:heavy`: one file at a time (the script also passes one worker), so
         // that no two of them hold their gigabytes at once.
-        test: { name: 'heavy', include: [HEAVY], fileParallelism: false },
+        // Each worker gets an 8 GiB heap: some of them (the disclosure at scale) pass the default
+        // heap of Node 20 and 22, so `npm run test:heavy` needs no `NODE_OPTIONS`.
+        test: {
+          name: 'heavy',
+          include: [HEAVY],
+          fileParallelism: false,
+          execArgv: ['--max-old-space-size=8192'],
+        },
       },
     ],
   },
