@@ -18,7 +18,14 @@ export default defineConfig({
       {
         extends: true,
         // `npm test`: every test but the heavy ones, files in parallel.
-        test: { name: 'fast', include: ['tests/**/*.test.ts'], exclude: [HEAVY] },
+        // The timeout only catches a hang: the exhaustive tests prove their bounds with counted
+        // assertions, never with time, so a slow runner must not fail them.
+        test: {
+          name: 'fast',
+          include: ['tests/**/*.test.ts'],
+          exclude: [HEAVY],
+          testTimeout: 60_000,
+        },
       },
       {
         extends: true,
