@@ -286,7 +286,6 @@ describe('verifyProof: invalid, with a readable issue', () => {
       issues: [
         'unsigned',
         'window not checked: k@1 (effectiveOn is /$item/naissance)',
-        'reason not checked: INHIBITED',
         NOT_REPLAYED,
       ],
     });

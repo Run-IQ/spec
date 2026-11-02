@@ -1,7 +1,8 @@
 import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import { boundMessages } from '../issues.js';
+import { boundMessages, boundWithFixed } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
+import type { CivilCalendar } from '../time/civil.js';
 import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
@@ -27,6 +28,8 @@ import { readDecisionProof } from './validate.js';
 interface Finding {
   message: string;
   level: 'invalid' | 'warning' | 'notice';
+  /** Never cut when issues are bounded: the notices that say what was not checked. */
+  fixed?: true;
 }
 
 const invalidFinding = (message: string): Finding => ({ message, level: 'invalid' });
@@ -112,7 +115,11 @@ const NOT_REPLAYED = 'conditions and amounts not checked: verifyProof does not r
  */
 export function verifyProof(
   p: unknown,
-  o?: { trustedKeys?: Record<string, string>; rules?: ReadonlyArray<RuleDefinitionInput> },
+  o?: {
+    trustedKeys?: Record<string, string>;
+    rules?: ReadonlyArray<RuleDefinitionInput>;
+    calendar?: CivilCalendar;
+  },
 ): ProofVerification {
   try {
     return withValueBudget(() => verify(p, o));
@@ -134,7 +141,11 @@ function verify(p: unknown, options: unknown): ProofVerification {
     findings.push(invalidFinding(message));
   }
   if (redactions.count > 0) {
-    findings.push({ message: `redacted entries: ${redactions.count}`, level: 'notice' });
+    findings.push({
+      message: `redacted entries: ${redactions.count}`,
+      level: 'notice',
+      fixed: true,
+    });
     if (!proof.inputSalted) {
       findings.push({ message: 'redacted entries in an unsalted proof', level: 'warning' });
     }
@@ -146,7 +157,7 @@ function verify(p: unknown, options: unknown): ProofVerification {
   const lifted = liftedChecks(redactions.hidden);
   for (const { check, redacted } of lifted) {
     const message = `check lifted: ${check} (${redacted.join(', ')} redacted)`;
-    findings.push({ message, level: 'notice' });
+    findings.push({ message, level: 'notice', fixed: true });
   }
 
   // What was not checked is said under a verdict that claims something, never under `invalid`,
@@ -154,9 +165,9 @@ function verify(p: unknown, options: unknown): ProofVerification {
   const refused = findings.some((finding) => finding.level === 'invalid');
   if (!refused) {
     unchecked.push(NOT_REPLAYED);
-    for (const message of unchecked) findings.push({ message, level: 'notice' });
+    for (const message of unchecked) findings.push({ message, level: 'notice', fixed: true });
   }
-  const issues = boundMessages(findings.map((finding) => finding.message));
+  const issues = boundWithFixed(findings);
   const trusted = !findings.some((finding) => finding.level === 'warning');
   if (refused) {
     return redactions.count > 0
@@ -198,6 +209,7 @@ function optionFindings(
   }
   let trustedKeys: unknown;
   let rules: unknown;
+  let calendar: unknown;
   try {
     trustedKeys = record?.trustedKeys;
   } catch (error) {
@@ -209,6 +221,17 @@ function optionFindings(
     return [...findings, ...unreadable('options.rules', error)];
   }
   try {
+    calendar = record?.calendar;
+  } catch (error) {
+    return [...findings, ...unreadable('options.calendar', error)];
+  }
+  if (calendar !== undefined && !isCalendar(calendar)) {
+    findings.push(
+      invalidFinding('options.calendar must be a calendar { toCivilDate, startOfDay }'),
+    );
+    calendar = undefined;
+  }
+  try {
     extend(findings, signatureFindings(proof, trustedKeys));
   } catch (error) {
     return [...findings, ...unreadable('options.trustedKeys', error)];
@@ -218,7 +241,17 @@ function optionFindings(
     return findings;
   }
   try {
-    extend(findings, ruleFindings(view, rules, context, redactions, unchecked));
+    extend(
+      findings,
+      ruleFindings(
+        view,
+        rules,
+        context,
+        redactions,
+        unchecked,
+        calendar as CivilCalendar | undefined,
+      ),
+    );
   } catch (error) {
     extend(findings, unreadable('options.rules', error));
   }
@@ -230,11 +263,19 @@ function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
   if (trustedKeys !== undefined && !isPlainObject(trustedKeys)) {
     return [invalidFinding('trustedKeys must be an object of hex public keys')];
   }
+  // A broken trust anchor is a configuration error, whoever signed: every key is read.
+  const malformed: Finding[] = [];
+  const keys = new Map<string, Uint8Array | undefined>();
+  for (const id of trustedKeys === undefined ? [] : Object.keys(trustedKeys)) {
+    const bytes = publicKeyBytes((trustedKeys as Record<string, unknown>)[id]);
+    keys.set(id, bytes);
+    if (!bytes) malformed.push(invalidFinding(`${citeName(`trustedKeys.${id}`)} is malformed`));
+  }
+  if (malformed.length > 0) return malformed;
   if (!p.signature) return warning('unsigned');
   const { keyId, value } = p.signature;
-  if (!trustedKeys || !Object.hasOwn(trustedKeys, keyId)) return warning('untrusted key');
-  const publicKey = publicKeyBytes(trustedKeys[keyId]);
-  if (!publicKey) return [invalidFinding(`${citeName(`trustedKeys.${keyId}`)} is malformed`)];
+  const publicKey = Object.hasOwn(trustedKeys ?? {}, keyId) ? keys.get(keyId) : undefined;
+  if (!publicKey) return warning('untrusted key');
   if (!signatureMatches(p.digest, value, publicKey)) {
     return [invalidFinding('signature invalid')];
   }
@@ -247,6 +288,7 @@ function ruleFindings(
   context: Context,
   redactions: Redactions,
   unchecked: string[],
+  calendar: CivilCalendar | undefined,
 ): Finding[] {
   if (!Array.isArray(rules)) return [invalidFinding('rules must be an array')];
   const findings: Finding[] = [];
@@ -345,9 +387,33 @@ function ruleFindings(
     }
   }
   carrierRuleFindings(p, matched, context, invalid);
-  definitionFindings(p, matched, {
-    invalid,
-    unchecked: (message) => unchecked.push(message),
-  });
+  definitionFindings(
+    p,
+    matched,
+    { invalid, unchecked: (message) => unchecked.push(message) },
+    calendar,
+  );
+  // A redacted entry has no rule to compare with its definition: say so, never skip it.
+  for (const section of ['applied', 'skipped', 'pending'] as const) {
+    const hidden = redactions.bySection.get(section) ?? 0;
+    if (hidden > 0) {
+      const entries = hidden === 1 ? 'entry' : 'entries';
+      unchecked.push(`${hidden} ${section} ${entries} redacted: not checked against rules`);
+    }
+  }
   return findings;
+}
+
+/** A calendar a caller gives: an object with the two functions `windowContains` calls. */
+function isCalendar(value: unknown): value is CivilCalendar {
+  try {
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      typeof (value as CivilCalendar).toCivilDate === 'function' &&
+      typeof (value as CivilCalendar).startOfDay === 'function'
+    );
+  } catch {
+    return false;
+  }
 }

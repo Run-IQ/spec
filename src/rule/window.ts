@@ -1,4 +1,5 @@
 import { isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
+import { nullFieldMessage } from './fields.js';
 import { parsePointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import {
@@ -20,7 +21,7 @@ import type { ForEach } from './forEach.js';
 export interface RuleWindow {
   readonly effectiveFrom: Date | string;
   readonly effectiveUntil?: Date | string | null | undefined;
-  readonly timeZone?: string | null | undefined;
+  readonly timeZone?: string | undefined;
 }
 
 /** A window read and checked: bounds as civil dates or canonical instants, zone normalized. */
@@ -100,7 +101,8 @@ function position(
 
 /**
  * Internal: the window of the fields read from a rule, checked, its zone being the rule's
- * (`null` and absence alike) or `defaultZone`. Messages start with `prefix`.
+ * (absent, `undefined`; a `null` is refused: `timeZone is null: omit the field instead`) or
+ * `defaultZone`. Messages start with `prefix`.
  */
 export function resolveWindow(
   fields: { readonly from: unknown; readonly until: unknown; readonly timeZone: unknown },
@@ -108,8 +110,11 @@ export function resolveWindow(
   prefix: string,
 ): ResolvedWindow {
   return prefixed(prefix, () => {
+    if (fields.timeZone === null) throw newSpecError('INVALID_RULE', nullFieldMessage('timeZone'));
     const zone =
-      fields.timeZone == null ? defaultZone : requireTimeZone(fields.timeZone, 'INVALID_RULE');
+      fields.timeZone === undefined
+        ? defaultZone
+        : requireTimeZone(fields.timeZone, 'INVALID_RULE');
     return { ...readRuleWindow(fields.from, fields.until), zone };
   });
 }

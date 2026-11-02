@@ -184,10 +184,14 @@ describe('nested null stays data', () => {
     expect(normalizeRuleDefinition(a).extensions).toEqual({ extra: { owner: null } });
   });
 
-  it('an extension that is null is data, not absence', () => {
-    const a = { ...minimal, extensions: { extra: null } };
-    expect(computeRuleChecksum(a)).not.toBe(computeRuleChecksum(minimal));
-    expect(normalizeRuleDefinition(a).extensions).toEqual({ extra: null });
+  it('a name of `extensions` whose value is null is refused, a null deeper is data', () => {
+    const refused = { ...minimal, extensions: { extra: null } };
+    expect(() => normalizeRuleDefinition(refused)).toThrow(
+      'extensions.extra is null: omit the field instead',
+    );
+    const deeper = { ...minimal, extensions: { extra: { owner: null } } };
+    expect(computeRuleChecksum(deeper)).not.toBe(computeRuleChecksum(minimal));
+    expect(normalizeRuleDefinition(deeper).extensions).toEqual({ extra: { owner: null } });
   });
 
   it('inside exceptions', () => {

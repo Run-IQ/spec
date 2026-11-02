@@ -1,25 +1,30 @@
-import { isCanonicalText, canonicalSha256Hex } from '../canonical.js';
+import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
-import { normalizeStoredRuleDefinition } from './normalize.js';
-import { canonicalRulePayload } from './payload.js';
+import { normalizeRuleDefinition, normalizeStoredRuleDefinition } from './normalize.js';
 import type { StoredRuleRecord } from './stored.js';
 
 /**
  * Payload and checksum to store for a rule: `payload` is the canonical JSON of the normalized
  * definition, `checksum` its sha256 hex (equal to `computeRuleChecksum(input)`).
- * A `checksum` in `input` is ignored. Throws `SpecError` like `normalizeRuleDefinition`.
+ * A `checksum` in `input` is ignored. Throws `SpecError` like `normalizeRuleDefinition`: it
+ * reads a rule as an author writes it (`effectiveUntil: null` is refused: omit the field).
  *
  * It re-seals: whatever the input held, the result carries a fresh checksum. A caller that
  * loaded a rule, edits it and re-seals it should first check the loaded rule with
  * `verifyRuleChecksum`, or tampering before the edit goes unnoticed.
  */
 export function toStoredPayload(input: RuleDefinitionInput): { payload: string; checksum: string } {
-  const payload = canonicalRulePayload(input);
+  // What an author writes: the authored path, so a `null` that would widen the rule is refused
+  // here, before it is stored. Read back, the payload goes through `fromStoredRecord`.
+  const payload = withValueBudget(() => {
+    const definition = normalizeRuleDefinition(input);
+    return ownCopy(() => canonicalize(definition));
+  });
   return { payload, checksum: sha256Hex(payload) };
 }
 

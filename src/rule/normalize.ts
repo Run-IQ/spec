@@ -14,7 +14,7 @@ import {
   withValueBudget,
 } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
-import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { isRuleVersion } from './definition.js';
 import {
   isUnnamable,
   readDimensionSpec,
@@ -33,7 +33,13 @@ import {
   ruleSetIdMessage,
   shortestFrom,
 } from './ruleSet.js';
-import { EXTENSIONS_NOT_OBJECT, nullFieldMessage, unknownRuleFieldMessage } from './fields.js';
+import {
+  CHECKSUM_NOT_STRING,
+  EXTENSIONS_NOT_OBJECT,
+  nullFieldMessage,
+  unknownRuleFieldMessage,
+  unknownRuleKeys,
+} from './fields.js';
 import { dimensionKeyMessage } from './validate.js';
 import { boundIssueText, IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
@@ -43,8 +49,6 @@ import {
   readEffectiveOn,
   readRuleWindow,
 } from './window.js';
-
-const RESERVED = new Set(RESERVED_RULE_FIELDS);
 
 /**
  * Builds the canonical definition of a rule, so that the same data always gives the same
@@ -146,13 +150,14 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
   if (!spendValues(Object.keys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
   // The keys alone, before any value: an unknown field is refused whatever it holds.
-  for (const key of Object.keys(input)) {
-    if (!RESERVED.has(key)) invalidRule(unknownRuleFieldMessage(key));
-  }
+  for (const key of unknownRuleKeys(input)) invalidRule(unknownRuleFieldMessage(key));
   const untilInput = input.effectiveUntil;
   if (!stored) {
     if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
-    if (input.checksum === null) invalidRule(nullFieldMessage('checksum'));
+  }
+  const checksum = input.checksum;
+  if (checksum === null ? !stored : checksum !== undefined && typeof checksum !== 'string') {
+    invalidRule(checksum === null ? nullFieldMessage('checksum') : CHECKSUM_NOT_STRING);
   }
   const { from, until } = readRuleWindow(input.effectiveFrom, untilInput);
 
@@ -252,7 +257,13 @@ function given(value: unknown, field: string): unknown {
 function readExtensions(value: unknown): Record<string, JsonValue> | undefined {
   if (!isPlainObject(value)) invalidRule(EXTENSIONS_NOT_OBJECT);
   const json = readJson(value, 'extensions') as Record<string, JsonValue>;
-  return Object.keys(json).length === 0 ? undefined : json;
+  const keys = Object.keys(json);
+  // A name with no value is written by omitting it: `null` at the first level is refused, as
+  // at the top level of the rule. Deeper, `null` is data.
+  for (const key of keys) {
+    if (json[key] === null) invalidRule(nullFieldMessage(`extensions.${key}`));
+  }
+  return keys.length === 0 ? undefined : json;
 }
 
 /** The rule set of the rule: `local` when absent (`undefined`); `null` is refused. */

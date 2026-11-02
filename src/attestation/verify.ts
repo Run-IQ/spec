@@ -139,42 +139,51 @@ function verify(a: unknown, proofDigest: unknown, trustedKeys: unknown): ProofVe
   } else if (read.subject.proofDigest !== proofDigest) {
     findings.push({ message: 'attestation for another proof', level: 'invalid' });
   }
-  const signature = signatureFinding(read, trustedKeys);
-  if (signature !== undefined) findings.push(signature);
+  findings.push(...signatureFinding(read, trustedKeys));
   const messages = findings.map((finding) => finding.message);
   if (findings.some((finding) => finding.level === 'invalid')) return invalid(messages);
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues: messages };
 }
 
-/** What the signature of `a` (a copy) says under `trustedKeys`; `undefined` when it holds. */
-function signatureFinding(a: Attestation, trustedKeys: unknown): Finding | undefined {
-  let publicKey: unknown;
+/**
+ * What the signature of `a` (a copy) says under `trustedKeys`; nothing when it holds. A trusted
+ * key that is malformed, whoever it belongs to, is a configuration error of the caller, listed
+ * for each key (`trustedKeys.<id> is malformed`): a broken trust anchor is never ignored.
+ */
+function signatureFinding(a: Attestation, trustedKeys: unknown): Finding[] {
+  const keys = new Map<string, Uint8Array | undefined>();
+  const malformed: Finding[] = [];
   try {
     if (trustedKeys !== undefined && !isPlainObject(trustedKeys)) {
-      return { message: 'trustedKeys must be an object of hex public keys', level: 'invalid' };
+      return [{ message: 'trustedKeys must be an object of hex public keys', level: 'invalid' }];
     }
-    if (trustedKeys === undefined || !Object.hasOwn(trustedKeys, a.keyId)) {
-      return { message: 'untrusted key', level: 'warning' };
+    for (const id of trustedKeys === undefined ? [] : Object.keys(trustedKeys)) {
+      const bytes = publicKeyBytes((trustedKeys as Record<string, unknown>)[id]);
+      keys.set(id, bytes);
+      if (!bytes) {
+        malformed.push({
+          message: `${citeName(`trustedKeys.${id}`)} is malformed`,
+          level: 'invalid',
+        });
+      }
     }
-    publicKey = trustedKeys[a.keyId];
   } catch (error) {
-    return { message: unreadableMessage('trustedKeys', error), level: 'invalid' };
+    return [{ message: unreadableMessage('trustedKeys', error), level: 'invalid' }];
   }
-  const key = publicKeyBytes(publicKey);
-  if (!key) {
-    return { message: `${citeName(`trustedKeys.${a.keyId}`)} is malformed`, level: 'invalid' };
-  }
+  if (malformed.length > 0) return malformed;
+  const key = keys.get(a.keyId);
+  if (key === undefined) return [{ message: 'untrusted key', level: 'warning' }];
   let message: string;
   try {
     message = attestationMessage(a);
   } catch (error) {
     // A text no string can hold once quoted: nothing that long was ever signed.
-    return { message: `attestation too long to verify: ${reasonOf(error)}`, level: 'invalid' };
+    return [{ message: `attestation too long to verify: ${reasonOf(error)}`, level: 'invalid' }];
   }
   if (!signatureMatches(message, a.signature, key)) {
-    return { message: 'signature invalid', level: 'invalid' };
+    return [{ message: 'signature invalid', level: 'invalid' }];
   }
-  return undefined;
+  return [];
 }
 
 /**

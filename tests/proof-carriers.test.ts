@@ -378,9 +378,10 @@ describe('PENDING_CARRIER: a chain of pending carriers down to one that did not 
 });
 
 describe('given the rules, fired is on the pending entries of carriers only', () => {
-  const plain = (id: string): RuleDefinitionInput => ({ ...ruleA, id });
+  const plain = (id: string): RuleDefinitionInput => ({ ...ruleA, model: 'M', id });
   const definition: RuleDefinitionInput = {
     ...ruleA,
+    model: 'M',
     id: 'X',
     exceptions: [{ kind: 'inhibit', targets: { ids: ['T'] } }],
   };

@@ -9,6 +9,7 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
 import { isRuleVersion } from './definition.js';
+import { nullFieldMessage } from './fields.js';
 import { isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { DEFAULT_EFFECTIVE_ON, readEffectiveOn, resolveWindow } from './window.js';
 import type { ResolvedWindow, RuleWindow } from './window.js';
@@ -362,12 +363,18 @@ function readRule(
   if (!isRuleVersion(version)) {
     throw newSpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
   }
-  const set = ruleSet == null ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
+  if (ruleSet === null) {
+    throw newSpecError('INVALID_RULE', prefix + nullFieldMessage('ruleSet'));
+  }
+  if (effectiveOn === null) {
+    throw newSpecError('INVALID_RULE', prefix + nullFieldMessage('effectiveOn'));
+  }
+  const set = ruleSet === undefined ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
   if (!isRuleSetId(set)) {
     throw newSpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet', set));
   }
   const window = resolveWindow(fields, zone, prefix);
-  const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
+  const read = effectiveOn === undefined ? undefined : readEffectiveOn(effectiveOn, prefix);
   // The default reference date is the absent one, as normalization writes it.
   const pointer = read === DEFAULT_EFFECTIVE_ON ? undefined : read;
   return { ruleSet: set, id: ruleId, name, version: { version, window, effectiveOn: pointer } };

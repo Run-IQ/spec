@@ -114,6 +114,7 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
   it('given the rules, each recorded priority is that of its definition', () => {
     const definition = (id: string, priority: number): RuleDefinitionInput => ({
       ...ruleA,
+      model: 'M',
       id,
       priority,
     });
@@ -129,7 +130,13 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
         ...ref,
         checksum: computeRuleChecksum(rules[i]!),
       }));
-      return sealProof(unsalted({ ...content, rules: listed } as unknown as UnsignedProof));
+      return sealProof(
+        unsalted({
+          ...content,
+          evaluatedAt: '2025-06-01',
+          rules: listed,
+        } as unknown as UnsignedProof),
+      );
     };
     const honest = [definition('r0', 5000), definition('w', 1000)];
     expect(
@@ -180,8 +187,9 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
 
   it('given the rules, a recorded -0 is the priority 0 of a definition', () => {
     const content = outputProof({ type: 'number', combine: 'sum', value: 1 }, [1]);
-    const rule: RuleDefinitionInput = { ...ruleA, id: 'r0', priority: 0 };
+    const rule: RuleDefinitionInput = { ...ruleA, model: 'M', id: 'r0', priority: 0 };
     content.rules[0] = { ...content.rules[0]!, checksum: computeRuleChecksum(rule), priority: -0 };
+    content.evaluatedAt = '2025-06-01';
     expect(
       withoutDefinitionChecks(verifyProof(sealProof(unsalted(content)), { rules: [rule] }).issues),
     ).toEqual(['unsigned']);

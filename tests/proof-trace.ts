@@ -90,7 +90,7 @@ export function traceProof(trace: Trace): Content {
   return {
     format: PROOF_FORMAT,
     requestId: 'req-1',
-    evaluatedAt: null,
+    evaluatedAt: '2025-06-01',
     sealedAt: '2026-01-01T00:00:00.000Z',
     inputDigest: 'a'.repeat(64),
     inputSalted: false,

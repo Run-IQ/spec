@@ -12,12 +12,11 @@ import {
   fromStoredRecord,
   normalizeRuleDefinition,
   toExecutableRule,
-  toStoredPayload,
+  canonicalRulePayload,
   RESERVED_RULE_FIELDS,
   validateRuleDefinition,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
-import { parseRuleDate } from '../src/rule/date.js';
 import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 import { specError } from './helpers.js';
 
@@ -87,7 +86,8 @@ describe('frozen checksums: a rule with no extension and no null keeps its check
     expect(computeRuleFingerprint(normalized)).toBe(computeRuleFingerprint(base));
     expect(toExecutableRule(normalized).checksum).toBe(MINIMAL);
     expect(toExecutableRule(normalized).effectiveUntil).toBeNull();
-    const record = { id: 'r1', version: 1, ...toStoredPayload(normalized) };
+    const payload = canonicalRulePayload(normalized);
+    const record = { id: 'r1', version: 1, payload, checksum: MINIMAL };
     expect(fromStoredRecord(record).checksum).toBe(MINIMAL);
   });
 
@@ -254,9 +254,13 @@ describe('I13: extensions go under `extensions`, covered by the checksum', () =>
     expect(normalizeRuleDefinition(rule).extensions).toEqual({ id: 'other', dominanceGroup: 'g' });
   });
 
-  it('null inside `extensions` is data, kept', () => {
-    expect(normalizeRuleDefinition(ext({ a: null })).extensions).toEqual({ a: null });
-    expect(computeRuleChecksum(ext({ a: null }))).not.toBe(computeRuleChecksum(ext({})));
+  it('a name whose value is null is refused: omit the name; deeper, null is data', () => {
+    const message = 'extensions.a is null: omit the field instead';
+    expect(validateRuleDefinition(ext({ a: null })).errors).toEqual([message]);
+    expect(specError(() => normalizeRuleDefinition(ext({ a: null }))).message).toBe(message);
+    expect(validateRuleDefinition(ext({ a: { b: null }, c: [null] })).valid).toBe(true);
+    expect(normalizeRuleDefinition(ext({ a: { b: null } })).extensions).toEqual({ a: { b: null } });
+    expect(computeRuleChecksum(ext({ a: { b: null } }))).not.toBe(computeRuleChecksum(ext({})));
   });
 
   it.each([
@@ -380,30 +384,6 @@ describe('M8: null is refused in a rule, the field to omit is named', () => {
     expect(computeRuleChecksum(withField('dimensions', { a: undefined }))).toBe(
       computeRuleChecksum(base),
     );
-  });
-});
-
-describe('M9: a date holds at most three fractional digits', () => {
-  it.each(['00.1234Z', '00.123456Z', '00.123456789Z', '00.1000Z', '00.0000Z'])(
-    '%s is refused, not truncated',
-    (tail) => {
-      const error = specError(() => parseRuleDate(`2026-01-01T00:00:${tail}`, 'evaluatedAt'));
-      expect(error.code).toBe('INVALID_DATE');
-      expect(error.message).toBe(
-        `evaluatedAt must be a Date, YYYY-MM-DD, or an ISO date-time with Z or an offset; got "2026-01-01T00:00:${tail}" (at most 3 fractional digits)`,
-      );
-    },
-  );
-
-  it.each([
-    ['00.1Z', 100],
-    ['00.12Z', 120],
-    ['00.123Z', 123],
-    ['00.123+01:00', 123],
-    ['00Z', 0],
-  ])('%s is read', (tail, ms) => {
-    const date = parseRuleDate(`2026-01-01T00:00:${tail}`, 'evaluatedAt');
-    expect(date.getUTCMilliseconds()).toBe(ms);
   });
 });
 

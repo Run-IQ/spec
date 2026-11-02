@@ -43,6 +43,23 @@ export function unknownRuleFieldMessage(key: string): string {
   return `unknown rule field: ${citeName(key)}${suffix}`;
 }
 
+/**
+ * Internal: the own keys of a rule that are not reserved fields, ready to cite: every own key,
+ * enumerable or not, string or symbol (`Symbol(x)`), so a field hidden from `Object.keys` is not
+ * silently ignored.
+ */
+export function unknownRuleKeys(rule: object): string[] {
+  const out: string[] = [];
+  for (const key of Reflect.ownKeys(rule)) {
+    if (typeof key === 'symbol') out.push(key.toString());
+    else if (!RESERVED_RULE_FIELDS.includes(key)) out.push(key);
+  }
+  return out;
+}
+
+/** Internal: the message refusing a `checksum` that is neither absent nor a string. */
+export const CHECKSUM_NOT_STRING = 'checksum must be a string';
+
 /** Internal: the message refusing a `null` where the field must be omitted instead. */
 export function nullFieldMessage(path: string): string {
   return `${citeName(path)} is null: omit the field instead`;

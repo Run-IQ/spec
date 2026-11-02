@@ -105,3 +105,26 @@ export function boundMessages(messages: Iterable<string>): string[] {
 export function pathArgumentIssue(path: unknown): RuleValidationIssue {
   return { path: '', message: `path must be a string, got a value of type ${typeof path}` };
 }
+
+/**
+ * Internal: at most `MAX_ISSUES` messages, in the order found, but the items marked `fixed`
+ * (the notices that say what a verifier did not check) are never cut: the other items give way
+ * to them, and a last notice says how many were left out
+ * (`further problems not listed (limit 100): n left out`).
+ */
+export function boundWithFixed(items: readonly { message: string; fixed?: true }[]): string[] {
+  if (items.length <= MAX_ISSUES) return items.map((item) => item.message);
+  const kept = items.filter((item) => item.fixed === true).length;
+  let room = Math.max(0, MAX_ISSUES - kept - 1);
+  let left = 0;
+  const out: string[] = [];
+  for (const item of items) {
+    if (item.fixed === true) out.push(item.message);
+    else if (room > 0) {
+      room--;
+      out.push(item.message);
+    } else left++;
+  }
+  out.push(`further problems not listed (limit ${MAX_ISSUES}): ${left} left out`);
+  return out;
+}

@@ -70,7 +70,7 @@ export {
 export type { CivilCalendar, CivilDate, Instant } from './time/civil.js';
 export type { ExecutableRule, ExecutableRuleBase } from './rule/executable.js';
 export type { StoredRuleRecord } from './rule/stored.js';
-export { validateRuleDefinition } from './rule/validate.js';
+export { validateRuleDefinition, validateStoredRuleDefinition } from './rule/validate.js';
 export type { RuleValidationIssue } from './rule/validate.js';
 export {
   contributionMatchesDeclaration,

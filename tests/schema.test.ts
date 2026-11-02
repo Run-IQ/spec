@@ -58,7 +58,7 @@ const VALID: [string, unknown][] = [
       dominanceGroup: 'VAT',
       exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
       sourceRef: 'CGI art. 1',
-      extensions: { jurisdiction: 'NATIONAL', meta: { nested: [1, 'a', null] }, gone: null },
+      extensions: { jurisdiction: 'NATIONAL', meta: { nested: [1, 'a', null] } },
     },
   ],
   ['an empty extensions object', { ...base, extensions: {} }],

@@ -172,8 +172,9 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
     const rules = Array.from({ length: 500 }, () => 1);
     const verdict = verifyProof(BASE_PROOF, { rules: rules as never });
     expect(verdict.status).toBe('invalid');
-    expect(verdict.issues).toHaveLength(101);
-    expect(verdict.issues[100]).toBe('further problems not listed (limit 100)');
+    // 99 findings, then the notice that says how many were left out.
+    expect(verdict.issues).toHaveLength(100);
+    expect(verdict.issues[99]).toMatch(/^further problems not listed \(limit 100\): \d+ left out$/);
   });
 
   it('validateProofInput and validateTemporalFact list at most 100 problems', () => {

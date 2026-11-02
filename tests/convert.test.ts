@@ -2,6 +2,7 @@ import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
 import {
   canonicalize,
+  canonicalRulePayload,
   computeRuleChecksum,
   fromStoredRecord,
   normalizeRuleDefinition,
@@ -26,8 +27,10 @@ const base = {
 };
 
 function storedRecordOf(input: Parameters<typeof toStoredPayload>[0]): StoredRuleRecord {
-  const { payload, checksum } = toStoredPayload(input);
-  return { id: input.id, version: input.version, checksum, payload };
+  // A rule read back (an executable rule holds `effectiveUntil: null`) is written the way a
+  // store writes it; `toStoredPayload` is for what an author writes.
+  const payload = canonicalRulePayload(input);
+  return { id: input.id, version: input.version, checksum: sha256(payload), payload };
 }
 
 function thrown(fn: () => unknown): SpecError {

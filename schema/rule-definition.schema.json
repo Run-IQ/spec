@@ -55,11 +55,11 @@
       "$ref": "#/$defs/effectiveOn"
     },
     "forEach": {
-      "description": "What the rule iterates over: a collection { path, key, orderBy?, dimensions?, recurse?, groupBy? } or time segments { segments }. null means absent.",
+      "description": "What the rule iterates over: a collection { path, key, orderBy?, dimensions?, recurse?, groupBy? } or time segments { segments }. Absent for no iteration (null is refused).",
       "$ref": "#/$defs/forEach"
     },
     "ruleSet": {
-      "description": "The rule set (pack) of the rule; null, absent and 'local' are a local rule.",
+      "description": "The rule set (pack) of the rule; absent and 'local' are a local rule (null is refused).",
       "$ref": "#/$defs/ruleSetId"
     },
     "output": {
@@ -87,7 +87,7 @@
       "$ref": "#/$defs/nonEmptyString"
     },
     "exceptions": {
-      "description": "The exceptions the rule carries, in order. null and [] mean absent.",
+      "description": "The exceptions the rule carries, in order. [] means absent (null is refused).",
       "type": "array",
       "items": {
         "$ref": "#/$defs/ruleException"
@@ -97,8 +97,13 @@
       "$ref": "#/$defs/nonEmptyString"
     },
     "extensions": {
-      "description": "What a plugin or a pack adds, by name: an object whose values are any JSON values, null included. The only place for a field the spec does not define. An empty object is the same as absent.",
-      "type": "object"
+      "description": "What a plugin or a pack adds, by name: an object whose values are any JSON values; a value that is null is refused (omit the name), deeper levels may hold null. The only place for a field the spec does not define. An empty object is the same as absent.",
+      "type": "object",
+      "additionalProperties": {
+        "not": {
+          "type": "null"
+        }
+      }
     },
     "checksum": {
       "description": "Ignored: never part of the definition. null is refused as authored.",

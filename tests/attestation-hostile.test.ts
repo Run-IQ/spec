@@ -480,7 +480,7 @@ describe('read once, at a bounded cost (counted)', () => {
     expect(lastValuesSpent()).toBe(8);
   });
 
-  it('each trusted key is read once, only the one named', () => {
+  it('each trusted key is read once, every one of them (a broken anchor is never ignored)', () => {
     const keys = { reviewer: RFC_PUBLIC, other: RFC_PUBLIC };
     const reads = new Map<PropertyKey, number>();
     const proxy = new Proxy(keys, {
@@ -490,7 +490,7 @@ describe('read once, at a bounded cost (counted)', () => {
       },
     });
     expect(verify(COSIGNATURE, proxy).status).toBe('authentic');
-    expect(Object.fromEntries(reads)).toEqual({ reviewer: 1 });
+    expect(Object.fromEntries(reads)).toEqual({ reviewer: 1, other: 1 });
   });
 
   it('the message signed is the canonical text of the six members: linear in their size', () => {

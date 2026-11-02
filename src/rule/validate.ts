@@ -16,8 +16,14 @@ import {
 } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
-import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
-import { EXTENSIONS_NOT_OBJECT, nullFieldMessage, unknownRuleFieldMessage } from './fields.js';
+import { isRuleVersion } from './definition.js';
+import {
+  CHECKSUM_NOT_STRING,
+  EXTENSIONS_NOT_OBJECT,
+  nullFieldMessage,
+  unknownRuleFieldMessage,
+  unknownRuleKeys,
+} from './fields.js';
 import {
   isUnnamable,
   readDimensionSpec,
@@ -35,7 +41,6 @@ import type { ForEach } from './forEach.js';
 import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
 
-const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
 
 export type { RuleValidationIssue } from '../issues.js';
@@ -103,8 +108,35 @@ export function validateRuleDefinition(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
+  return validateForm(value, false);
+}
+
+/**
+ * `validateRuleDefinition` for a rule in its normalized or stored form, as a consumer reads it
+ * back from a store (`hydrateRule`): the same checks, with one difference. `effectiveUntil:
+ * null`, the internal encoding of "no end" that `normalizeRuleDefinition` writes, and a `null`
+ * `checksum`, which is ignored, are accepted. It accepts nothing else that the authored
+ * validator refuses, `null` in any other field included. Use it to list the problems of a row
+ * `toExecutableRule` refused; use `validateRuleDefinition` for what an author writes.
+ */
+export function validateStoredRuleDefinition(value: unknown): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
+  return validateForm(value, true);
+}
+
+function validateForm(
+  value: unknown,
+  stored: boolean,
+): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
   try {
-    return withValueBudget(() => definitionIssues(value));
+    return withValueBudget(() => definitionIssues(value, stored));
   } catch (error) {
     const unreadable = new IssueList();
     unreadable.add('', unreadableMessage('rule definition', error));
@@ -112,7 +144,10 @@ export function validateRuleDefinition(value: unknown): {
   }
 }
 
-function definitionIssues(value: unknown): {
+function definitionIssues(
+  value: unknown,
+  stored: boolean,
+): {
   valid: boolean;
   errors: string[];
   issues: RuleValidationIssue[];
@@ -127,8 +162,8 @@ function definitionIssues(value: unknown): {
     return result(errors);
   }
 
-  for (const key of Object.keys(value)) {
-    if (!RESERVED.has(key)) errors.add(citeName(key), unknownRuleFieldMessage(key));
+  for (const key of unknownRuleKeys(value)) {
+    errors.add(citeName(key), unknownRuleFieldMessage(key));
   }
   checkNonEmptyString(value.id, 'id', errors);
   if (typeof value.id === 'string' && value.id.includes(':')) {
@@ -150,8 +185,15 @@ function definitionIssues(value: unknown): {
 
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
   const untilValue = value.effectiveUntil;
-  if (untilValue === null) errors.add('effectiveUntil', nullFieldMessage('effectiveUntil'));
-  if (value.checksum === null) errors.add('checksum', nullFieldMessage('checksum'));
+  if (untilValue === null && !stored) {
+    errors.add('effectiveUntil', nullFieldMessage('effectiveUntil'));
+  }
+  const checksum = value.checksum;
+  if (checksum === null) {
+    if (!stored) errors.add('checksum', nullFieldMessage('checksum'));
+  } else if (checksum !== undefined && typeof checksum !== 'string') {
+    errors.add('checksum', CHECKSUM_NOT_STRING);
+  }
   const until = untilValue == null ? null : checkDate(untilValue, 'effectiveUntil', errors);
   if (from !== undefined && until !== undefined) {
     const problem = windowShapeProblem(from, until);
@@ -221,7 +263,11 @@ function checkExtensions(value: unknown, errors: Issues): void {
     errors.add('extensions', EXTENSIONS_NOT_OBJECT);
     return;
   }
-  toJsonOrIssue(value, 'extensions', errors);
+  const json = toJsonOrIssue(value, 'extensions', errors);
+  if (!isPlainObject(json)) return;
+  for (const key of Object.keys(json)) {
+    if (json[key] === null) errors.add(`extensions.${key}`, nullFieldMessage(`extensions.${key}`));
+  }
 }
 
 function result(issues: Issues): {

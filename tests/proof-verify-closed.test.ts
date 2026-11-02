@@ -11,6 +11,7 @@ import {
   signProof,
   verifyProof,
 } from '../src/index.js';
+import { fixedCalendar } from './helpers.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import type { ProofView } from '../src/proof/types.js';
@@ -348,25 +349,80 @@ describe('I11: what the definitions decide without execution', () => {
     });
     expect(check(proof)).toEqual({
       status: 'authentic',
-      issues: [
-        'window not checked: r1@1 (no evaluatedAt)',
-        'window not checked: r2@2 (no evaluatedAt)',
-        NOT_REPLAYED,
-      ],
+      issues: ['window not checked: 2 rules (no evaluatedAt): r1@1, r2@2', NOT_REPLAYED],
     });
   });
 
-  it('an IANA zone the verifier cannot cross is named, not guessed', () => {
+  describe('an IANA time zone: decided when every offset of the world agrees', () => {
     const paris = { ...ruleA, timeZone: 'Europe/Paris' };
-    const proof = forRules([paris, ruleB], (c) => {
-      c.evaluatedAt = '2024-06-01T00:00:00.000Z';
+    const at = (instant: string, options: object = {}) =>
+      verifyProof(
+        forRules([paris, ruleB], (c) => {
+          c.evaluatedAt = instant;
+        }),
+        { trustedKeys: TRUSTED, rules: [paris, ruleB], ...options },
+      );
+
+    it('an applied rule five years outside its window is invalid, with no calendar given', () => {
+      expect(at('2020-06-01T00:00:00.000Z')).toEqual({
+        status: 'invalid',
+        issues: ['rule applied outside its window: r1@1'],
+      });
     });
-    const out = verifyProof(proof, { trustedKeys: TRUSTED, rules: [paris, ruleB] });
-    expect(out.status).toBe('authentic');
-    expect(out.issues).toEqual([
-      'window not checked: r1@1 (time zone Europe/Paris needs a calendar)',
-      NOT_REPLAYED,
-    ]);
+
+    it('five years inside is checked too', () => {
+      expect(at('2030-06-01T00:00:00.000Z')).toEqual({
+        status: 'authentic',
+        issues: [NOT_REPLAYED],
+      });
+    });
+
+    it('within a day of the bound, the zone decides: it is said, not guessed', () => {
+      // 2025-01-01T00:30Z is 2025-01-01 in Paris and 2024-12-31 at -12:00.
+      expect(at('2025-01-01T00:30:00.000Z')).toEqual({
+        status: 'authentic',
+        issues: ['window not checked: r1@1 (civil bound in Europe/Paris)', NOT_REPLAYED],
+      });
+    });
+
+    it('a calendar given is used, and decides the same instant', () => {
+      expect(at('2025-01-01T00:30:00.000Z', { calendar: fixedCalendar })).toEqual({
+        status: 'authentic',
+        issues: [NOT_REPLAYED],
+      });
+      expect(at('2024-12-31T23:30:00.000Z', { calendar: fixedCalendar })).toEqual({
+        status: 'authentic',
+        issues: [NOT_REPLAYED],
+      });
+      expect(
+        at('2024-12-31T23:30:00.000Z', {
+          calendar: {
+            ...fixedCalendar,
+            toCivilDate: (i: string) => fixedCalendar.toCivilDate(i, 'UTC'),
+          },
+        }).status,
+      ).toBe('invalid');
+    });
+
+    it('a calendar that fails is a named failure of the check, never a notice', () => {
+      const broken = {
+        toCivilDate: () => {
+          throw new Error('no tzdata');
+        },
+        startOfDay: () => '2025-01-01T00:00:00.000Z',
+      };
+      const out = at('2025-01-01T00:30:00.000Z', { calendar: broken });
+      expect(out.status).toBe('invalid');
+      expect(out.issues).toHaveLength(1);
+      expect(out.issues[0]).toMatch(/^window check failed: .*no tzdata.* \(r1@1\)$/);
+    });
+
+    it('a calendar that is not one is refused', () => {
+      expect(at('2025-01-01T00:30:00.000Z', { calendar: 'Europe/Paris' })).toEqual({
+        status: 'invalid',
+        issues: ['options.calendar must be a calendar { toCivilDate, startOfDay }'],
+      });
+    });
   });
 
   it('a day cut by an instant bound is undecidable, and it is said', () => {
@@ -421,10 +477,14 @@ describe('M1: a malformed trusted key is invalid', () => {
     });
   });
 
-  it('only the key of the signer is read', () => {
+  it('every key is read: a broken key of another id is a configuration error too', () => {
     expect(
       verifyProof(signed(), { trustedKeys: { ...TRUSTED, other: 'zz' }, rules: RULES }),
-    ).toEqual({ status: 'authentic', issues: [NOT_REPLAYED] });
+    ).toEqual({ status: 'invalid', issues: ['trustedKeys.other is malformed'] });
+    expect(verifyProof(signed(), { trustedKeys: { other: 'zz', alsoOther: 'q' } })).toEqual({
+      status: 'invalid',
+      issues: ['trustedKeys.other is malformed', 'trustedKeys.alsoOther is malformed'],
+    });
   });
 
   it('a key id that is not plain text is cited safely', () => {
@@ -452,6 +512,7 @@ describe('the outputs a rule may feed: its own, and the targets of its short cir
       timeZone: 'UTC',
       ruleSets: [],
       applied: [{ ruleId: 'X', version: 1, model: 'FLAT', output }],
+      pending: [],
       skipped: [],
     }) as unknown as ProofView;
   const found = (output: string): string[] => {
