@@ -260,20 +260,15 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
     return undefined;
   }
   const fields = readFields(value, path, path, SUBJECT_KEYS, reader);
-  if (fields === undefined) {
-    markRead(reader, value, 'proofDigest', undefined);
-    return undefined;
-  }
+  if (fields === undefined) return undefined;
   const subject = checkSubject(fields, path, add);
   // The subject may be reachable from `claims` too: the claims walk takes this read, and the
-  // same copy of it, instead of reading it a second time.
-  const [only] = [...fields.values.keys()];
-  markRead(
-    reader,
-    value,
-    only ?? 'proofDigest',
-    subject === undefined ? undefined : { ...subject },
-  );
+  // same copy of it, instead of reading it a second time. It is marked under a member it holds
+  // (read or failed to read); an object with no known member is not marked.
+  const [member] = [...fields.values.keys(), ...fields.failed];
+  if (member !== undefined) {
+    markRead(reader, value, member, subject === undefined ? undefined : { ...subject });
+  }
   return subject;
 }
 

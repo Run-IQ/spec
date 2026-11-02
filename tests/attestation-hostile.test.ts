@@ -362,6 +362,81 @@ describe('an object shared by the subject and the claims is read once', () => {
   });
 });
 
+describe('a shared subject is read once at any depth of the claims', () => {
+  /** `shared` under `levels` objects `{ a: … }`, as the claims. */
+  function under(shared: object, levels: number): Record<string, unknown> {
+    let value: unknown = shared;
+    for (let i = 0; i < levels; i++) value = { a: value };
+    return value as Record<string, unknown>;
+  }
+  function counting(): { subject: object; reads: () => number } {
+    let reads = 0;
+    const subject = {
+      get keyId(): string {
+        reads++;
+        return 'k1';
+      },
+    };
+    return { subject, reads: () => reads };
+  }
+  function attestation(subject: object, claims: unknown): Record<string, unknown> {
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+    });
+    a.subject = subject;
+    a.claims = claims;
+    return a;
+  }
+
+  it('at depth 1000, one container past the limit: read once, the depth reported', () => {
+    const { subject, reads } = counting();
+    const result = verify(attestation(subject, under(subject, 1000)));
+    expect(result.status).toBe('invalid');
+    expect(result.issues).toHaveLength(1);
+    expect(result.issues[0]).toMatch(/is nested deeper than 1000 levels$/);
+    expect(reads()).toBe(1);
+  });
+
+  it('at depth 999, the deepest that fits: read once, the claims accepted (the unsigned claims differ)', () => {
+    const { subject, reads } = counting();
+    expect(verify(attestation(subject, under(subject, 999)))).toEqual({
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+    });
+    expect(reads()).toBe(1);
+  });
+});
+
+describe('a subject whose members cannot all be read, shared with the claims', () => {
+  it('a member that throws, other than proofDigest: one read, one issue', () => {
+    let reads = 0;
+    const shared = {
+      get keyId(): string {
+        reads++;
+        throw new Error('boom');
+      },
+    };
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+    });
+    a.subject = shared;
+    a.claims = { s: shared };
+    expect(verify(a)).toEqual(invalid(['/subject/keyId could not be read: boom']));
+    expect(reads).toBe(1);
+  });
+
+  it('a subject with no known member is not marked: a closed object, named once', () => {
+    const a = changed((copy) => {
+      copy.kind = 'timestamp';
+    });
+    a.subject = { other: 1 };
+    a.claims = { s: a.subject };
+    const result = verify(a);
+    expect(result.status).toBe('invalid');
+    expect(result.issues[0]).toBe('/subject has an unknown key "other"');
+  });
+});
+
 describe('read once, at a bounded cost (counted)', () => {
   it('each property of the attestation is read exactly once', () => {
     const counter = { reads: 0 };
