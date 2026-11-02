@@ -38,10 +38,11 @@ Other rigour: write the test first and show it failing; exact assertions; one mu
 The cloud session (you) and the machine session (on the owner's computer) talk only through the GitHub issue `Run-IQ/.github#1` and the pull requests. The owner does not intervene in the loop.
 
 - **Branches.** One `cloud/<task>` branch per job, cut from `refonte/phase-2`. Pull requests go into `refonte/phase-2`.
-- **Comments.** Every comment you post starts with `Cloud session:`. The machine session's start with `Machine session:`.
-- **Sequence.** `Cloud session: ready for audit <PR link>`, then audit comments, then `Cloud session: fixes pushed` (one answer per finding, by number, Minor ones included), repeated until `Machine session: audit OK`.
-- **Merge.** Only after `Machine session: audit OK`, with CI green and the base unchanged: a fast-forward only, `git push origin cloud/<task>:refonte/phase-2`. Then post `Cloud session: merged <sha>` and wait for the next job. Commits are kept, never squashed.
-- **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to spec while working on a core task, or a budget choice: post `Cloud session: BLOCKED (owner decision) <why>` and wait.
+- **Lanes.** Two cloud sessions work in parallel: **lane A** and **lane B**, with the machine session. A lane is a session, not a repo: each job names the repos it works in, and a lane works only in those. In this repo the session is usually lane B. Two lanes never work in the same repo at the same time. When a job needs a change in a repo the job does not name, post what is needed and wait for the machine session's ruling. Cross-lane dependencies are decided by the machine session; lanes never coordinate directly. Each repo a lane enters later gets this same `CLAUDE.md` in that lane's first PR there.
+- **Comments.** Every comment you post starts with `Cloud session (lane A):` or `Cloud session (lane B):`. The machine session's start with `Machine session (lane A):`, `Machine session (lane B):` or `Machine session (all lanes):`; a `Machine session: DECISION` post counts as all lanes. A lane acts only on comments for its own lane or for all lanes, and never answers, comments on or acts on the other lane's jobs, audits or PRs. Earlier comments with no lane tag belonged to lane A, except Job 5, which is lane B. An audit is posted on the PR, with a one-line tagged notice on #1.
+- **Sequence.** `Cloud session (lane B): ready for audit <PR link>`, then audit comments, then `fixes pushed` (one answer per finding, by number, Minor ones included), repeated until `Machine session: audit OK`.
+- **Merge.** Only after `Machine session: audit OK`, with CI green and the base unchanged: a fast-forward only, `git push origin cloud/<task>:refonte/phase-2`. Then post `merged <sha>` and wait for the next job. Commits are kept, never squashed.
+- **Owner questions.** For a product, licence or irreversible choice, any publish, tag or release, any push to `master` or `main`, deleting a repository or another branch, a change to a repo the job does not name, or a budget choice: post `Cloud session (lane B): BLOCKED (owner decision) <why>` and wait.
 - **Waiting.** Never end the session while waiting: poll issue #1 and the PR every 2 minutes for a new `Machine session:` comment, and re-arm the watch when it expires.
 - **No footers.** No "Generated with", no `Co-Authored-By`, no signature line in commits, pull requests or comments. Tools that append one (`gh api`, some MCP create calls) must be followed by an edit that removes it, then checked.
 - **The owner is the sole author** of every commit.
@@ -52,7 +53,7 @@ The cloud session (you) and the machine session (on the owner's computer) talk o
 Decisions of 2 November 2026 that apply to spec. Items marked "from <task>" are decided and are not in the code yet; the code follows when that task lands.
 
 - From 9K5: the verifier says what it did not check, and never returns `authentic` or `consistent` for a skipped check without a notice.
-- From 9K5: an attestation that is unsupported, or a revocation, is `invalid`.
+- From 9K5: an attestation that is unsupported, or a revocation, is `invalid`; so is a `{ keyId }` subject verified against a proof digest. D-29 is revised to this.
 - From 9K5: unknown rule fields are refused, and extensions go under `extensions`.
 - From 9K5: `null` in a rule is refused.
 - Tags absent means no tag filter (D-38). A given list is complete unless the caller declares otherwise.
