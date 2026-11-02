@@ -27,7 +27,8 @@
  * absent (`discloseFacts`, `verifyFactDisclosure`, which agrees with
  * `schema/fact-disclosure.schema.json`; `DISCLOSURE_FORMAT`), the Merkle trees it rests on
  * (`merkleRoot`, `inclusionPath`, `verifyInclusion`) and the idempotency digest of a request
- * (`computeIdempotencyDigest`).
+ * (`computeIdempotencyDigest`); and detached attestations of a proof (`createAttestation`,
+ * `verifyAttestation`, which agrees with `schema/attestation.schema.json`; `ATTESTATION_FORMAT`).
  *
  * Inputs must be plain JSON data: plain objects, arrays, strings, finite numbers, booleans,
  * null, and `Date` objects (any realm). Values such as `Decimal` (decimal.js), Luxon
@@ -187,4 +188,8 @@ export { validateProofInput } from './input/validate.js';
 export { validateTemporalFact } from './input/temporal.js';
 export { createSigningKeyPair, signProof } from './proof/sign.js';
 export { verifyProof } from './proof/verify.js';
+export { ATTESTATION_FORMAT } from './attestation/types.js';
+export type { Attestation, AttestationSubject } from './attestation/types.js';
+export { createAttestation } from './attestation/sign.js';
+export { verifyAttestation } from './attestation/verify.js';
 export { validateProof } from './proof/validate.js';

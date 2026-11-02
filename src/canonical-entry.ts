@@ -154,4 +154,8 @@ export { validateProofInput } from './input/validate.js';
 export { validateTemporalFact } from './input/temporal.js';
 export { createSigningKeyPair, signProof } from './proof/sign.js';
 export { verifyProof } from './proof/verify.js';
+export { ATTESTATION_FORMAT } from './attestation/types.js';
+export type { Attestation, AttestationSubject } from './attestation/types.js';
+export { createAttestation } from './attestation/sign.js';
+export { verifyAttestation } from './attestation/verify.js';
 export { validateProof } from './proof/validate.js';

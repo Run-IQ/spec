@@ -10,6 +10,7 @@ import { unsigned } from './proof-cases.js';
 import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 import disclosures from './vectors/disclosure-v1.json';
+import attestation from './vectors/attestation-v1.json';
 import { unsalted } from './proof-cases.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
@@ -135,6 +136,18 @@ type Entry = {
     d: unknown,
     inputDigest: string,
   ) => { valid: boolean; issues: string[]; facts: object; absent: string[] };
+  ATTESTATION_FORMAT: string;
+  createAttestation: (
+    proofDigest: string,
+    privateKey: string,
+    keyId: string,
+    o?: { role?: string; at?: string },
+  ) => object;
+  verifyAttestation: (
+    a: unknown,
+    proofDigest: string,
+    trustedKeys: Record<string, string>,
+  ) => { status: string; issues: string[] };
 };
 
 async function esm(file: string): Promise<Entry> {
@@ -506,6 +519,28 @@ describe('built entries: one SpecError identity', () => {
         const shown = entry.verifyFactDisclosure(c.disclosure, digest).facts;
         expect(Object.keys(shown)).toEqual(c.disclosure.facts.map((fact) => fact.pointer));
       }
+    }
+  });
+
+  it('every built entry cosigns and verifies as the frozen attestation vector says', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ];
+    const v = attestation;
+    for (const entry of entries) {
+      expect(entry.ATTESTATION_FORMAT).toBe('run-iq.attestation/1');
+      const made = entry.createAttestation(v.proofDigest, v.secret, v.keyId, {
+        role: v.role,
+        at: v.at,
+      });
+      expect(made).toEqual(v.attestation);
+      expect(entry.verifyAttestation(made, v.proofDigest, { [v.keyId]: v.public })).toEqual({
+        status: 'authentic',
+        issues: [],
+      });
     }
   });
 

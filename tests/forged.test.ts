@@ -476,7 +476,7 @@ describe('every exported function: hostile arguments give an own SpecError or a 
   }
 
   it('covers every exported function', () => {
-    expect(functions.size).toBe(74);
+    expect(functions.size).toBe(76);
   });
 
   it.each([...functions.keys()])('%s', (name) => {

@@ -1,0 +1,22 @@
+{
+  "format": "run-iq.attestation/1",
+  "description": "Frozen vector of a detached attestation (D-29), computed by an independent generator (node:crypto only). message = the canonical JSON (RFC 8785) of the attestation without signature; signature = ed25519 (RFC 8032) of utf8(message) by the secret key (the seed of RFC 8032 test 1), in base64url without padding. proofDigest is the digest of the sealed proof of proof-v1.json.",
+  "secret": "9d61b19deffd5a60ba844af492ec2cc44449c5697b326919703bac031cae7f60",
+  "public": "d75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+  "keyId": "reviewer-1",
+  "role": "human-review",
+  "at": "2026-11-01T10:00:00.000Z",
+  "proofDigest": "acfaa494f781e65df2c0b70a29d440f462427f4e46cc91c66b23a45e0e88f2e3",
+  "message": "{\"at\":\"2026-11-01T10:00:00.000Z\",\"format\":\"run-iq.attestation/1\",\"keyId\":\"reviewer-1\",\"kind\":\"cosignature\",\"role\":\"human-review\",\"subject\":{\"proofDigest\":\"acfaa494f781e65df2c0b70a29d440f462427f4e46cc91c66b23a45e0e88f2e3\"}}",
+  "attestation": {
+    "format": "run-iq.attestation/1",
+    "kind": "cosignature",
+    "subject": {
+      "proofDigest": "acfaa494f781e65df2c0b70a29d440f462427f4e46cc91c66b23a45e0e88f2e3"
+    },
+    "keyId": "reviewer-1",
+    "role": "human-review",
+    "at": "2026-11-01T10:00:00.000Z",
+    "signature": "8BY9WNtOY18OdFrkzkJQ9aDLgIAi_u0X_RXrjOCaaDeBx13tynAly6Ne45Kxx1nPa8-NL8JOsut7kMPzehxiBw"
+  }
+}

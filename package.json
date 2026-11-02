@@ -32,7 +32,8 @@
     "./schema/referential.schema.json": "./schema/referential.schema.json",
     "./schema/proof-input.schema.json": "./schema/proof-input.schema.json",
     "./schema/fact-disclosure.schema.json": "./schema/fact-disclosure.schema.json",
-    "./schema/output-declaration.schema.json": "./schema/output-declaration.schema.json"
+    "./schema/output-declaration.schema.json": "./schema/output-declaration.schema.json",
+    "./schema/attestation.schema.json": "./schema/attestation.schema.json"
   },
   "typesVersions": {
     "*": {
