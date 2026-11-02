@@ -391,17 +391,28 @@ describe('a shared subject is read once at any depth of the claims', () => {
   it('at depth 1000, one container past the limit: read once, the depth reported', () => {
     const { subject, reads } = counting();
     const result = verify(attestation(subject, under(subject, 1000)));
-    expect(result.status).toBe('invalid');
-    expect(result.issues).toHaveLength(1);
-    expect(result.issues[0]).toMatch(/is nested deeper than 1000 levels$/);
+    expect(result).toEqual(
+      invalid([
+        `/claims${'/a'.repeat(1000)}`.slice(0, 256) + '… is nested deeper than 1000 levels',
+      ]),
+    );
     expect(reads()).toBe(1);
   });
 
-  it('at depth 999, the deepest that fits: read once, the claims accepted (the unsigned claims differ)', () => {
+  it('at depth 999, the deepest that fits: read once, the claims accepted', () => {
     const { subject, reads } = counting();
-    expect(verify(attestation(subject, under(subject, 999)))).toEqual({
-      status: 'invalid',
-      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+    const a = attestation(subject, under(subject, 999));
+    // What a single read gives: k1 in the subject and at the foot of the claims, signed.
+    const once = {
+      ...a,
+      subject: { keyId: 'k1' },
+      claims: under({ keyId: 'k1' }, 999),
+      signature: undefined,
+    };
+    a.signature = signAttestationBody(once, RFC_SECRET);
+    expect(verify(a)).toEqual({
+      status: 'consistent',
+      issues: ['attestation kind not supported: timestamp'],
     });
     expect(reads()).toBe(1);
   });
@@ -431,9 +442,12 @@ describe('a subject whose members cannot all be read, shared with the claims', (
     });
     a.subject = { other: 1 };
     a.claims = { s: a.subject };
-    const result = verify(a);
-    expect(result.status).toBe('invalid');
-    expect(result.issues[0]).toBe('/subject has an unknown key "other"');
+    expect(verify(a)).toEqual(
+      invalid([
+        '/subject has an unknown key "other"',
+        '/subject must hold exactly one of proofDigest and keyId',
+      ]),
+    );
   });
 });
 
