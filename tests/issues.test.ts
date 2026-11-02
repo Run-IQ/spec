@@ -75,9 +75,9 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
       'tags[0] contains a lone UTF-16 surrogate',
     ],
     [
-      'an over-long extension key with a lone surrogate',
+      'an over-long unknown field with a lone surrogate',
       { [`${LONG}\uD800`]: 1 },
-      `rule definition has an extension key with a lone UTF-16 surrogate: "${'x'.repeat(256)}…"`,
+      `unknown rule field: ${'x'.repeat(256)}…`,
     ],
     ['an over-long id holding ":"', { id: `${LONG}:` }, 'id must not contain ":"'],
     [

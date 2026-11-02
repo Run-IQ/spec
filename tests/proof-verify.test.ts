@@ -22,6 +22,7 @@ import {
 import { handSealed, specError } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { ProofView } from '../src/proof/types.js';
+import { NOT_REPLAYED } from './notices.js';
 
 describe('verifyProof: invalid, with a readable issue', () => {
   it('a field changed after sealing', () => {
@@ -201,8 +202,8 @@ describe('verifyProof: invalid, with a readable issue', () => {
     ['a small-order point (the identity)', `01${'0'.repeat(62)}`],
   ])('a trusted key of the right length that is %s', (_name, key) => {
     expect(verifyProof(signed(), { trustedKeys: { 'executor-1': key } })).toEqual({
-      status: 'consistent',
-      issues: ['trusted key malformed'],
+      status: 'invalid',
+      issues: ['trustedKeys.executor-1 is malformed'],
     });
   });
 
@@ -252,11 +253,27 @@ describe('verifyProof: invalid, with a readable issue', () => {
   it('rules of packs: each given rule matched by its qualified id (D-37)', () => {
     const content = baseContent();
     const listed = content.rules as { id: string; version: number; ruleSet: string }[];
+    // Each definition says what the trace of the base proof says of its rule: its model, its
+    // output and a window, so that only the qualified ids are under test here.
+    const shape: Record<string, Record<string, unknown>> = {
+      'local:k@1': {
+        model: 'PER_CHILD',
+        output: 'kids',
+        effectiveOn: '/$item/naissance',
+        forEach: { path: '/enfants', key: 'id' },
+      },
+      'local:r1@1': { model: 'FLAT' },
+      'social:R1@1': { model: 'CHECK', output: 'aid' },
+      'vat:R1@1': { model: 'CHECK', output: 'social:aid' },
+      'vat:R2@1': { model: 'LEVEL', output: 'level' },
+      'vat:R2@2': { effectiveFrom: '2030-01-01', output: 'level' },
+    };
     const definitions: RuleDefinitionInput[] = listed.map(({ id, version, ruleSet }) => ({
       ...ruleA,
       id,
       version,
       ...(ruleSet === 'local' ? {} : { ruleSet }),
+      ...shape[`${ruleSet}:${id}@${version}`],
     }));
     const rules = listed.map((ref, i) => ({
       ...ref,
@@ -266,12 +283,16 @@ describe('verifyProof: invalid, with a readable issue', () => {
     const proof = sealProof(unsalted({ ...content, rules } as unknown as ProofView));
     expect(verifyProof(proof, { rules: definitions })).toEqual({
       status: 'consistent',
-      issues: ['unsigned'],
+      issues: [
+        'unsigned',
+        'window not checked: k@1 (effectiveOn is /$item/naissance)',
+        'reason not checked: INHIBITED',
+        NOT_REPLAYED,
+      ],
     });
     // R1@1 of social given as a rule of vat: the vat one twice, the social one missing.
-    const moved = definitions.map((rule) =>
-      rule.ruleSet === 'social' ? { ...rule, ruleSet: 'vat' } : rule,
-    );
+    const vatR1 = definitions.find((rule) => rule.ruleSet === 'vat' && rule.id === 'R1')!;
+    const moved = definitions.map((rule) => (rule.ruleSet === 'social' ? { ...vatR1 } : rule));
     expect(verifyProof(proof, { rules: moved })).toEqual({
       status: 'invalid',
       issues: ['unsigned', 'duplicate rule: vat:R1@1', 'rule missing: social:R1@1'],

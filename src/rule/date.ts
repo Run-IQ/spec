@@ -8,6 +8,9 @@ const DATE_ONLY = /^(\d{4})-(\d{2})-(\d{2})$/;
 const DATE_TIME =
   /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2})(?:\.(\d{1,9}))?)?(Z|[+-]\d{2}:\d{2})$/;
 
+/** `Date` stops at the millisecond. */
+const MAX_FRACTION_DIGITS = 3;
+
 /**
  * Parses a date of a decision PROOF (`evaluatedAt`, `sealedAt`), in the grammar rule dates had
  * before civil time: Task 9J gives proofs the reference dates of rules. Rule windows read their
@@ -16,9 +19,10 @@ const DATE_TIME =
  * - a valid `Date`, from any realm;
  * - `YYYY-MM-DD`, read as UTC midnight;
  * - an ISO 8601 date-time WITH `Z` or a `±HH:MM` offset (seconds and fraction optional).
- *   Fractional seconds take 1 to 9 digits; digits beyond the millisecond are TRUNCATED, not
- *   rounded (`.123456` → `.123`), because `Date` and the canonical ISO form stop at the
- *   millisecond and databases such as Postgres emit microseconds.
+ *   Fractional seconds take 1 to 3 digits: `Date` and the canonical ISO form stop at the
+ *   millisecond, so a finer value is REFUSED, never truncated or rounded (`.123456` is an
+ *   `INVALID_DATE` saying "at most 3 fractional digits"): the proof would name another instant
+ *   than the one given.
  *
  * Anything else throws `SpecError` (`INVALID_DATE`), including a date-time without a time
  * zone, whose meaning would depend on the machine's time zone.
@@ -37,11 +41,17 @@ export function parseRuleDate(value: unknown, field: string): Date {
   const dateTime = DATE_TIME.exec(value);
   if (dateTime) {
     const [, y, mo, d, h, mi, s, frac, zone] = dateTime;
+    if (frac !== undefined && frac.length > MAX_FRACTION_DIGITS) {
+      return invalid(
+        field,
+        `${quoteText(value)} (at most ${MAX_FRACTION_DIGITS} fractional digits)`,
+      );
+    }
     return build(
       value,
       field,
       [y, mo, d],
-      [h, mi, s ?? '0', (frac ?? '').padEnd(3, '0').slice(0, 3)],
+      [h, mi, s ?? '0', (frac ?? '').padEnd(MAX_FRACTION_DIGITS, '0')],
       zone ?? 'Z',
     );
   }

@@ -7,12 +7,16 @@ import { omit } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 import type { ProofView } from '../src/proof/types.js';
+import { UNCHECKED } from './notices.js';
 
 describe('the base proof', () => {
   it('is consistent: sealed, verified, sealed again to the same digest', () => {
     expect(problems(baseContent())).toEqual([]);
     const sealed = sealProof(unsalted(baseContent() as unknown as ProofView));
-    expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expect(sealProof(unsalted(sealed)).digest).toBe(sealed.digest);
   });
 

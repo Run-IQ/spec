@@ -173,11 +173,14 @@ describe('verifyProof: hostile input', () => {
       },
     });
     // Read as computeRuleChecksum reads a rule: both refuse it with the same reason.
-    expect(specError(() => computeRuleChecksum(rule as RuleDefinitionInput)).message).toBe(
-      'rule definition could not be read: unreadable value',
-    );
     expect(
-      verifyProof(signed(), { trustedKeys: TRUSTED, rules: [rule as RuleDefinitionInput] }),
+      specError(() => computeRuleChecksum(rule as unknown as RuleDefinitionInput)).message,
+    ).toBe('rule definition could not be read: unreadable value');
+    expect(
+      verifyProof(signed(), {
+        trustedKeys: TRUSTED,
+        rules: [rule as unknown as RuleDefinitionInput],
+      }),
     ).toEqual({
       status: 'invalid',
       issues: [

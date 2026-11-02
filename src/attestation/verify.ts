@@ -24,7 +24,7 @@ import type { Attestation, AttestationSubject } from './types.js';
 /** Internal: a proof digest as `sealProof` writes it: 64 lowercase hex characters. */
 export const HEX_DIGEST = /^[0-9a-f]{64}$/;
 
-/** The kinds this version verifies (D-29); any other is at best `consistent`. */
+/** The kinds this version verifies (D-29); any other is `invalid`. */
 const VERIFIED_KINDS: readonly string[] = ['cosignature'];
 
 const KEYS: readonly string[] = [
@@ -63,18 +63,22 @@ const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ'
  *    (`cosignature takes no claims`, its content not read). An object reachable from both
  *    `subject` and `claims` is read once, and both hold the same value. Each problem is named with
  *    its path (`/at must be …`, `/subject could not be read: <reason>`).
- * 3. The kind: one this version does not verify keeps it at best `consistent`
- *    (`attestation kind not supported: <kind>`). Its envelope is still checked, and its
- *    signature when its key is trusted (step 5).
+ * 3. The kind: one this version does not verify (`timestamp`, `revocation`, any later kind) makes
+ *    it `invalid` (`attestation kind not supported: <kind>`): it is not a weak yes, and it is
+ *    never read as an attestation of the proof. Its envelope is still checked, and its signature
+ *    when its key is trusted (step 5), so every problem is listed.
  * 4. The subject: a `subject.proofDigest` other than `proofDigest` makes it `invalid`
- *    (`attestation for another proof`).
+ *    (`attestation for another proof`), and so does a `{ keyId }` subject, which is about a key
+ *    and never about a proof digest (`attestation not about this proof`).
  * 5. The signature, against `canonicalize` of the attestation without `signature`: `untrusted
- *    key` (its `keyId` is not an own key of `trustedKeys`) or `trusted key malformed` (not 64
- *    hex characters, not a curve point, a small-order point) leave it at best `consistent`;
- *    `signature invalid` makes it `invalid`.
+ *    key` (its `keyId` is not an own key of `trustedKeys`) leaves it at best `consistent`;
+ *    a trusted key that is malformed (not 64 hex characters, not a curve point, a small-order
+ *    point) is a configuration error and makes it `invalid` (`trustedKeys.<keyId> is
+ *    malformed`); `signature invalid` makes it `invalid`.
  *
  * `authentic` needs a cosignature of `proofDigest` whose signature a trusted key verifies,
- * with no issue. Its cost is linear in the size of the attestation: each property is read
+ * with no issue. Every other attestation is `consistent` at best (an untrusted key) or
+ * `invalid`. Its cost is linear in the size of the attestation: each property is read
  * once, and the message signed is the canonical text of its members.
  *
  * The verdict is about the data read during the call: act on the copy it describes (take a JSON
@@ -128,9 +132,11 @@ function verify(a: unknown, proofDigest: unknown, trustedKeys: unknown): ProofVe
   const findings: Finding[] = [];
   if (!VERIFIED_KINDS.includes(read.kind)) {
     const message = `attestation kind not supported: ${citeName(read.kind)}`;
-    findings.push({ message, level: 'warning' });
+    findings.push({ message, level: 'invalid' });
   }
-  if ('proofDigest' in read.subject && read.subject.proofDigest !== proofDigest) {
+  if (!('proofDigest' in read.subject)) {
+    findings.push({ message: 'attestation not about this proof', level: 'invalid' });
+  } else if (read.subject.proofDigest !== proofDigest) {
     findings.push({ message: 'attestation for another proof', level: 'invalid' });
   }
   const signature = signatureFinding(read, trustedKeys);
@@ -155,7 +161,9 @@ function signatureFinding(a: Attestation, trustedKeys: unknown): Finding | undef
     return { message: unreadableMessage('trustedKeys', error), level: 'invalid' };
   }
   const key = publicKeyBytes(publicKey);
-  if (!key) return { message: 'trusted key malformed', level: 'warning' };
+  if (!key) {
+    return { message: `${citeName(`trustedKeys.${a.keyId}`)} is malformed`, level: 'invalid' };
+  }
   let message: string;
   try {
     message = attestationMessage(a);

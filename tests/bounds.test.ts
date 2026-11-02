@@ -181,8 +181,8 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ],
   [
     'validateRuleDefinition extension',
-    (list) => validateRuleDefinition({ ...BASE_RULE, ext: list }).errors[0],
-    'ext',
+    (list) => validateRuleDefinition({ ...BASE_RULE, extensions: { ext: list } }).errors[0],
+    'extensions.ext',
   ],
   [
     'validateProof applied',

@@ -11,6 +11,7 @@ import vector from './vectors/input-v1.json';
 import second from './vectors/input-v2.json';
 import disclosures from './vectors/disclosure-v1.json';
 import attestation from './vectors/attestation-v1.json';
+import { UNCHECKED } from './notices.js';
 import { unsalted } from './proof-cases.js';
 
 // These tests read the BUILT entries: only there do `index` and `canonical` bundle separate
@@ -237,7 +238,7 @@ describe('built entries: one SpecError identity', () => {
       for (const verifier of entries) {
         expect(verifier.verifyProof(proof, { trustedKeys: { k: publicKey } })).toEqual({
           status: 'authentic',
-          issues: [],
+          issues: UNCHECKED,
         });
       }
     }

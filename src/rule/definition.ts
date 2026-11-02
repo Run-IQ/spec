@@ -76,39 +76,43 @@ export interface RuleDefinitionBase {
    */
   exceptions?: RuleException[];
   sourceRef?: string;
+  /**
+   * What a plugin or a pack adds to the rule, by name. It is the only place for a field the
+   * spec does not define: an unknown top-level field is refused (`unknown rule field`), so a
+   * misspelled name never loses its meaning silently. The checksum and the fingerprint cover
+   * it. An empty `extensions` is absent. Inside it, `null` is data.
+   */
+  extensions?: Record<string, JsonValue>;
 }
 
 /**
- * A normalized rule definition: the named fields plus plugin extension fields at the top
- * level. Extensions enter the checksum and the fingerprint. `checksum` is never part of it.
+ * A normalized rule definition. Extensions are under `extensions`, never at the top level.
+ * `checksum` is never part of it.
  *
- * Null at the top level: for every optional named field (`condition`, `effectiveUntil`,
- * `timeZone`, `effectiveOn`, `forEach`, `ruleSet`, `output`, `dimensions`, `tags`,
- * `dominanceGroup`, `exceptions`, `sourceRef`) and every
- * extension field, `null`, `undefined` and absence are the same input, so the checksum and
- * fingerprint do not depend on how a database writes empty columns. Normalization drops them,
- * or writes the default (`effectiveUntil: null`, `dimensions: {}`, `tags: []`). An empty
- * `exceptions` list is absent too, and so is `ruleSet: 'local'`. A `null` value inside
- * `dimensions` likewise means the dimension is unset and its key is dropped (other non-string
- * values throw). Below the top level (inside `params`, `condition.value`, `forEach`,
- * `exceptions` and extension values), and for the required `params` itself, `null` is data and
- * is kept (and refused where the format has no place for it, as in `forEach`).
+ * Null at the top level: the format has no `null` to write, so `null` is refused for
+ * every optional field (`<field> is null: omit the field instead`), and so is a `null`
+ * dimension in `dimensions`: a lost column never widens a rule. `undefined` and absence are
+ * the same input, and normalization writes the defaults (`dimensions: {}`, `tags: []`). One
+ * `null` stays: `effectiveUntil: null` is the written form of "no end", and a normalized
+ * definition is read again as it is. An empty `exceptions` list or `extensions` object is
+ * absent too, and so is `ruleSet: 'local'`. Below the top level (inside `params`,
+ * `condition.value`, `forEach`, `exceptions` and the values of `extensions`), and for the
+ * required `params` itself, `null` is data and is kept (and refused where the format has no
+ * place for it, as in `forEach`).
  */
-export interface RuleDefinition extends RuleDefinitionBase {
-  [extension: string]: unknown;
-}
+export type RuleDefinition = RuleDefinitionBase;
 
 /**
  * Named fields accepted by `normalizeRuleDefinition`, before defaults and date conversion.
- * Every optional field (and every extension) accepts `null`, `undefined` or absence, which all
- * mean the same thing at the top level: see `RuleDefinition`.
+ * Every optional field accepts `undefined` or absence, which mean the same thing; `null` is
+ * refused, `effectiveUntil` excepted: see `RuleDefinition`.
  */
 export interface RuleDefinitionInputBase {
   readonly id: string;
   readonly version: number;
   readonly model: string;
   readonly params: unknown;
-  readonly condition?: { readonly dsl: string; readonly value: unknown } | null | undefined;
+  readonly condition?: { readonly dsl: string; readonly value: unknown } | undefined;
   readonly priority: number;
   /**
    * `YYYY-MM-DD` (stays a civil date), or an instant: a `Date` or
@@ -117,38 +121,40 @@ export interface RuleDefinitionInputBase {
   readonly effectiveFrom: Date | string;
   /**
    * Same forms as `effectiveFrom`, and the same form as it (both civil or both instants);
-   * absent, `undefined` or `null` means no end.
+   * absent, `undefined` or `null` means no end: the only field where `null` is accepted.
    */
   readonly effectiveUntil?: Date | string | null | undefined;
   /** `UTC`, `±HH:MM` or an IANA name; `+00:00` and `-00:00` are written `UTC`. */
-  readonly timeZone?: string | null | undefined;
+  readonly timeZone?: string | undefined;
   /** `/$dates/<name>`, `/$item/<path>` (with `forEach`) or `/$segment/from`. */
-  readonly effectiveOn?: string | null | undefined;
+  readonly effectiveOn?: string | undefined;
   /** A `ForEach`; a one-level `key` list may be written as a list. Checked by normalization. */
   readonly forEach?: unknown;
   /** A rule set id; `'local'` means absent. */
-  readonly ruleSet?: string | null | undefined;
-  readonly output?: string | null | undefined;
+  readonly ruleSet?: string | undefined;
+  readonly output?: string | undefined;
   /**
-   * A `DimensionSpec` per dimension, in any written order; a `null` or `undefined` value means
-   * the dimension is unset: the key is dropped.
+   * A `DimensionSpec` per dimension, in any written order; an `undefined` value means the
+   * dimension is unset: the key is dropped. A `null` is refused.
    */
-  readonly dimensions?:
-    Readonly<Record<string, DimensionSpecInput | null | undefined>> | null | undefined;
-  readonly tags?: readonly string[] | null | undefined;
-  readonly dominanceGroup?: string | null | undefined;
+  readonly dimensions?: Readonly<Record<string, DimensionSpecInput | undefined>> | undefined;
+  readonly tags?: readonly string[] | undefined;
+  readonly dominanceGroup?: string | undefined;
   /** A list of `RuleException`; `[]` means absent. Checked by normalization. */
   readonly exceptions?: unknown;
-  readonly sourceRef?: string | null | undefined;
-  /** Ignored: removed by normalization. */
+  readonly sourceRef?: string | undefined;
+  /** Whatever a plugin or a pack adds, by name: a plain object, covered by the checksum. */
+  readonly extensions?: Readonly<Record<string, unknown>> | undefined;
+  /** Ignored: removed by normalization. May be `null`, as a database column of it would be. */
   readonly checksum?: string | null | undefined;
 }
 
-export interface RuleDefinitionInput extends RuleDefinitionInputBase {
-  readonly [extension: string]: unknown;
-}
+export type RuleDefinitionInput = RuleDefinitionInputBase;
 
-/** Field names with a meaning defined by the spec; every other top-level key is an extension. */
+/**
+ * Field names with a meaning defined by the spec. Any other top-level key is refused
+ * (`unknown rule field`): what a plugin adds goes under `extensions`.
+ */
 export const RESERVED_RULE_FIELDS: readonly string[] = [
   'id',
   'version',
@@ -168,6 +174,7 @@ export const RESERVED_RULE_FIELDS: readonly string[] = [
   'dominanceGroup',
   'exceptions',
   'sourceRef',
+  'extensions',
   'checksum',
 ];
 

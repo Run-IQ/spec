@@ -6,6 +6,7 @@ import type { Entry } from './proof-builders.js';
 import { ruleA } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { withoutDefinitionChecks } from './notices.js';
 
 // With `rules`, the definitions say which rules a carrier targets (`matchesSelector`, as core
 // resolves targets statically) and which exceptions it carries.
@@ -29,7 +30,9 @@ function issues(trace: Trace, definitions: RuleDefinitionInput[]): string[] {
     ...ref,
     checksum: computeRuleChecksum(byId.get(String(ref.id))!),
   }));
-  return verifyProof(handSealed({ ...content, rules: listed }), { rules: definitions }).issues;
+  return withoutDefinitionChecks(
+    verifyProof(handSealed({ ...content, rules: listed }), { rules: definitions }).issues,
+  );
 }
 
 const root = { ruleId: 'X', reason: 'UNDETERMINED', detail: 'missing /a', fired: false };

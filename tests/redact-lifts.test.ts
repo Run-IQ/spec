@@ -21,6 +21,7 @@ import type { Content, Entry } from './proof-builders.js';
 import { RFC_SECRET, ruleA, TRUSTED, unsalted, unsigned } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { UNCHECKED, withoutUnchecked } from './notices.js';
 
 // A redacted entry's preimage is never checkable (D-16): any content may be behind its hash. A
 // check that such an entry could satisfy is lifted, and a proof with a redacted entry never gets
@@ -155,17 +156,17 @@ describe('a fake marker never buys the full verdict (review of 9K1, I1)', () => 
   it('an honest redaction of a signed proof is authentic-redacted, lifting nothing', () => {
     const sealed = sealProof({ ...unsalted(unsigned()), inputSalted: true } as UnsaltedProof, SEED);
     const proof = signed(sealed);
-    expect(verified(proof)).toEqual({ status: 'authentic', issues: [] });
+    expect(verified(proof)).toEqual({ status: 'authentic', issues: UNCHECKED });
     const redacted = redactProof(proof, (section, i) => section === 'factsRead' && i === 0);
     expect(verified(redacted)).toEqual({
       status: 'authentic-redacted',
-      issues: ['redacted entries: 1'],
+      issues: ['redacted entries: 1', ...UNCHECKED],
       redacted: 1,
       lifted: [],
     });
     expect(verifyProof(redacted)).toEqual({
       status: 'consistent-redacted',
-      issues: ['redacted entries: 1', 'untrusted key'],
+      issues: ['redacted entries: 1', 'untrusted key', ...UNCHECKED],
       redacted: 1,
       lifted: [],
     });
@@ -640,9 +641,9 @@ describe('each lift, both ways (review of 9K1, I3)', () => {
       ...FORGERIES[0]!.trace,
       output: { ...FORGERIES[0]!.trace.output, value: 1 },
     });
-    expect(verifyProof(handSealed({ ...honest, inputSalted: true }) as never).issues).toEqual([
-      'unsigned',
-    ]);
+    expect(
+      withoutUnchecked(verifyProof(handSealed({ ...honest, inputSalted: true }) as never).issues),
+    ).toEqual(['unsigned']);
     const result = verifyProof(forged(honest, 'exceptions'));
     expect(result.lifted).toEqual([]);
   });
@@ -1050,7 +1051,7 @@ describe('a bounded check lifts no more problems than entries redacted (review o
       ],
     });
     const proof = sealProof({ ...unsalted(content), inputSalted: true } as UnsaltedProof, SEED);
-    expect(verifyProof(proof).issues).toEqual(['unsigned']);
+    expect(withoutUnchecked(verifyProof(proof).issues)).toEqual(['unsigned']);
     const redacted = verifyProof(redactProof(proof, (s, i) => s === 'rules' && i === 0));
     expect(redacted.status).toBe('consistent-redacted');
     expect(redacted.lifted).toContainEqual({

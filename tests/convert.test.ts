@@ -22,7 +22,7 @@ const base = {
   effectiveUntil: '2026-01-01T00:00:00+01:00',
   dimensions: { country: 'TG' },
   tags: ['vat', 'b2c', 'vat'],
-  jurisdiction: 'NATIONAL',
+  extensions: { jurisdiction: 'NATIONAL' },
 };
 
 function storedRecordOf(input: Parameters<typeof toStoredPayload>[0]): StoredRuleRecord {
@@ -54,7 +54,7 @@ describe('toExecutableRule', () => {
       effectiveUntil: new Date('2025-12-31T23:00:00.000Z'),
       dimensions: { country: 'TG' },
       tags: ['b2c', 'vat'],
-      jurisdiction: 'NATIONAL',
+      extensions: { jurisdiction: 'NATIONAL' },
       checksum: computeRuleChecksum(base),
     });
     expect(rule.effectiveFrom).toBeInstanceOf(Date);
@@ -247,9 +247,23 @@ describe('fromStoredRecord: the payload must be canonical', () => {
       'an embedded checksum field',
       record.payload.replace('{', `{"checksum":"${record.checksum}",`),
     ],
-    ['a null extension', record.payload.replace('{', '{"extra":null,')],
     ['duplicate JSON keys', record.payload.replace('"model":', '"model":"OTHER","model":')],
   ];
+
+  it.each([
+    [
+      'a top-level extension, which now lives under `extensions`',
+      '{"extra":1,',
+      'unknown rule field: extra',
+    ],
+    ['a null extension field', '{"extra":null,', 'unknown rule field: extra'],
+    ['a null optional field', '{"sourceRef":null,', 'sourceRef is null: omit the field instead'],
+  ])('refuses a payload with %s', (_name, head, reason) => {
+    const payload = record.payload.replace('{', head);
+    const error = thrown(() => fromStoredRecord({ ...record, checksum: sha256(payload), payload }));
+    expect(error.code).toBe('INVALID_RULE');
+    expect(error.message).toBe(`Stored rule vat-std@2: invalid definition: ${reason}`);
+  });
 
   it('a record produced by toStoredPayload passes', () => {
     expect(fromStoredRecord(record).checksum).toBe(record.checksum);

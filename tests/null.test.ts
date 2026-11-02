@@ -3,8 +3,10 @@ import {
   computeRuleChecksum,
   computeRuleFingerprint,
   normalizeRuleDefinition,
+  validateRuleDefinition,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { specError } from './helpers.js';
 
 /** A rule where every optional field is absent. */
 const minimal: RuleDefinitionInput = {
@@ -16,7 +18,7 @@ const minimal: RuleDefinitionInput = {
   effectiveFrom: '2025-01-01',
 };
 
-/** The same rule with every optional field set, to check null removes exactly that field. */
+/** The same rule with every optional field set, to check what null and undefined do to each. */
 const full: RuleDefinitionInput = {
   ...minimal,
   condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'x' }, 1] } },
@@ -27,13 +29,13 @@ const full: RuleDefinitionInput = {
   dominanceGroup: 'VAT',
   exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
   sourceRef: 'CGI art. 1',
-  jurisdiction: 'NATIONAL',
+  extensions: { jurisdiction: 'NATIONAL' },
 };
 
 function without(obj: object, key: string): RuleDefinitionInput {
   const copy: Record<string, unknown> = { ...obj };
   delete copy[key];
-  return copy as RuleDefinitionInput;
+  return copy as unknown as RuleDefinitionInput;
 }
 
 const OPTIONAL_FIELDS = [
@@ -44,55 +46,52 @@ const OPTIONAL_FIELDS = [
   'tags',
   'dimensions',
   'exceptions',
-  'effectiveUntil',
-  'jurisdiction', // an extension field
+  'extensions',
 ];
 
-describe('top-level null means absent (A3: independent of how a database writes columns)', () => {
+describe('top-level undefined means absent; null is refused (Task 9K5, M8)', () => {
   describe.each(OPTIONAL_FIELDS)('%s', (field) => {
-    it('null, undefined and absent give the same checksum and fingerprint', () => {
+    it('undefined and absent give the same checksum and fingerprint', () => {
       const absent = without(full, field);
-      const asNull = { ...full, [field]: null } as RuleDefinitionInput;
       const asUndefined = { ...full, [field]: undefined } as RuleDefinitionInput;
-      expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(absent));
       expect(computeRuleChecksum(asUndefined)).toBe(computeRuleChecksum(absent));
-      expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(absent));
       expect(computeRuleFingerprint(asUndefined)).toBe(computeRuleFingerprint(absent));
+      expect(normalizeRuleDefinition(asUndefined)).toEqual(normalizeRuleDefinition(absent));
     });
 
-    it('null on a minimal rule gives the minimal checksum and fingerprint', () => {
-      const asNull = { ...minimal, [field]: null } as RuleDefinitionInput;
-      expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(minimal));
-      expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(minimal));
-    });
-
-    it('null gives the same normalized definition as absent', () => {
-      expect(normalizeRuleDefinition({ ...full, [field]: null } as RuleDefinitionInput)).toEqual(
-        normalizeRuleDefinition(without(full, field)),
-      );
+    it('null is refused, in every function that reads a rule, naming the field', () => {
+      const asNull = { ...full, [field]: null } as unknown as RuleDefinitionInput;
+      const message = `${field} is null: omit the field instead`;
+      for (const call of [
+        () => normalizeRuleDefinition(asNull),
+        () => computeRuleChecksum(asNull),
+        () => computeRuleFingerprint(asNull),
+      ]) {
+        expect(specError(call)).toMatchObject({ code: 'INVALID_RULE', message });
+      }
+      expect(validateRuleDefinition(asNull).errors).toEqual([message]);
     });
   });
 
-  it('every optional field null at once equals the minimal rule', () => {
-    const allNull = { ...minimal, ...Object.fromEntries(OPTIONAL_FIELDS.map((f) => [f, null])) };
-    expect(normalizeRuleDefinition(allNull as RuleDefinitionInput)).toEqual(
-      normalizeRuleDefinition(minimal),
-    );
-    expect(computeRuleChecksum(allNull as RuleDefinitionInput)).toBe(computeRuleChecksum(minimal));
+  it('every optional field absent or undefined at once equals the minimal rule', () => {
+    const undefineds = Object.fromEntries(OPTIONAL_FIELDS.map((f) => [f, undefined]));
+    const allAbsent = { ...minimal, ...undefineds } as RuleDefinitionInput;
+    expect(normalizeRuleDefinition(allAbsent)).toEqual(normalizeRuleDefinition(minimal));
+    expect(computeRuleChecksum(allAbsent)).toBe(computeRuleChecksum(minimal));
   });
 
-  it('a null extension is dropped from the definition', () => {
-    expect(normalizeRuleDefinition({ ...minimal, jurisdiction: null })).not.toHaveProperty(
-      'jurisdiction',
-    );
+  it('effectiveUntil is the one null accepted: the written form of no end', () => {
+    const asNull = { ...minimal, effectiveUntil: null };
+    expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(minimal));
+    expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(minimal));
   });
 
   it('defaults stay explicit: tags, dimensions and effectiveUntil', () => {
     const def = normalizeRuleDefinition({
       ...minimal,
-      tags: null,
-      dimensions: null,
-      effectiveUntil: null,
+      tags: undefined,
+      dimensions: undefined,
+      effectiveUntil: undefined,
     });
     expect(def.tags).toEqual([]);
     expect(def.dimensions).toEqual({});
@@ -100,28 +99,32 @@ describe('top-level null means absent (A3: independent of how a database writes 
   });
 });
 
-describe('a null dimension value means the dimension is unset', () => {
-  it('{country: null}, {} and absent dimensions give the same checksum and fingerprint', () => {
-    const asNull = { ...minimal, dimensions: { country: null } } as unknown as RuleDefinitionInput;
-    const empty = { ...minimal, dimensions: {} };
-    expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(empty));
-    expect(computeRuleChecksum(asNull)).toBe(computeRuleChecksum(minimal));
-    expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(empty));
-    expect(computeRuleFingerprint(asNull)).toBe(computeRuleFingerprint(minimal));
+describe('a null dimension value is refused; an undefined one means the dimension is unset', () => {
+  const asNull = { ...minimal, dimensions: { country: null } } as unknown as RuleDefinitionInput;
+
+  it('{country: null} is refused, the dimension named', () => {
+    const message = 'dimensions.country is null: omit the field instead';
+    expect(specError(() => computeRuleChecksum(asNull))).toMatchObject({
+      code: 'INVALID_RULE',
+      message,
+    });
+    expect(validateRuleDefinition(asNull).errors).toEqual([message]);
   });
 
-  it('drops only the null key', () => {
+  it('{country: undefined}, {} and absent dimensions give the same checksum and fingerprint', () => {
+    const unset = { ...minimal, dimensions: { country: undefined } };
+    const empty = { ...minimal, dimensions: {} };
+    expect(computeRuleChecksum(unset)).toBe(computeRuleChecksum(empty));
+    expect(computeRuleChecksum(unset)).toBe(computeRuleChecksum(minimal));
+    expect(computeRuleFingerprint(unset)).toBe(computeRuleFingerprint(minimal));
+  });
+
+  it('drops only the undefined key', () => {
     const def = normalizeRuleDefinition({
       ...minimal,
-      dimensions: { country: 'TG', category: null },
-    } as unknown as RuleDefinitionInput);
+      dimensions: { country: 'TG', category: undefined },
+    });
     expect(def.dimensions).toEqual({ country: 'TG' });
-    expect(
-      computeRuleChecksum({
-        ...minimal,
-        dimensions: { country: 'TG', category: null },
-      } as unknown as RuleDefinitionInput),
-    ).toBe(computeRuleChecksum({ ...minimal, dimensions: { country: 'TG' } }));
   });
 
   it.each([
@@ -175,10 +178,16 @@ describe('nested null stays data', () => {
   });
 
   it('inside an extension value', () => {
-    const a = { ...minimal, extra: { owner: null } };
-    const b = { ...minimal, extra: {} };
+    const a = { ...minimal, extensions: { extra: { owner: null } } };
+    const b = { ...minimal, extensions: { extra: {} } };
     expect(computeRuleFingerprint(a)).not.toBe(computeRuleFingerprint(b));
-    expect(normalizeRuleDefinition(a).extra).toEqual({ owner: null });
+    expect(normalizeRuleDefinition(a).extensions).toEqual({ extra: { owner: null } });
+  });
+
+  it('an extension that is null is data, not absence', () => {
+    const a = { ...minimal, extensions: { extra: null } };
+    expect(computeRuleChecksum(a)).not.toBe(computeRuleChecksum(minimal));
+    expect(normalizeRuleDefinition(a).extensions).toEqual({ extra: null });
   });
 
   it('inside exceptions', () => {

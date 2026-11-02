@@ -90,7 +90,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let definition: RuleDefinition;
   try {
-    definition = normalizeRuleDefinition(parsed as RuleDefinitionInput);
+    definition = normalizeRuleDefinition(parsed as unknown as RuleDefinitionInput);
   } catch (error) {
     // The error of `normalizeRuleDefinition` is its own: its message, already cited, as it is.
     return fail(`invalid definition: ${reasonOf(error)}`);
@@ -116,7 +116,7 @@ function executableOf(definition: RuleDefinition, checksum: string): ExecutableR
   rule.effectiveUntil =
     definition.effectiveUntil === null ? null : boundOf(definition.effectiveUntil);
   rule.checksum = checksum;
-  return rule as ExecutableRule;
+  return rule as unknown as ExecutableRule;
 }
 
 /**

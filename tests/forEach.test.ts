@@ -171,9 +171,15 @@ describe('forEach: normalization', () => {
     });
   });
 
-  it('treats a null forEach as absent', () => {
-    expect(normalizeRuleDefinition(rule(null))).not.toHaveProperty('forEach');
-    expect(computeRuleChecksum(rule(null))).toBe(computeRuleChecksum(BASE_RULE));
+  it('treats an undefined forEach as absent', () => {
+    expect(normalizeRuleDefinition(rule(undefined))).not.toHaveProperty('forEach');
+    expect(computeRuleChecksum(rule(undefined))).toBe(computeRuleChecksum(BASE_RULE));
+  });
+
+  it('refuses a null forEach: the field must be omitted', () => {
+    expect(validateRuleDefinition(rule(null)).errors).toEqual([
+      'forEach is null: omit the field instead',
+    ]);
   });
 
   it('never mutates the input and shares no reference with it', () => {

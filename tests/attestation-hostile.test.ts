@@ -168,7 +168,7 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
     const unknown = { ...COSIGNATURE, kind: 'notary' };
     unknown.signature = signAttestationBody({ ...unknown, signature: undefined }, RFC_SECRET);
     expect(verify(unknown)).toEqual({
-      status: 'consistent',
+      status: 'invalid',
       issues: ['attestation kind not supported: notary'],
     });
   });
@@ -310,8 +310,8 @@ describe('hostile claims: a named invalid, never a throw, read once', () => {
     const a = withClaims({ a: 1, inner: { b: 2 }, list: [1, 2] }, true);
     a.claims = counted({ a: 1, inner: counted({ b: 2 }, counter), list: [1, 2] }, counter);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     // a, inner, list, then b: four member reads, each once.
     expect(counter.reads).toBe(4);
@@ -338,8 +338,8 @@ describe('an object shared by the subject and the claims is read once', () => {
     const once = { ...a, subject: { keyId: 'k1' }, claims: { s: { keyId: 'k1' } } };
     a.signature = signAttestationBody({ ...once, signature: undefined }, RFC_SECRET);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     expect(reads).toBe(1);
   });
@@ -411,8 +411,8 @@ describe('a shared subject is read once at any depth of the claims', () => {
     };
     a.signature = signAttestationBody(once, RFC_SECRET);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     expect(reads()).toBe(1);
   });

@@ -7,6 +7,7 @@ import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
+import { definitionFindings } from './definition-checks.js';
 import type { Context } from './combination.js';
 import { contextOf, inconsistencies } from './consistency.js';
 import { isLifted, liftedChecks, LIFTS, unexplained } from './lifts.js';
@@ -29,6 +30,13 @@ interface Finding {
 }
 
 const invalidFinding = (message: string): Finding => ({ message, level: 'invalid' });
+
+/** The notice of a call without `rules`: what `authentic` then does not cover. */
+const RULES_NOT_CHECKED =
+  'rules not checked: pass rules to compare checksums, priorities and carriers';
+
+/** The notice of every verdict that is not `invalid`: `verifyProof` executes nothing. */
+const NOT_REPLAYED = 'conditions and amounts not checked: verifyProof does not replay the decision';
 
 /**
  * Verifies a decision proof without executing anything, and never throws: any malformed input
@@ -131,7 +139,8 @@ function verify(p: unknown, options: unknown): ProofVerification {
       findings.push({ message: 'redacted entries in an unsalted proof', level: 'warning' });
     }
   }
-  extend(findings, optionFindings(view, proof, options, context, redactions));
+  const unchecked: string[] = [];
+  extend(findings, optionFindings(view, proof, options, context, redactions, unchecked));
   // Every problem lifted, when the redacted entries cannot explain them all with the rules given.
   for (const message of unexplained(redactions.hidden)) findings.push(invalidFinding(message));
   const lifted = liftedChecks(redactions.hidden);
@@ -140,9 +149,16 @@ function verify(p: unknown, options: unknown): ProofVerification {
     findings.push({ message, level: 'notice' });
   }
 
+  // What was not checked is said under a verdict that claims something, never under `invalid`,
+  // which stops at its problem.
+  const refused = findings.some((finding) => finding.level === 'invalid');
+  if (!refused) {
+    unchecked.push(NOT_REPLAYED);
+    for (const message of unchecked) findings.push({ message, level: 'notice' });
+  }
   const issues = boundMessages(findings.map((finding) => finding.message));
   const trusted = !findings.some((finding) => finding.level === 'warning');
-  if (findings.some((finding) => finding.level === 'invalid')) {
+  if (refused) {
     return redactions.count > 0
       ? { status: 'invalid', issues, redacted: redactions.count, lifted }
       : { status: 'invalid', issues };
@@ -165,6 +181,7 @@ function optionFindings(
   options: unknown,
   context: Context,
   redactions: Redactions,
+  unchecked: string[],
 ): Finding[] {
   const unreadable = (subject: string, error: unknown): Finding[] => [
     invalidFinding(unreadableMessage(subject, error)),
@@ -196,9 +213,12 @@ function optionFindings(
   } catch (error) {
     return [...findings, ...unreadable('options.trustedKeys', error)];
   }
-  if (rules === undefined) return findings;
+  if (rules === undefined) {
+    unchecked.push(RULES_NOT_CHECKED);
+    return findings;
+  }
   try {
-    extend(findings, ruleFindings(view, rules, context, redactions));
+    extend(findings, ruleFindings(view, rules, context, redactions, unchecked));
   } catch (error) {
     extend(findings, unreadable('options.rules', error));
   }
@@ -214,7 +234,7 @@ function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
   const { keyId, value } = p.signature;
   if (!trustedKeys || !Object.hasOwn(trustedKeys, keyId)) return warning('untrusted key');
   const publicKey = publicKeyBytes(trustedKeys[keyId]);
-  if (!publicKey) return warning('trusted key malformed');
+  if (!publicKey) return [invalidFinding(`${citeName(`trustedKeys.${keyId}`)} is malformed`)];
   if (!signatureMatches(p.digest, value, publicKey)) {
     return [invalidFinding('signature invalid')];
   }
@@ -226,6 +246,7 @@ function ruleFindings(
   rules: unknown,
   context: Context,
   redactions: Redactions,
+  unchecked: string[],
 ): Finding[] {
   if (!Array.isArray(rules)) return [invalidFinding('rules must be an array')];
   const findings: Finding[] = [];
@@ -324,5 +345,9 @@ function ruleFindings(
     }
   }
   carrierRuleFindings(p, matched, context, invalid);
+  definitionFindings(p, matched, {
+    invalid,
+    unchecked: (message) => unchecked.push(message),
+  });
   return findings;
 }

@@ -17,6 +17,7 @@ import {
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
 import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { EXTENSIONS_NOT_OBJECT, nullFieldMessage, unknownRuleFieldMessage } from './fields.js';
 import {
   isUnnamable,
   readDimensionSpec,
@@ -61,12 +62,18 @@ type Issues = IssueList;
  * not target, and an exception carrier's `<other set>:value` output (JSON Schema cannot relate
  * them to the rule's `ruleSet`). Each dimension must be a `DimensionSpec`; JSON
  * Schema cannot refuse an `except` value repeated in `anyOf`. Every text (a string field, a tag,
- * a dimension key or value, an extension key, any string inside `params`, `condition.value`,
+ * a dimension key or value, any string inside `params`, `condition.value`,
  * `forEach`, `exceptions` or an
  * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
  * valid rule always has a checksum. JSON Schema cannot express this check. Like
  * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
  * Set, class instances, functions, `NaN`, `Infinity`...).
+ *
+ * It refuses a top-level key that is not a reserved field (`unknown rule field: <key>`, with
+ * `(did you mean <field>?)` for a misspelling), whatever its value: what a plugin adds goes under
+ * `extensions`, a plain object of free-form JSON. It refuses `null` in an optional field
+ * (`<field> is null: omit the field instead`) and in `dimensions` (`dimensions.<name> is null:
+ * ...`), `effectiveUntil` excepted, as normalize does.
  *
  * `checksum` is ignored, as in normalize.
  *
@@ -120,13 +127,16 @@ function definitionIssues(value: unknown): {
     return result(errors);
   }
 
+  for (const key of Object.keys(value)) {
+    if (!RESERVED.has(key)) errors.add(citeName(key), unknownRuleFieldMessage(key));
+  }
   checkNonEmptyString(value.id, 'id', errors);
   if (typeof value.id === 'string' && value.id.includes(':')) {
     errors.add('id', 'id must not contain ":"');
   }
-  const ruleSetValue = value.ruleSet;
+  const ruleSetValue = given(value.ruleSet, 'ruleSet', errors);
   let ruleSet: string | undefined = LOCAL_RULE_SET;
-  if (ruleSetValue != null) {
+  if (ruleSetValue !== undefined) {
     ruleSet = isRuleSetId(ruleSetValue) ? ruleSetValue : undefined;
     if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet', ruleSetValue));
   }
@@ -139,57 +149,77 @@ function definitionIssues(value: unknown): {
   }
 
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
-  const until =
-    value.effectiveUntil == null ? null : checkDate(value.effectiveUntil, 'effectiveUntil', errors);
+  const untilValue = value.effectiveUntil;
+  const until = untilValue == null ? null : checkDate(untilValue, 'effectiveUntil', errors);
   if (from !== undefined && until !== undefined) {
     const problem = windowShapeProblem(from, until);
     if (problem !== undefined) errors.add('effectiveUntil', problem);
   }
-  if (value.timeZone != null && !isTimeZone(value.timeZone)) {
-    errors.add('timeZone', timeZoneMessage(value.timeZone));
+  const timeZone = given(value.timeZone, 'timeZone', errors);
+  if (timeZone !== undefined && !isTimeZone(timeZone)) {
+    errors.add('timeZone', timeZoneMessage(timeZone));
   }
-  const effectiveOn = value.effectiveOn;
-  const pointer = effectiveOn == null ? undefined : checkEffectiveOn(effectiveOn, errors);
+  const effectiveOn = given(value.effectiveOn, 'effectiveOn', errors);
+  const pointer = effectiveOn === undefined ? undefined : checkEffectiveOn(effectiveOn, errors);
 
-  if (value.condition != null) checkCondition(value.condition, errors);
+  const condition = given(value.condition, 'condition', errors);
+  if (condition !== undefined) checkCondition(condition, errors);
+  let output: unknown;
   for (const field of OPTIONAL_STRINGS) {
-    if (value[field] != null) checkNonEmptyString(value[field], field, errors);
+    const text = given(value[field], field, errors);
+    if (text !== undefined) checkNonEmptyString(text, field, errors);
+    if (field === 'output') output = text;
   }
-  const output = value.output;
   if (typeof output === 'string' && output !== '') {
     const problem = citedNameProblem(output, 'output', 'output');
     if (problem !== undefined) errors.add('output', problem);
   }
-  if (value.dimensions != null) checkDimensions(value.dimensions, errors);
-  if (value.tags != null) checkTags(value.tags, errors);
-  if (value.exceptions != null) checkExceptions(value.exceptions, ruleSet, errors);
+  const dimensions = given(value.dimensions, 'dimensions', errors);
+  if (dimensions !== undefined) checkDimensions(dimensions, errors);
+  const tags = given(value.tags, 'tags', errors);
+  if (tags !== undefined) checkTags(tags, errors);
+  const exceptions = given(value.exceptions, 'exceptions', errors);
+  if (exceptions !== undefined) checkExceptions(exceptions, ruleSet, errors);
   const modelIssues = exceptionModelIssues({
     model: value.model,
-    output: normalizedOutput(value.output, ruleSet),
-    exceptions: value.exceptions,
+    output: normalizedOutput(output, ruleSet),
+    exceptions,
   });
   for (const issue of modelIssues) errors.add(issue.path, issue.message);
 
   // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
-  const forEachValue = value.forEach;
-  const forEach = forEachValue == null ? null : checkForEach(forEachValue, errors);
+  const forEachValue = given(value.forEach, 'forEach', errors);
+  const forEach = forEachValue === undefined ? null : checkForEach(forEachValue, errors);
   if (pointer !== undefined && forEach !== undefined) {
     const problem = effectiveOnContextProblem(pointer, forEach ?? undefined);
     if (problem !== undefined) errors.add('effectiveOn', problem);
   }
 
-  for (const key of Object.keys(value)) {
-    if (RESERVED.has(key)) continue;
-    const extension = value[key];
-    if (extension == null) continue;
-    if (hasLoneSurrogate(key)) {
-      errors.add('', extensionKeyMessage(key));
-      continue;
-    }
-    toJsonOrIssue(extension, key, errors);
-  }
+  const extensions = given(value.extensions, 'extensions', errors);
+  if (extensions !== undefined) checkExtensions(extensions, errors);
 
   return result(errors);
+}
+
+/**
+ * `value` itself, read once; `undefined` when absent. `null` is refused, with the field named:
+ * a lost column must not widen a rule. The caller checks the value of a given field only.
+ */
+function given(value: unknown, field: string, errors: Issues): unknown {
+  if (value === null) {
+    errors.add(field, nullFieldMessage(field));
+    return undefined;
+  }
+  return value;
+}
+
+/** The `extensions` object: plain, free names, values free-form JSON (`null` is data). */
+function checkExtensions(value: unknown, errors: Issues): void {
+  if (!isPlainObject(value)) {
+    errors.add('extensions', EXTENSIONS_NOT_OBJECT);
+    return;
+  }
+  toJsonOrIssue(value, 'extensions', errors);
 }
 
 function result(issues: Issues): {
@@ -204,11 +234,6 @@ function checkNonEmptyString(value: unknown, field: string, errors: Issues): voi
   if (typeof value !== 'string' || value === '') {
     errors.add(field, `${citeName(field)} must be a non-empty string`);
   } else if (hasLoneSurrogate(value)) errors.add(field, loneSurrogateMessage(field));
-}
-
-/** Internal: the message refusing an extension key that holds a lone UTF-16 surrogate. */
-export function extensionKeyMessage(key: string): string {
-  return `rule definition has an extension key with a lone UTF-16 surrogate: ${quoteText(key)}`;
 }
 
 /** Internal: the message refusing a dimension key that holds a lone UTF-16 surrogate. */
@@ -323,7 +348,11 @@ function checkDimensions(value: unknown, errors: Issues): void {
       errors.add(`dimensions.${key}`, reservedDimensionNameMessage(`dimensions.${key}`));
       continue;
     }
-    if (v == null) continue; // the dimension is unset: normalize drops the key
+    if (v === undefined) continue; // the dimension is unset: normalize drops the key
+    if (v === null) {
+      errors.add(`dimensions.${key}`, nullFieldMessage(`dimensions.${key}`));
+      continue;
+    }
     if (hasLoneSurrogate(key)) errors.add('dimensions', dimensionKeyMessage(key));
     else readDimensionSpec(v, `dimensions.${key}`, (path, message) => errors.add(path, message));
   }
