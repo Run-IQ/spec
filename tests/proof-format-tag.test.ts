@@ -115,6 +115,9 @@ describe('a format not listed is refused by both functions', () => {
     for (const format of ['run-iq.proof/2', '', 7, undefined, null]) {
       expect(verifyProofInclusion(proof.digest, n, 1, leaf, path, format as never)).toBe(false);
     }
+    // A digest made under an unlisted format, matching the leaves: still refused by its format.
+    const forged = nodeDigest('run-iq.proof/2', leaves);
+    expect(verifyProofInclusion(forged, n, 1, leaf, path, 'run-iq.proof/2')).toBe(false);
   });
 });
 

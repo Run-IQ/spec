@@ -280,6 +280,23 @@ describe('hostile claims: a named invalid, never a throw, read once', () => {
     expect(reads).toBe(0);
   });
 
+  it('on a cosignature, claims are refused unread, whatever they hold', () => {
+    let reads = 0;
+    const claims = new Proxy(
+      { n: Number.NaN },
+      {
+        get: () => {
+          reads += 1;
+          throw new Error('boom');
+        },
+      },
+    );
+    expect(verify(changed((copy) => (copy.claims = claims)))).toEqual(
+      invalid(['cosignature takes no claims']),
+    );
+    expect(reads).toBe(0);
+  });
+
   it('not an object', () => {
     for (const claims of [null, 7, 'x', [], [{}], new Map()]) {
       expect(verify(withClaims(claims)), String(claims)).toEqual(
