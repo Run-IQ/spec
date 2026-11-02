@@ -1,4 +1,3 @@
-/* eslint-env node */
 // The time budgets of D-26 for the input tree (Task 9H1), measured on the built package:
 // `npm run bench` (it builds first). Not part of `npm test` nor of CI: the suite bounds the same
 // work by counting it (tests/input-scale.test.ts); a clock is only read here, on a machine at

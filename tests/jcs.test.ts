@@ -7,7 +7,7 @@ import { canonical } from './hashing.js';
 describe('canonicalize is JCS (RFC 8785)', () => {
   it('writes numbers as ECMAScript does (section 3.2.2.3)', () => {
     // RFC 8785 writes this vector with more digits than a double holds: that is its point.
-    // eslint-disable-next-line @typescript-eslint/no-loss-of-precision
+    // eslint-disable-next-line no-loss-of-precision
     expect(canonical({ numbers: [333333333.33333329, 1e30, 4.5, 2e-3, 1e-27] })).toBe(
       '{"numbers":[333333333.3333333,1e+30,4.5,0.002,1e-27]}',
     );

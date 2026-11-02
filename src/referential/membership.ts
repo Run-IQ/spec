@@ -347,7 +347,6 @@ class Resolver {
           continue;
         }
         if (result.result === 'unknown') frame.unknown ??= result;
-        result = undefined;
       }
       const name = frame.nested[frame.next];
       if (name === undefined) {

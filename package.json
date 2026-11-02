@@ -52,8 +52,8 @@
     "test:heavy": "vitest run --project heavy --no-file-parallelism --maxWorkers=1",
     "bench": "npm run build && node bench/input.mjs",
     "typecheck": "tsc --noEmit && tsc --noEmit -p tsconfig.test.json",
-    "lint": "eslint src/ tests/ bench/ --ext .ts,.mjs && prettier --check src/ tests/ schema/ bench/ docs/",
-    "lint:fix": "eslint src/ tests/ bench/ --ext .ts,.mjs --fix && prettier --write src/ tests/ schema/ bench/ docs/"
+    "lint": "eslint src/ tests/ bench/ && prettier --check src/ tests/ schema/ bench/ docs/",
+    "lint:fix": "eslint src/ tests/ bench/ --fix && prettier --write src/ tests/ schema/ bench/ docs/"
   },
   "keywords": [
     "run-iq",
@@ -72,16 +72,20 @@
   "author": "Abdou-Raouf ATARMLA",
   "license": "MIT",
   "devDependencies": {
+    "@eslint/js": "^10.0.1",
     "@types/node": "^20.11.0",
-    "@typescript-eslint/eslint-plugin": "^7.0.0",
-    "@typescript-eslint/parser": "^7.0.0",
-    "@vitest/coverage-v8": "^4.1.0",
+    "@vitest/coverage-v8": "^4.1.12",
     "ajv": "^8.20.0",
-    "eslint": "^8.57.0",
-    "prettier": "^3.2.0",
+    "eslint": "^10.14.0",
+    "prettier": "^3.9.10",
     "tsup": "^8.0.0",
     "typescript": "^5.4.0",
-    "vitest": "^4.1.0"
+    "typescript-eslint": "^8.72.1",
+    "vitest": "^4.1.12"
+  },
+  "overrides": {
+    "esbuild": "^0.28.2",
+    "minimatch": "^11.0.1"
   },
   "publishConfig": {
     "registry": "https://npm.pkg.github.com"
