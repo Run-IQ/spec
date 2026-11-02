@@ -349,7 +349,7 @@ describe('I11: what the definitions decide without execution', () => {
     });
     expect(check(proof)).toEqual({
       status: 'authentic',
-      issues: ['window not checked: 2 rules (no evaluatedAt): r1@1, r2@2', NOT_REPLAYED],
+      issues: ['window not checked for 2 rules (no evaluatedAt): r1@1, r2@2', NOT_REPLAYED],
     });
   });
 
@@ -377,11 +377,19 @@ describe('I11: what the definitions decide without execution', () => {
       });
     });
 
-    it('within a day of the bound, the zone decides: it is said, not guessed', () => {
-      // 2025-01-01T00:30Z is 2025-01-01 in Paris and 2024-12-31 at -12:00.
+    it('within a day of the bound, the offset of the zone is read: Paris decides it', () => {
+      // 2025-01-01T00:30Z is 2025-01-01 01:30 in Paris (inside) and 2024-12-31 at -12:00.
       expect(at('2025-01-01T00:30:00.000Z')).toEqual({
         status: 'authentic',
-        issues: ['window not checked: r1@1 (civil bound in Europe/Paris)', NOT_REPLAYED],
+        issues: [NOT_REPLAYED],
+      });
+      expect(at('2024-12-31T23:30:00.000Z')).toEqual({
+        status: 'authentic',
+        issues: [NOT_REPLAYED],
+      });
+      expect(at('2024-12-31T22:59:59.999Z')).toEqual({
+        status: 'invalid',
+        issues: ['rule applied outside its window: r1@1'],
       });
     });
 

@@ -373,8 +373,10 @@ describe('M8: null is refused in a rule, the field to omit is named', () => {
     );
   });
 
-  it('read back, the ignored `checksum` may be null', () => {
-    expect(computeRuleChecksum(withField('checksum', null))).toBe(computeRuleChecksum(base));
+  it('read back, a null `checksum` is refused too: a stored rule always has its checksum', () => {
+    expect(specError(() => computeRuleChecksum(withField('checksum', null))).message).toBe(
+      'checksum is null: omit the field instead',
+    );
   });
 
   it('absence and undefined are still absence', () => {

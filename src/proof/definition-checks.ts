@@ -3,9 +3,10 @@ import { citeName, reasonOf } from '../errors.js';
 import type { RuleDefinition } from '../rule/definition.js';
 import { LOCAL_RULE_SET, qualifiedFrom } from '../rule/ruleSet.js';
 import { windowContains } from '../rule/window.js';
-import { fixedOffsetCalendar } from '../time/civil.js';
+import { fixedOffsetCalendar, isCivilDate } from '../time/civil.js';
 import type { CivilCalendar } from '../time/civil.js';
 import { BEFORE_EXCEPTIONS } from './effects.js';
+import { intlCalendar, isKnownZone } from './intl-calendar.js';
 import { instanceKey } from './output-values.js';
 import { ruleKey } from './precedence.js';
 import type { ProofView } from './types.js';
@@ -69,18 +70,54 @@ function zoneOf(proof: ProofView, definition: RuleDefinition): string {
   return proof.timeZone;
 }
 
-/** The offsets, in minutes, no time zone of the world goes beyond: -12:00 and +14:00. */
-const EXTREME_OFFSETS = ['-12:00', '+14:00'] as const;
-
 const FIXED_ZONE = /^(UTC|[+-]\d{2}:\d{2})$/;
+const DAY_MS = 86_400_000;
+
+/** Where `ref` lies against one bound of a window, whatever the time zone. */
+type Position = 'before' | 'notBefore' | 'undecided';
+
+/**
+ * Where the reference date `ref` lies against `bound`, knowing nothing of the zone but that its
+ * offset stays within -24:00 and +24:00 (no zone of the database comes near: Sitka before 1867
+ * is +14:58). Two bounds of one form compare as text. An instant against a civil bound: the
+ * local midnight of that day lies within a day of its UTC midnight. A civil day against an
+ * instant bound: the civil day of the bound lies within a day of its UTC day. Outside that band
+ * the answer is the same in every zone; inside it, the zone decides.
+ */
+function position(ref: string, bound: string): Position {
+  const refCivil = isCivilDate(ref);
+  if (refCivil === isCivilDate(bound)) return ref < bound ? 'before' : 'notBefore';
+  if (!refCivil) {
+    const midnight = Date.parse(`${bound}T00:00:00.000Z`);
+    const at = Date.parse(ref);
+    if (at < midnight - DAY_MS) return 'before';
+    return at >= midnight + DAY_MS ? 'notBefore' : 'undecided';
+  }
+  const at = Date.parse(bound);
+  const first = new Date(at - DAY_MS).toISOString().slice(0, 10);
+  const last = new Date(at + DAY_MS).toISOString().slice(0, 10);
+  if (ref < first) return 'before';
+  return ref > last ? 'notBefore' : 'undecided';
+}
+
+/**
+ * The window `[from, until)` against `ref`, bound by bound: `false` as soon as one bound puts
+ * `ref` outside whatever the zone, `true` when both put it inside, `undefined` otherwise.
+ */
+function decidedByBounds(ref: string, from: string, until: string | null): boolean | undefined {
+  const start = position(ref, from);
+  const end = until === null ? 'before' : position(ref, until);
+  if (start === 'before' || end === 'notBefore') return false;
+  return start === 'notBefore' && end === 'before' ? true : undefined;
+}
 
 /**
  * Whether the window of `definition` holds the reference date of the decision: `true`, `false`,
  * or why it cannot be said. Given a `calendar`, it is the one that crosses civil dates and
- * instants. Without one, `UTC` and fixed offsets are exact; for an IANA zone the window is
- * decided when the two extreme offsets agree (the civil date of an instant is monotone in the
- * offset, so every zone in between agrees too), and said to be undecidable only for an instant
- * within a day of a bound.
+ * instants. Without one, `UTC` and fixed offsets are exact; for an IANA zone each bound decides
+ * on its own where the instant lies outside the band its zone could put it in
+ * (`position`); inside a band the offset of the zone at that instant is read from the runtime
+ * (`Intl`), and only a zone the runtime does not know leaves the window undecided.
  */
 function windowHolds(
   proof: ProofView,
@@ -94,16 +131,20 @@ function windowHolds(
   const effective = definition.timeZone ?? zone;
   const at = proof.evaluatedAt;
   if (calendar !== undefined) return decided(windowContains(definition, at, zone, calendar));
-  const offsets = fixedOffsetCalendar('verifyProof');
-  if (FIXED_ZONE.test(effective)) return decided(windowContains(definition, at, zone, offsets));
-  const [low, high] = EXTREME_OFFSETS.map((offset): CivilCalendar => ({
-    toCivilDate: (instant) => offsets.toCivilDate(instant, offset),
-    startOfDay: (day) => offsets.startOfDay(day, offset),
-  })) as [CivilCalendar, CivilCalendar];
-  const atLow = windowContains(definition, at, zone, low);
-  const atHigh = windowContains(definition, at, zone, high);
-  if (atLow === atHigh && atLow !== 'unknown') return atLow;
-  return `civil bound in ${citeName(effective)}`;
+  if (FIXED_ZONE.test(effective)) {
+    return decided(windowContains(definition, at, zone, fixedOffsetCalendar('verifyProof')));
+  }
+  const byBounds = decidedByBounds(at, definition.effectiveFrom, definition.effectiveUntil);
+  if (byBounds !== undefined) return byBounds;
+  if (!isKnownZone(effective)) return `zone ${citeName(effective)} unknown to this verifier`;
+  return decided(windowContains(definition, at, zone, intlCalendar));
+}
+
+/** The kind of a cause of an undecided window: the pointer or the zone is not part of it. */
+function windowKind(why: string): string {
+  if (why.startsWith('effectiveOn is ')) return 'effectiveOn is not the decision date';
+  if (why.startsWith('zone ')) return 'zone unknown to this verifier';
+  return why;
 }
 
 /** The answer of `windowContains`, `'unknown'` being a day that holds an instant bound. */
@@ -201,7 +242,11 @@ export function definitionFindings(
     } else if (skip.reason === 'NOT_REQUESTED') {
       if (proof.requested === undefined) {
         report.invalid(`NOT_REQUESTED while every output was requested: ${at}`);
-      } else if (skip.output !== undefined && proof.requested.includes(skip.output)) {
+      } else if (skip.output === undefined) {
+        // An exclusion for an output not asked for names that output: without it, nothing can
+        // be compared with `requested`.
+        report.invalid(`NOT_REQUESTED without an output: ${at}`);
+      } else if (proof.requested.includes(skip.output)) {
         report.invalid(`NOT_REQUESTED on a requested output: ${at}`);
       }
     }
@@ -218,14 +263,24 @@ export function definitionFindings(
     }
   }
 
+  // One notice per kind of cause, whatever the number of rules: the number of notices of a
+  // verdict is fixed, and none is ever cut.
+  const kinds = new Map<string, { causes: Set<string>; keys: string[] }>();
   for (const [why, keys] of undecided) {
+    const kind = windowKind(why);
+    const group = kinds.get(kind) ?? { causes: new Set<string>(), keys: [] };
+    group.causes.add(why);
+    group.keys.push(...keys);
+    kinds.set(kind, group);
+  }
+  for (const [kind, { causes, keys }] of kinds) {
     if (keys.length === 1) {
-      report.unchecked(`window not checked: ${citeName(keys[0]!)} (${why})`);
+      report.unchecked(`window not checked: ${citeName(keys[0]!)} (${[...causes][0]})`);
       continue;
     }
     const named = keys.slice(0, MAX_NAMED_RULES).map(citeName).join(', ');
-    const more = keys.length > MAX_NAMED_RULES ? `, and ${keys.length - MAX_NAMED_RULES} more` : '';
-    report.unchecked(`window not checked: ${keys.length} rules (${why}): ${named}${more}`);
+    const more = keys.length > MAX_NAMED_RULES ? ` and ${keys.length - MAX_NAMED_RULES} more` : '';
+    report.unchecked(`window not checked for ${keys.length} rules (${kind}): ${named}${more}`);
   }
   for (const reason of unnamed.slice(0, MAX_NAMED_REASONS)) {
     report.unchecked(`reason not checked: ${citeName(reason)}`);

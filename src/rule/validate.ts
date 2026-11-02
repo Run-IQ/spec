@@ -114,9 +114,9 @@ export function validateRuleDefinition(value: unknown): {
 /**
  * `validateRuleDefinition` for a rule in its normalized or stored form, as a consumer reads it
  * back from a store (`hydrateRule`): the same checks, with one difference. `effectiveUntil:
- * null`, the internal encoding of "no end" that `normalizeRuleDefinition` writes, and a `null`
- * `checksum`, which is ignored, are accepted. It accepts nothing else that the authored
- * validator refuses, `null` in any other field included. Use it to list the problems of a row
+ * null`, the internal encoding of "no end" that `normalizeRuleDefinition` writes, is accepted.
+ * It accepts nothing else that the authored validator refuses, a `null` `checksum` and `null`
+ * in any other field included. Use it to list the problems of a row
  * `toExecutableRule` refused; use `validateRuleDefinition` for what an author writes.
  */
 export function validateStoredRuleDefinition(value: unknown): {
@@ -190,7 +190,7 @@ function definitionIssues(
   }
   const checksum = value.checksum;
   if (checksum === null) {
-    if (!stored) errors.add('checksum', nullFieldMessage('checksum'));
+    errors.add('checksum', nullFieldMessage('checksum'));
   } else if (checksum !== undefined && typeof checksum !== 'string') {
     errors.add('checksum', CHECKSUM_NOT_STRING);
   }
@@ -257,7 +257,7 @@ function given(value: unknown, field: string, errors: Issues): unknown {
   return value;
 }
 
-/** The `extensions` object: plain, free names, values free-form JSON (`null` is data). */
+/** The `extensions` object: plain, free names, values free-form JSON; a name's `null` is refused. */
 function checkExtensions(value: unknown, errors: Issues): void {
   if (!isPlainObject(value)) {
     errors.add('extensions', EXTENSIONS_NOT_OBJECT);

@@ -60,13 +60,19 @@ describe('finding 1: a validator for the stored and normalized form', () => {
     expect(canonicalEntry.validateStoredRuleDefinition).toBe(validateStoredRuleDefinition);
   });
 
-  it('accepts effectiveUntil: null and a null checksum; the authored one refuses them', () => {
-    const row = { ...stored, checksum: null };
-    expect(validateStoredRuleDefinition(row)).toEqual({ valid: true, errors: [], issues: [] });
-    expect(validateRuleDefinition(row).errors).toEqual([
+  it('accepts effectiveUntil: null and nothing else; the authored one refuses it', () => {
+    expect(validateStoredRuleDefinition(stored)).toEqual({ valid: true, errors: [], issues: [] });
+    expect(validateRuleDefinition(stored).errors).toEqual([
       'effectiveUntil is null: omit the field instead',
-      'checksum is null: omit the field instead',
     ]);
+  });
+
+  it('refuses a null checksum in both forms: a stored rule always has its checksum', () => {
+    const row = { ...stored, checksum: null };
+    const message = 'checksum is null: omit the field instead';
+    expect(validateStoredRuleDefinition(row).errors).toEqual([message]);
+    expect(validateRuleDefinition(row).errors).toContain(message);
+    expect(specError(() => computeRuleChecksum(row as never)).message).toBe(message);
   });
 
   it('a normalized rule is valid in its own form only', () => {
@@ -169,7 +175,7 @@ describe('finding 2: the notices that say what was not checked are never cut', (
       unchecked: (m) => notices.push(m),
     });
     expect(notices).toEqual([
-      'window not checked: 150 rules (effectiveOn is /$dates/birth): r000@1, r001@1, r002@1, r003@1, r004@1, and 145 more',
+      'window not checked for 150 rules (effectiveOn is not the decision date): r000@1, r001@1, r002@1, r003@1, r004@1 and 145 more',
     ]);
   });
 
@@ -442,7 +448,7 @@ describe('findings 3 and 12: the cases the first tests left open', () => {
     });
     expect(out).toEqual({
       status: 'authentic',
-      issues: ['window not checked: r1@1 (civil bound in Europe/Paris)', NOT_REPLAYED],
+      issues: ['window not checked: r1@1 (the day holds the bound of the window)', NOT_REPLAYED],
     });
   });
 

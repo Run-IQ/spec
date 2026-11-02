@@ -347,7 +347,7 @@ describe('verifyProof: invalid, with a readable issue', () => {
     const bad = 'trusted' as unknown as Parameters<typeof verifyProof>[1];
     expect(verifyProof(signed(), bad)).toEqual({
       status: 'invalid',
-      issues: ['options must be an object { trustedKeys?, rules? }', 'untrusted key'],
+      issues: ['options must be an object { trustedKeys?, rules?, calendar? }', 'untrusted key'],
     });
   });
 

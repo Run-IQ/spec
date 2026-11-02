@@ -125,6 +125,6 @@ export function boundWithFixed(items: readonly { message: string; fixed?: true }
       out.push(item.message);
     } else left++;
   }
-  out.push(`further problems not listed (limit ${MAX_ISSUES}): ${left} left out`);
+  if (left > 0) out.push(`further problems not listed (limit ${MAX_ISSUES}): ${left} left out`);
   return out;
 }

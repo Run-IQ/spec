@@ -120,10 +120,10 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
 
 /**
  * Internal: `normalizeRuleDefinition` for a rule read back in its normalized or stored form, as
- * `computeRuleChecksum`, `toExecutableRule` and `fromStoredRecord` read it. The one difference:
+ * the functions listed in the README ("Rule definition") read it. The one difference:
  * `effectiveUntil: null`, the internal encoding of "no end" that a normalized definition holds,
- * is accepted, and so is a `null` `checksum`, which is ignored. What an author writes
- * (`normalizeRuleDefinition`, `validateRuleDefinition`) refuses both: omit the field.
+ * is accepted. What an author writes (`normalizeRuleDefinition`, `validateRuleDefinition`)
+ * refuses it: omit the field. A `null` `checksum` is refused in both forms.
  */
 export function normalizeStoredRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
   return normalizeForm(input, true);
@@ -156,7 +156,7 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
   }
   const checksum = input.checksum;
-  if (checksum === null ? !stored : checksum !== undefined && typeof checksum !== 'string') {
+  if (checksum === null || (checksum !== undefined && typeof checksum !== 'string')) {
     invalidRule(checksum === null ? nullFieldMessage('checksum') : CHECKSUM_NOT_STRING);
   }
   const { from, until } = readRuleWindow(input.effectiveFrom, untilInput);
@@ -252,7 +252,8 @@ function given(value: unknown, field: string): unknown {
 
 /**
  * The `extensions` object of the rule (read once, as JSON), or `undefined` when it is empty.
- * Its keys are free names, reserved ones included; its values are free-form JSON, `null` too.
+ * Its keys are free names, reserved ones included; its values are free-form JSON, but a name
+ * whose value is `null` is refused (omit it): deeper, `null` is data.
  */
 function readExtensions(value: unknown): Record<string, JsonValue> | undefined {
   if (!isPlainObject(value)) invalidRule(EXTENSIONS_NOT_OBJECT);

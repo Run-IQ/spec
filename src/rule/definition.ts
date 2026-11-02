@@ -93,13 +93,13 @@ export interface RuleDefinitionBase {
  * every optional field, `effectiveUntil` and `checksum` included (`<field> is null: omit the
  * field instead`), and so is a `null` dimension in `dimensions`: a lost column never widens a
  * rule. "No end" is written by omitting `effectiveUntil`. `undefined` and absence are the same
- * input, and normalization writes the defaults (`dimensions: {}`, `tags: []`). Two forms: what
- * an author writes (`validateRuleDefinition`, `normalizeRuleDefinition`) never holds `null`; the
- * normalized form (`RuleDefinition`) holds `effectiveUntil: null` as its internal encoding of
- * "no end", and the functions that read a normalized or stored rule (`computeRuleChecksum`,
- * `computeRuleFingerprint`, `toExecutableRule`, `fromStoredRecord`) accept it. An empty `exceptions` list or `extensions` object is
- * absent too, and so is `ruleSet: 'local'`. Below the top level (inside `params`,
- * `condition.value`, `forEach`, `exceptions` and the values of `extensions`), and for the
+ * input, and normalization writes the defaults (`dimensions: {}`, `tags: []`). There are two
+ * forms: what an author writes never holds `null`; the normalized form (`RuleDefinition`)
+ * holds `effectiveUntil: null` as its internal encoding of "no end", and the functions that
+ * read it back accept that one `null` (the list is in the README, "Rule definition"). An empty
+ * `exceptions` list or `extensions` object is absent too, and so is `ruleSet: 'local'`. Below
+ * the top level (inside `params`, `condition.value`, `forEach`, `exceptions` and below the
+ * first level of `extensions`), and for the
  * required `params` itself, `null` is data and is kept (and refused where the format has no
  * place for it, as in `forEach`).
  */

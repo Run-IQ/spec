@@ -6,6 +6,7 @@ import type { CivilCalendar } from '../time/civil.js';
 import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import { isPlainObject, readList, withValueBudget } from '../values.js';
+import { misspellingOf } from '../rule/fields.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
 import { definitionFindings } from './definition-checks.js';
@@ -165,7 +166,8 @@ function verify(p: unknown, options: unknown): ProofVerification {
   const refused = findings.some((finding) => finding.level === 'invalid');
   if (!refused) {
     unchecked.push(NOT_REPLAYED);
-    for (const message of unchecked) findings.push({ message, level: 'notice', fixed: true });
+    // Fixed in number (a handful of kinds, never one per rule), so never cut.
+    for (const message of unchecked) findings.push({ message, level: 'notice' });
   }
   const issues = boundWithFixed(findings);
   const trusted = !findings.some((finding) => finding.level === 'warning');
@@ -179,6 +181,10 @@ function verify(p: unknown, options: unknown): ProofVerification {
   const status = trusted ? 'authentic-redacted' : 'consistent-redacted';
   return { status, issues, redacted: redactions.count, lifted };
 }
+
+/** The options `verifyProof` reads: any other key is a mistake, never ignored. */
+const OPTION_KEYS: readonly string[] = ['trustedKeys', 'rules', 'calendar'];
+const OPTION_NAMES = OPTION_KEYS.map((name) => [name, name.toLowerCase()] as const);
 
 /**
  * The findings of the options: their shape, the signature against `trustedKeys`, the rules
@@ -205,7 +211,20 @@ function optionFindings(
   }
   const findings: Finding[] = [];
   if (options !== undefined && record === undefined) {
-    findings.push(invalidFinding('options must be an object { trustedKeys?, rules? }'));
+    findings.push(invalidFinding('options must be an object { trustedKeys?, rules?, calendar? }'));
+  }
+  if (record !== undefined) {
+    try {
+      for (const key of Reflect.ownKeys(record)) {
+        if (typeof key === 'string' && OPTION_KEYS.includes(key)) continue;
+        const name = typeof key === 'symbol' ? key.toString() : key;
+        const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
+        const hint = wanted === undefined ? '' : ` (did you mean ${wanted}?)`;
+        findings.push(invalidFinding(`options.${citeName(name)} is not an option${hint}`));
+      }
+    } catch (error) {
+      return [...findings, ...unreadable('options', error)];
+    }
   }
   let trustedKeys: unknown;
   let rules: unknown;

@@ -24,12 +24,15 @@ function oneEditApart(a: string, b: string): boolean {
 }
 
 /**
- * Internal: the first reserved field `key` is within one edit of, case ignored (so a name that
+ * Internal: the first of `names` that `key` is within one edit of, case ignored (so a name that
  * differs by case only, `dominancegroup`, is found); `undefined` when none.
  */
-function misspellingOf(key: string): string | undefined {
+export function misspellingOf(
+  key: string,
+  names: ReadonlyArray<readonly [string, string]> = LOWERCASE,
+): string | undefined {
   const lower = key.toLowerCase();
-  return LOWERCASE.find(([, reserved]) => oneEditApart(reserved, lower))?.[0];
+  return names.find(([, candidate]) => oneEditApart(candidate, lower))?.[0];
 }
 
 /**
