@@ -34,16 +34,15 @@ const rule = {
 };
 
 computeRuleChecksum(rule);
-// '2346263c94cae281fd1697403414a56628161b3491378e2a455fd346e6d1a10c'
-// The same with effectiveFrom: new Date('2025-01-01') or '2025-01-01T01:00:00+01:00'
+// '1a8b4239e0edc51c03709bd61a30de2ff67987d770f66221cd8d88c505492597'
 
 // Store a rule, then read it back
 const { payload, checksum } = toStoredPayload(rule);
 payload;
-// '{"dimensions":{},"effectiveFrom":"2025-01-01T00:00:00.000Z","effectiveUntil":"2026-01-01T00:00:00.000Z",
+// '{"dimensions":{},"effectiveFrom":"2025-01-01","effectiveUntil":"2026-01-01",
 //   "id":"shipping-fee","model":"PERCENTAGE","params":{"base":"orderTotal","rate":0.05},"priority":1,"tags":[],"version":1}'
 const executable = fromStoredRecord({ id: 'shipping-fee', version: 1, payload, checksum });
-executable.effectiveFrom; // Date 2025-01-01T00:00:00.000Z
+executable.effectiveFrom; // '2025-01-01': a civil bound stays a civil date
 
 // effectiveUntil is excluded
 isEffectiveAt(rule, new Date('2025-12-31T23:59:59Z')); // true
@@ -66,8 +65,12 @@ computeRuleChecksum(copy) === computeRuleChecksum(rule);       // false
 | `condition` | Optional `{ dsl, value }` |
 | `priority` | Finite number |
 | `effectiveFrom`, `effectiveUntil` | Validity window, see below. `effectiveUntil` is optional |
+| `timeZone` | Optional. The time zone of a civil window: an IANA name, `UTC` or `±HH:MM` |
+| `effectiveOn` | Optional pointer to the date the window is checked on (`/$dates/<name>`, `/$item/…`) |
 | `output`, `dominanceGroup`, `sourceRef` | Optional strings. `output` names the output the rule contributes to (`value` when absent) |
-| `dimensions` | Optional `Record<string, string>`, for example `{ country: 'TG' }` |
+| `dimensions` | Optional. Per dimension, a value (`{ country: 'TG' }`) or `{ ref?, anyOf, except?, match? }` |
+| `forEach` | Optional. Applies the rule once per element of a collection |
+| `ruleSet` | Optional rule set id (`local` when absent) |
 | `tags` | Optional string array |
 | `exceptions` | Optional list of exceptions, see below |
 
@@ -75,7 +78,7 @@ Every other top-level key is a plugin extension. Extensions enter the checksum a
 
 `normalizeRuleDefinition` turns an input into the canonical definition:
 
-- Dates may be a `Date`, `YYYY-MM-DD` (read as UTC midnight) or an ISO date-time with `Z` or an offset. A date-time without a time zone, such as `2025-01-01T00:00`, throws `INVALID_DATE`. Dates are written as full UTC ISO strings.
+- A bound is a civil date `YYYY-MM-DD`, kept as written, or an instant: a `Date` or a date-time with `Z` or an offset, written `YYYY-MM-DDTHH:MM:SS.sssZ`. Both bounds are of one kind (`INVALID_RULE` otherwise). A date-time without a time zone, such as `2025-01-01T00:00`, throws `INVALID_DATE`.
 - Missing `effectiveUntil`, `dimensions` and `tags` become `null`, `{}` and `[]`. Tags are sorted and deduplicated.
 - At the top level, `null`, `undefined` and an absent key mean the same thing. Inside `params`, `condition.value`, `exceptions` and extension values, `null` is data.
 - `checksum` is dropped.
@@ -152,7 +155,7 @@ matchesSelector(normalizeRuleDefinition(rule), waiver.exceptions[0].targets); //
 
 A rule is in force on `[effectiveFrom, effectiveUntil)`: `effectiveUntil` is excluded, so a successor can start exactly when its predecessor ends. A rule for the single day 2025-03-01 has `effectiveFrom: '2025-03-01'` and `effectiveUntil: '2025-03-02'`. `effectiveUntil` must be after `effectiveFrom`, otherwise the rule is refused (`INVALID_RULE`).
 
-`isEffectiveAt(rule, at)` implements the window. In this release only the checksum and validation use it: `@run-iq/core` still applies `effectiveUntil` inclusively when filtering rules, and so does the store resolution of `@run-iq/context-engine`. They move to this window in later phases of the redesign (see [docs](docs/2026-10-30-refonte-run-iq-design.md)).
+`isEffectiveAt(rule, at)` implements the window: a civil bound is compared with the civil date of `at` in the rule's `timeZone` (`UTC` when absent). For an IANA zone, use `windowContains` with a calendar. In this release only the checksum and validation use it: `@run-iq/core` still applies `effectiveUntil` inclusively when filtering rules, and so does the store resolution of `@run-iq/context-engine`. They move to this window in later phases of the redesign (see [docs](docs/2026-10-30-refonte-run-iq-design.md)).
 
 ## Checksum and fingerprint
 
@@ -181,7 +184,7 @@ validateRuleDefinition({
 //   errors: [ ...the messages below ],
 //   issues: [
 //     { path: 'params.rates[1]', message: 'Value at "params.rates[1]" cannot be serialized to canonical JSON: NaN' },
-//     { path: 'effectiveFrom', message: 'effectiveFrom must be a Date, YYYY-MM-DD, or an ISO date-time with Z or an offset; got "2025-01-01T00:00"' } ] }
+//     { path: 'effectiveFrom', message: 'effectiveFrom must be a Date, a civil date YYYY-MM-DD or an instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; got "2025-01-01T00:00"' } ] }
 ```
 
 The JSON schema `@run-iq/spec/schema/rule-definition.schema.json` (draft 2020-12) accepts the same definitions, except that it cannot check that `effectiveUntil` is after `effectiveFrom`.
@@ -199,19 +202,20 @@ import {
 // The secret stays with the producer (32 bytes or more); never put it or the seed in a proof.
 const secret = crypto.getRandomValues(new Uint8Array(32));
 const seed = deriveInputSeed(secret, 'order-42');
+const input = {
+  data: { orderTotal: 200 },
+  meta: {
+    tenantId: 'shop', dates: { effective: '2025-06-01' }, tags: [], dimensions: {},
+    context: {}, assertions: {},
+  },
+};
 
 const proof = sealProof({
   format: 'run-iq.proof/1',
   requestId: 'order-42',
   evaluatedAt: '2025-06-01',
   sealedAt: '2025-06-01T10:00:00.000Z',
-  inputDigest: computeInputDigest({
-    data: { orderTotal: 200 },
-    meta: {
-      tenantId: 'shop', dates: { effective: '2025-06-01' }, tags: [], dimensions: {},
-      context: {}, assertions: {},
-    },
-  }, seed),
+  inputDigest: computeInputDigest(input, seed),
   inputSalted: true,
   timeZone: 'UTC',
   ruleSets: [{ kind: 'local' }],
@@ -252,13 +256,39 @@ verifyProof(signed, { trustedKeys });
 // { status: 'invalid', issues: ['digest mismatch', 'output value does not follow from its contributions: fee'] }
 ```
 
+Show one fact of the input, and prove another absent, to someone who holds only the proof:
+
+```js
+import { discloseFacts, verifyFactDisclosure } from '@run-iq/spec';
+
+const disclosure = discloseFacts(input, seed, ['/data/orderTotal'], ['/data/coupon']);
+verifyFactDisclosure(disclosure, signed.inputDigest);
+// { valid: true, issues: [], facts: { '/data/orderTotal': 200 }, lists: {}, absent: ['/data/coupon'] }
+```
+
+A reviewer who checked the proof cosigns its digest with a key of their own, apart from the proof:
+
+```js
+import { createAttestation, verifyAttestation } from '@run-iq/spec';
+
+const reviewer = createSigningKeyPair();
+const cosignature = createAttestation(signed.digest, reviewer.privateKey, 'auditor-7', { role: 'human-review' });
+verifyAttestation(cosignature, signed.digest, { 'auditor-7': reviewer.publicKey }); // { status: 'authentic', issues: [] }
+verifyAttestation(cosignature, signed.digest, {});  // { status: 'consistent', issues: ['untrusted key'] }
+```
+
+Use opaque identifiers. The header of a proof is never redacted, so `requestId` is shown to everyone who sees the proof. A subject names the element it is about (`/orders/@a7`), and a disclosure shows the keys next to a disclosed fact: keys such as names or tax numbers stay visible until their entries are redacted. Prefer ids (`order-42`, `a7`) to personal data in request ids, element keys and identity keys.
+
 - `computeInputDigest(input, seed)` commits to the leaf count and the root of a Merkle tree (RFC 6962) with one salted leaf per value of the input: a scalar, a list or an empty object, at its JSON pointer. `deriveInputSeed(secret, requestId)` gives each request its own seed; with `UNSALTED_SEED` (32 zero bytes) the salts are public and anyone holding the input can recompute the digest. `inputLeaves` and `inputLeafHash` expose the leaves; `merkleRoot`, `inclusionPath` and `verifyInclusion` build and check the tree; `verifyInputInclusion` checks a disclosed leaf against the digest. `computeIdempotencyDigest({ input, options })` is the unsalted digest a decision store keeps to recognise a retry; it is never published.
 - `sealProof(content, seed)` salts each entry of the ten sections (the first 16 bytes of `HMAC-SHA256(seed, 'proof:' + section + ':' + index)`) and sets `digest`: the leaf count and RFC 6962 root of a tree whose first leaf is the header (the proof without its sections, `digest` and `signature`, holding `counts`, the number of entries of each section) and whose other leaves are the entries, section by section (`proofLeafHashes`). `seed` defaults to `UNSALTED_SEED`; `inputSalted` must say which. It hashes lists in the order given: the producer sorts them.
 - `redactProof(proof, hide)` replaces each entry `hide(section, index)` picks with `{ redacted: <hash of its leaf> }`: the digest and the signature still hold, and `verifyProof` checks what is left (`redacted: n`, the notice `redacted entries: n`). What a redacted entry hides can never be checked, so a redacted proof is at best `authentic-redacted` (signed by a trusted key) or `consistent-redacted`, never `authentic`. A check that a hidden entry could satisfy is lifted rather than failed, and named in `lifted` (`{ check, redacted }`) and in a notice (`check lifted: output value from its contributions (applied redacted)`). The problems lifted must fit the hidden entries: each needs an entry, in a section whose hidden entry could change what the check computed, carrying what would explain it (a rule, an output), distinct ones where one entry could not explain both; if k hidden entries cannot explain them all, every problem is reported and the proof is `invalid`. A redaction of a proof that is not `invalid` is never `invalid`. Only a proof sealed with a secret seed can be redacted. `proofLeafHash` and `verifyProofInclusion` check one entry against the signed digest without the other leaves.
+- `discloseFacts(input, seed, present, absent)` shows the leaves of the input tree at and below each `present` pointer, with their audit paths, and proves each `absent` pointer absent by the two leaves around it. `verifyFactDisclosure(d, inputDigest)` checks it against the input digest alone and never throws. Only a salted input can be disclosed. A neighbour leaf shows its pointer and its rank, never its value.
 - `signProof` signs the `digest` string with ed25519 and stores the signature in base64url. It refuses a proof whose digest does not match its content. Keys are hex strings.
+- `createAttestation(digest, privateKey, keyId, { role?, at? })` returns a detached cosignature (`run-iq.attestation/1`): `{ format, kind: 'cosignature', subject: { proofDigest }, keyId, role?, at, signature }`, the signature covering the canonical JSON of the rest. `verifyAttestation(a, digest, trustedKeys)` never throws: `authentic` under a trusted key, `consistent` under an unknown one, `invalid` for another proof or a bad signature. `kind` is open: a kind this version does not verify (`timestamp`, `revocation`) is at best `consistent` (`attestation kind not supported: timestamp`). The JSON schema `@run-iq/spec/schema/attestation.schema.json` accepts the same attestations, except for lone surrogates.
 - `verifyProof` never throws. A proof is `invalid` if it cites a rule its `rules` does not list (in the trace, the output contributors or the exceptions); `sealProof` and `signProof` refuse such a proof. A proof is `authentic` only when its digest matches and a trusted key signed it. An unsigned proof, or one signed by a key not in `trustedKeys`, is at best `consistent`. With `rules`, the set of `{ id, version, checksum }` must equal the proof's `rules`; with redacted rules, they are compared by number and the proof is at best `consistent-redacted`.
 - `strata` lists the outputs of each evaluation stratum, in order: `[['fee']]` when no rule reads an output. Each entry of `applied`, `skipped`, `pending` and `exceptions` carries its `stratum`, the index in `strata`. A proof is `invalid`, and `sealProof` and `signProof` refuse it, when an output is in no stratum or in two, a stratum names an unknown output, a `stratum` is out of range, or an applied rule's output is not in its stratum (`step stratum mismatch: id@version`); likewise for a `decimal` output whose value, or an applied contribution or `unrounded` value for it, is not a canonical decimal string (`decimal value not canonical: name`).
 - `validateProof(value)` checks the shape only, with the same `{ errors, issues }` as `validateRuleDefinition`. The JSON schema `@run-iq/spec/schema/decision-proof.schema.json` accepts the same proofs, except for what its description lists (a rule listed twice, a redacted leaf repeated, a section whose length is not its count, lone surrogates, the dates of a time segment, the depth and count of values).
+- The `digest` of a pack in `ruleSets` is declared by the caller: the proof digest commits to it, but nothing compares it with the rules of the pack before the pack registry of phase 5. The version of a `tzdata` component in `versions.components` is the name of an IANA database release (`2026c`), so a verifier in another language pins the same release.
 
 ## Browser entry
 
@@ -273,7 +303,7 @@ const checksum = sha256Hex(canonicalRulePayload(rule));
 
 ## Errors
 
-Every function throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE`, `INVALID_RULE`, `INVALID_PROOF`, `INVALID_KEY` or `INVALID_DECIMAL`. `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
+A function that fails throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE`, `INVALID_RULE`, `INVALID_PROOF`, `INVALID_KEY`, `INVALID_DECIMAL`, `INVALID_PATH`, `INVALID_INPUT`, `INVALID_REFERENTIAL`, `INVALID_DISCLOSURE` or `INVALID_ATTESTATION`. `verifyProof`, `verifyFactDisclosure` and `verifyAttestation` never throw: they return their verdict. `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
 
 ## Documents
 
