@@ -24,7 +24,7 @@ import { definitionFindings } from '../src/proof/definition-checks.js';
 import { clearIntlCaches, intlRuntime } from '../src/proof/intl-calendar.js';
 import * as windowModule from '../src/rule/window.js';
 import { lastValuesSpent } from '../src/values.js';
-import { isOwnOptionsError } from '../src/errors.js';
+import { isOwnOptionsError, newOptionsError } from '../src/errors.js';
 import type { ProofView } from '../src/proof/types.js';
 import { normalizeRuleDefinition } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
@@ -84,6 +84,20 @@ describe('AA2: the intrinsics are captured at load', () => {
     }
   });
 
+  it('a real Date under the forged prototype is still not a Date, and is named', () => {
+    const real = globalThis.Date;
+    function Fake() {}
+    Fake.prototype = {};
+    const odd = Object.setPrototypeOf(new real(5), Fake.prototype) as Date;
+    (globalThis as { Date: unknown }).Date = Fake;
+    try {
+      expect(() => canonicalize({ a: odd })).toThrow('a Date with a foreign prototype');
+      expect(() => toReferenceDate(odd)).toThrow('a Date with a foreign prototype');
+    } finally {
+      (globalThis as { Date: unknown }).Date = real;
+    }
+  });
+
   it('a replaced Date.prototype.getTime changes nothing', () => {
     const real = Date.prototype.getTime;
     Date.prototype.getTime = function () {
@@ -121,6 +135,14 @@ describe('AA3: only the errors this package created are trusted', () => {
   it('a caller-built VerifyOptionsError is not an own error', () => {
     expect(isOwnOptionsError(forged())).toBe(false);
     expect(isOwnOptionsError(optionError(() => verifyProof(signed(), 5 as never)))).toBe(true);
+  });
+
+  it('the factory cuts the message and the option like an issue text', () => {
+    const error = newOptionsError('o'.repeat(3000), `m${'x'.repeat(5000)}`);
+    expect(error.option).toHaveLength(1025);
+    expect(error.message).toHaveLength(1025);
+    expect(error.message.endsWith('…')).toBe(true);
+    expect(isOwnOptionsError(error)).toBe(true);
   });
 
   it('thrown from a getter of the proof: cited and cut, the verdict stays invalid', () => {
