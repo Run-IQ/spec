@@ -225,6 +225,23 @@ describe('AC4: an error raised by another call is foreign', () => {
   });
 });
 
+describe('AC4: a nested call has a scope of its own', () => {
+  it('an options error raised by a call made inside a trap is foreign to the outer call', () => {
+    const trap = new Proxy(
+      {},
+      {
+        ownKeys() {
+          // A call of the package made by the caller's own code: its error, in its own scope.
+          return verifyProof({}, { calender: 1 } as never) as never;
+        },
+      },
+    );
+    const error = optionError(() => verifyProof(signed(), { trustedKeys: trap } as never));
+    expect(error.option).toBe('options.trustedKeys');
+    expect(error.message.startsWith('options.trustedKeys could not be read: ')).toBe(true);
+  });
+});
+
 describe('AC6: verifyAttestation needs its trusted keys', () => {
   it('undefined throws; an empty object trusts none', () => {
     const digest = 'a'.repeat(64);
