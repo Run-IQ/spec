@@ -351,6 +351,9 @@ describe('Y3 and Y4: a Date is the slot under Date.prototype, in one step', () =
 
   it('only Date.prototype of this realm: not a subclass, not another realm', () => {
     expect(dateTimeOf(new globalThis.Date(7))).toBe(7);
+    // The prototype alone is not a Date: the slot is what holds the time.
+    expect(dateTimeOf(Object.create(globalThis.Date.prototype))).toBeUndefined();
+    expect(hasDateSlot(Object.create(globalThis.Date.prototype))).toBe(false);
     class Sub extends globalThis.Date {}
     expect(dateTimeOf(new Sub(7))).toBeUndefined();
     expect(dateTimeOf(runInNewContext('new Date(7)'))).toBeUndefined();
