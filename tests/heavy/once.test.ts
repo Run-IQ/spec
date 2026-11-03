@@ -221,7 +221,9 @@ describe('a value is counted once: the spend counter', () => {
       status: 'consistent',
       issues: ['unsigned', NOT_REPLAYED],
     });
-    expect(lastValuesSpent()).toBe(countValues(sealed) + countValues(rules));
+    // The rules given are the options: they have a budget of their own, the proof's alone is
+    // counted here.
+    expect(lastValuesSpent()).toBe(countValues(sealed));
     // The signature signing adds, and its three members, are counted with the content.
     const signed = signProof(sealed, keys.privateKey, 'k1');
     expect(lastValuesSpent()).toBe(countValues(sealed) + 4);
