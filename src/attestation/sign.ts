@@ -1,4 +1,5 @@
 import { newSpecError, reasonOf, unreadableMessage } from '../errors.js';
+import { nowIso } from '../intrinsics.js';
 import { checkText, childPointer, expectPlainObject, readFields, runCheck } from '../input/read.js';
 import { keyBytes, signText } from '../proof/sign.js';
 import type { Instant } from '../time/civil.js';
@@ -49,7 +50,7 @@ export function createAttestation(
       subject: { proofDigest: digest },
       keyId: id,
       ...(role === undefined ? {} : { role }),
-      at: at ?? new Date().toISOString(),
+      at: at ?? nowIso(),
     };
     return { ...body, signature: signAttestationBody(body, privateKeyHex) };
   });

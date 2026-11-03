@@ -1,6 +1,7 @@
 import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
+import { NativeDate } from '../intrinsics.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
@@ -152,5 +153,5 @@ function nameOf(value: unknown): string {
 
 /** A civil date stays a string; a canonical instant becomes a `Date`. */
 function boundOf(bound: string): string | Date {
-  return isCivilDate(bound) ? bound : new Date(bound);
+  return isCivilDate(bound) ? bound : new NativeDate(bound);
 }

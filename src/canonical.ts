@@ -1,5 +1,6 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
+import { isoOf } from './intrinsics.js';
 import { withSha256, writeJsonString } from './stream.js';
 import type { TextOut } from './stream.js';
 import {
@@ -374,7 +375,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
     const time = read(path, () => dateTimeOf(node));
     if (time !== undefined) {
       if (Number.isNaN(time)) fail(path, 'an invalid Date');
-      sink.leaf(new Date(time).toISOString());
+      sink.leaf(isoOf(time));
       return;
     }
     const notDate = read(path, () => notADateMessage(node));

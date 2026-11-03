@@ -12,7 +12,7 @@ import {
 import type { Attestation, ProofVerification } from '../src/index.js';
 import * as canonicalEntry from '../src/canonical-entry.js';
 import { signAttestationBody } from '../src/attestation/sign.js';
-import { jsonCopy, specError } from './helpers.js';
+import { jsonCopy, optionError, specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, signed } from './proof-cases.js';
 import vector from './vectors/attestation-v1.json';
 import proofVector from './vectors/proof-v1.json';
@@ -199,17 +199,17 @@ describe('verifyAttestation: what it proves about which proof', () => {
       issues: ['untrusted key'],
     });
     // A trusted key that is malformed is a configuration error, not a missing key.
-    expect(verify(COSIGNATURE, DIGEST, { reviewer: 'zz' })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.reviewer is malformed'],
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, { reviewer: 'zz' }))).toMatchObject({
+      option: 'trustedKeys.reviewer',
+      message: 'trustedKeys.reviewer is malformed',
     });
     // A key of Object.prototype is not listed; an object of another prototype is refused.
     const toString = signedBody(bodyWith({ keyId: 'toString' }));
     expect(verify(toString, DIGEST, {}).issues).toEqual(['untrusted key']);
     const inherited = Object.create({ reviewer: RFC_PUBLIC }) as Record<string, string>;
-    expect(verify(COSIGNATURE, DIGEST, inherited)).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys must be an object of hex public keys'],
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, inherited))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
     });
   });
 
@@ -243,21 +243,21 @@ describe('verifyAttestation: what it proves about which proof', () => {
   });
 
   it('checks its arguments: the digest expected and the trusted keys', () => {
-    for (const digest of [`${DIGEST}0`, `x${DIGEST}`]) {
-      expect(verify(COSIGNATURE, digest).issues).toEqual([
-        'the expected proof digest must be 64 lowercase hex characters',
-      ]);
+    // A mistake of the caller in the arguments throws, never a verdict on the attestation.
+    for (const digest of [`${DIGEST}0`, `x${DIGEST}`, 'ABC']) {
+      expect(optionError(() => verify(COSIGNATURE, digest))).toMatchObject({
+        code: 'INVALID_OPTIONS',
+        option: 'proofDigest',
+        message: 'the expected proof digest must be 64 lowercase hex characters',
+      });
     }
     expect(verify({ ...COSIGNATURE, subject: { proofDigest: `${DIGEST}0` } }).issues).toEqual([
       '/subject/proofDigest must be 64 lowercase hex characters',
     ]);
-    expect(verify(COSIGNATURE, 'ABC')).toEqual({
-      status: 'invalid',
-      issues: ['the expected proof digest must be 64 lowercase hex characters'],
-    });
-    expect(verify(COSIGNATURE, DIGEST, 'keys')).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys must be an object of hex public keys'],
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, 'keys'))).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
     });
   });
 });

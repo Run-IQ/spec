@@ -1,6 +1,12 @@
 import { canonicalize } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
-import { citeName, reasonOf, unreadableMessage } from '../errors.js';
+import {
+  citeName,
+  isOwnOptionsError,
+  newOptionsError,
+  reasonOf,
+  unreadableMessage,
+} from '../errors.js';
 import { boundMessages } from '../issues.js';
 import {
   checkText,
@@ -14,10 +20,11 @@ import {
 } from '../input/read.js';
 import type { Add, Fields, Reader } from '../input/read.js';
 import { SIGNATURE_BASE64URL } from '../proof/fields.js';
-import { publicKeyBytes, signatureMatches } from '../proof/sign.js';
+import { signatureMatches } from '../proof/sign.js';
+import { readTrustedKeys } from '../proof/trusted-keys.js';
 import type { ProofVerification } from '../proof/types.js';
 import { isInstant } from '../time/civil.js';
-import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
+import { ownCopy, withValueBudget } from '../values.js';
 import { ATTESTATION_FORMAT } from './types.js';
 import type { Attestation, AttestationSubject } from './types.js';
 
@@ -44,12 +51,15 @@ const SHAPE = 'an object { format, kind, subject, keyId, role?, claims?, at, sig
 const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ';
 
 /**
- * Verifies a detached attestation (D-29) of the proof whose digest is `proofDigest`, and never
- * throws: anything malformed gives `invalid`. Issues are short, stable English strings.
+ * Verifies a detached attestation (D-29) of the proof whose digest is `proofDigest`: anything
+ * malformed in the attestation gives `invalid`; a mistake of the caller in the arguments throws
+ * `VerifyOptionsError` (`INVALID_OPTIONS`). Issues are short, stable English strings.
  *
- * 1. The arguments: `proofDigest` must be 64 lowercase hex characters, `trustedKeys` (read
- *    after the attestation) an object mapping a key id to a hex ed25519 public key, or
- *    `undefined` (no key trusted).
+ * 1. The arguments, checked first: `proofDigest` must be 64 lowercase hex characters, `trustedKeys`
+ *    an object mapping a key id to a hex ed25519 public key, or `undefined` (no key trusted);
+ *    a digest that is not, `trustedKeys` that are not an object or cannot be read, a symbol or
+ *    non-enumerable key, a malformed key, each throw (`proofDigest`, `trustedKeys`,
+ *    `trustedKeys.<id>`).
  * 2. The shape. `a` is read once (each property read and counted exactly once) into a plain
  *    copy, and every later check runs on that copy: a closed object `{ format, kind, subject,
  *    keyId, role?, claims?, at, signature }`; a `format` other than `run-iq.attestation/1`
@@ -72,9 +82,8 @@ const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ'
  *    and never about a proof digest (`attestation not about this proof`).
  * 5. The signature, against `canonicalize` of the attestation without `signature`: `untrusted
  *    key` (its `keyId` is not an own key of `trustedKeys`) leaves it at best `consistent`;
- *    a trusted key that is malformed (not 64 hex characters, not a curve point, a small-order
- *    point) is a configuration error and makes it `invalid` (`trustedKeys.<keyId> is
- *    malformed`); `signature invalid` makes it `invalid`.
+ *    `signature invalid` makes it `invalid`. A trusted key that is malformed was refused in
+ *    step 1.
  *
  * `authentic` needs a cosignature of `proofDigest` whose signature a trusted key verifies,
  * with no issue. Every other attestation is `consistent` at best (an untrusted key) or
@@ -90,11 +99,20 @@ export function verifyAttestation(
   trustedKeys: Record<string, string>,
 ): ProofVerification {
   try {
+    // The arguments are the caller's: a mistake in them throws, before the attestation is read.
+    const fail = (option: string, message: string): never => {
+      throw newOptionsError(option, message);
+    };
+    if (typeof proofDigest !== 'string' || !HEX_DIGEST.test(proofDigest)) {
+      fail('proofDigest', 'the expected proof digest must be 64 lowercase hex characters');
+    }
+    const keys = readTrustedKeys(trustedKeys, 'trustedKeys', fail);
     // Defensive: `runCheck` opens the only budget spent today; this one keeps a later read
     // added outside it inside one budget per call (an equivalent mutant, kept on purpose).
-    return withValueBudget(() => verify(a, proofDigest, trustedKeys));
+    return withValueBudget(() => verify(a, proofDigest, keys));
   } catch (error) {
-    // Never reached by a value read under guard; a last net, still never a throw.
+    if (isOwnOptionsError(error)) throw error;
+    // Never reached by a value read under guard; a last net, still never a verdict of "valid".
     return invalid([unreadableMessage('attestation', error)]);
   }
 }
@@ -109,10 +127,7 @@ interface Finding {
   readonly level: 'invalid' | 'warning';
 }
 
-function verify(a: unknown, proofDigest: unknown, trustedKeys: unknown): ProofVerification {
-  if (typeof proofDigest !== 'string' || !HEX_DIGEST.test(proofDigest)) {
-    return invalid(['the expected proof digest must be 64 lowercase hex characters']);
-  }
+function verify(a: unknown, proofDigest: string, keys: Map<string, Uint8Array>): ProofVerification {
   let copy: Attestation | undefined;
   let unknownFormat: string | undefined;
   const { issues } = runCheck(
@@ -139,38 +154,17 @@ function verify(a: unknown, proofDigest: unknown, trustedKeys: unknown): ProofVe
   } else if (read.subject.proofDigest !== proofDigest) {
     findings.push({ message: 'attestation for another proof', level: 'invalid' });
   }
-  findings.push(...signatureFinding(read, trustedKeys));
+  findings.push(...signatureFinding(read, keys));
   const messages = findings.map((finding) => finding.message);
   if (findings.some((finding) => finding.level === 'invalid')) return invalid(messages);
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues: messages };
 }
 
 /**
- * What the signature of `a` (a copy) says under `trustedKeys`; nothing when it holds. A trusted
- * key that is malformed, whoever it belongs to, is a configuration error of the caller, listed
- * for each key (`trustedKeys.<id> is malformed`): a broken trust anchor is never ignored.
+ * What the signature of `a` (a copy) says under `keys` (the trusted keys, already checked: a
+ * malformed one threw before this point); nothing when it holds.
  */
-function signatureFinding(a: Attestation, trustedKeys: unknown): Finding[] {
-  const keys = new Map<string, Uint8Array | undefined>();
-  const malformed: Finding[] = [];
-  try {
-    if (trustedKeys !== undefined && !isPlainObject(trustedKeys)) {
-      return [{ message: 'trustedKeys must be an object of hex public keys', level: 'invalid' }];
-    }
-    for (const id of trustedKeys === undefined ? [] : Object.keys(trustedKeys)) {
-      const bytes = publicKeyBytes((trustedKeys as Record<string, unknown>)[id]);
-      keys.set(id, bytes);
-      if (!bytes) {
-        malformed.push({
-          message: `${citeName(`trustedKeys.${id}`)} is malformed`,
-          level: 'invalid',
-        });
-      }
-    }
-  } catch (error) {
-    return [{ message: unreadableMessage('trustedKeys', error), level: 'invalid' }];
-  }
-  if (malformed.length > 0) return malformed;
+function signatureFinding(a: Attestation, keys: Map<string, Uint8Array>): Finding[] {
   const key = keys.get(a.keyId);
   if (key === undefined) return [{ message: 'untrusted key', level: 'warning' }];
   let message: string;

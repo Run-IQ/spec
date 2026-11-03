@@ -1,3 +1,4 @@
+import { isoOf, NativeDate, parseTime } from '../intrinsics.js';
 import type { CivilCalendar } from '../time/civil.js';
 
 // Internal to `@run-iq/spec`: a `CivilCalendar` for any IANA zone the runtime knows, read from
@@ -36,8 +37,16 @@ export function intlCacheSizes(): { formatters: number; names: number } {
   return { formatters: byCanonical.size, names: canonicalOf.size };
 }
 
+/**
+ * `Intl.DateTimeFormat`, captured when the module loads (the one place the tests replace it).
+ * Code that reassigns `Intl.DateTimeFormat` later changes nothing here.
+ */
+export const intlRuntime: { DateTimeFormat: typeof Intl.DateTimeFormat } = {
+  DateTimeFormat: Intl.DateTimeFormat,
+};
+
 function makeFormatter(zone: string): Intl.DateTimeFormat {
-  return new Intl.DateTimeFormat('en-US', {
+  return new intlRuntime.DateTimeFormat('en-US', {
     timeZone: zone,
     timeZoneName: 'longOffset',
     hour: 'numeric',
@@ -71,34 +80,25 @@ function formatter(zone: string): Intl.DateTimeFormat {
   return shared;
 }
 
-/** Whether `makeFormatter(zone)` reads a valid `longOffset` text at the epoch. */
-function readsOffsetOf(zone: string): boolean {
-  const part = makeFormatter(zone)
-    .formatToParts(new Date(0))
-    .find((entry) => entry.type === 'timeZoneName');
-  return part !== undefined && parseOffset(part.value) !== undefined;
-}
-
 /**
- * Throws what the runtime cannot do: `RuntimeCannotReadOffsets` without time zones and the
- * `longOffset` form at all, `RuntimeHasNoZoneData` when it knows `UTC` only. Any other throw of
- * the runtime while it is asked is the same limit.
+ * Throws what the runtime cannot do: `RuntimeCannotReadOffsets` when it has no time zone support
+ * at all (it cannot build the formatter of `UTC`), `RuntimeHasNoZoneData` only when it refuses a
+ * zone every database has (a `RangeError`: it knows `UTC` only), `RuntimeCannotReadOffsets` for
+ * any other failure on that zone. An offset text it prints badly is found where it is read
+ * (`offsetAt`), whichever zone it is.
  */
 function requireZoneSupport(): void {
-  let utc: boolean;
   try {
-    utc = readsOffsetOf('UTC');
+    makeFormatter('UTC');
   } catch {
-    utc = false;
+    throw new RuntimeCannotReadOffsets('no time zone support');
   }
-  if (!utc) throw new RuntimeCannotReadOffsets('no time zone support');
-  let named: boolean;
   try {
-    named = readsOffsetOf(PROBE_ZONE);
-  } catch {
-    named = false;
+    makeFormatter(PROBE_ZONE);
+  } catch (error) {
+    if (error instanceof RangeError) throw new RuntimeHasNoZoneData('no time zone data');
+    throw new RuntimeCannotReadOffsets(`cannot build the formatter of ${PROBE_ZONE}`);
   }
-  if (!named) throw new RuntimeHasNoZoneData('no time zone data');
 }
 
 /** A zone every time zone database has, to tell a runtime with a database from one without. */
@@ -154,7 +154,7 @@ const DAY_MS = 86_400_000;
 /** The offset of `zone` from UTC at the instant `ms`, in milliseconds. */
 function offsetAt(zone: string, ms: number): number {
   const part = formatter(zone)
-    .formatToParts(new Date(ms))
+    .formatToParts(new NativeDate(ms))
     .find((entry) => entry.type === 'timeZoneName');
   const offset = parseOffset(part?.value ?? '');
   if (offset === undefined) {
@@ -164,7 +164,7 @@ function offsetAt(zone: string, ms: number): number {
 }
 
 function civilDateAt(zone: string, ms: number): string {
-  return new Date(ms + offsetAt(zone, ms)).toISOString().split('T')[0] ?? '';
+  return isoOf(ms + offsetAt(zone, ms)).split('T')[0] ?? '';
 }
 
 /**
@@ -173,9 +173,9 @@ function civilDateAt(zone: string, ms: number): string {
  * midnight does not, and the start of the next day for a day skipped whole.
  */
 export const intlCalendar: CivilCalendar = {
-  toCivilDate: (at, zone) => civilDateAt(zone, Date.parse(at)),
+  toCivilDate: (at, zone) => civilDateAt(zone, parseTime(at)),
   startOfDay: (day, zone) => {
-    const midnight = Date.parse(`${day}T00:00:00.000Z`);
+    const midnight = parseTime(`${day}T00:00:00.000Z`);
     let low = midnight - 1.2 * DAY_MS;
     let high = midnight + 1.2 * DAY_MS;
     while (high - low > 1) {
@@ -183,6 +183,6 @@ export const intlCalendar: CivilCalendar = {
       if (civilDateAt(zone, middle) >= day) high = middle;
       else low = middle;
     }
-    return new Date(high).toISOString();
+    return isoOf(high);
   },
 };

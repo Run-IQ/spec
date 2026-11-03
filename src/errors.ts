@@ -76,8 +76,42 @@ export class VerifyOptionsError extends SpecError {
     super('INVALID_OPTIONS', message, option);
     this.name = 'VerifyOptionsError';
     this.option = option;
-    OWN_ERRORS.add(this);
+    Object.defineProperty(this, OPTIONS_BRAND, { value: true });
   }
+
+  /**
+   * Holds for an error of any copy of the class (the other entry point, ESM or CJS, another
+   * installed copy), like `SpecError`: a brand of its own, so that a caller can test
+   * `error instanceof VerifyOptionsError` whichever entry threw it.
+   */
+  static [Symbol.hasInstance](value: unknown): boolean {
+    if (this !== VerifyOptionsError)
+      return Function.prototype[Symbol.hasInstance].call(this, value);
+    return (
+      typeof value === 'object' &&
+      value !== null &&
+      (value as Record<symbol, unknown>)[OPTIONS_BRAND] === true
+    );
+  }
+}
+
+const OPTIONS_BRAND = Symbol.for('@run-iq/spec/VerifyOptionsError');
+
+/**
+ * Internal: the `VerifyOptionsError` this package throws, remembered as its own (`isOwnError`):
+ * one a caller builds and throws from a getter or a calendar is not trusted. The message is cut
+ * like an issue text (1024 code units, then `…`), because it can carry the text of the caller's
+ * own error.
+ */
+export function newOptionsError(option: string, message: string): VerifyOptionsError {
+  const error = new VerifyOptionsError(boundIssueText(option), boundIssueText(message));
+  OWN_ERRORS.add(error);
+  return error;
+}
+
+/** Internal: true for a `VerifyOptionsError` this package created. */
+export function isOwnOptionsError(error: unknown): error is VerifyOptionsError {
+  return isOwnError(error) && error instanceof VerifyOptionsError;
 }
 
 /**

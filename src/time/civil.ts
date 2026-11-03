@@ -1,4 +1,5 @@
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from '../errors.js';
+import { isoOf, parseTime, startOfYear, utcTime } from '../intrinsics.js';
 import { dateTimeOf, notADateMessage, typeName } from '../values.js';
 
 /**
@@ -43,8 +44,8 @@ const OFFSET = /^([+-])(\d{2}):(\d{2})$/;
 const IANA_NAME = /^[A-Z][A-Za-z0-9_+-]*(?:\/[A-Za-z][A-Za-z0-9_+-]*)+$/;
 
 /** Time values of 0000-01-01T00:00:00.000Z and of 9999-12-31T23:59:59.999Z. */
-const MIN_TIME = new Date(0).setUTCFullYear(0, 0, 1);
-const MAX_TIME = new Date(0).setUTCFullYear(9999, 11, 31) + 86_400_000 - 1;
+const MIN_TIME = startOfYear(0, 0, 1);
+const MAX_TIME = startOfYear(9999, 11, 31) + 86_400_000 - 1;
 
 /** Internal: the number of days of `month` (1 to 12) in `year`, proleptic Gregorian calendar. */
 export function daysInMonth(year: number, month: number): number {
@@ -117,7 +118,7 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
     if (time < MIN_TIME || time > MAX_TIME) {
       invalidDate(field, 'a Date outside the years 0000 to 9999');
     }
-    return new Date(time).toISOString();
+    return isoOf(time);
   }
   if (typeof value !== 'string') {
     invalidDate(field, notADateMessage(value) ?? `a value of type ${typeName(value)}`);
@@ -137,19 +138,19 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
   ) {
     invalidDate(field, quoteText(value));
   }
-  const instant = new Date(0);
-  instant.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
-  instant.setUTCHours(
+  const result = utcTime(
+    Number(year),
+    Number(month) - 1,
+    Number(day),
     Number(hour),
     Number(minute) - offset,
     Number(second),
     Number((fraction ?? '').padEnd(3, '0')),
   );
-  const result = instant.getTime();
   if (result < MIN_TIME || result > MAX_TIME) {
     invalidDate(field, `${quoteText(value)}, outside the years 0000 to 9999 in UTC`);
   }
-  return instant.toISOString();
+  return isoOf(result);
 }
 
 /** Minutes east of UTC of a `±HH:MM` offset (hour at most 23, minute at most 59), else none. */
@@ -285,7 +286,7 @@ export function startOfDayIn(
 /** Internal: the civil date after `day`, or `AFTER_ALL` after 9999-12-31. */
 export function nextCivilDate(day: CivilDate): CivilDate | Beyond {
   if (day === '9999-12-31') return AFTER_ALL;
-  return new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+  return isoOf(parseTime(`${day}T00:00:00.000Z`) + 86_400_000).slice(0, 10);
 }
 
 function callCalendar(
@@ -333,9 +334,7 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
     return offset * 60_000;
   };
   return {
-    toCivilDate: (at, zone) =>
-      new Date(Date.parse(at) + offsetOf(zone)).toISOString().split('T')[0] ?? '',
-    startOfDay: (day, zone) =>
-      new Date(Date.parse(`${day}T00:00:00.000Z`) - offsetOf(zone)).toISOString(),
+    toCivilDate: (at, zone) => isoOf(parseTime(at) + offsetOf(zone)).split('T')[0] ?? '',
+    startOfDay: (day, zone) => isoOf(parseTime(`${day}T00:00:00.000Z`) - offsetOf(zone)),
   };
 }

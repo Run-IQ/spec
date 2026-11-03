@@ -1,4 +1,10 @@
-import { citeName, reasonOf, unreadableMessage, VerifyOptionsError } from '../errors.js';
+import {
+  citeName,
+  isOwnOptionsError,
+  newOptionsError,
+  reasonOf,
+  unreadableMessage,
+} from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages, boundWithFixed } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
@@ -18,7 +24,8 @@ import { instanceKey } from './output-values.js';
 import { proofView } from './redact.js';
 import type { Redactions } from './redact.js';
 import { treeDigest } from './tree.js';
-import { publicKeyBytes, signatureMatches } from './sign.js';
+import { signatureMatches } from './sign.js';
+import { readTrustedKeys } from './trusted-keys.js';
 import type { DecisionProof, ProofVerification, ProofView } from './types.js';
 import { readDecisionProof } from './validate.js';
 
@@ -126,10 +133,14 @@ export function verifyProof(
   },
 ): ProofVerification {
   try {
-    return withValueBudget(() => verify(p, readOptions(o)));
+    // The options have a budget of their own (`MAX_VERIFY_OPTIONS_NODES`), so that nothing a
+    // caller passes can use up the budget of the proof: a correct proof is never called too
+    // large for what the options hold.
+    const options = withValueBudget(() => readOptions(o), MAX_VERIFY_OPTIONS_NODES);
+    return withValueBudget(() => verify(p, options));
   } catch (error) {
     // A mistake of the caller in the options is never a verdict on the proof.
-    if (error instanceof VerifyOptionsError) throw error;
+    if (isOwnOptionsError(error)) throw error;
     // A hostile value (a Proxy, a throwing getter) can still throw while being read.
     return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
   }
@@ -215,6 +226,12 @@ interface Options {
   maxProofTimeZones: number;
 }
 
+/**
+ * The most values the options of one call may hold (the rules given count with their `params`):
+ * past it, the call throws `VerifyOptionsError`. The proof has its own budget.
+ */
+export const MAX_VERIFY_OPTIONS_NODES = 10_000_000;
+
 /** The distinct time zones a proof may name (`maxProofTimeZones`, by default). */
 export const MAX_PROOF_TIME_ZONES = 64;
 
@@ -228,7 +245,7 @@ export const MAX_PROOF_TIME_ZONES = 64;
  */
 function readOptions(o: unknown): Options {
   const fail = (option: string, message: string): never => {
-    throw new VerifyOptionsError(option, message);
+    throw newOptionsError(option, message);
   };
   const none: Options = {
     keys: new Map(),
@@ -258,7 +275,7 @@ function readOptions(o: unknown): Options {
       fail(`options.${citeName(name)}`, `options.${citeName(name)} is not an option${hint}`);
     }
   } catch (error) {
-    if (error instanceof VerifyOptionsError) throw error;
+    if (isOwnOptionsError(error)) throw error;
     return fail('options', unreadableMessage('options', error));
   }
   const read = (name: string): unknown => {
@@ -274,7 +291,7 @@ function readOptions(o: unknown): Options {
   }
   const calendar = readCalendar(read('calendar'), fail);
   return {
-    keys: readTrustedKeys(read('trustedKeys'), fail),
+    keys: readTrustedKeys(read('trustedKeys'), 'options.trustedKeys', fail),
     rules: readGivenRules(read('rules'), fail),
     calendar,
     maxProofTimeZones: (max as number | undefined) ?? MAX_PROOF_TIME_ZONES,
@@ -282,40 +299,6 @@ function readOptions(o: unknown): Options {
 }
 
 type Fail = (option: string, message: string) => never;
-
-/** The keys of `trustedKeys`, each read once: a key that is malformed is the caller's. */
-function readTrustedKeys(trustedKeys: unknown, fail: Fail): Map<string, Uint8Array> {
-  const keys = new Map<string, Uint8Array>();
-  if (trustedKeys === undefined) return keys;
-  let record: Record<string, unknown> | undefined;
-  try {
-    record = isPlainObject(trustedKeys) ? trustedKeys : undefined;
-  } catch (error) {
-    return fail('options.trustedKeys', unreadableMessage('options.trustedKeys', error));
-  }
-  if (record === undefined) {
-    return fail('options.trustedKeys', 'options.trustedKeys must be an object of hex public keys');
-  }
-  let ids: string[];
-  try {
-    ids = Object.keys(record);
-  } catch (error) {
-    return fail('options.trustedKeys', unreadableMessage('options.trustedKeys', error));
-  }
-  for (const id of ids) {
-    const path = citeName(`options.trustedKeys.${id}`);
-    let value: unknown;
-    try {
-      value = record[id];
-    } catch (error) {
-      return fail(path, unreadableMessage(path, error));
-    }
-    const bytes = publicKeyBytes(value);
-    if (!bytes) return fail(path, `${path} is malformed`);
-    keys.set(id, bytes);
-  }
-  return keys;
-}
 
 /** The rules of `rules`, each read once: a rule that is not valid or is listed twice is the caller's. */
 function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
@@ -325,7 +308,7 @@ function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
     if (!Array.isArray(rules)) return fail('options.rules', 'options.rules must be an array');
     items = readList(rules, 'options.rules');
   } catch (error) {
-    if (error instanceof VerifyOptionsError) throw error;
+    if (isOwnOptionsError(error)) throw error;
     return fail('options.rules', unreadableMessage('options.rules', error));
   }
   if (!Array.isArray(items)) {

@@ -201,6 +201,29 @@ describe('built entries: one SpecError identity', () => {
     expect(new cjsClass('INVALID_RULE', 'x')).toBeInstanceOf(esmClass);
   });
 
+  it('VerifyOptionsError is recognised across the four entries (AA4)', async () => {
+    const entries = [
+      await esm('index.js'),
+      await esm('canonical.js'),
+      cjs('index.cjs'),
+      cjs('canonical.cjs'),
+    ] as unknown as {
+      VerifyOptionsError: new (option: string, message: string) => Error;
+      verifyProof: (proof: unknown, options?: unknown) => unknown;
+    }[];
+    for (const thrower of entries) {
+      let thrown: unknown;
+      try {
+        thrower.verifyProof({}, 5);
+      } catch (error) {
+        thrown = error;
+      }
+      expect(thrown).toMatchObject({ code: 'INVALID_OPTIONS', option: 'options' });
+      for (const checker of entries) expect(thrown).toBeInstanceOf(checker.VerifyOptionsError);
+    }
+    expect(new Error('x')).not.toBeInstanceOf(entries[0]!.VerifyOptionsError);
+  });
+
   it('a plain Error, or one only named SpecError, is not a SpecError', async () => {
     const main = (await esm('index.js')).SpecError;
     const impostor = Object.assign(new Error('x'), { name: 'SpecError', code: 'INVALID_RULE' });

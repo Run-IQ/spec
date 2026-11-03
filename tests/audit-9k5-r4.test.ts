@@ -22,7 +22,12 @@ import {
 import * as canonicalEntry from '../src/canonical-entry.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import { definitionFindings, WINDOW_KINDS } from '../src/proof/definition-checks.js';
-import { clearIntlCaches, parseOffset, runtimeTzdata } from '../src/proof/intl-calendar.js';
+import {
+  clearIntlCaches,
+  intlRuntime,
+  parseOffset,
+  runtimeTzdata,
+} from '../src/proof/intl-calendar.js';
 import { LIFTS } from '../src/proof/lifts.js';
 import type { ProofView } from '../src/proof/types.js';
 import { dateTimeOf, hasDateSlot, notADateMessage } from '../src/values.js';
@@ -224,7 +229,10 @@ describe('Y2: a fault of the runtime is a notice naming what could not be checke
   });
 
   const stub = (build: (zone: string) => object) =>
-    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (_l: unknown, options: unknown) {
+    vi.spyOn(intlRuntime, 'DateTimeFormat').mockImplementation(function (
+      _l: unknown,
+      options: unknown,
+    ) {
       return build((options as { timeZone: string }).timeZone) as never;
     } as never);
   const reads = (zone: string) => ({
@@ -375,7 +383,7 @@ describe('Y5: one tzdata release, recorded by the engine', () => {
     for (const declaredBy of ['plugin:x', 'model:x']) {
       const other = { name: 'tzdata', version: '2025c', declaredBy };
       expect(run([paris], near, [other], '2025c').unchecked).toEqual([
-        'window not checked: r1@1 (no tzdata in the proof)',
+        'window not checked: r1@1 (no tzdata recorded by the engine)',
       ]);
     }
     // The engine's release decides even when a plugin names another.
@@ -411,7 +419,7 @@ describe('Y8: what the two surviving mutants of round 4 needed', () => {
     (name) => {
       const near = { name, version: '2025c', declaredBy: 'engine' };
       expect(run([paris], '2025-01-01T00:30:00.000Z', [near], '2025c').unchecked).toEqual([
-        'window not checked: r1@1 (no tzdata in the proof)',
+        'window not checked: r1@1 (no tzdata recorded by the engine)',
       ]);
     },
   );
@@ -480,7 +488,7 @@ describe('Y9: the bound of the notices is derived from the code', () => {
       '(no evaluatedAt)',
       'zone Mars/Olympus unknown to this verifier',
       'tzdata 2024a of the proof, 2025c here',
-      '(no tzdata in the proof)',
+      '(no tzdata recorded by the engine)',
       '(this runtime does not name its tzdata)',
       '(the day holds the bound of the window)',
     ];

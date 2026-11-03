@@ -1,4 +1,5 @@
 import { citeName } from './errors.js';
+import { datePrototype, getPrototypeOf, slotTime } from './intrinsics.js';
 
 /**
  * The deepest a free-form JSON value carried by the format may nest: rule `params`,
@@ -51,16 +52,16 @@ let lastSpent = 0;
  * makes (a nested call, as `verifyProof` normalizing a rule, shares the budget of the outer one).
  * Calls are synchronous, so the budget is the current call's alone.
  */
-export function withValueBudget<T>(read: () => T): T {
+export function withValueBudget<T>(read: () => T, limit: number = MAX_JSON_VALUES): T {
   // Nested, it shares the budget; inside `ownCopy` nothing is spent, so no budget is needed.
   if (budget !== undefined || ownCopies > 0) return read();
-  const current = { remaining: MAX_JSON_VALUES };
+  const current = { remaining: limit };
   budget = current;
   try {
     return read();
   } finally {
     budget = undefined;
-    lastSpent = MAX_JSON_VALUES - current.remaining;
+    lastSpent = limit - current.remaining;
   }
 }
 
@@ -167,7 +168,7 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
 export function dateTimeOf(value: unknown): number | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   // Throws for a revoked Proxy, which `readReferenceDate` reports as unreadable.
-  const real = Object.getPrototypeOf(value) === Date.prototype;
+  const real = getPrototypeOf(value) === datePrototype;
   const time = dateSlotOf(value);
   // The slot under another prototype is not a Date here: see `hasDateSlot`.
   return real ? time : undefined;
@@ -179,7 +180,7 @@ function dateSlotOf(value: unknown): number | undefined {
   // accessor would see. `getTime` reads the internal slot and nothing else, and throws without it.
   if (typeof value !== 'object' || value === null) return undefined;
   try {
-    return Date.prototype.getTime.call(value);
+    return slotTime(value);
   } catch {
     return undefined;
   }
@@ -194,7 +195,7 @@ function dateSlotOf(value: unknown): number | undefined {
  */
 export function notADateMessage(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || !hasDateSlot(value)) return undefined;
-  if (Object.getPrototypeOf(value) === Date.prototype) return undefined;
+  if (getPrototypeOf(value) === datePrototype) return undefined;
   return hasPlainPrototype(value)
     ? 'a Date with a plain prototype'
     : 'a Date with a foreign prototype';
@@ -224,14 +225,14 @@ export function isPlainObject(value: unknown): value is Record<string, unknown> 
 
 /** True when the prototype of `value` is `null` or some realm's `Object.prototype`. */
 function hasPlainPrototype(value: object): boolean {
-  const proto: unknown = Object.getPrototypeOf(value);
+  const proto: unknown = getPrototypeOf(value);
   return proto === null || proto === Object.prototype || isForeignObjectPrototype(proto);
 }
 
 /** True for `Object.prototype` of another realm. */
 function isForeignObjectPrototype(proto: unknown): boolean {
   if (proto === null || typeof proto !== 'object') return false;
-  if (Object.getPrototypeOf(proto) !== null || Object.keys(proto).length > 0) return false;
+  if (getPrototypeOf(proto) !== null || Object.keys(proto).length > 0) return false;
   const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
   return (
     typeof ctor === 'function' &&
@@ -278,7 +279,7 @@ export function typeName(value: unknown): string {
 }
 
 /** `%TypedArray%.prototype`: its getters read a typed array's internal slots, never caller code. */
-const TYPED_ARRAY_PROTOTYPE: object = Object.getPrototypeOf(Uint8Array.prototype) as object;
+const TYPED_ARRAY_PROTOTYPE: object = getPrototypeOf(Uint8Array.prototype) as object;
 const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
   TYPED_ARRAY_PROTOTYPE,
   Symbol.toStringTag,

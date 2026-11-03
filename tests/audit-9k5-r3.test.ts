@@ -18,6 +18,7 @@ import { canonicalize } from '../src/index.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import {
   clearIntlCaches,
+  intlRuntime,
   intlCacheLimits,
   intlCacheSizes,
   intlCalendar,
@@ -116,9 +117,9 @@ describe('W1: the exact offset is used only under the database of the proof', ()
     expect(run([end], at, '2025c', '2026c')).toEqual({ invalid: [], unchecked: other });
   });
 
-  it('no tzdata in the proof, or none named by the runtime: a notice', () => {
+  it('no tzdata recorded by the engine, or none named by the runtime: a notice', () => {
     expect(run([start], at, undefined, '2025c').unchecked).toEqual([
-      'window not checked: r1@1 (no tzdata in the proof)',
+      'window not checked: r1@1 (no tzdata recorded by the engine)',
     ]);
     expect(run([start], at, '2025c', undefined).unchecked).toEqual([
       'window not checked: r1@1 (this runtime does not name its tzdata)',
@@ -312,7 +313,7 @@ describe('W6: a runtime that cannot read offsets says so, in a notice', () => {
   });
 
   const fakeFormatter = (offsetOf: (zone: string) => string) =>
-    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function (
+    vi.spyOn(intlRuntime, 'DateTimeFormat').mockImplementation(function (
       _locale: unknown,
       options: unknown,
     ) {
@@ -336,7 +337,7 @@ describe('W6: a runtime that cannot read offsets says so, in a notice', () => {
   });
 
   it('a runtime whose Intl refuses every time zone: the same notice, no zone is "unknown"', () => {
-    vi.spyOn(Intl, 'DateTimeFormat').mockImplementation(function () {
+    vi.spyOn(intlRuntime, 'DateTimeFormat').mockImplementation(function () {
       throw new RangeError('Invalid time zone specified');
     } as never);
     const out = run([{ ...paris, effectiveFrom: '2025-01-01' }], near, '2025c', '2025c');

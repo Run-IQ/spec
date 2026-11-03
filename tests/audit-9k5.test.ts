@@ -31,7 +31,7 @@ import * as canonicalEntry from '../src/canonical-entry.js';
 import { boundWithFixed } from '../src/issues.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import type { ProofView } from '../src/proof/types.js';
-import { fixedCalendar, specError } from './helpers.js';
+import { fixedCalendar, optionError, specError } from './helpers.js';
 import { NOT_REPLAYED, withRuntimeTzdata } from './notices.js';
 import {
   baseContent,
@@ -452,12 +452,12 @@ describe('findings 3 and 12: the cases the first tests left open', () => {
     });
   });
 
-  it('verifyAttestation reads every trusted key: a broken key of another id is invalid', () => {
+  it('verifyAttestation reads every trusted key: a broken key of another id throws', () => {
     const body = createAttestation('a'.repeat(64), RFC_SECRET, 'reviewer');
     const keys = { reviewer: RFC_PUBLIC, other: 'zz' };
-    expect(verifyAttestation(body, 'a'.repeat(64), keys)).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.other is malformed'],
+    expect(optionError(() => verifyAttestation(body, 'a'.repeat(64), keys))).toMatchObject({
+      option: 'trustedKeys.other',
+      message: 'trustedKeys.other is malformed',
     });
     expect(verifyAttestation(body, 'a'.repeat(64), { reviewer: RFC_PUBLIC }).status).toBe(
       'authentic',

@@ -4,7 +4,7 @@ import type { Attestation, ProofVerification } from '../src/index.js';
 import { attestationMessage } from '../src/attestation/verify.js';
 import { signAttestationBody } from '../src/attestation/sign.js';
 import { lastValuesSpent } from '../src/values.js';
-import { counted, jsonCopy, nested, revokedProxy, specError } from './helpers.js';
+import { counted, jsonCopy, nested, optionError, revokedProxy, specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, signed } from './proof-cases.js';
 
 const DIGEST = signed().digest;
@@ -174,18 +174,28 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
   });
 
   it('hostile arguments: the trusted keys and the digest expected', () => {
-    expect(verify(COSIGNATURE, throwingProxy({}))).toEqual(
-      invalid(['trustedKeys could not be read: boom']),
-    );
+    expect(optionError(() => verify(COSIGNATURE, throwingProxy({})))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys could not be read: boom',
+    });
     const keys = {};
     throwAt(keys, 'reviewer');
-    expect(verify(COSIGNATURE, keys)).toEqual(invalid(['trustedKeys could not be read: boom']));
-    expect(verifyAttestation(COSIGNATURE, throwingProxy({}) as unknown as string, TRUSTED)).toEqual(
-      invalid(['the expected proof digest must be 64 lowercase hex characters']),
-    );
-    expect(verify(COSIGNATURE, [])).toEqual(
-      invalid(['trustedKeys must be an object of hex public keys']),
-    );
+    expect(optionError(() => verify(COSIGNATURE, keys))).toMatchObject({
+      option: 'trustedKeys.reviewer',
+      message: 'trustedKeys.reviewer could not be read: boom',
+    });
+    expect(
+      optionError(() =>
+        verifyAttestation(COSIGNATURE, throwingProxy({}) as unknown as string, TRUSTED),
+      ),
+    ).toMatchObject({
+      option: 'proofDigest',
+      message: 'the expected proof digest must be 64 lowercase hex characters',
+    });
+    expect(optionError(() => verify(COSIGNATURE, []))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
+    });
   });
 
   it('huge texts: a 10,000,000-character role and key id are named, never thrown', () => {

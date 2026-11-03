@@ -1,5 +1,6 @@
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { citeName, isOwnError, reasonOf, VerifyOptionsError } from '../errors.js';
+import { isoOf, parseTime } from '../intrinsics.js';
+import { citeName, isOwnError, isOwnOptionsError, newOptionsError, reasonOf } from '../errors.js';
 import type { RuleDefinition } from '../rule/definition.js';
 import { LOCAL_RULE_SET, qualifiedFrom } from '../rule/ruleSet.js';
 import { windowContains } from '../rule/window.js';
@@ -96,14 +97,14 @@ function position(ref: string, bound: string): Position {
   const refCivil = isCivilDate(ref);
   if (refCivil === isCivilDate(bound)) return ref < bound ? 'before' : 'notBefore';
   if (!refCivil) {
-    const midnight = Date.parse(`${bound}T00:00:00.000Z`);
-    const at = Date.parse(ref);
+    const midnight = parseTime(`${bound}T00:00:00.000Z`);
+    const at = parseTime(ref);
     if (at < midnight - DAY_MS) return 'before';
     return at >= midnight + DAY_MS ? 'notBefore' : 'undecided';
   }
-  const at = Date.parse(bound);
-  const first = new Date(at - DAY_MS).toISOString().slice(0, 10);
-  const last = new Date(at + DAY_MS).toISOString().slice(0, 10);
+  const at = parseTime(bound);
+  const first = isoOf(at - DAY_MS).slice(0, 10);
+  const last = isoOf(at + DAY_MS).slice(0, 10);
   if (ref < first) return 'before';
   return ref > last ? 'notBefore' : 'undecided';
 }
@@ -166,7 +167,7 @@ function windowHolds(
     const recorded = proof.versions.components.find(
       (entry) => entry.name === 'tzdata' && entry.declaredBy === 'engine',
     )?.version;
-    if (recorded === undefined) return 'no tzdata in the proof';
+    if (recorded === undefined) return 'no tzdata recorded by the engine';
     if (tzdata === undefined) return 'this runtime does not name its tzdata';
     if (recorded !== tzdata)
       return `tzdata ${citeName(recorded)} of the proof, ${citeName(tzdata)} here`;
@@ -216,7 +217,7 @@ function withCallerCalendar(
     const answered =
       isOwnError(error) && /^calendar\.(toCivilDate|startOfDay) /.test(error.message);
     if (threw || answered) {
-      throw new VerifyOptionsError(
+      throw newOptionsError(
         'options.calendar',
         `options.calendar is not usable: ${reasonOf(threw ? faulted : error)}`,
       );
@@ -237,7 +238,7 @@ export const WINDOW_KINDS = [
   'no evaluatedAt',
   'zone unknown to this verifier',
   "tzdata of the proof differs from this runtime's",
-  'no tzdata in the proof',
+  'no tzdata recorded by the engine',
   'this runtime does not name its tzdata',
   'the day holds the bound of the window',
   CANNOT_READ_OFFSETS,
@@ -307,7 +308,7 @@ export function definitionFindings(
         held = windowHolds(proof, definition, calendar, runtime.tzdata);
       } catch (error) {
         // A mistake of the caller in the options is not a finding about the proof.
-        if (error instanceof VerifyOptionsError) throw error;
+        if (isOwnOptionsError(error)) throw error;
         report.invalid(`window check failed: ${reasonOf(error)} (${citeName(key)})`);
         held = 'the check failed';
       }
