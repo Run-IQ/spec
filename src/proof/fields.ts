@@ -9,6 +9,14 @@ import { isCivilDate, isInstant, isTimeZone, normalizeTimeZone } from '../time/c
 import { hasLoneSurrogate, loneSurrogateMessage } from '../values.js';
 import { oneOf, scalarCheck, stringCheck } from './checks.js';
 import type { Check } from './checks.js';
+import {
+  arrayFilter,
+  numberIsFinite,
+  numberIsSafeInteger,
+  regExpSource,
+  regExpTest,
+  stringIncludes,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the checks of the scalar fields of a decision proof (ids, versions,
 // salts, dates, pointers, subjects, statuses), from which its shapes are built (`shape.ts`).
@@ -24,7 +32,8 @@ export const GROUPED_REASONS: readonly string[] = [
   'TAG_MISMATCH',
   'NOT_REQUESTED',
 ];
-export const SETTLED: readonly string[] = OUTPUT_STATUSES.filter(
+export const SETTLED: readonly string[] = arrayFilter(
+  OUTPUT_STATUSES,
   (status) => status !== 'undetermined',
 );
 const SUBJECT_FORM =
@@ -32,7 +41,7 @@ const SUBJECT_FORM =
 
 /** A rule's priority, as its definition gives it: a finite number. */
 export const priority = scalarCheck((value, path, add) => {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== 'number' || !numberIsFinite(value)) {
     add(path, `${citeName(path)} must be a finite number`);
   }
 });
@@ -43,7 +52,7 @@ export const version = scalarCheck((value, path, add) => {
 
 /** A stratum index: a safe integer, 0 or more. Whether `strata` has it is checked later. */
 export const stratum = scalarCheck((value, path, add) => {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+  if (typeof value !== 'number' || !numberIsSafeInteger(value) || value < 0) {
     add(path, `${citeName(path)} must be a non-negative integer`);
   }
 });
@@ -52,18 +61,20 @@ export const stratum = scalarCheck((value, path, add) => {
 export const rank = stratum;
 
 export const salt = scalarCheck((value, path, add) => {
-  if (typeof value !== 'string' || !SALT.test(value)) {
+  if (typeof value !== 'string' || !regExpTest(SALT, value)) {
     add(path, `${citeName(path)} must be 16 bytes in lowercase hex (32 characters)`);
   }
 });
 
 export const code = stringCheck('a non-empty string', (text, path) =>
-  CODE.test(text) ? undefined : `${citeName(path)} must be a code matching ${CODE.source}`,
+  regExpTest(CODE, text)
+    ? undefined
+    : `${citeName(path)} must be a code matching ${regExpSource(CODE)}`,
 );
 
 /** A rule id inside its rule set: bare. */
 export const ruleId = stringCheck('a non-empty string', (text, path) =>
-  text.includes(':')
+  stringIncludes(text, ':')
     ? `${citeName(path)} must not contain ":": a rule id is qualified by its rule set`
     : undefined,
 );

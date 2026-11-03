@@ -11,6 +11,30 @@ import {
   undefinedMessage,
   withValueBudget,
 } from './values.js';
+import {
+  NativeDataView,
+  NativeMap,
+  NativeString,
+  NativeUint8Array,
+  arrayForEach,
+  arrayIsArray,
+  arrayMap,
+  arrayPush,
+  dataViewSetUint32,
+  mapGet,
+  mapSet,
+  mathFloor,
+  mathMax,
+  numberIsSafeInteger,
+  uint8ArrayBuffer,
+  uint8ArrayEvery,
+  uint8ArrayFrom,
+  uint8ArrayLength,
+  uint8ArrayOf,
+  uint8ArraySet,
+  uint8ArraySlice,
+  uint8ArraySubarray,
+} from './intrinsics.js';
 
 /**
  * Merkle trees as RFC 6962 (section 2.1) defines them, shared by the input digest (D-15) and
@@ -27,7 +51,7 @@ import {
 /** The bytes of a leaf hash or a node hash: a sha256 digest. */
 const HASH_BYTES = 32;
 /** The domain prefix of a node (RFC 6962): `0x01`. */
-const NODE_PREFIX = Uint8Array.of(1);
+const NODE_PREFIX = uint8ArrayOf(1);
 /** How a list of hashes is named in messages. */
 const LEAVES = 'leaf hashes';
 
@@ -42,7 +66,7 @@ export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) =>
     fresh._cloneInto(work);
     hashWork.calls += 1;
     for (const part of parts) {
-      hashWork.bytes += part.length;
+      hashWork.bytes += uint8ArrayLength(part);
       work.update(part);
     }
     work.digestInto(out);
@@ -53,7 +77,7 @@ export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) =>
 export function createHasher(): (...parts: Uint8Array[]) => Uint8Array {
   const hashInto = createHasherInto();
   return (...parts) => {
-    const out = new Uint8Array(HASH_BYTES);
+    const out = new NativeUint8Array(HASH_BYTES);
     hashInto(out, ...parts);
     return out;
   };
@@ -72,8 +96,8 @@ export class PackedHashes {
   allocated: number;
 
   constructor(capacity = 1024) {
-    this.bytes = new Uint8Array(HASH_BYTES * Math.max(capacity, 1));
-    this.allocated = this.bytes.length;
+    this.bytes = new NativeUint8Array(HASH_BYTES * mathMax(capacity, 1));
+    this.allocated = uint8ArrayLength(this.bytes);
   }
 
   /** How many hashes it holds. */
@@ -83,24 +107,24 @@ export class PackedHashes {
 
   /** A copy of the hash at `index` (below `length`). */
   copyAt(index: number): Uint8Array {
-    return this.bytes.slice(index * HASH_BYTES, (index + 1) * HASH_BYTES);
+    return uint8ArraySlice(this.bytes, index * HASH_BYTES, (index + 1) * HASH_BYTES);
   }
 
   /** A copy of the hashes held, end to end (32 bytes each). */
   copyAll(): Uint8Array {
-    return this.bytes.slice(0, this.count * HASH_BYTES);
+    return uint8ArraySlice(this.bytes, 0, this.count * HASH_BYTES);
   }
 
   /** The 32 bytes where the next hash is to be written; `push` then keeps them. */
   next(): Uint8Array {
     const end = (this.count + 1) * HASH_BYTES;
-    if (end > this.bytes.length) {
-      const grown = new Uint8Array(this.bytes.length * 2);
-      this.allocated += grown.length;
-      grown.set(this.bytes);
+    if (end > uint8ArrayLength(this.bytes)) {
+      const grown = new NativeUint8Array(uint8ArrayLength(this.bytes) * 2);
+      this.allocated += uint8ArrayLength(grown);
+      uint8ArraySet(grown, this.bytes);
       this.bytes = grown;
     }
-    return this.bytes.subarray(end - HASH_BYTES, end);
+    return uint8ArraySubarray(this.bytes, end - HASH_BYTES, end);
   }
 
   /** Keeps the hash written into the last `next()`. */
@@ -133,38 +157,44 @@ export class PackedHashes {
    */
   pathsAndRoot(indices: readonly number[]): { paths: Uint8Array[][]; root: Uint8Array } {
     const hashInto = createHasherInto();
-    const paths = indices.map((): Uint8Array[] => []);
+    const paths = arrayMap(indices, (): Uint8Array[] => []);
     if (this.count === 0) {
-      const empty = new Uint8Array(HASH_BYTES);
+      const empty = new NativeUint8Array(HASH_BYTES);
       hashInto(empty);
       return { paths, root: empty };
     }
-    const node = new Uint8Array(1 + 2 * HASH_BYTES);
+    const node = new NativeUint8Array(1 + 2 * HASH_BYTES);
     node[0] = 1;
-    const at = (i: number): Uint8Array => this.bytes.subarray(i * HASH_BYTES, (i + 1) * HASH_BYTES);
+    const at = (i: number): Uint8Array =>
+      uint8ArraySubarray(this.bytes, i * HASH_BYTES, (i + 1) * HASH_BYTES);
     const positions = [...indices];
     let width = this.count;
     while (width > 1) {
-      positions.forEach((position, k) => {
+      arrayForEach(positions, (position, k) => {
         const sibling = position % 2 === 1 ? position - 1 : position + 1;
-        if (sibling < width) paths[k]?.push(at(sibling).slice());
-        positions[k] = Math.floor(position / 2);
+        const path = paths[k];
+        if (sibling < width && path !== undefined) arrayPush(path, uint8ArraySlice(at(sibling)));
+        positions[k] = mathFloor(position / 2);
       });
       let next = 0;
       for (let i = 0; i < width; i += 2) {
         if (i + 1 < width) {
           // Both children are copied into `node` before their parent overwrites slot `next`.
-          node.set(this.bytes.subarray(i * HASH_BYTES, (i + 2) * HASH_BYTES), 1);
+          uint8ArraySet(
+            node,
+            uint8ArraySubarray(this.bytes, i * HASH_BYTES, (i + 2) * HASH_BYTES),
+            1,
+          );
           hashInto(at(next), node);
         } else {
           // The odd node at the end goes up unchanged; `next` < `i`, so the slots are distinct.
-          at(next).set(at(i));
+          uint8ArraySet(at(next), at(i));
         }
         next += 1;
       }
       width = next;
     }
-    return { paths, root: at(0).slice() };
+    return { paths, root: uint8ArraySlice(at(0)) };
   }
 }
 
@@ -176,27 +206,27 @@ export class PackedHashes {
  * to the size of the tree, which an RFC 6962 root alone does not.
  */
 export function sizedDigest(tag: string, size: number, root: Uint8Array): Uint8Array {
-  const count = new Uint8Array(8);
-  const view = new DataView(count.buffer);
+  const count = new NativeUint8Array(8);
+  const view = new NativeDataView(uint8ArrayBuffer(count));
   // `size` is a safe integer: its high and low 32 bits, big-endian.
-  view.setUint32(0, Math.floor(size / 2 ** 32));
-  view.setUint32(4, size % 2 ** 32);
-  const out = new Uint8Array(HASH_BYTES);
+  dataViewSetUint32(view, 0, mathFloor(size / 2 ** 32));
+  dataViewSetUint32(view, 4, size % 2 ** 32);
+  const out = new NativeUint8Array(HASH_BYTES);
   createHasherInto()(out, digestPrefix(tag), count, root);
   return out;
 }
 
 /** The prefix of the digest of a tree tagged `tag`: `0x02 ‖ utf8(tag) ‖ 0x00`, built once. */
 function digestPrefix(tag: string): Uint8Array {
-  let prefix = DIGEST_PREFIXES.get(tag);
+  let prefix = mapGet(DIGEST_PREFIXES, tag);
   if (prefix === undefined) {
-    prefix = Uint8Array.from([2, ...new TextEncoder().encode(tag), 0]);
-    DIGEST_PREFIXES.set(tag, prefix);
+    prefix = uint8ArrayFrom([2, ...new TextEncoder().encode(tag), 0]);
+    mapSet(DIGEST_PREFIXES, tag, prefix);
   }
   return prefix;
 }
 
-const DIGEST_PREFIXES = new Map<string, Uint8Array>();
+const DIGEST_PREFIXES = new NativeMap<string, Uint8Array>();
 
 /**
  * The RFC 6962 hash of the tree whose leaves are `leafHashes`, in that order: 32 bytes, a fresh
@@ -232,10 +262,10 @@ export function inclusionPath(leafHashes: readonly Uint8Array[], index: number):
     if (typeof at !== 'number') {
       throw newSpecError('INVALID_PROOF', `index must be a number, got ${typeName(at)}`);
     }
-    if (!Number.isSafeInteger(at) || at < 0 || at >= leaves.length) {
+    if (!numberIsSafeInteger(at) || at < 0 || at >= leaves.length) {
       throw newSpecError(
         'INVALID_PROOF',
-        `index ${String(at)} is not a leaf of a tree of ${leaves.length} leaves`,
+        `index ${NativeString(at)} is not a leaf of a tree of ${leaves.length} leaves`,
       );
     }
     return leaves.path(at);
@@ -282,15 +312,15 @@ export function rootFromPath(
 ): Uint8Array | undefined {
   const n: unknown = size;
   const at: unknown = index;
-  if (typeof n !== 'number' || !Number.isSafeInteger(n) || n < 1) return undefined;
-  if (typeof at !== 'number' || !Number.isSafeInteger(at) || at < 0 || at >= n) return undefined;
+  if (typeof n !== 'number' || !numberIsSafeInteger(n) || n < 1) return undefined;
+  if (typeof at !== 'number' || !numberIsSafeInteger(at) || at < 0 || at >= n) return undefined;
   const steps = auditSteps(at, n);
   const hashes = readPath(path, steps.length);
   const leaf = hashOf(leafHash);
   if (hashes === undefined || leaf === undefined) return undefined;
   const hash = createHasher();
   let current = leaf;
-  steps.forEach((left, i) => {
+  arrayForEach(steps, (left, i) => {
     const sibling = hashes[i] ?? current;
     current = left ? hash(NODE_PREFIX, sibling, current) : hash(NODE_PREFIX, current, sibling);
   });
@@ -317,16 +347,16 @@ function auditSteps(index: number, size: number): boolean[] {
   let sn = size - 1;
   while (sn > 0) {
     const odd = fn % 2 === 1;
-    steps.push(odd || fn === sn);
+    arrayPush(steps, odd || fn === sn);
     if (!odd && fn === sn) {
       // The last node of its level: it goes up unchanged until it becomes a right child.
       while (fn % 2 === 0 && fn !== 0) {
         fn /= 2;
-        sn = Math.floor(sn / 2);
+        sn = mathFloor(sn / 2);
       }
     }
-    fn = Math.floor(fn / 2);
-    sn = Math.floor(sn / 2);
+    fn = mathFloor(fn / 2);
+    sn = mathFloor(sn / 2);
   }
   return steps;
 }
@@ -342,11 +372,11 @@ function auditSteps(index: number, size: number): boolean[] {
  */
 function readHashes(list: readonly Uint8Array[]): PackedHashes {
   try {
-    if (!Array.isArray(list)) {
+    if (!arrayIsArray(list)) {
       throw newSpecError('INVALID_PROOF', `${LEAVES} must be an array of 32-byte Uint8Array`);
     }
     const length: unknown = list.length;
-    if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+    if (typeof length !== 'number' || !numberIsSafeInteger(length) || length < 0) {
       throw newSpecError('INVALID_PROOF', `${LEAVES} has an invalid length`);
     }
     if (!spendValues(length)) throw newSpecError('INVALID_PROOF', tooLargeMessage(LEAVES));
@@ -388,13 +418,13 @@ export function lastPackedBytes(): number {
  */
 function readPath(path: readonly Uint8Array[], length: number): Uint8Array[] | undefined {
   try {
-    if (!Array.isArray(path) || path.length !== length) return undefined;
+    if (!arrayIsArray(path) || path.length !== length) return undefined;
     const hashes: Uint8Array[] = [];
     for (let i = 0; i < length; i++) {
       if (!(i in path)) return undefined;
       const hash = hashOf(path[i]);
       if (hash === undefined) return undefined;
-      hashes.push(hash);
+      arrayPush(hashes, hash);
     }
     return hashes;
   } catch {
@@ -405,10 +435,12 @@ function readPath(path: readonly Uint8Array[], length: number): Uint8Array[] | u
 /** A copy of `value` when it is a `Uint8Array` of 32 bytes, else `undefined`. */
 function hashOf(value: unknown): Uint8Array | undefined {
   const bytes = bytesOf(value);
-  return bytes?.length === HASH_BYTES ? bytes : undefined;
+  return bytes !== undefined && uint8ArrayLength(bytes) === HASH_BYTES ? bytes : undefined;
 }
 
 /** Internal: true when `a` and `b` hold the same bytes. */
 export function sameBytes(a: Uint8Array, b: Uint8Array): boolean {
-  return a.length === b.length && a.every((byte, i) => byte === b[i]);
+  return (
+    uint8ArrayLength(a) === uint8ArrayLength(b) && uint8ArrayEvery(a, (byte, i) => byte === b[i])
+  );
 }

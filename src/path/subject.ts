@@ -3,6 +3,16 @@ import { daysInMonth } from '../rule/date.js';
 import { hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
 import { parsePointer } from './pointer.js';
 import type { JsonPointer } from './pointer.js';
+import {
+  NativeNumber,
+  NativeString,
+  arrayEvery,
+  arrayMap,
+  numberIsSafeInteger,
+  regExpExec,
+  stringSplit,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * The subject of a rule instance: a JSON pointer to the collection element (or nested elements)
@@ -50,7 +60,7 @@ export function isSubject(value: unknown): value is Subject {
   } catch {
     return false;
   }
-  return segments.every(isSubjectSegment);
+  return arrayEvery(segments, isSubjectSegment);
 }
 
 /**
@@ -61,7 +71,7 @@ export function isSubject(value: unknown): value is Subject {
 export function subjectContains(scope: Subject, subject: Subject): boolean {
   const outer = subjectSegments(scope);
   const inner = subjectSegments(subject);
-  return outer.length <= inner.length && outer.every((segment, i) => segment === inner[i]);
+  return outer.length <= inner.length && arrayEvery(outer, (segment, i) => segment === inner[i]);
 }
 
 function subjectSegments(subject: Subject): string[] {
@@ -73,9 +83,9 @@ function subjectSegments(subject: Subject): string[] {
 }
 
 function isSubjectSegment(segment: string): boolean {
-  if (!segment.startsWith('!')) return true;
-  if (segment.startsWith(GROUP_PREFIX)) return true;
-  const period = SEGMENT.exec(segment);
+  if (!stringStartsWith(segment, '!')) return true;
+  if (stringStartsWith(segment, GROUP_PREFIX)) return true;
+  const period = regExpExec(SEGMENT, segment);
   if (!period) return false;
   const [, from, until] = period;
   return (
@@ -89,7 +99,7 @@ function isSubjectSegment(segment: string): boolean {
 
 /** A `YYYY-MM-DD` text (already matched) that names a real day. */
 function isRealDate(text: string): boolean {
-  const [year, month, day] = text.split('-').map(Number);
+  const [year, month, day] = arrayMap(stringSplit(text, '-'), NativeNumber);
   if (year === undefined || month === undefined || day === undefined) return false;
   return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
 }
@@ -102,8 +112,8 @@ function keyText(value: unknown, what: string): string {
     }
     return value;
   }
-  if (typeof value === 'number' && Number.isSafeInteger(value)) return String(value);
-  const got = typeof value === 'number' ? String(value) : typeName(value);
+  if (typeof value === 'number' && numberIsSafeInteger(value)) return NativeString(value);
+  const got = typeof value === 'number' ? NativeString(value) : typeName(value);
   throw newSpecError(
     'INVALID_PATH',
     `${citeName(what)} must be a string or a safe integer, got ${got}`,

@@ -4,6 +4,19 @@ import { parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { FactCopy } from './read-disclosure.js';
 import type { InputLeaf } from './tree.js';
+import {
+  NativeMap,
+  NativeNumber,
+  arrayForEach,
+  arrayPop,
+  arrayPush,
+  arraySlice,
+  mapGet,
+  mapHas,
+  mapSet,
+  mapSize,
+  objectDefineProperty,
+} from '../intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: the value of a fact of a disclosure, rebuilt from its leaves once
@@ -37,19 +50,19 @@ export function rebuild(
   let root: Node | undefined;
   for (const { leaf } of fact.leaves) {
     const node = nodeOf(leaf);
-    if (node.kind === 'array') arrays.push(node);
-    const segments = parsePointer(leaf.pointer).slice(depth);
-    root ??= segments.length === 0 ? node : { kind: 'object', members: new Map() };
+    if (node.kind === 'array') arrayPush(arrays, node);
+    const segments = arraySlice(parsePointer(leaf.pointer), depth);
+    root ??= segments.length === 0 ? node : { kind: 'object', members: new NativeMap() };
     let parent = root;
-    segments.forEach((segment, i) => {
+    arrayForEach(segments, (segment, i) => {
       const child = i === segments.length - 1 ? node : undefined;
       parent = childOf(parent, segment, child);
     });
   }
   for (const list of arrays) {
-    if (list.items.size === list.length) continue;
+    if (mapSize(list.items) === list.length) continue;
     let missing = 0;
-    while (list.items.has(missing)) missing += 1;
+    while (mapHas(list.items, missing)) missing += 1;
     return (
       `fact not shown whole: ${citeName(fact.pointer)} ` +
       `(${citeName(list.pointer)} lacks element ${missing})`
@@ -62,9 +75,14 @@ export function rebuild(
 /** The node of a leaf: its scalar, its list (no element yet), or its empty object. */
 function nodeOf(leaf: InputLeaf): Node {
   if (leaf.kind === 'array') {
-    return { kind: 'array', pointer: leaf.pointer, length: leaf.length ?? 0, items: new Map() };
+    return {
+      kind: 'array',
+      pointer: leaf.pointer,
+      length: leaf.length ?? 0,
+      items: new NativeMap(),
+    };
   }
-  if (leaf.kind === 'object') return { kind: 'object', members: new Map() };
+  if (leaf.kind === 'object') return { kind: 'object', members: new NativeMap() };
   return { kind: 'value', value: leaf.value ?? null };
 }
 
@@ -75,15 +93,15 @@ function nodeOf(leaf: InputLeaf): Node {
  */
 function childOf(parent: Node, segment: string, node: Node | undefined): Node {
   if (parent.kind === 'value') return parent;
-  const make = (): Node => node ?? { kind: 'object', members: new Map() };
+  const make = (): Node => node ?? { kind: 'object', members: new NativeMap() };
   if (parent.kind === 'array') {
-    const index = Number(segment);
-    const child = parent.items.get(index) ?? make();
-    parent.items.set(index, child);
+    const index = NativeNumber(segment);
+    const child = mapGet(parent.items, index) ?? make();
+    mapSet(parent.items, index, child);
     return child;
   }
-  const child = parent.members.get(segment) ?? make();
-  parent.members.set(segment, child);
+  const child = mapGet(parent.members, segment) ?? make();
+  mapSet(parent.members, segment, child);
   return child;
 }
 
@@ -106,25 +124,25 @@ function jsonOf(node: Node): JsonValue {
     if (child.kind === 'value') return child.value;
     if (child.kind === 'array') {
       const out: JsonValue[] = [];
-      pending.push({ kind: 'array', node: child, out });
+      arrayPush(pending, { kind: 'array', node: child, out });
       return out;
     }
     const out: { [key: string]: JsonValue } = {};
-    pending.push({ kind: 'object', node: child, out });
+    arrayPush(pending, { kind: 'object', node: child, out });
     return out;
   };
   const value = open(node);
-  for (let task = pending.pop(); task !== undefined; task = pending.pop()) {
+  for (let task = arrayPop(pending); task !== undefined; task = arrayPop(pending)) {
     if (task.kind === 'array') {
       for (let k = 0; k < task.node.length; k++) {
-        const item = task.node.items.get(k);
-        task.out.push(item === undefined ? null : open(item));
+        const item = mapGet(task.node.items, k);
+        arrayPush(task.out, item === undefined ? null : open(item));
       }
       continue;
     }
     for (const [key, member] of task.node.members) {
       // Plain assignment would turn a `__proto__` key into a prototype change.
-      Object.defineProperty(task.out, key, {
+      objectDefineProperty(task.out, key, {
         value: open(member),
         enumerable: true,
         writable: true,

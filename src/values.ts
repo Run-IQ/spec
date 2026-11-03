@@ -1,5 +1,22 @@
 import { citeName } from './errors.js';
-import { datePrototype, getPrototypeOf, slotTime } from './intrinsics.js';
+import {
+  NativeUint8Array,
+  arrayIsArray,
+  arrayPush,
+  datePrototype,
+  functionCall,
+  getPrototypeOf,
+  numberIsSafeInteger,
+  objectGetOwnPropertyDescriptor,
+  objectKeys,
+  objectPrototype,
+  regExpTest,
+  slotTime,
+  symbolToStringTag,
+  uint8ArrayLength,
+  uint8ArrayPrototype,
+  uint8ArraySet,
+} from './intrinsics.js';
 
 /**
  * The deepest a free-form JSON value carried by the format may nest: rule `params`,
@@ -40,8 +57,19 @@ export const MAX_JSON_VALUES = 10_000_000;
  */
 export const MAX_INPUT_LEAF_TEXT = 2 ** 28;
 
+/**
+ * The most values the options of one call may hold (`verifyProof`'s `rules` with their `params`,
+ * its `trustedKeys`; `verifyAttestation`'s `trustedKeys`). The proof has a budget of its own.
+ * An object, so that a test can lower it.
+ */
+export const optionsLimits = { nodes: 10_000_000 };
+/** The default of `optionsLimits.nodes`: past it, the call throws `VerifyOptionsError`. */
+export const MAX_VERIFY_OPTIONS_NODES = 10_000_000;
+
 /** The values the current call may still read; `undefined` outside `withValueBudget`. */
 let budget: { remaining: number } | undefined;
+/** Whether a `spendValues` of the current budget was refused: the budget ran out. */
+let exhausted = false;
 /** How many `ownCopy` calls are running: while one is, nothing is spent. */
 let ownCopies = 0;
 /** The values the last outermost `withValueBudget` call spent (`lastValuesSpent`). */
@@ -57,6 +85,7 @@ export function withValueBudget<T>(read: () => T, limit: number = MAX_JSON_VALUE
   if (budget !== undefined || ownCopies > 0) return read();
   const current = { remaining: limit };
   budget = current;
+  exhausted = false;
   try {
     return read();
   } finally {
@@ -93,12 +122,20 @@ export function lastValuesSpent(): number {
  * of at most `MAX_JSON_VALUES` values is allowed. Inside `ownCopy`, nothing is spent.
  */
 export function spendValues(count: number): boolean {
-  if (!Number.isSafeInteger(count) || count < 0) return false;
+  if (!numberIsSafeInteger(count) || count < 0) return false;
   if (ownCopies > 0) return true;
   const left = budget === undefined ? MAX_JSON_VALUES : budget.remaining;
-  if (count > left) return false;
+  if (count > left) {
+    exhausted = true;
+    return false;
+  }
   if (budget !== undefined) budget.remaining = left - count;
   return true;
+}
+
+/** Internal: whether the current (or last) budget ran out: a read was refused for its size. */
+export function budgetExhausted(): boolean {
+  return exhausted;
 }
 
 /** Internal: the problem of a value whose reading would pass `MAX_JSON_VALUES`. */
@@ -134,7 +171,7 @@ export interface ListProblem {
  */
 export function readList(list: readonly unknown[], path: string): unknown[] | ListProblem {
   const length: unknown = list.length;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+  if (typeof length !== 'number' || !numberIsSafeInteger(length) || length < 0) {
     return { path, message: `${citeName(path)} has an invalid length` };
   }
   if (!spendValues(length)) return { path, message: tooLargeMessage(path) };
@@ -145,7 +182,7 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
     if (item === undefined) {
       return { path: `${path}[${i}]`, message: undefinedMessage(`${path}[${i}]`) };
     }
-    items.push(item);
+    arrayPush(items, item);
   }
   return items;
 }
@@ -219,21 +256,21 @@ export function hasDateSlot(value: unknown): boolean {
  * inherited properties would be invisible to the canonical form.
  */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
+  if (value === null || typeof value !== 'object' || arrayIsArray(value)) return false;
   return hasPlainPrototype(value) && !hasDateSlot(value);
 }
 
 /** True when the prototype of `value` is `null` or some realm's `Object.prototype`. */
 function hasPlainPrototype(value: object): boolean {
   const proto: unknown = getPrototypeOf(value);
-  return proto === null || proto === Object.prototype || isForeignObjectPrototype(proto);
+  return proto === null || proto === objectPrototype || isForeignObjectPrototype(proto);
 }
 
 /** True for `Object.prototype` of another realm. */
 function isForeignObjectPrototype(proto: unknown): boolean {
   if (proto === null || typeof proto !== 'object') return false;
-  if (getPrototypeOf(proto) !== null || Object.keys(proto).length > 0) return false;
-  const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+  if (getPrototypeOf(proto) !== null || objectKeys(proto).length > 0) return false;
+  const ctor: unknown = objectGetOwnPropertyDescriptor(proto, 'constructor')?.value;
   return (
     typeof ctor === 'function' &&
     ctor.name === 'Object' &&
@@ -252,7 +289,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
  * (RFC 7493) and JCS (RFC 8785) refuse it.
  */
 export function hasLoneSurrogate(text: string): boolean {
-  return LONE_SURROGATE.test(text);
+  return regExpTest(LONE_SURROGATE, text);
 }
 
 /**
@@ -271,7 +308,7 @@ export function loneSurrogateMessage(subject: string): string {
 export function typeName(value: unknown): string {
   if (value === null) return 'null';
   try {
-    if (Array.isArray(value)) return 'array';
+    if (arrayIsArray(value)) return 'array';
   } catch {
     return 'unreadable value';
   }
@@ -279,12 +316,12 @@ export function typeName(value: unknown): string {
 }
 
 /** `%TypedArray%.prototype`: its getters read a typed array's internal slots, never caller code. */
-const TYPED_ARRAY_PROTOTYPE: object = getPrototypeOf(Uint8Array.prototype) as object;
-const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
+const TYPED_ARRAY_PROTOTYPE: object = getPrototypeOf(uint8ArrayPrototype) as object;
+const TYPED_ARRAY_TAG = objectGetOwnPropertyDescriptor(
   TYPED_ARRAY_PROTOTYPE,
-  Symbol.toStringTag,
+  symbolToStringTag,
 )?.get;
-const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
+const TYPED_ARRAY_LENGTH = objectGetOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
 
 /**
  * Internal: copies the bytes of `value` into `target` and returns true when `value` is a real
@@ -295,10 +332,10 @@ export function copyBytesInto(value: unknown, target: Uint8Array): boolean {
   if (typeof value !== 'object' || value === null) return false;
   if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return false;
   try {
-    if (TYPED_ARRAY_TAG.call(value) !== 'Uint8Array') return false;
-    if (TYPED_ARRAY_LENGTH.call(value) !== target.length) return false;
+    if (functionCall(TYPED_ARRAY_TAG, value) !== 'Uint8Array') return false;
+    if (functionCall(TYPED_ARRAY_LENGTH, value) !== uint8ArrayLength(target)) return false;
     // The tag above proves `value` holds the internal slots of a Uint8Array.
-    target.set(value as Uint8Array);
+    uint8ArraySet(target, value as Uint8Array);
     return true;
   } catch {
     return false;
@@ -316,13 +353,13 @@ export function bytesOf(value: unknown): Uint8Array | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return undefined;
   try {
-    const tag: unknown = TYPED_ARRAY_TAG.call(value);
+    const tag: unknown = functionCall(TYPED_ARRAY_TAG, value);
     if (tag !== 'Uint8Array') return undefined;
-    const length: unknown = TYPED_ARRAY_LENGTH.call(value);
+    const length: unknown = functionCall(TYPED_ARRAY_LENGTH, value);
     if (typeof length !== 'number') return undefined;
-    const copy = new Uint8Array(length);
+    const copy = new NativeUint8Array(length);
     // The tag above proves `value` holds the internal slots of a Uint8Array.
-    copy.set(value as Uint8Array);
+    uint8ArraySet(copy, value as Uint8Array);
     return copy;
   } catch {
     return undefined;

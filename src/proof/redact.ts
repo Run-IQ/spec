@@ -8,6 +8,17 @@ import { isRedacted, packedLeafHashes } from './tree.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { DecisionProof, ProofSection, ProofView, UnsignedProof } from './types.js';
 import { readDecisionProof } from './validate.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayForEach,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  mapSet,
+  setAdd,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 /** Internal: where a proof's redacted entries are, as its checks need to know it. */
 export interface Redactions {
@@ -27,9 +38,9 @@ export interface Redactions {
 /** Internal: no redacted entry. */
 export const NO_REDACTION: Redactions = {
   count: 0,
-  hidden: new Set(),
-  bySection: new Map(),
-  positions: new Map(),
+  hidden: new NativeSet(),
+  bySection: new NativeMap(),
+  positions: new NativeMap(),
 };
 
 /**
@@ -39,25 +50,25 @@ export const NO_REDACTION: Redactions = {
  */
 export function proofView(p: UnsignedProof): { view: ProofView; redactions: Redactions } {
   const view = { ...p } as unknown as Record<string, unknown>;
-  const hidden = new Set<ProofSection>();
-  const bySection = new Map<ProofSection, number>();
-  const positions = new Map<ProofSection, number[]>();
+  const hidden = new NativeSet<ProofSection>();
+  const bySection = new NativeMap<ProofSection, number>();
+  const positions = new NativeMap<ProofSection, number[]>();
   let count = 0;
   for (const section of PROOF_SECTIONS) {
     const list: readonly object[] = p[section];
-    if (!list.some(isRedacted)) continue;
+    if (!arraySome(list, isRedacted)) continue;
     const left: object[] = [];
     const places: number[] = [];
-    list.forEach((entry, i) => {
+    arrayForEach(list, (entry, i) => {
       if (isRedacted(entry)) return;
-      left.push(entry);
-      places.push(i);
+      arrayPush(left, entry);
+      arrayPush(places, i);
     });
     const redacted = list.length - left.length;
     count += redacted;
-    hidden.add(section);
-    bySection.set(section, redacted);
-    positions.set(section, places);
+    setAdd(hidden, section);
+    mapSet(bySection, section, redacted);
+    mapSet(positions, section, places);
     view[section] = left;
   }
   return {
@@ -114,14 +125,18 @@ export function redactProof(
     const chosen: [ProofSection, number, string][] = [];
     let leaf = 1;
     for (const section of PROOF_SECTIONS) {
-      proof[section].forEach((entry, i) => {
+      arrayForEach(proof[section] as readonly object[], (entry, i) => {
         const at = leaf++;
         if (isRedacted(entry) || !askHide(hide, section, i)) return;
-        chosen.push([section, i, bytesToHex(leaves.subarray(at * 32, (at + 1) * 32))]);
+        arrayPush(chosen, [
+          section,
+          i,
+          bytesToHex(uint8ArraySubarray(leaves, at * 32, (at + 1) * 32)),
+        ]);
       });
     }
     const copy = { ...proof } as unknown as Record<ProofSection, object[]>;
-    for (const section of new Set(chosen.map(([section]) => section))) {
+    for (const section of new NativeSet(arrayMap(chosen, ([section]) => section))) {
       copy[section] = [...copy[section]];
     }
     for (const [section, i, redacted] of chosen) copy[section][i] = { redacted };

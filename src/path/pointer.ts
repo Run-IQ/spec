@@ -1,5 +1,17 @@
 import { isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
+import {
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayMap,
+  objectHasOwn,
+  regExpTest,
+  stringReplace,
+  stringSlice,
+  stringSplit,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * A JSON Pointer (RFC 6901): `""` is the root, every other pointer is `/` followed by segments
@@ -27,13 +39,12 @@ export function parsePointer(pointer: string): string[] {
     throw newSpecError('INVALID_PATH', `a JSON pointer must be a string, got ${typeName(pointer)}`);
   }
   if (pointer === '') return [];
-  if (!pointer.startsWith('/')) invalidPointer(pointer, 'must be empty or start with "/"');
-  if (/~(?![01])/.test(pointer)) invalidPointer(pointer, '"~" must be followed by 0 or 1');
+  if (!stringStartsWith(pointer, '/')) invalidPointer(pointer, 'must be empty or start with "/"');
+  if (regExpTest(/~(?![01])/, pointer)) invalidPointer(pointer, '"~" must be followed by 0 or 1');
   if (hasLoneSurrogate(pointer)) invalidPointer(pointer, 'contains a lone UTF-16 surrogate');
-  return pointer
-    .slice(1)
-    .split('/')
-    .map((segment) => segment.replace(/~1/g, '/').replace(/~0/g, '~'));
+  return arrayMap(stringSplit(stringSlice(pointer, 1), '/'), (segment) =>
+    stringReplace(stringReplace(segment, /~1/g, '/'), /~0/g, '~'),
+  );
 }
 
 /**
@@ -45,7 +56,7 @@ export function parsePointer(pointer: string): string[] {
 export function formatPointer(segments: readonly string[]): JsonPointer {
   const items = readSegments(segments);
   let out = '';
-  items.forEach((segment, i) => {
+  arrayForEach(items, (segment, i) => {
     if (typeof segment !== 'string') {
       throw newSpecError(
         'INVALID_PATH',
@@ -55,7 +66,7 @@ export function formatPointer(segments: readonly string[]): JsonPointer {
     if (hasLoneSurrogate(segment)) {
       throw newSpecError('INVALID_PATH', loneSurrogateMessage(`segment ${i} of a JSON pointer`));
     }
-    out += `/${segment.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+    out += `/${stringReplace(stringReplace(segment, /~/g, '~0'), /\//g, '~1')}`;
   });
   return out;
 }
@@ -70,11 +81,11 @@ export function formatPointer(segments: readonly string[]): JsonPointer {
 function readSegments(segments: readonly string[]): unknown[] {
   let items: unknown[];
   try {
-    if (!Array.isArray(segments)) {
+    if (!arrayIsArray(segments)) {
       throw newSpecError('INVALID_PATH', 'JSON pointer segments must be an array of strings');
     }
     const read = readList(segments, 'JSON pointer segments');
-    if (!Array.isArray(read)) throw newSpecError('INVALID_PATH', read.message);
+    if (!arrayIsArray(read)) throw newSpecError('INVALID_PATH', read.message);
     items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
@@ -124,8 +135,8 @@ export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undef
   const segments = parseReadPointer(pointer);
   const [head, ...rest] = segments;
   if (head === undefined) return undefined;
-  if (!head.startsWith('$')) return formatPointer(['data', ...segments]);
-  const field = Object.hasOwn(INPUT_VARIABLES, head) ? INPUT_VARIABLES[head] : undefined;
+  if (!stringStartsWith(head, '$')) return formatPointer(['data', ...segments]);
+  const field = objectHasOwn(INPUT_VARIABLES, head) ? INPUT_VARIABLES[head] : undefined;
   return field === undefined ? undefined : formatPointer(['meta', field, ...rest]);
 }
 
@@ -136,7 +147,7 @@ export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undef
  */
 export function parseReadPointer(pointer: JsonPointer): string[] {
   const segments = parsePointer(pointer);
-  if (segments.includes('-')) invalidPointer(pointer, "'-' is not an index");
+  if (arrayIncludes(segments, '-')) invalidPointer(pointer, "'-' is not an index");
   return segments;
 }
 

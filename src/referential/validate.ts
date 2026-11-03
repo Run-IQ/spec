@@ -19,6 +19,27 @@ import { ALWAYS, sweepNesting } from './nesting.js';
 import type { Edge, Work } from './nesting.js';
 import { REFERENTIAL_FORMAT } from './types.js';
 import type { Period, Referential, ReferentialMember } from './types.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayIncludes,
+  arrayIsArray,
+  arrayMap,
+  arrayPush,
+  arraySort,
+  mapGet,
+  mapSet,
+  mapValues,
+  mathMax,
+  numberIsSafeInteger,
+  objectDefineProperty,
+  objectHasOwn,
+  objectKeys,
+  setAdd,
+  setHas,
+  stringIncludes,
+} from '../intrinsics.js';
 
 export type { ReferentialLimits } from './limits.js';
 
@@ -201,7 +222,7 @@ function readReferential(
   if (fields.codeSystem !== undefined) {
     if (
       checkText(fields.codeSystem, 'codeSystem', add) &&
-      String(fields.codeSystem).includes(':')
+      stringIncludes(NativeString(fields.codeSystem), ':')
     ) {
       add('codeSystem', 'codeSystem must not hold ":"');
     }
@@ -219,28 +240,29 @@ function readReferential(
   const codes = fields.codes === undefined ? undefined : readCodeLists(fields.codes, codeKeys, add);
   const groups = readGroups(fields.groups, groupKeys, add);
   let nodes = 0;
-  for (const periods of codes?.values() ?? []) nodes += periods?.length ?? 0;
+  for (const periods of codes === undefined ? [] : mapValues(codes)) nodes += periods?.length ?? 0;
   for (const group of groups ?? []) nodes += 1 + group.length;
   if (nodes > limits.maxNodes) {
     add('', `referential too large: ${nodes} nodes`);
     return undefined;
   }
-  work.limit = limits.maxSteps ?? STEPS_PER_NODE * Math.max(nodes, 1);
+  work.limit = limits.maxSteps ?? STEPS_PER_NODE * mathMax(nodes, 1);
 
-  const codeNames = new Set<string>();
+  const codeNames = new NativeSet<string>();
   const normalCodes: Record<string, Period[]> = {};
   if (codes !== undefined) {
     for (const [code, periods] of codes) {
-      codeNames.add(code);
+      setAdd(codeNames, code);
       if (periods !== undefined) {
         defineField(normalCodes, code, checkPeriods(periods, `codes.${code}`, add));
       }
     }
   }
   if (groups === undefined) return undefined;
-  const groupNames = new Set(groups.map((g) => g.name));
+  const groupNames = new NativeSet(arrayMap(groups, (g) => g.name));
   for (const name of groupNames) {
-    if (codeNames.has(name)) add(`groups.${name}`, `${citeName(name)} is both a code and a group`);
+    if (setHas(codeNames, name))
+      add(`groups.${name}`, `${citeName(name)} is both a code and a group`);
   }
 
   const edges: Edge[] = [];
@@ -270,9 +292,9 @@ function readReferential(
 
   const normal: Referential = {
     format: REFERENTIAL_FORMAT,
-    id: String(fields.id),
-    version: String(fields.version),
-    dimension: String(fields.dimension),
+    id: NativeString(fields.id),
+    version: NativeString(fields.version),
+    dimension: NativeString(fields.dimension),
     groups: normalGroups,
   };
   if (typeof fields.codeSystem === 'string') normal.codeSystem = fields.codeSystem;
@@ -283,7 +305,7 @@ function readReferential(
 
 /** Plain assignment would turn a `__proto__` key into a prototype change. */
 function defineField<T>(target: Record<string, T>, key: string, value: T): void {
-  Object.defineProperty(target, key, {
+  objectDefineProperty(target, key, {
     value,
     enumerable: true,
     writable: true,
@@ -319,10 +341,10 @@ function compareSpans(
 function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number): T[] {
   const out: T[] = [];
   let last: string | undefined;
-  for (const entry of [...entries].sort(compare)) {
+  for (const entry of arraySort([...entries], compare)) {
     // An entry of the normal form: this package's copy.
     const key = ownCopy(() => canonicalSha256Hex(entry));
-    if (key !== last) out.push(entry);
+    if (key !== last) arrayPush(out, entry);
     last = key;
   }
   return out;
@@ -343,7 +365,7 @@ function readFields(
 ): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
   let readable = true;
-  for (const key of Object.keys(value)) {
+  for (const key of objectKeys(value)) {
     const path = `${prefix}${key}`;
     let member: unknown;
     try {
@@ -355,7 +377,7 @@ function readFields(
     }
     if (member === undefined) continue;
     // Known keys only: `__proto__` is never one, so plain assignment stays data.
-    if (known.includes(key)) out[key] = member;
+    if (arrayIncludes(known, key)) out[key] = member;
     else add(path, `${unknownMessage} ${quoteText(key)}`);
   }
   return readable ? out : undefined;
@@ -366,7 +388,7 @@ function readFields(
  * referential, a group, a membership or a code period): absent, or a non-empty string.
  */
 function checkSourceRef(fields: Record<string, unknown>, prefix: string, add: Add): void {
-  if (Object.hasOwn(fields, 'sourceRef') && fields.sourceRef !== undefined) {
+  if (objectHasOwn(fields, 'sourceRef') && fields.sourceRef !== undefined) {
     checkText(fields.sourceRef, `${prefix}sourceRef`, add);
   }
 }
@@ -391,7 +413,7 @@ function checkText(value: unknown, path: string, add: Add): boolean {
 function nameProblem(name: string, kind: 'code' | 'group name'): string | undefined {
   if (name === '') return `${kind} must not be empty`;
   if (hasLoneSurrogate(name)) return `${kind} ${quoteText(name)} contains a lone UTF-16 surrogate`;
-  if (name.includes(':')) return `${kind} ${quoteText(name)} must not hold ":"`;
+  if (stringIncludes(name, ':')) return `${kind} ${quoteText(name)} must not hold ":"`;
   return undefined;
 }
 
@@ -401,7 +423,7 @@ function nameProblem(name: string, kind: 'code' | 'group name'): string | undefi
  */
 function ownKeys(value: unknown, path: string, add: Add): string[] | undefined {
   try {
-    return isPlainObject(value) ? Object.keys(value) : [];
+    return isPlainObject(value) ? objectKeys(value) : [];
   } catch (error) {
     add(path, unreadableMessage(path, error));
     return undefined;
@@ -414,7 +436,7 @@ function readCodeLists(
   keys: readonly string[],
   add: Add,
 ): Map<string, PeriodList | undefined> {
-  const codes = new Map<string, PeriodList | undefined>();
+  const codes = new NativeMap<string, PeriodList | undefined>();
   if (!isPlainObject(value)) {
     add('codes', 'codes must be an object of period lists');
     return codes;
@@ -426,7 +448,7 @@ function readCodeLists(
       periods = value[code];
     } catch (error) {
       add(path, unreadableMessage(path, error));
-      codes.set(code, undefined);
+      mapSet(codes, code, undefined);
       continue;
     }
     // An entry of the map whose value is `undefined` is absent.
@@ -437,15 +459,15 @@ function readCodeLists(
       continue;
     }
     // The length is read once: the size check and the read of the periods both use it.
-    const length: unknown = Array.isArray(periods) ? periods.length : undefined;
-    if (!Array.isArray(periods) || !isCount(length)) {
+    const length: unknown = arrayIsArray(periods) ? periods.length : undefined;
+    if (!arrayIsArray(periods) || !isCount(length)) {
       add(path, `${citeName(path)} must be an array of periods`);
-      codes.set(code, undefined);
+      mapSet(codes, code, undefined);
     } else if (length === 0) {
       add(path, `${citeName(path)} must list at least one period`);
-      codes.set(code, undefined);
+      mapSet(codes, code, undefined);
     } else {
-      codes.set(code, { list: periods, length });
+      mapSet(codes, code, { list: periods, length });
     }
   }
   return codes;
@@ -459,7 +481,7 @@ interface PeriodList {
 
 /** True for a list length: a safe integer, 0 or more (only a Proxy claims anything else). */
 function isCount(value: unknown): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+  return typeof value === 'number' && numberIsSafeInteger(value) && value >= 0;
 }
 
 /** The groups, each read once with the length of its member list; `undefined` if refused. */
@@ -486,7 +508,7 @@ function readGroups(value: unknown, keys: readonly string[], add: Add): RawGroup
       continue;
     }
     try {
-      groups.push(readGroup(group, name, path, add));
+      arrayPush(groups, readGroup(group, name, path, add));
     } catch (error) {
       add(path, unreadableMessage(path, error));
     }
@@ -514,7 +536,7 @@ function readGroup(value: unknown, name: string, path: string, add: Add): RawGro
     add(`${path}.exhaustive`, `${citeName(path)}.exhaustive must be a boolean`);
   }
   const members = fields.members;
-  if (!Array.isArray(members)) {
+  if (!arrayIsArray(members)) {
     add(`${path}.members`, `${citeName(path)}.members must be an array of members`);
     return refused;
   }
@@ -559,13 +581,13 @@ function checkPeriods(periods: PeriodList, path: string, add: Add): Period[] {
         continue;
       }
       const period = readPeriod(item, at, add);
-      if (period !== undefined) read.push(period);
+      if (period !== undefined) arrayPush(read, period);
     } catch (error) {
       add(at, unreadableMessage(at, error));
     }
   }
   const normal = sortedUnique(read, compareSpans);
-  const overlap = firstOverlap(normal.map((p) => ({ from: p.from, until: p.until ?? null })));
+  const overlap = firstOverlap(arrayMap(normal, (p) => ({ from: p.from, until: p.until ?? null })));
   if (overlap !== undefined) add(path, `${citeName(path)} has overlapping periods from ${overlap}`);
   return mergeAdjacent(normal);
 }
@@ -620,7 +642,7 @@ function checkSpan(
 
 /** The start of the first overlap between two spans, or `undefined`. */
 function firstOverlap(spans: readonly Span[]): CivilDate | undefined {
-  const sorted = [...spans].sort((a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+  const sorted = arraySort([...spans], (a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
   let end: CivilDate | null | undefined;
   let found: CivilDate | undefined;
   for (const span of sorted) {
@@ -665,17 +687,17 @@ function checkMembers(
       add(at, unreadableMessage(at, error));
     }
     if (member === undefined) valid = false;
-    else read.push(member);
+    else arrayPush(read, member);
   }
   const normal = sortedUnique(read, (a, b) => compareText(a.value, b.value) || compareSpans(a, b));
-  const byValue = new Map<string, Span[]>();
+  const byValue = new NativeMap<string, Span[]>();
   for (const member of normal) {
     const span = { from: member.from ?? ALWAYS, until: member.until ?? null };
-    const spans = byValue.get(member.value) ?? [];
-    spans.push(span);
-    byValue.set(member.value, spans);
-    if (groupNames.has(member.value)) {
-      edges.push({ group: group.name, member: member.value, ...span });
+    const spans = mapGet(byValue, member.value) ?? [];
+    arrayPush(spans, span);
+    mapSet(byValue, member.value, spans);
+    if (setHas(groupNames, member.value)) {
+      arrayPush(edges, { group: group.name, member: member.value, ...span });
     }
   }
   for (const [value, spans] of byValue) {
@@ -710,7 +732,7 @@ function mergeAdjacent<T extends { value?: string; from?: string; until?: string
       else merged.until = entry.until;
       out[out.length - 1] = merged;
     } else {
-      out.push(entry);
+      arrayPush(out, entry);
     }
   }
   return out;
@@ -743,14 +765,14 @@ function readMember(
   if (problem !== undefined) {
     add(valuePath, problem);
     valid = false;
-  } else if (typeof member === 'string' && member.includes(':')) {
+  } else if (typeof member === 'string' && stringIncludes(member, ':')) {
     add(valuePath, `${citeName(valuePath)} must not hold ":"`);
     valid = false;
   } else if (
     typeof member === 'string' &&
     codes !== undefined &&
-    !codes.has(member) &&
-    !groupNames.has(member)
+    !setHas(codes, member) &&
+    !setHas(groupNames, member)
   ) {
     add(
       valuePath,

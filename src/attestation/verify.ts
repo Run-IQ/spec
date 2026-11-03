@@ -3,7 +3,7 @@ import type { JsonValue } from '../canonical.js';
 import {
   citeName,
   isOwnOptionsError,
-  newOptionsError,
+  withOptionsScope,
   reasonOf,
   unreadableMessage,
 } from '../errors.js';
@@ -21,12 +21,27 @@ import {
 import type { Add, Fields, Reader } from '../input/read.js';
 import { SIGNATURE_BASE64URL } from '../proof/fields.js';
 import { signatureMatches } from '../proof/sign.js';
-import { readTrustedKeys } from '../proof/trusted-keys.js';
+import { optionsFailure, readTrustedKeys } from '../proof/trusted-keys.js';
 import type { ProofVerification } from '../proof/types.js';
 import { isInstant } from '../time/civil.js';
-import { ownCopy, withValueBudget } from '../values.js';
+import { optionsLimits, ownCopy, withValueBudget } from '../values.js';
 import { ATTESTATION_FORMAT } from './types.js';
 import type { Attestation, AttestationSubject } from './types.js';
+import {
+  NativeSet,
+  arrayFilter,
+  arrayIncludes,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapKeys,
+  mapSize,
+  regExpTest,
+  setHas,
+  setSize,
+} from '../intrinsics.js';
 
 /** Internal: a proof digest as `sealProof` writes it: 64 lowercase hex characters. */
 export const HEX_DIGEST = /^[0-9a-f]{64}$/;
@@ -44,8 +59,8 @@ const KEYS: readonly string[] = [
   'at',
   'signature',
 ];
-const OPTIONAL: ReadonlySet<string> = new Set(['role', 'claims']);
-const REQUIRED: readonly string[] = KEYS.filter((key) => !OPTIONAL.has(key));
+const OPTIONAL: ReadonlySet<string> = new NativeSet(['role', 'claims']);
+const REQUIRED: readonly string[] = arrayFilter(KEYS, (key) => !setHas(OPTIONAL, key));
 const SUBJECT_KEYS: readonly string[] = ['proofDigest', 'keyId'];
 const SHAPE = 'an object { format, kind, subject, keyId, role?, claims?, at, signature }';
 const INSTANT_FORM = 'an instant in its canonical form YYYY-MM-DDTHH:MM:SS.sssZ';
@@ -98,23 +113,28 @@ export function verifyAttestation(
   proofDigest: string,
   trustedKeys: Record<string, string>,
 ): ProofVerification {
-  try {
-    // The arguments are the caller's: a mistake in them throws, before the attestation is read.
-    const fail = (option: string, message: string): never => {
-      throw newOptionsError(option, message);
-    };
-    if (typeof proofDigest !== 'string' || !HEX_DIGEST.test(proofDigest)) {
-      fail('proofDigest', 'the expected proof digest must be 64 lowercase hex characters');
+  // One scope per call, as `verifyProof`'s: only the errors this call raises count as its own.
+  return withOptionsScope(() => {
+    try {
+      // The arguments are the caller's: a mistake in them throws, before the attestation is read.
+      const fail = optionsFailure('trustedKeys');
+      if (typeof proofDigest !== 'string' || !regExpTest(HEX_DIGEST, proofDigest)) {
+        fail('proofDigest', 'the expected proof digest must be 64 lowercase hex characters');
+      }
+      // The keys have the budget of the options, apart from the attestation's own.
+      const keys = withValueBudget(
+        () => readTrustedKeys(trustedKeys, 'trustedKeys', fail, true),
+        optionsLimits.nodes,
+      );
+      // Defensive: `runCheck` opens the only budget spent today; this one keeps a later read
+      // added outside it inside one budget per call (an equivalent mutant, kept on purpose).
+      return withValueBudget(() => verify(a, proofDigest as string, keys));
+    } catch (error) {
+      if (isOwnOptionsError(error)) throw error;
+      // Never reached by a value read under guard; a last net, still never a verdict of "valid".
+      return invalid([unreadableMessage('attestation', error)]);
     }
-    const keys = readTrustedKeys(trustedKeys, 'trustedKeys', fail);
-    // Defensive: `runCheck` opens the only budget spent today; this one keeps a later read
-    // added outside it inside one budget per call (an equivalent mutant, kept on purpose).
-    return withValueBudget(() => verify(a, proofDigest, keys));
-  } catch (error) {
-    if (isOwnOptionsError(error)) throw error;
-    // Never reached by a value read under guard; a last net, still never a verdict of "valid".
-    return invalid([unreadableMessage('attestation', error)]);
-  }
+  });
 }
 
 /** An `invalid` verdict for `issues`. */
@@ -141,22 +161,22 @@ function verify(a: unknown, proofDigest: string, keys: Map<string, Uint8Array>):
   );
   if (unknownFormat !== undefined) return invalid([`unknown format: ${unknownFormat}`]);
   if (issues.length > 0 || copy === undefined) {
-    return invalid(issues.map((issue) => issue.message));
+    return invalid(arrayMap(issues, (issue) => issue.message));
   }
   const read: Attestation = copy;
   const findings: Finding[] = [];
-  if (!VERIFIED_KINDS.includes(read.kind)) {
+  if (!arrayIncludes(VERIFIED_KINDS, read.kind)) {
     const message = `attestation kind not supported: ${citeName(read.kind)}`;
-    findings.push({ message, level: 'invalid' });
+    arrayPush(findings, { message, level: 'invalid' });
   }
   if (!('proofDigest' in read.subject)) {
-    findings.push({ message: 'attestation not about this proof', level: 'invalid' });
+    arrayPush(findings, { message: 'attestation not about this proof', level: 'invalid' });
   } else if (read.subject.proofDigest !== proofDigest) {
-    findings.push({ message: 'attestation for another proof', level: 'invalid' });
+    arrayPush(findings, { message: 'attestation for another proof', level: 'invalid' });
   }
-  findings.push(...signatureFinding(read, keys));
-  const messages = findings.map((finding) => finding.message);
-  if (findings.some((finding) => finding.level === 'invalid')) return invalid(messages);
+  arrayPush(findings, ...signatureFinding(read, keys));
+  const messages = arrayMap(findings, (finding) => finding.message);
+  if (arraySome(findings, (finding) => finding.level === 'invalid')) return invalid(messages);
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues: messages };
 }
 
@@ -165,7 +185,7 @@ function verify(a: unknown, proofDigest: string, keys: Map<string, Uint8Array>):
  * malformed one threw before this point); nothing when it holds.
  */
 function signatureFinding(a: Attestation, keys: Map<string, Uint8Array>): Finding[] {
-  const key = keys.get(a.keyId);
+  const key = mapGet(keys, a.keyId);
   if (key === undefined) return [{ message: 'untrusted key', level: 'warning' }];
   let message: string;
   try {
@@ -204,8 +224,8 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
   });
   if (fields === undefined) return undefined;
   requireFields(fields, '', REQUIRED, add);
-  const field = (key: string): unknown => fields.values.get(key);
-  const has = (key: string): boolean => fields.values.has(key);
+  const field = (key: string): unknown => mapGet(fields.values, key);
+  const has = (key: string): boolean => mapHas(fields.values, key);
   const format = field('format');
   if (typeof format === 'string' && format !== ATTESTATION_FORMAT) return citeName(format);
   if (has('format') && format !== ATTESTATION_FORMAT) add('/format', '/format must be a string');
@@ -220,7 +240,10 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
   const claims = has('claims') ? readClaims(field('claims'), kind, reader) : undefined;
   if (has('at')) checkInstant(field('at'), '/at', add);
   const signature = field('signature');
-  if (has('signature') && (typeof signature !== 'string' || !SIGNATURE_BASE64URL.test(signature))) {
+  if (
+    has('signature') &&
+    (typeof signature !== 'string' || !regExpTest(SIGNATURE_BASE64URL, signature))
+  ) {
     add(
       '/signature',
       '/signature must be an ed25519 signature in unpadded base64url (86 characters)',
@@ -276,7 +299,7 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
   // The subject may be reachable from `claims` too: the claims walk takes this read, and the
   // same copy of it, instead of reading it a second time. It is marked under a member it holds
   // (read or failed to read); an object with no known member is not marked.
-  const [member] = [...fields.values.keys(), ...fields.failed];
+  const [member] = [...mapKeys(fields.values), ...fields.failed];
   if (member !== undefined) {
     markRead(reader, value, member, subject === undefined ? undefined : { ...subject });
   }
@@ -285,18 +308,19 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
 
 /** The subject held by `fields`, checked; `undefined` after reporting a problem. */
 function checkSubject(fields: Fields, path: string, add: Add): AttestationSubject | undefined {
-  if (fields.values.size + fields.failed.size !== 1) {
+  if (mapSize(fields.values) + setSize(fields.failed) !== 1) {
     add(path, `${path} must hold exactly one of proofDigest and keyId`);
     return undefined;
   }
-  const proofDigest = fields.values.get('proofDigest');
-  if (fields.values.has('proofDigest')) {
-    if (typeof proofDigest === 'string' && HEX_DIGEST.test(proofDigest)) return { proofDigest };
+  const proofDigest = mapGet(fields.values, 'proofDigest');
+  if (mapHas(fields.values, 'proofDigest')) {
+    if (typeof proofDigest === 'string' && regExpTest(HEX_DIGEST, proofDigest))
+      return { proofDigest };
     add(`${path}/proofDigest`, `${path}/proofDigest must be 64 lowercase hex characters`);
     return undefined;
   }
-  const keyId = fields.values.get('keyId');
-  if (fields.values.has('keyId') && checkText(keyId, `${path}/keyId`, add)) return { keyId };
+  const keyId = mapGet(fields.values, 'keyId');
+  if (mapHas(fields.values, 'keyId') && checkText(keyId, `${path}/keyId`, add)) return { keyId };
   return undefined;
 }
 

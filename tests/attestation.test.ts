@@ -194,9 +194,12 @@ describe('verifyAttestation: what it proves about which proof', () => {
       status: 'consistent',
       issues: ['untrusted key'],
     });
-    expect(verifyAttestation(COSIGNATURE, DIGEST, undefined as never)).toEqual({
-      status: 'consistent',
-      issues: ['untrusted key'],
+    // The trusted keys are required for an attestation: `undefined` is not "no key" (AC6).
+    expect(
+      optionError(() => verifyAttestation(COSIGNATURE, DIGEST, undefined as never)),
+    ).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys is required: an object of hex public keys ({} trusts none)',
     });
     // A trusted key that is malformed is a configuration error, not a missing key.
     expect(optionError(() => verify(COSIGNATURE, DIGEST, { reviewer: 'zz' }))).toMatchObject({

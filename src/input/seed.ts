@@ -4,6 +4,7 @@ import { utf8ToBytes } from '@noble/hashes/utils.js';
 import { newSpecError } from '../errors.js';
 import { HashStream } from '../stream.js';
 import { bytesOf, hasLoneSurrogate, loneSurrogateMessage, typeName } from '../values.js';
+import { NativeUint8Array, uint8ArrayLength } from '../intrinsics.js';
 
 /** The bytes of a seed (D-14). */
 const SEED_BYTES = 32;
@@ -21,7 +22,7 @@ const SEED_SALT = utf8ToBytes('run-iq.input-seed/1');
  * read the bytes of the seed they are given, and decide nothing from the identity of this
  * object.
  */
-export const UNSALTED_SEED: Uint8Array = new Uint8Array(SEED_BYTES);
+export const UNSALTED_SEED: Uint8Array = new NativeUint8Array(SEED_BYTES);
 
 /**
  * The seed of the input of the request `requestId` (D-14):
@@ -38,7 +39,7 @@ export const UNSALTED_SEED: Uint8Array = new Uint8Array(SEED_BYTES);
  */
 export function deriveInputSeed(secret: Uint8Array, requestId: string): Uint8Array {
   const key = bytesOf(secret);
-  if (key === undefined || key.length < MIN_SECRET_BYTES) {
+  if (key === undefined || uint8ArrayLength(key) < MIN_SECRET_BYTES) {
     throw newSpecError(
       'INVALID_KEY',
       `the input secret must be a Uint8Array of at least ${MIN_SECRET_BYTES} bytes, ` +
@@ -60,7 +61,7 @@ export function deriveInputSeed(secret: Uint8Array, requestId: string): Uint8Arr
  */
 export function readSeed(seed: Uint8Array): Uint8Array {
   const bytes = bytesOf(seed);
-  if (bytes === undefined || bytes.length !== SEED_BYTES) {
+  if (bytes === undefined || uint8ArrayLength(bytes) !== SEED_BYTES) {
     throw newSpecError(
       'INVALID_KEY',
       `the input seed must be a Uint8Array of ${SEED_BYTES} bytes, ${got(seed, bytes)}`,
@@ -88,7 +89,7 @@ export function inputSalter(
   purpose: SaltPurpose,
 ): (pointer: string) => Uint8Array {
   const stream = HashStream.hmacSha256(seed);
-  const salt = new Uint8Array(SEED_BYTES);
+  const salt = new NativeUint8Array(SEED_BYTES);
   return (pointer) => {
     stream.start();
     stream.text(purpose);
@@ -102,5 +103,5 @@ export function inputSalter(
 function got(value: unknown, bytes: Uint8Array | undefined): string {
   return bytes === undefined
     ? `got a value of type ${typeName(value)}`
-    : `got ${bytes.length} bytes`;
+    : `got ${uint8ArrayLength(bytes)} bytes`;
 }

@@ -1,5 +1,24 @@
 import { numberToDecimal, toCanonicalDecimal } from '../decision/decimal.js';
 import type { RoundingMode } from '../decision/rounding.js';
+import {
+  NativeBigInt,
+  NativeFloat64Array,
+  NativeNumber,
+  NativeString,
+  arrayMap,
+  bigIntToString,
+  float64ArrayLength,
+  mathFloor,
+  mathMax,
+  mathMin,
+  stringIndexOf,
+  stringPadEnd,
+  stringPadStart,
+  stringRepeat,
+  stringReplace,
+  stringSlice,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the arithmetic `verifyProof` redoes to check that a combined value
 // follows from its contributions, as the engine computes it (`@run-iq/core`'s
@@ -24,12 +43,16 @@ export function arithmeticWork(): { digits: number } {
 
 /** The sign, integer digits and fraction digits of a canonical decimal. */
 function partsOf(text: string): { negative: boolean; integer: string; fraction: string } {
-  const negative = text.startsWith('-');
-  const unsigned = negative ? text.slice(1) : text;
-  const point = unsigned.indexOf('.');
+  const negative = stringStartsWith(text, '-');
+  const unsigned = negative ? stringSlice(text, 1) : text;
+  const point = stringIndexOf(unsigned, '.');
   return point < 0
     ? { negative, integer: unsigned, fraction: '' }
-    : { negative, integer: unsigned.slice(0, point), fraction: unsigned.slice(point + 1) };
+    : {
+        negative,
+        integer: stringSlice(unsigned, 0, point),
+        fraction: stringSlice(unsigned, point + 1),
+      };
 }
 
 /** The remainder of the digits `digits` by `divisor`, 15 digits at a time. */
@@ -37,8 +60,8 @@ function remainder(digits: string, divisor: bigint): bigint {
   work.digits += digits.length;
   let rest = 0n;
   for (let i = 0; i < digits.length; i += 15) {
-    const chunk = digits.slice(i, i + 15);
-    rest = (rest * 10n ** BigInt(chunk.length) + BigInt(chunk)) % divisor;
+    const chunk = stringSlice(digits, i, i + 15);
+    rest = (rest * 10n ** NativeBigInt(chunk.length) + NativeBigInt(chunk)) % divisor;
   }
   return rest;
 }
@@ -47,15 +70,23 @@ function remainder(digits: string, divisor: bigint): bigint {
 function increment(digits: string): string {
   let i = digits.length - 1;
   while (i >= 0 && digits[i] === '9') i--;
-  if (i < 0) return `1${'0'.repeat(digits.length)}`;
-  return digits.slice(0, i) + String(Number(digits[i]) + 1) + '0'.repeat(digits.length - i - 1);
+  if (i < 0) return `1${stringRepeat('0', digits.length)}`;
+  return (
+    stringSlice(digits, 0, i) +
+    NativeString(NativeNumber(digits[i]) + 1) +
+    stringRepeat('0', digits.length - i - 1)
+  );
 }
 
 /** `digits` (a positive integer, leading zeros allowed) minus 1. */
 function decrement(digits: string): string {
   let i = digits.length - 1;
   while (i >= 0 && digits[i] === '0') i--;
-  return digits.slice(0, i) + String(Number(digits[i]) - 1) + '9'.repeat(digits.length - i - 1);
+  return (
+    stringSlice(digits, 0, i) +
+    NativeString(NativeNumber(digits[i]) - 1) +
+    stringRepeat('9', digits.length - i - 1)
+  );
 }
 
 /**
@@ -63,12 +94,12 @@ function decrement(digits: string): string {
  * result is never negative. Only the last digits are computed; a carry or a borrow runs once.
  */
 function adjust(digits: string, delta: bigint): string {
-  const width = (delta < 0n ? -delta : delta).toString().length + 1;
-  const low = digits.slice(-width);
-  let high = digits.slice(0, digits.length - low.length);
-  const base = 10n ** BigInt(low.length);
-  let sum = BigInt(low === '' ? '0' : low) + delta;
-  if (high === '') return sum.toString();
+  const width = bigIntToString(delta < 0n ? -delta : delta).length + 1;
+  const low = stringSlice(digits, -width);
+  let high = stringSlice(digits, 0, digits.length - low.length);
+  const base = 10n ** NativeBigInt(low.length);
+  let sum = NativeBigInt(low === '' ? '0' : low) + delta;
+  if (high === '') return bigIntToString(sum);
   if (sum >= base) {
     sum -= base;
     high = increment(high);
@@ -76,14 +107,15 @@ function adjust(digits: string, delta: bigint): string {
     sum += base;
     high = decrement(high);
   }
-  return high + sum.toString().padStart(low.length, '0');
+  return high + stringPadStart(bigIntToString(sum), low.length, '0');
 }
 
 /** The canonical decimal of `digits` (a non-negative integer) divided by 10^places. */
 function placed(negative: boolean, digits: string, places: number): string {
-  const padded = digits.padStart(places + 1, '0');
+  const padded = stringPadStart(digits, places + 1, '0');
   const point = padded.length - places;
-  const text = places === 0 ? padded : `${padded.slice(0, point)}.${padded.slice(point)}`;
+  const text =
+    places === 0 ? padded : `${stringSlice(padded, 0, point)}.${stringSlice(padded, point)}`;
   return toCanonicalDecimal(negative ? `-${text}` : text);
 }
 
@@ -104,11 +136,11 @@ export function roundDecimal(value: string, rounding: Rounding): string {
   const step = rounding.increment ?? '1';
   const places =
     rounding.increment === undefined ? (rounding.scale ?? 0) : partsOf(step).fraction.length;
-  const unit = BigInt(step.replace('.', ''));
+  const unit = NativeBigInt(stringReplace(step, '.', ''));
   const { negative, integer, fraction } = partsOf(value);
   // The value in units of 10^-places, and what lies below one unit.
-  const scaled = integer + fraction.slice(0, places).padEnd(places, '0');
-  const below = fraction.slice(places);
+  const scaled = integer + stringPadEnd(stringSlice(fraction, 0, places), places, '0');
+  const below = stringSlice(fraction, places);
   work.digits += value.length;
   const doubled = remainder(scaled, 2n * unit);
   const rest = doubled % unit;
@@ -156,7 +188,7 @@ function awayFromZero(
 
 /** The number `value` rounded in decimal from its shortest writing, never `-0`. */
 export function roundNumber(value: number, rounding: Rounding): number {
-  return Number(roundDecimal(numberToDecimal(value), rounding));
+  return NativeNumber(roundDecimal(numberToDecimal(value), rounding));
 }
 
 /** Digits per limb of `sumDecimals`: a limb never exceeds 10^7 times the number of terms. */
@@ -168,35 +200,36 @@ const LIMB_BASE = 10 ** LIMB;
  * the point, then carries run once: linear in the digits of the terms.
  */
 export function sumDecimals(values: readonly string[]): string {
-  const terms = values.map(partsOf);
+  const terms = arrayMap(values, partsOf);
   let lowest = 0;
   let highest = 0;
   for (const { integer, fraction } of terms) {
-    lowest = Math.min(lowest, Math.floor(-fraction.length / LIMB));
-    highest = Math.max(highest, Math.floor((integer.length - 1) / LIMB));
+    lowest = mathMin(lowest, mathFloor(-fraction.length / LIMB));
+    highest = mathMax(highest, mathFloor((integer.length - 1) / LIMB));
   }
   // One limb more for the carry of the sum of many terms, and one for its own carry.
-  const limbs = new Float64Array(highest - lowest + 3);
+  const limbs = new NativeFloat64Array(highest - lowest + 3);
   for (const { negative, integer, fraction } of terms) {
     const sign = negative ? -1 : 1;
     work.digits += integer.length + fraction.length;
     const add = (digit: string | undefined, position: number): void => {
-      const limb = Math.floor(position / LIMB);
+      const limb = mathFloor(position / LIMB);
       const index = limb - lowest;
-      limbs[index] = (limbs[index] ?? 0) + sign * Number(digit) * 10 ** (position - limb * LIMB);
+      limbs[index] =
+        (limbs[index] ?? 0) + sign * NativeNumber(digit) * 10 ** (position - limb * LIMB);
     };
     for (let i = 0; i < integer.length; i++) add(integer[i], integer.length - 1 - i);
     for (let i = 0; i < fraction.length; i++) add(fraction[i], -1 - i);
   }
   let negative = !normalize(limbs);
   if (negative) {
-    for (let i = 0; i < limbs.length; i++) limbs[i] = -(limbs[i] ?? 0);
+    for (let i = 0; i < float64ArrayLength(limbs); i++) limbs[i] = -(limbs[i] ?? 0);
     normalize(limbs);
   }
   let integer = '';
   let fraction = '';
-  for (let i = limbs.length - 1; i >= 0; i--) {
-    const digits = String(limbs[i] ?? 0).padStart(LIMB, '0');
+  for (let i = float64ArrayLength(limbs) - 1; i >= 0; i--) {
+    const digits = stringPadStart(NativeString(limbs[i] ?? 0), LIMB, '0');
     if (i + lowest >= 0) integer += digits;
     else fraction += digits;
   }
@@ -212,7 +245,7 @@ export function sumDecimals(values: readonly string[]): string {
  */
 function normalize(limbs: Float64Array): boolean {
   let carry = 0;
-  for (let i = 0; i < limbs.length; i++) {
+  for (let i = 0; i < float64ArrayLength(limbs); i++) {
     const total = (limbs[i] ?? 0) + carry;
     const digit = ((total % LIMB_BASE) + LIMB_BASE) % LIMB_BASE;
     limbs[i] = digit;
@@ -232,7 +265,7 @@ const SUM_DIGITS = 20;
 
 function scaledOf(value: number): Scaled {
   const { negative, integer, fraction } = partsOf(numberToDecimal(value));
-  const digits = BigInt(integer + fraction);
+  const digits = NativeBigInt(integer + fraction);
   return { coefficient: negative ? -digits : digits, exponent: -fraction.length };
 }
 
@@ -242,14 +275,14 @@ function scaledOf(value: number): Scaled {
  * `ROUND_HALF_UP`, which rounds a tie away from zero). `1e20 + 5` is `100000000000000000010`.
  */
 function addRounded(a: Scaled, b: Scaled): Scaled {
-  const exponent = Math.min(a.exponent, b.exponent);
+  const exponent = mathMin(a.exponent, b.exponent);
   const sum =
-    a.coefficient * 10n ** BigInt(a.exponent - exponent) +
-    b.coefficient * 10n ** BigInt(b.exponent - exponent);
+    a.coefficient * 10n ** NativeBigInt(a.exponent - exponent) +
+    b.coefficient * 10n ** NativeBigInt(b.exponent - exponent);
   const magnitude = sum < 0n ? -sum : sum;
-  const drop = magnitude.toString().length - SUM_DIGITS;
+  const drop = bigIntToString(magnitude).length - SUM_DIGITS;
   if (drop <= 0) return { coefficient: sum, exponent };
-  const divisor = 10n ** BigInt(drop);
+  const divisor = 10n ** NativeBigInt(drop);
   let kept = magnitude / divisor;
   if (2n * (magnitude % divisor) >= divisor) kept += 1n;
   return { coefficient: sum < 0n ? -kept : kept, exponent: exponent + drop };
@@ -258,9 +291,9 @@ function addRounded(a: Scaled, b: Scaled): Scaled {
 /** The canonical decimal of a scaled value. */
 function textOf({ coefficient, exponent }: Scaled): string {
   const negative = coefficient < 0n;
-  const digits = (negative ? -coefficient : coefficient).toString();
+  const digits = bigIntToString(negative ? -coefficient : coefficient);
   if (exponent >= 0)
-    return toCanonicalDecimal(`${negative ? '-' : ''}${digits}${'0'.repeat(exponent)}`);
+    return toCanonicalDecimal(`${negative ? '-' : ''}${digits}${stringRepeat('0', exponent)}`);
   return placed(negative, digits, -exponent);
 }
 
@@ -272,6 +305,6 @@ export function sumNumbers(values: readonly number[], rounding: Rounding | undef
   let total: Scaled = { coefficient: 0n, exponent: 0 };
   for (const value of values) total = addRounded(total, scaledOf(value));
   const text = textOf(total);
-  const sum = Number(rounding === undefined ? text : roundDecimal(text, rounding));
+  const sum = NativeNumber(rounding === undefined ? text : roundDecimal(text, rounding));
   return sum === 0 ? 0 : sum;
 }

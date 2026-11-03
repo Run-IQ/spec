@@ -1,4 +1,27 @@
-import { isoOf, NativeDate, parseTime } from '../intrinsics.js';
+import {
+  NativeDate,
+  NativeError,
+  NativeIntlDateTimeFormat,
+  NativeMap,
+  NativeNumber,
+  NativeRangeError,
+  NativeString,
+  arrayFind,
+  dateTimeFormatFormatToParts,
+  dateTimeFormatResolvedOptions,
+  isoOf,
+  mapClear,
+  mapDelete,
+  mapGet,
+  mapIteratorNext,
+  mapKeys,
+  mapSet,
+  mapSize,
+  mathFloor,
+  parseTime,
+  regExpExec,
+  stringSplit,
+} from '../intrinsics.js';
 import type { CivilCalendar } from '../time/civil.js';
 
 // Internal to `@run-iq/spec`: a `CivilCalendar` for any IANA zone the runtime knows, read from
@@ -10,7 +33,7 @@ import type { CivilCalendar } from '../time/civil.js';
 // unable (`RuntimeCannotReadOffsets`), never taken for the proof's fault.
 
 /** The verifier cannot read the offset of a zone: a limit of the runtime, not a fault of a proof. */
-export class RuntimeCannotReadOffsets extends Error {}
+export class RuntimeCannotReadOffsets extends NativeError {}
 
 /**
  * The runtime knows `UTC` and fixed offsets only (the minimum ECMA-402 asks for): it has no time
@@ -22,19 +45,19 @@ export class RuntimeHasNoZoneData extends RuntimeCannotReadOffsets {}
 export const intlCacheLimits = { max: 512 };
 
 /** The formatters by canonical zone name (`resolvedOptions().timeZone`), oldest first. */
-const byCanonical = new Map<string, Intl.DateTimeFormat>();
+const byCanonical = new NativeMap<string, Intl.DateTimeFormat>();
 /** The canonical name of a zone as written: bounded, so a flood of spellings costs nothing. */
-const canonicalOf = new Map<string, string>();
+const canonicalOf = new NativeMap<string, string>();
 
 /** Empties the two caches (for the tests that bound them). */
 export function clearIntlCaches(): void {
-  byCanonical.clear();
-  canonicalOf.clear();
+  mapClear(byCanonical);
+  mapClear(canonicalOf);
 }
 
 /** The sizes of the two caches, for the tests that bound them. */
 export function intlCacheSizes(): { formatters: number; names: number } {
-  return { formatters: byCanonical.size, names: canonicalOf.size };
+  return { formatters: mapSize(byCanonical), names: mapSize(canonicalOf) };
 }
 
 /**
@@ -42,7 +65,7 @@ export function intlCacheSizes(): { formatters: number; names: number } {
  * Code that reassigns `Intl.DateTimeFormat` later changes nothing here.
  */
 export const intlRuntime: { DateTimeFormat: typeof Intl.DateTimeFormat } = {
-  DateTimeFormat: Intl.DateTimeFormat,
+  DateTimeFormat: NativeIntlDateTimeFormat,
 };
 
 function makeFormatter(zone: string): Intl.DateTimeFormat {
@@ -59,24 +82,24 @@ function makeFormatter(zone: string): Intl.DateTimeFormat {
  * cannot make a long-running verifier grow by writing the same zone in new ways.
  */
 function formatter(zone: string): Intl.DateTimeFormat {
-  const known = canonicalOf.get(zone);
+  const known = mapGet(canonicalOf, zone);
   if (known !== undefined) {
-    const cached = byCanonical.get(known);
+    const cached = mapGet(byCanonical, known);
     if (cached !== undefined) return cached;
   }
   const made = makeFormatter(zone);
-  const canonical = made.resolvedOptions().timeZone;
-  let shared = byCanonical.get(canonical);
+  const canonical = dateTimeFormatResolvedOptions(made).timeZone;
+  let shared = mapGet(byCanonical, canonical);
   if (shared === undefined) {
-    if (byCanonical.size >= intlCacheLimits.max) {
-      const oldest = byCanonical.keys().next().value;
-      if (oldest !== undefined) byCanonical.delete(oldest);
+    if (mapSize(byCanonical) >= intlCacheLimits.max) {
+      const oldest = mapIteratorNext(mapKeys(byCanonical)).value;
+      if (oldest !== undefined) mapDelete(byCanonical, oldest);
     }
-    byCanonical.set(canonical, made);
+    mapSet(byCanonical, canonical, made);
     shared = made;
   }
-  if (canonicalOf.size >= intlCacheLimits.max) canonicalOf.clear();
-  canonicalOf.set(zone, canonical);
+  if (mapSize(canonicalOf) >= intlCacheLimits.max) mapClear(canonicalOf);
+  mapSet(canonicalOf, zone, canonical);
   return shared;
 }
 
@@ -96,7 +119,7 @@ function requireZoneSupport(): void {
   try {
     makeFormatter(PROBE_ZONE);
   } catch (error) {
-    if (error instanceof RangeError) throw new RuntimeHasNoZoneData('no time zone data');
+    if (error instanceof NativeRangeError) throw new RuntimeHasNoZoneData('no time zone data');
     throw new RuntimeCannotReadOffsets(`cannot build the formatter of ${PROBE_ZONE}`);
   }
 }
@@ -116,8 +139,10 @@ export function isKnownZone(zone: string): boolean {
     formatter(zone);
     return true;
   } catch (error) {
-    if (error instanceof RangeError) return false;
-    throw new RuntimeCannotReadOffsets(`cannot build a formatter for the zone: ${String(error)}`);
+    if (error instanceof NativeRangeError) return false;
+    throw new RuntimeCannotReadOffsets(
+      `cannot build a formatter for the zone: ${NativeString(error)}`,
+    );
   }
 }
 
@@ -141,11 +166,12 @@ export function runtimeTzdata(): string | undefined {
  * `GMT+14:58:47`, with the true minus sign U+2212 too), or `undefined` for any other text.
  */
 export function parseOffset(text: string): number | undefined {
-  const match = /^GMT(?:([+\-\u2212])(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
+  const match = regExpExec(/^GMT(?:([+\-\u2212])(\d{2}):(\d{2})(?::(\d{2}))?)?$/, text);
   if (!match) return undefined;
   const [, sign, hours, minutes, seconds] = match;
   if (sign === undefined) return 0;
-  const total = (Number(hours) * 60 + Number(minutes)) * 60 + Number(seconds ?? 0);
+  const total =
+    (NativeNumber(hours) * 60 + NativeNumber(minutes)) * 60 + NativeNumber(seconds ?? 0);
   return (sign === '+' ? 1 : -1) * total * 1000;
 }
 
@@ -153,9 +179,10 @@ const DAY_MS = 86_400_000;
 
 /** The offset of `zone` from UTC at the instant `ms`, in milliseconds. */
 function offsetAt(zone: string, ms: number): number {
-  const part = formatter(zone)
-    .formatToParts(new NativeDate(ms))
-    .find((entry) => entry.type === 'timeZoneName');
+  const part = arrayFind(
+    dateTimeFormatFormatToParts(formatter(zone), new NativeDate(ms)),
+    (entry) => entry.type === 'timeZoneName',
+  );
   const offset = parseOffset(part?.value ?? '');
   if (offset === undefined) {
     throw new RuntimeCannotReadOffsets(`cannot read the offset of ${zone}: ${part?.value ?? ''}`);
@@ -164,7 +191,7 @@ function offsetAt(zone: string, ms: number): number {
 }
 
 function civilDateAt(zone: string, ms: number): string {
-  return isoOf(ms + offsetAt(zone, ms)).split('T')[0] ?? '';
+  return stringSplit(isoOf(ms + offsetAt(zone, ms)), 'T')[0] ?? '';
 }
 
 /**
@@ -179,7 +206,7 @@ export const intlCalendar: CivilCalendar = {
     let low = midnight - 1.2 * DAY_MS;
     let high = midnight + 1.2 * DAY_MS;
     while (high - low > 1) {
-      const middle = Math.floor((low + high) / 2);
+      const middle = mathFloor((low + high) / 2);
       if (civilDateAt(zone, middle) >= day) high = middle;
       else low = middle;
     }

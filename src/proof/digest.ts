@@ -20,6 +20,14 @@ import { readUnsaltedProof } from './validate.js';
 import { treeDigest } from './tree.js';
 import { inputSalter, readSeed, UNSALTED_SEED } from '../input/seed.js';
 import { MAX_JSON_VALUES, ownCopy, spendValues, withValueBudget } from '../values.js';
+import {
+  arrayMap,
+  mapGet,
+  mapHas,
+  objectFromEntries,
+  uint8ArrayEvery,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 /**
  * The digest a proof keeps in place of its input (D-15), lowercase hex:
@@ -82,8 +90,8 @@ function readRequest(value: unknown): { input: unknown; options: unknown } {
       const fields = readFields(value, '', 'request', REQUEST_KEYS, reader);
       if (fields === undefined) return;
       requireFields(fields, '', REQUEST_KEYS, add);
-      if (fields.values.has('input') && fields.values.has('options')) {
-        read = { input: fields.values.get('input'), options: fields.values.get('options') };
+      if (mapHas(fields.values, 'input') && mapHas(fields.values, 'options')) {
+        read = { input: mapGet(fields.values, 'input'), options: mapGet(fields.values, 'options') };
       }
     },
     (error) => ({ path: '', message: unreadableMessage('request', error) }),
@@ -154,7 +162,7 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
   const bytes = readSeed(seed);
   const { proof, errors } = readUnsaltedProof(p);
   if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
-  if (proof.inputSalted === bytes.every((byte) => byte === 0)) {
+  if (proof.inputSalted === uint8ArrayEvery(bytes, (byte) => byte === 0)) {
     throw newSpecError(
       'INVALID_PROOF',
       'Cannot seal the proof: inputSalted does not match the seed',
@@ -171,8 +179,8 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
-  const counts = Object.fromEntries(
-    PROOF_SECTIONS.map((section) => [section, salted[section].length]),
+  const counts = objectFromEntries(
+    arrayMap(PROOF_SECTIONS, (section) => [section, salted[section].length]),
   ) as ProofCounts;
   const content = { ...salted, counts };
   return { ...content, digest: treeDigest(content) };
@@ -190,9 +198,9 @@ function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number
   const salter = inputSalter(seed, 'proof:');
   const salted = { ...proof } as unknown as Record<string, unknown>;
   for (const section of PROOF_SECTIONS) {
-    salted[section] = proof[section].map((entry: object, i) => ({
+    salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) => ({
       ...entry,
-      salt: bytesToHex(salter(`${section}:${i}`).subarray(0, SALT_BYTES)),
+      salt: bytesToHex(uint8ArraySubarray(salter(`${section}:${i}`), 0, SALT_BYTES)),
     }));
   }
   return salted as unknown as ProofView;

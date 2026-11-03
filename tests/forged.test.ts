@@ -494,7 +494,7 @@ describe('every exported function: hostile arguments give an own SpecError or a 
             call(...args);
           } catch (error) {
             const bounded =
-              isOwnError(error) &&
+              (isOwnError(error) || error instanceof VerifyOptionsError) &&
               error.message.length <= 2048 &&
               (error.path === undefined || error.path.length <= 2048);
             if (!bounded) refused.push(`${label} at ${position}, others ${fill}`);

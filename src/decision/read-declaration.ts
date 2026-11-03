@@ -20,6 +20,24 @@ import {
   roundingNotApplicable,
 } from './rounding.js';
 import type { OutputRounding } from './rounding.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayJoin,
+  arrayMap,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  objectKeys,
+  regExpTest,
+  setAdd,
+  setHas,
+  setSize,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the one reader of output declarations, shared by
 // `validateOutputDeclaration`, `normalizeOutputDeclaration` and every function that takes a
@@ -69,21 +87,24 @@ const COMBINABLE: Readonly<Record<CombineStrategy, readonly OutputType[]>> = {
  */
 export function combinationProblem(type: OutputType, combine: CombineStrategy): string | undefined {
   const types = COMBINABLE[combine];
-  return types.includes(type)
+  return arrayIncludes(types, type)
     ? undefined
     : `${quoteText(combine)} cannot combine ${article(type)} ${type} output: ` +
-        `it applies to ${types.join(', ')}`;
+        `it applies to ${arrayJoin(types, ', ')}`;
 }
 
 /** `an` before a type starting with a vowel (`an enum`, `an object`), `a` otherwise. */
 export function article(type: string): string {
-  return /^[aeiou]/.test(type) ? 'an' : 'a';
+  return regExpTest(/^[aeiou]/, type) ? 'an' : 'a';
 }
 
 const KEYS = ['type', 'combine', 'values', 'rounding', 'unit', 'empty', 'per', 'dimension', 'sign'];
-const KEY_SET = new Set(KEYS);
+const KEY_SET = new NativeSet(KEYS);
 /** The members of a declaration, as a message lists them: `{ type, combine, values?, … }`. */
-const SHAPE = `{ ${KEYS.map((key, i) => (i < 2 ? key : `${key}?`)).join(', ')} }`;
+const SHAPE = `{ ${arrayJoin(
+  arrayMap(KEYS, (key, i) => (i < 2 ? key : `${key}?`)),
+  ', ',
+)} }`;
 const SIGNS: readonly NonNullable<OutputDeclaration['sign']>[] = ['nonNegative', 'nonPositive'];
 
 type Add = (path: string, message: string) => void;
@@ -116,7 +137,7 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
     add(path, `${citeName(path)} must be an object ${SHAPE}`);
     return undefined;
   }
-  const keys = Object.keys(declaration);
+  const keys = objectKeys(declaration);
   if (!spendValues(keys.length)) {
     add(path, tooLargeMessage(path));
     return undefined;
@@ -126,22 +147,22 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
     failed = true;
     add(at, message);
   };
-  const members = new Map<string, unknown>();
+  const members = new NativeMap<string, unknown>();
   for (const key of keys) {
     const member = declaration[key];
     // A member whose value is `undefined` is absent, known or not.
     if (member === undefined) continue;
-    if (KEY_SET.has(key)) members.set(key, member);
+    if (setHas(KEY_SET, key)) mapSet(members, key, member);
     else fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
   }
-  const type = members.get('type');
-  const combine = members.get('combine');
+  const type = mapGet(members, 'type');
+  const combine = mapGet(members, 'combine');
   if (!isOneOf(type, OUTPUT_TYPES)) {
-    fail(`${path}.type`, `${citeName(path)}.type must be one of ${OUTPUT_TYPES.join(', ')}`);
+    fail(`${path}.type`, `${citeName(path)}.type must be one of ${arrayJoin(OUTPUT_TYPES, ', ')}`);
   }
   if (!isOneOf(combine, COMBINE_STRATEGIES)) {
     const at = `${path}.combine`;
-    fail(at, `${citeName(at)} must be one of ${COMBINE_STRATEGIES.join(', ')}`);
+    fail(at, `${citeName(at)} must be one of ${arrayJoin(COMBINE_STRATEGIES, ', ')}`);
   } else if (isOneOf(type, OUTPUT_TYPES)) {
     const problem = combinationProblem(type, combine);
     if (problem !== undefined) fail(`${path}.combine`, `${citeName(path)}.combine ${problem}`);
@@ -155,7 +176,7 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
   const per = read.per();
   const dimension = read.dimension();
   // Exclusive as written, valid or not: every problem is reported at once.
-  if (members.has('per') && members.has('dimension')) {
+  if (mapHas(members, 'per') && mapHas(members, 'dimension')) {
     fail(path, `${citeName(path)}: per and dimension are exclusive`);
   }
   if (failed || !isOneOf(type, OUTPUT_TYPES) || !isOneOf(combine, COMBINE_STRATEGIES)) {
@@ -184,11 +205,11 @@ class Fields {
 
   /** The enum values, copied; refused on any other known type. */
   values(): string[] | undefined {
-    const values = this.members.get('values');
+    const values = mapGet(this.members, 'values');
     const at = `${this.path}.values`;
     if (this.type === 'enum') {
       // The values of an enum that sets a dimension are dimension values (`iso:TG`, never `:x`).
-      const ofDimension = this.members.get('dimension') !== undefined;
+      const ofDimension = mapGet(this.members, 'dimension') !== undefined;
       return enumValues(values, at, ofDimension, this.fail);
     }
     if (values !== undefined && isOneOf(this.type, OUTPUT_TYPES)) {
@@ -198,7 +219,7 @@ class Fields {
   }
 
   rounding(): OutputRounding | undefined {
-    const rounding = this.members.get('rounding');
+    const rounding = mapGet(this.members, 'rounding');
     const at = `${this.path}.rounding`;
     if (rounding === undefined) return undefined;
     if (isOneOf(this.type, OUTPUT_TYPES) && !isRoundable(this.type)) {
@@ -216,14 +237,14 @@ class Fields {
   }
 
   unit(): string | undefined {
-    const unit = this.members.get('unit');
+    const unit = mapGet(this.members, 'unit');
     const at = `${this.path}.unit`;
     if (unit === undefined) return undefined;
     if (typeof unit !== 'string' || unit === '') {
       this.fail(at, `${citeName(at)} must be a non-empty string`);
     } else if (hasLoneSurrogate(unit)) {
       this.fail(at, loneSurrogateMessage(at));
-    } else if (/^\s|\s$/.test(unit)) {
+    } else if (regExpTest(/^\s|\s$/, unit)) {
       this.fail(at, `${citeName(at)} must not start or end with white space`);
     } else if (isOneOf(this.type, OUTPUT_TYPES) && !isRoundable(this.type)) {
       this.fail(at, `${citeName(at)} applies only to a number or decimal output`);
@@ -234,7 +255,7 @@ class Fields {
   }
 
   empty(): boolean | undefined {
-    const empty = this.members.get('empty');
+    const empty = mapGet(this.members, 'empty');
     const at = `${this.path}.empty`;
     if (empty === undefined) return undefined;
     if (typeof empty !== 'boolean') this.fail(at, `${citeName(at)} must be a boolean`);
@@ -245,11 +266,11 @@ class Fields {
   }
 
   sign(): OutputDeclaration['sign'] {
-    const sign = this.members.get('sign');
+    const sign = mapGet(this.members, 'sign');
     const at = `${this.path}.sign`;
     if (sign === undefined) return undefined;
     if (!isOneOf(sign, SIGNS)) {
-      this.fail(at, `${citeName(at)} must be one of ${SIGNS.join(', ')}`);
+      this.fail(at, `${citeName(at)} must be one of ${arrayJoin(SIGNS, ', ')}`);
     } else if (isOneOf(this.combine, COMBINE_STRATEGIES) && this.combine !== 'sum') {
       this.fail(at, `${citeName(at)} applies only to a sum output`);
     } else return sign;
@@ -257,14 +278,14 @@ class Fields {
   }
 
   per(): string | undefined {
-    const per = this.members.get('per');
+    const per = mapGet(this.members, 'per');
     if (per === undefined) return undefined;
     const levels = readCollectionPath(per, `${this.path}.per`, this.fail);
     return levels !== undefined && typeof per === 'string' ? per : undefined;
   }
 
   dimension(): string | undefined {
-    const dimension = this.members.get('dimension');
+    const dimension = mapGet(this.members, 'dimension');
     const at = `${this.path}.dimension`;
     if (dimension === undefined) return undefined;
     if (typeof dimension !== 'string') {
@@ -293,12 +314,12 @@ function enumValues(
     fail(path, `${citeName(path)} is required for an enum output: list its allowed strings`);
     return undefined;
   }
-  if (!Array.isArray(values)) {
+  if (!arrayIsArray(values)) {
     fail(path, `${citeName(path)} must be an array of non-empty strings`);
     return undefined;
   }
   const items = readList(values, path);
-  if (!Array.isArray(items)) {
+  if (!arrayIsArray(items)) {
     fail(items.path, items.message);
     return undefined;
   }
@@ -306,24 +327,24 @@ function enumValues(
     fail(path, `${citeName(path)} must not be empty: an enum output needs at least one value`);
     return undefined;
   }
-  const seen = new Set<string>();
-  items.forEach((item, i) => {
+  const seen = new NativeSet<string>();
+  arrayForEach(items, (item, i) => {
     const at = `${path}[${i}]`;
     if (typeof item !== 'string' || item === '') {
       fail(at, `${citeName(at)} must be a non-empty string`);
     } else if (hasLoneSurrogate(item)) {
       fail(at, loneSurrogateMessage(at));
-    } else if (seen.has(item)) {
+    } else if (setHas(seen, item)) {
       fail(at, `${citeName(at)} repeats ${quoteText(item)}`);
     } else {
-      seen.add(item);
+      setAdd(seen, item);
       const problem = ofDimension ? dimensionValueProblem(item, at) : undefined;
       if (problem !== undefined) fail(at, problem);
     }
   });
-  return seen.size === items.length ? [...seen] : undefined;
+  return setSize(seen) === items.length ? [...seen] : undefined;
 }
 
 function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
-  return allowed.some((item) => item === value);
+  return arraySome(allowed, (item) => item === value);
 }

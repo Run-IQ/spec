@@ -1,7 +1,7 @@
 import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import { NativeDate } from '../intrinsics.js';
+import { NativeDate, NativeString, jsonParse } from '../intrinsics.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
@@ -82,7 +82,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(payload as string);
+    parsed = jsonParse(payload as string);
   } catch (error) {
     fail(`payload is not valid JSON (${reasonOf(error)})`);
   }
@@ -109,7 +109,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
   const computed = sha256Hex(payload as string);
   if (computed !== checksum) {
     fail(
-      `checksum mismatch: the record holds ${citeName(String(checksum))}, the payload gives ` +
+      `checksum mismatch: the record holds ${citeName(NativeString(checksum))}, the payload gives ` +
         `${computed}`,
     );
   }
@@ -148,7 +148,7 @@ function nameOf(value: unknown): string {
     ? 'an object'
     : typeof value === 'function'
       ? 'a function'
-      : String(value);
+      : NativeString(value);
 }
 
 /** A civil date stays a string; a canonical instant becomes a `Date`. */

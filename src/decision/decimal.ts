@@ -1,4 +1,20 @@
 import { newSpecError, quoteText } from '../errors.js';
+import {
+  NativeBigInt,
+  NativeNumber,
+  NativeString,
+  arrayIsArray,
+  bigIntToString,
+  regExpExec,
+  regExpTest,
+  stringCharCodeAt,
+  stringIndexOf,
+  stringRepeat,
+  stringReplace,
+  stringSlice,
+  stringSplit,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /** A canonical decimal: no leading zero, no trailing fractional zero, no exponent. */
 const CANONICAL = /^-?(0|[1-9][0-9]*)(\.[0-9]*[1-9])?$/;
@@ -13,7 +29,7 @@ const ZERO = 0x30;
  * and any value that is not a string are not. Any number of digits is allowed.
  */
 export function isCanonicalDecimal(text: string): boolean {
-  return typeof text === 'string' && text !== '-0' && CANONICAL.test(text);
+  return typeof text === 'string' && text !== '-0' && regExpTest(CANONICAL, text);
 }
 
 /**
@@ -30,7 +46,7 @@ export function toCanonicalDecimal(text: string): string {
   if (typeof text !== 'string') {
     throw newSpecError('INVALID_DECIMAL', `Not a decimal: ${describe(text)} (expected a string)`);
   }
-  const parts = DECIMAL.exec(text);
+  const parts = regExpExec(DECIMAL, text);
   if (!parts) {
     throw newSpecError(
       'INVALID_DECIMAL',
@@ -39,10 +55,10 @@ export function toCanonicalDecimal(text: string): string {
     );
   }
   const [, sign = '', digits = '', fraction = ''] = parts;
-  const integer = digits.replace(/^0+(?=[0-9])/, '');
+  const integer = stringReplace(digits, /^0+(?=[0-9])/, '');
   let end = fraction.length;
-  while (end > 0 && fraction.charCodeAt(end - 1) === ZERO) end--;
-  const decimals = fraction.slice(0, end);
+  while (end > 0 && stringCharCodeAt(fraction, end - 1) === ZERO) end--;
+  const decimals = stringSlice(fraction, 0, end);
   const magnitude = decimals === '' ? integer : `${integer}.${decimals}`;
   return magnitude === '0' ? '0' : `${sign}${magnitude}`;
 }
@@ -51,13 +67,15 @@ function describe(value: unknown): string {
   if (value === null) return 'null';
   if (isArray(value)) return 'an array';
   const type = typeof value;
-  return type === 'undefined' ? 'undefined' : `${/^[aeiou]/.test(type) ? 'an' : 'a'} ${type}`;
+  return type === 'undefined'
+    ? 'undefined'
+    : `${regExpTest(/^[aeiou]/, type) ? 'an' : 'a'} ${type}`;
 }
 
 /** `Array.isArray`, false when it throws (a revoked Proxy). */
 function isArray(value: unknown): boolean {
   try {
-    return Array.isArray(value);
+    return arrayIsArray(value);
   } catch {
     return false;
   }
@@ -81,16 +99,16 @@ export const MAX_ROUNDING_SCALE = 20;
 export const MAX_INCREMENT_DIGITS = 20;
 
 export function incrementProblem(value: unknown): string | undefined {
-  if (typeof value !== 'string' || !DECIMAL.test(value)) {
+  if (typeof value !== 'string' || !regExpTest(DECIMAL, value)) {
     return 'must be a decimal string ("0.05", "10")';
   }
   const canonical = toCanonicalDecimal(value);
-  if (canonical === '0' || canonical.startsWith('-')) return 'must be greater than 0';
+  if (canonical === '0' || stringStartsWith(canonical, '-')) return 'must be greater than 0';
   if (canonical !== value) return `must be written ${quoteText(canonical)}`;
   if (decimalPlaces(canonical) > MAX_ROUNDING_SCALE) {
     return `must have at most ${MAX_ROUNDING_SCALE} decimal places`;
   }
-  const [integer = ''] = canonical.split('.');
+  const [integer = ''] = stringSplit(canonical, '.');
   if (integer.length > MAX_INCREMENT_DIGITS) {
     return `must have at most ${MAX_INCREMENT_DIGITS} digits before the point`;
   }
@@ -104,7 +122,7 @@ export function incrementProblem(value: unknown): string | undefined {
  */
 export function scaleOfIncrement(increment: string): number | undefined {
   if (increment === '1') return 0;
-  return /^0\.0*1$/.test(increment) ? decimalPlaces(increment) : undefined;
+  return regExpTest(/^0\.0*1$/, increment) ? decimalPlaces(increment) : undefined;
 }
 
 /**
@@ -112,17 +130,20 @@ export function scaleOfIncrement(increment: string): number | undefined {
  * canonical decimal `b`, exactly, for any number of digits (`"9"` before `"10"`).
  */
 export function compareCanonicalDecimals(a: string, b: string): -1 | 0 | 1 {
-  const negative = a.startsWith('-');
-  if (negative !== b.startsWith('-')) return negative ? -1 : 1;
-  const order = compareMagnitudes(negative ? a.slice(1) : a, negative ? b.slice(1) : b);
+  const negative = stringStartsWith(a, '-');
+  if (negative !== stringStartsWith(b, '-')) return negative ? -1 : 1;
+  const order = compareMagnitudes(
+    negative ? stringSlice(a, 1) : a,
+    negative ? stringSlice(b, 1) : b,
+  );
   if (!negative || order === 0) return order;
   return order < 0 ? 1 : -1;
 }
 
 /** -1, 0 or 1 comparing two canonical decimals without sign. */
 function compareMagnitudes(a: string, b: string): -1 | 0 | 1 {
-  const [aInteger = '', aFraction = ''] = a.split('.');
-  const [bInteger = '', bFraction = ''] = b.split('.');
+  const [aInteger = '', aFraction = ''] = stringSplit(a, '.');
+  const [bInteger = '', bFraction = ''] = stringSplit(b, '.');
   // Without leading zeros, the longer integer part is the greater.
   if (aInteger.length !== bInteger.length) return aInteger.length < bInteger.length ? -1 : 1;
   if (aInteger !== bInteger) return aInteger < bInteger ? -1 : 1;
@@ -133,7 +154,7 @@ function compareMagnitudes(a: string, b: string): -1 | 0 | 1 {
 
 /** The number of digits after the point of a decimal written in text. */
 function decimalPlaces(text: string): number {
-  const point = text.indexOf('.');
+  const point = stringIndexOf(text, '.');
   return point < 0 ? 0 : text.length - point - 1;
 }
 
@@ -143,18 +164,18 @@ function decimalPlaces(text: string): number {
  * `-0` gives `"0"`): the decimal a binary number stands for when it is rounded to a step.
  */
 export function numberToDecimal(n: number): string {
-  const text = String(n);
-  const match = /^(-?)([0-9]+)(?:\.([0-9]+))?e([+-][0-9]+)$/.exec(text);
+  const text = NativeString(n);
+  const match = regExpExec(/^(-?)([0-9]+)(?:\.([0-9]+))?e([+-][0-9]+)$/, text);
   if (match === null) return toCanonicalDecimal(text);
   const [, sign = '', integer = '', fraction = '', exponent = '0'] = match;
   const digits = integer + fraction;
-  const point = integer.length + Number(exponent);
+  const point = integer.length + NativeNumber(exponent);
   const plain =
     point <= 0
-      ? `0.${'0'.repeat(-point)}${digits}`
+      ? `0.${stringRepeat('0', -point)}${digits}`
       : point >= digits.length
-        ? digits + '0'.repeat(point - digits.length)
-        : `${digits.slice(0, point)}.${digits.slice(point)}`;
+        ? digits + stringRepeat('0', point - digits.length)
+        : `${stringSlice(digits, 0, point)}.${stringSlice(digits, point)}`;
   return toCanonicalDecimal(sign + plain);
 }
 
@@ -182,15 +203,16 @@ export function isOnStep(value: string, step: { scale?: number; increment?: stri
   const k = decimalPlaces(step.increment);
   // A multiple of the increment has at most its decimal places (`value` ends in no zero).
   if (places > k) return false;
-  const digits = value.replace('-', '').replace('.', '') + '0'.repeat(k - places);
-  const divisor = BigInt(step.increment.replace('.', ''));
+  const digits =
+    stringReplace(stringReplace(value, '-', ''), '.', '') + stringRepeat('0', k - places);
+  const divisor = NativeBigInt(stringReplace(step.increment, '.', ''));
   // The remainder, 15 digits at a time: never a number as long as `value`.
   let remainder = 0n;
   for (let i = 0; i < digits.length; i += 15) {
-    const chunk = digits.slice(i, i + 15);
-    const dividend = remainder * 10n ** BigInt(chunk.length) + BigInt(chunk);
+    const chunk = stringSlice(digits, i, i + 15);
+    const dividend = remainder * 10n ** NativeBigInt(chunk.length) + NativeBigInt(chunk);
     stepWork.steps += 1;
-    stepWork.digits += dividend.toString().length;
+    stepWork.digits += bigIntToString(dividend).length;
     remainder = dividend % divisor;
   }
   return remainder === 0n;

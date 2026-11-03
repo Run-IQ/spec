@@ -22,6 +22,23 @@ import { inputSalter, readSeed } from './seed.js';
 import { leafPlace } from './place.js';
 import type { LeafKind, LeafPlace } from './place.js';
 import { readValidInput } from './validate.js';
+import {
+  NativeString,
+  NativeUint8Array,
+  arrayIncludes,
+  arrayJoin,
+  arrayMap,
+  arrayPush,
+  mapGet,
+  mapHas,
+  mathAbs,
+  numberIsFinite,
+  numberIsSafeInteger,
+  objectIs,
+  regExpTest,
+  uint8ArrayFrom,
+  uint8ArraySet,
+} from '../intrinsics.js';
 
 /**
  * The domain tag of the input tree (D-15): every leaf hash starts with
@@ -52,9 +69,9 @@ export interface InputLeaf {
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The fixed start of every leaf hash: `0x00 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
-const LEAF_PREFIX = Uint8Array.from([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+const LEAF_PREFIX = uint8ArrayFrom([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
 /** The fixed start of every content commitment: `0x03 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
-const COMMITMENT_PREFIX = Uint8Array.from([3, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+const COMMITMENT_PREFIX = uint8ArrayFrom([3, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
 
 /**
  * The leaves of `input` under `seed` (D-14, D-15), sorted by `comparePointers`: decoded
@@ -76,7 +93,7 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
     const leaves: InputLeaf[] = [];
     ownCopy(() =>
       forEachLeaf(snapshot, (leaf) => {
-        leaves.push({
+        arrayPush(leaves, {
           ...leaf,
           salt: bytesToHex(salt(leaf.pointer)),
           valueSalt: bytesToHex(valueSalt(leaf.pointer)),
@@ -125,7 +142,7 @@ export function inputLeaves(input: ProofInput, seed: Uint8Array): InputLeaf[] {
 export function inputLeafHash(leaf: InputLeaf): Uint8Array {
   return withValueBudget(() => {
     const { content, salt, valueSalt } = readLeaf(leaf);
-    const out = new Uint8Array(32);
+    const out = new NativeUint8Array(32);
     createLeafHasher().hash(out, content, hexToBytes(salt), hexToBytes(valueSalt));
     return out;
   });
@@ -183,7 +200,7 @@ export function verifyInputInclusion(
   path: readonly Uint8Array[],
 ): boolean {
   const expected: unknown = digest;
-  if (typeof expected !== 'string' || !DIGEST_HEX.test(expected)) return false;
+  if (typeof expected !== 'string' || !regExpTest(DIGEST_HEX, expected)) return false;
   const root = rootFromPath(leafHash, index, size, path);
   return root !== undefined && bytesToHex(inputDigestOf(size, root)) === expected;
 }
@@ -200,7 +217,7 @@ function writeContent(out: TextOut, content: LeafContent): void {
     const last = content.kind === 'array' ? content.length : content.value;
     out.text(',');
     if (typeof last === 'string') writeJsonString(out, last);
-    else out.text(last === null ? 'null' : String(last));
+    else out.text(last === null ? 'null' : NativeString(last));
   }
   out.text(']');
 }
@@ -218,11 +235,12 @@ export interface LeafHasher {
 
 /** Internal: a `LeafHasher`. */
 export function createLeafHasher(): LeafHasher {
-  const commitment = new Uint8Array(32);
+  const commitment = new NativeUint8Array(32);
   return {
     commitment,
     hash(out, content, salt, valueSalt) {
-      commitment.set(
+      uint8ArraySet(
+        commitment,
         withSha256((stream) => {
           stream.bytes(COMMITMENT_PREFIX);
           stream.bytes(valueSalt);
@@ -244,7 +262,8 @@ function writeLeafHash(
   salt: Uint8Array,
   commitment: Uint8Array,
 ): void {
-  out.set(
+  uint8ArraySet(
+    out,
     withSha256((stream) => {
       stream.bytes(LEAF_PREFIX);
       stream.bytes(salt);
@@ -272,7 +291,7 @@ export function committedLeafHash(
   if (problem !== undefined) {
     throw newSpecError('INVALID_INPUT', `invalid input leaf: ${problem.message}`, problem.path);
   }
-  const out = new Uint8Array(32);
+  const out = new NativeUint8Array(32);
   writeLeafHash(out, pointer, salt, commitment);
   return out;
 }
@@ -314,13 +333,15 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
   const fields = readFields(value, '', 'input leaf', LEAF_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, '', ['pointer', 'kind', 'salt', 'valueSalt'], add);
-  const has = (key: string): boolean => fields.values.has(key);
-  const located = has('pointer') ? readLeafPointer(fields.values.get('pointer'), add) : undefined;
+  const has = (key: string): boolean => mapHas(fields.values, key);
+  const located = has('pointer')
+    ? readLeafPointer(mapGet(fields.values, 'pointer'), add)
+    : undefined;
   const at = located?.place;
-  const kind = fields.values.get('kind');
-  if (has('kind') && !isKind(kind)) add('/kind', `/kind must be one of ${KINDS.join(', ')}`);
-  else if (isKind(kind) && at !== undefined && !at.kinds.includes(kind)) {
-    add('/kind', `/kind must be ${at.kinds.join(' or ')} at this pointer`);
+  const kind = mapGet(fields.values, 'kind');
+  if (has('kind') && !isKind(kind)) add('/kind', `/kind must be one of ${arrayJoin(KINDS, ', ')}`);
+  else if (isKind(kind) && at !== undefined && !arrayIncludes(at.kinds, kind)) {
+    add('/kind', `/kind must be ${arrayJoin(at.kinds, ' or ')} at this pointer`);
   }
   const pointer = located?.pointer;
   let content: LeafContent | undefined;
@@ -328,7 +349,7 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
     if (has('length')) add('/length', '/length is only for a leaf of kind array');
     if (!has('value')) add('/value', '/value is required');
     else {
-      const scalar = readScalar(fields.values.get('value'), add);
+      const scalar = readScalar(mapGet(fields.values, 'value'), add);
       const problem = scalar === undefined || at === undefined ? undefined : at.value(scalar.value);
       if (problem !== undefined) add('/value', problem);
       else if (pointer !== undefined && scalar !== undefined) {
@@ -342,12 +363,12 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
       if (pointer !== undefined) content = { pointer, kind };
     } else if (!has('length')) add('/length', '/length is required');
     else {
-      const length = fields.values.get('length');
+      const length = mapGet(fields.values, 'length');
       const min = at?.minLength ?? 0;
       const max = at?.maxLength ?? MAX_JSON_VALUES;
       if (
         typeof length !== 'number' ||
-        !Number.isSafeInteger(length) ||
+        !numberIsSafeInteger(length) ||
         length < min ||
         length > max
       ) {
@@ -355,9 +376,9 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
       } else if (pointer !== undefined) content = { pointer, kind, length };
     }
   }
-  const [salt, valueSalt] = ['salt', 'valueSalt'].map((key) => {
-    const hex = fields.values.get(key);
-    if (typeof hex === 'string' && SALT_HEX.test(hex)) return hex;
+  const [salt, valueSalt] = arrayMap(['salt', 'valueSalt'], (key) => {
+    const hex = mapGet(fields.values, key);
+    if (typeof hex === 'string' && regExpTest(SALT_HEX, hex)) return hex;
     if (has(key)) add(`/${key}`, `/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
@@ -367,7 +388,7 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
 }
 
 function isKind(value: unknown): value is LeafKind {
-  return typeof value === 'string' && KINDS.includes(value);
+  return typeof value === 'string' && arrayIncludes(KINDS, value);
 }
 
 /**
@@ -422,9 +443,9 @@ function readScalar(
     return undefined;
   }
   if (typeof value === 'number') {
-    if (!Number.isFinite(value)) add(path, `${path} is not JSON: ${String(value)}`);
-    else if (Math.abs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${citeName(path)}`);
-    else return { value: Object.is(value, -0) ? 0 : value };
+    if (!numberIsFinite(value)) add(path, `${path} is not JSON: ${NativeString(value)}`);
+    else if (mathAbs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${citeName(path)}`);
+    else return { value: objectIs(value, -0) ? 0 : value };
     return undefined;
   }
   add(path, `${path} must be a JSON scalar`);

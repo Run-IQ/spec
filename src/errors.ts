@@ -1,4 +1,20 @@
 import { boundIssueText } from './issues.js';
+import {
+  NativeError,
+  NativeRangeError,
+  NativeString,
+  NativeWeakSet,
+  functionHasInstance,
+  jsonStringify,
+  objectDefineProperty,
+  regExpTest,
+  stringCharCodeAt,
+  stringSlice,
+  symbolFor,
+  symbolHasInstance,
+  weakSetAdd,
+  weakSetHas,
+} from './intrinsics.js';
 export type SpecErrorCode =
   | 'NON_SERIALIZABLE'
   | 'INVALID_DATE'
@@ -18,7 +34,7 @@ export type SpecErrorCode =
  * package: each built entry (`@run-iq/spec`, `@run-iq/spec/canonical`, ESM or CJS) bundles its
  * own class, and two installed versions would too.
  */
-const BRAND = Symbol.for('@run-iq/spec/SpecError');
+const BRAND = symbolFor('@run-iq/spec/SpecError');
 
 /**
  * Thrown by every `@run-iq/spec` function; `code` says which contract was broken.
@@ -31,7 +47,7 @@ const BRAND = Symbol.for('@run-iq/spec/SpecError');
  * passed on as it is: like any other thrown value, it is described and cited in the message of
  * the error this package throws.
  */
-export class SpecError extends Error {
+export class SpecError extends NativeError {
   readonly code: SpecErrorCode;
   /**
    * Path of the value `canonicalize` (or `canonicalizeAt`) could not serialize
@@ -46,12 +62,12 @@ export class SpecError extends Error {
     this.name = 'SpecError';
     this.code = code;
     if (path !== undefined) this.path = path;
-    Object.defineProperty(this, BRAND, { value: true });
+    objectDefineProperty(this, BRAND, { value: true });
   }
 
-  static [Symbol.hasInstance](value: unknown): boolean {
+  static [symbolHasInstance](value: unknown): boolean {
     // A subclass (`class MyError extends SpecError`) keeps the plain prototype check.
-    if (this !== SpecError) return Function.prototype[Symbol.hasInstance].call(this, value);
+    if (this !== SpecError) return functionHasInstance(this, value);
     return (
       typeof value === 'object' &&
       value !== null &&
@@ -76,7 +92,7 @@ export class VerifyOptionsError extends SpecError {
     super('INVALID_OPTIONS', message, option);
     this.name = 'VerifyOptionsError';
     this.option = option;
-    Object.defineProperty(this, OPTIONS_BRAND, { value: true });
+    objectDefineProperty(this, OPTIONS_BRAND, { value: true });
   }
 
   /**
@@ -84,9 +100,8 @@ export class VerifyOptionsError extends SpecError {
    * installed copy), like `SpecError`: a brand of its own, so that a caller can test
    * `error instanceof VerifyOptionsError` whichever entry threw it.
    */
-  static [Symbol.hasInstance](value: unknown): boolean {
-    if (this !== VerifyOptionsError)
-      return Function.prototype[Symbol.hasInstance].call(this, value);
+  static [symbolHasInstance](value: unknown): boolean {
+    if (this !== VerifyOptionsError) return functionHasInstance(this, value);
     return (
       typeof value === 'object' &&
       value !== null &&
@@ -95,23 +110,45 @@ export class VerifyOptionsError extends SpecError {
   }
 }
 
-const OPTIONS_BRAND = Symbol.for('@run-iq/spec/VerifyOptionsError');
+const OPTIONS_BRAND = symbolFor('@run-iq/spec/VerifyOptionsError');
 
 /**
- * Internal: the `VerifyOptionsError` this package throws, remembered as its own (`isOwnError`):
- * one a caller builds and throws from a getter or a calendar is not trusted. The message is cut
- * like an issue text (1024 code units, then `…`), because it can carry the text of the caller's
- * own error.
+ * The errors about their options that the current call of `verifyProof` or `verifyAttestation`
+ * raised: filled during that one call only. An error another call raised, or a caller built, is
+ * foreign here whatever its class and its text say.
+ */
+let optionsScope: WeakSet<object> | undefined;
+
+/** Internal: runs `read` with a fresh scope of own options errors (the previous one restored). */
+export function withOptionsScope<T>(read: () => T): T {
+  const previous = optionsScope;
+  optionsScope = new NativeWeakSet<object>();
+  try {
+    return read();
+  } finally {
+    optionsScope = previous;
+  }
+}
+
+/**
+ * Internal: the `VerifyOptionsError` this call throws, remembered as its own for this call
+ * (`isOwnOptionsError`). The option and the message are cut like an issue text (1024 code units,
+ * then `…`), because the message can carry the text of the caller's own error.
  */
 export function newOptionsError(option: string, message: string): VerifyOptionsError {
   const error = new VerifyOptionsError(boundIssueText(option), boundIssueText(message));
-  OWN_ERRORS.add(error);
+  if (optionsScope !== undefined) weakSetAdd(optionsScope, error);
   return error;
 }
 
-/** Internal: true for a `VerifyOptionsError` this package created. */
+/** Internal: true for a `VerifyOptionsError` the current call raised, and for nothing else. */
 export function isOwnOptionsError(error: unknown): error is VerifyOptionsError {
-  return isOwnError(error) && error instanceof VerifyOptionsError;
+  return (
+    optionsScope !== undefined &&
+    typeof error === 'object' &&
+    error !== null &&
+    weakSetHas(optionsScope, error)
+  );
 }
 
 /**
@@ -120,7 +157,7 @@ export function isOwnOptionsError(error: unknown): error is VerifyOptionsError {
  * and any text; such an error, like any other thrown value, is described and cited
  * (`reasonOf`), never passed on raw.
  */
-const OWN_ERRORS = new WeakSet<object>();
+const OWN_ERRORS = new NativeWeakSet<object>();
 
 /**
  * Internal: a `SpecError` created by this package, remembered as its own (`isOwnError`); its
@@ -130,7 +167,7 @@ export function newSpecError(code: SpecErrorCode, message: string, path?: string
   // Every path cut as issue paths are (1024 code units, never inside a surrogate pair, then
   // `…`), so no site can pass on unbounded caller text (a root path, deep keys).
   const error = new SpecError(code, message, path === undefined ? undefined : boundIssueText(path));
-  OWN_ERRORS.add(error);
+  weakSetAdd(OWN_ERRORS, error);
   return error;
 }
 
@@ -139,7 +176,7 @@ export function newSpecError(code: SpecErrorCode, message: string, path?: string
  * value, a `SpecError` built by a caller included. Never throws (no trap of a Proxy runs).
  */
 export function isOwnError(error: unknown): error is SpecError {
-  return typeof error === 'object' && error !== null && OWN_ERRORS.has(error);
+  return typeof error === 'object' && error !== null && weakSetHas(OWN_ERRORS, error);
 }
 
 /**
@@ -149,7 +186,7 @@ export function isOwnError(error: unknown): error is SpecError {
  */
 export function describeError(error: unknown): string {
   try {
-    if (error instanceof Error) {
+    if (error instanceof NativeError) {
       const message: unknown = error.message;
       if (typeof message === 'string') return message;
     }
@@ -163,7 +200,7 @@ export function describeError(error: unknown): string {
     case 'boolean':
     case 'bigint':
     case 'symbol':
-      return String(error);
+      return NativeString(error);
     default:
       return 'unreadable value';
   }
@@ -205,7 +242,7 @@ export function unreadableMessage(subject: string, error: unknown): string {
 /** Internal: true for the `RangeError` a call stack overflow throws; never throws. */
 export function isStackOverflow(error: unknown): boolean {
   try {
-    return error instanceof RangeError && /call stack/i.test(error.message);
+    return error instanceof NativeRangeError && regExpTest(/call stack/i, error.message);
   } catch {
     return false;
   }
@@ -225,11 +262,11 @@ export const CITE_LENGTH = 256;
 export function citeName(text: string): string {
   let out = '';
   for (let i = 0; i < text.length;) {
-    const code = text.charCodeAt(i);
-    const next = text.charCodeAt(i + 1);
+    const code = stringCharCodeAt(text, i);
+    const next = stringCharCodeAt(text, i + 1);
     const pair = code >= 0xd800 && code <= 0xdbff && next >= 0xdc00 && next <= 0xdfff;
-    const char = text.slice(i, i + (pair ? 2 : 1));
-    const piece = JSON.stringify(char).slice(1, -1);
+    const char = stringSlice(text, i, i + (pair ? 2 : 1));
+    const piece = stringSlice(jsonStringify(char), 1, -1);
     if (out.length + piece.length > CITE_LENGTH) return `${out}…`;
     out += piece;
     i += char.length;

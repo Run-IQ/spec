@@ -4,6 +4,7 @@ import type { CivilDate, Instant } from '../time/civil.js';
 import type { DimensionSpec, DimensionSpecInput } from './dimensions.js';
 import type { RuleException } from './exceptions.js';
 import type { ForEach } from './forEach.js';
+import { numberIsInteger } from '../intrinsics.js';
 
 export interface RuleCondition {
   dsl: string;
@@ -184,5 +185,5 @@ export const RESERVED_RULE_FIELDS: readonly string[] = [
 
 /** A rule version is a positive integer (`1`, `2`, ...). */
 export function isRuleVersion(value: unknown): value is number {
-  return typeof value === 'number' && Number.isInteger(value) && value >= 1;
+  return typeof value === 'number' && numberIsInteger(value) && value >= 1;
 }

@@ -1,6 +1,34 @@
 import { newSpecError } from '../errors.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { LiftedCheck, ProofSection, ProofStep } from './types.js';
+import {
+  NativeArray,
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayEvery,
+  arrayFill,
+  arrayFilter,
+  arrayForEach,
+  arrayIndexOf,
+  arrayMap,
+  arrayPush,
+  arrayReduce,
+  arraySome,
+  arraySort,
+  jsonStringify,
+  mapClear,
+  mapGet,
+  mapKeys,
+  mapSet,
+  mathLog2,
+  mathMax,
+  objectAssign,
+  objectValues,
+  setAdd,
+  setHas,
+  setSize,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the consistency checks a redacted entry can keep from being made
 // (D-16), and what the redacted entries of a proof can explain at most.
@@ -57,7 +85,7 @@ export interface Lift<N extends Need = Need> {
 
 const lift = <N extends Need>(check: string, needs: Partial<Record<ProofSection, N>>): Lift<N> => ({
   check,
-  sections: PROOF_SECTIONS.filter((section) => needs[section] !== undefined),
+  sections: arrayFilter(PROOF_SECTIONS, (section) => needs[section] !== undefined),
   needs,
 });
 
@@ -259,14 +287,14 @@ export interface HiddenSections extends ReadonlySet<ProofSection> {
 export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): HiddenSections {
   const ledger: Ledger = {
     counts,
-    lifted: new Map(),
+    lifted: new NativeMap(),
     problems: [],
     rules: [],
     outputs: [],
     pairs: [],
     failed: false,
   };
-  return Object.assign(new Set(counts.keys()), { ledger });
+  return objectAssign(new NativeSet(mapKeys(counts)), { ledger });
 }
 
 /**
@@ -276,7 +304,7 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
  */
 function ledgerOf(hidden: ReadonlySet<ProofSection>): Ledger | undefined {
   const { ledger } = hidden as HiddenSections;
-  if (ledger === undefined && hidden.size > 0) {
+  if (ledger === undefined && setSize(hidden) > 0) {
     throw newSpecError('INVALID_PROOF', 'internal: hidden sections without a ledger');
   }
   return ledger;
@@ -287,14 +315,15 @@ function ledgerOf(hidden: ReadonlySet<ProofSection>): Ledger | undefined {
  * Internal error for hidden sections without a ledger (`ledgerOf`).
  */
 export function redactedIn(hidden: ReadonlySet<ProofSection>, section: ProofSection): number {
-  return ledgerOf(hidden)?.counts.get(section) ?? 0;
+  const ledger = ledgerOf(hidden);
+  return (ledger === undefined ? undefined : mapGet(ledger.counts, section)) ?? 0;
 }
 
-const bit = (section: ProofSection): number => 1 << PROOF_SECTIONS.indexOf(section);
+const bit = (section: ProofSection): number => 1 << arrayIndexOf(PROOF_SECTIONS, section);
 
 /** What `problem` needs of an entry of `section`, by its row `check` (`Problem`). */
 function needOf(check: Lift, problem: Problem, section: ProofSection): Need | 'none' {
-  if (problem.ties?.has(section) === true) return 'free';
+  if (problem.ties !== undefined && setHas(problem.ties, section)) return 'free';
   return problem.as?.[section] ?? check.needs[section] ?? 'none';
 }
 
@@ -312,20 +341,20 @@ export function isLifted<N extends Need>(
   const ledger = ledgerOf(hidden);
   const row = check as Lift;
   const asked = problem as Problem;
-  const present = row.sections.filter((section) => {
+  const present = arrayFilter(row.sections, (section) => {
     const need = needOf(row, asked, section);
-    return hidden.has(section) && need !== 'none' && need !== 'tie';
+    return setHas(hidden, section) && need !== 'none' && need !== 'tie';
   });
   if (present.length === 0 || ledger === undefined || ledger.failed) return false;
-  const sections = ledger.lifted.get(row) ?? new Set<ProofSection>();
-  for (const section of present) sections.add(section);
-  ledger.lifted.set(row, sections);
-  ledger.problems.push(asked.message);
-  if (present.some((section) => needOf(row, asked, section) === 'free')) return true;
+  const sections = mapGet(ledger.lifted, row) ?? new NativeSet<ProofSection>();
+  for (const section of present) setAdd(sections, section);
+  mapSet(ledger.lifted, row, sections);
+  arrayPush(ledger.problems, asked.message);
+  if (arraySome(present, (section) => needOf(row, asked, section) === 'free')) return true;
   const { rule, output } = asked;
   const ruleFields = rule && [
     rule.id,
-    rule.version === undefined ? undefined : String(rule.version),
+    rule.version === undefined ? undefined : NativeString(rule.version),
     rule.subject,
   ];
   const rules: Alternative[] = [];
@@ -335,13 +364,13 @@ export function isLifted<N extends Need>(
     const need = needOf(row, asked, section);
     const at = bit(section);
     if (ruleFields !== undefined && (need === 'rule' || need === 'both')) {
-      rules.push({ bit: at, fields: ruleFields });
+      arrayPush(rules, { bit: at, fields: ruleFields });
     }
     if (output !== undefined && need !== 'rule') {
       const place = need === 'output' ? undefined : output.item;
-      outputs.push({ bit: at, fields: [output.output, place] });
+      arrayPush(outputs, { bit: at, fields: [output.output, place] });
       if (ruleFields !== undefined && need === 'both') {
-        pairs.push({ bit: at, fields: [...ruleFields, output.output, place] });
+        arrayPush(pairs, { bit: at, fields: [...ruleFields, output.output, place] });
       }
     }
   }
@@ -351,8 +380,8 @@ export function isLifted<N extends Need>(
     [ledger.pairs, pairs],
   ] as const) {
     if (alternatives.length === 0) continue;
-    const mask = alternatives.reduce((all, alternative) => all | alternative.bit, 0);
-    list.push({ alternatives, mask });
+    const mask = arrayReduce(alternatives, (all, alternative) => all | alternative.bit, 0);
+    arrayPush(list, { alternatives, mask });
   }
   return true;
 }
@@ -366,15 +395,16 @@ export function isLifted<N extends Need>(
 export function unexplained(hidden: HiddenSections): string[] {
   const ledger = ledgerOf(hidden);
   if (ledger === undefined || ledger.failed) return [];
-  const capacity = new Array<number>(PROOF_SECTIONS.length).fill(0);
-  for (const [section, count] of ledger.counts) capacity[PROOF_SECTIONS.indexOf(section)] = count;
-  const explained = [ledger.rules, ledger.outputs, ledger.pairs].every((parts) =>
+  const capacity = arrayFill(new NativeArray<number>(PROOF_SECTIONS.length), 0);
+  for (const [section, count] of ledger.counts)
+    capacity[arrayIndexOf(PROOF_SECTIONS, section)] = count;
+  const explained = arrayEvery([ledger.rules, ledger.outputs, ledger.pairs], (parts) =>
     matched(counted(parts), capacity),
   );
   if (explained) return [];
   ledger.failed = true;
-  ledger.lifted.clear();
-  return [...new Set(ledger.problems)];
+  mapClear(ledger.lifted);
+  return [...new NativeSet(ledger.problems)];
 }
 
 /**
@@ -385,12 +415,12 @@ export function unexplained(hidden: HiddenSections): string[] {
 export function liftedChecks(hidden: HiddenSections): LiftedCheck[] {
   const ledger = ledgerOf(hidden);
   const lifted: LiftedCheck[] = [];
-  for (const entry of Object.values(LIFTS) as Lift[]) {
-    const sections = ledger?.lifted.get(entry);
+  for (const entry of objectValues(LIFTS) as Lift[]) {
+    const sections = ledger === undefined ? undefined : mapGet(ledger.lifted, entry);
     if (sections === undefined) continue;
-    lifted.push({
+    arrayPush(lifted, {
       check: entry.check,
-      redacted: PROOF_SECTIONS.filter((section) => sections.has(section)),
+      redacted: arrayFilter(PROOF_SECTIONS, (section) => setHas(sections, section)),
     });
   }
   return lifted;
@@ -408,8 +438,8 @@ export function liftedOnSteps(
 ): string[] {
   const issues = check(applied);
   const without = check([]);
-  const kept = new Set(without);
-  const lifted = issues.filter((message) => !kept.has(message));
+  const kept = new NativeSet(without);
+  const lifted = arrayFilter(issues, (message) => !setHas(kept, message));
   for (const message of lifted) {
     if (!isLifted(hidden, LIFTS.decisionsAgainstExceptions, { message })) return issues;
   }
@@ -423,11 +453,11 @@ export function liftedOnSteps(
  */
 export function matched(masks: readonly number[], capacity: readonly number[]): boolean {
   const size = 1 << capacity.length;
-  const need = new Array<number>(size).fill(0);
+  const need = arrayFill(new NativeArray<number>(size), 0);
   for (const mask of masks) need[mask] = (need[mask] ?? 0) + 1;
-  const room = new Array<number>(size).fill(0);
+  const room = arrayFill(new NativeArray<number>(size), 0);
   for (let set = 1; set < size; set++) {
-    const low = Math.log2(set & -set);
+    const low = mathLog2(set & -set);
     room[set] = (room[set & (set - 1)] ?? 0) + (capacity[low] ?? 0);
   }
   // The requirements allowed only within each set of sections (sum over subsets).
@@ -446,7 +476,7 @@ export function matched(masks: readonly number[], capacity: readonly number[]): 
  */
 function weight(fields: readonly (string | undefined)[]): number {
   let total = 0;
-  fields.forEach((field, i) => {
+  arrayForEach(fields, (field, i) => {
     if (field !== undefined) total += 1 << (fields.length - 1 - i);
   });
   return total;
@@ -461,7 +491,7 @@ function weight(fields: readonly (string | undefined)[]): number {
 function keysOf(at: number, fields: readonly (string | undefined)[]): string[] {
   const keys: string[] = [];
   for (let scope = 0; scope < 1 << fields.length; scope++) {
-    keys.push(keyOf(at, scope, fields, givenIn(fields, scope)));
+    arrayPush(keys, keyOf(at, scope, fields, givenIn(fields, scope)));
   }
   return keys;
 }
@@ -472,7 +502,7 @@ function agreeing(at: number, fields: readonly (string | undefined)[]): string[]
   const keys: string[] = [];
   // Each subset `common` of the positions `fields` gives: those the other gives too.
   for (let common = scope; ; common = (common - 1) & scope) {
-    keys.push(keyOf(at, scope, fields, common));
+    arrayPush(keys, keyOf(at, scope, fields, common));
     if (common === 0) break;
   }
   return keys;
@@ -481,7 +511,7 @@ function agreeing(at: number, fields: readonly (string | undefined)[]): string[]
 /** The positions of `scope` that `fields` gives. */
 function givenIn(fields: readonly (string | undefined)[], scope: number): number {
   let given = 0;
-  fields.forEach((field, i) => {
+  arrayForEach(fields, (field, i) => {
     if ((scope & (1 << i)) !== 0 && field !== undefined) given |= 1 << i;
   });
   return given;
@@ -493,8 +523,8 @@ function keyOf(
   fields: readonly (string | undefined)[],
   given: number,
 ): string {
-  const values = fields.map((field, i) => ((given & (1 << i)) !== 0 ? field : null));
-  return JSON.stringify([at, scope, given, values]);
+  const values = arrayMap(fields, (field, i) => ((given & (1 << i)) !== 0 ? field : null));
+  return jsonStringify([at, scope, given, values]);
 }
 
 /**
@@ -506,21 +536,27 @@ function keyOf(
  */
 function counted(parts: readonly Part[]): number[] {
   const specificity = (part: Part): number =>
-    Math.max(...part.alternatives.map((alternative) => weight(alternative.fields)));
-  const order = parts
-    .map((part, i) => ({ part, i, weight: specificity(part), sections: sections(part.mask) }))
-    .sort((a, b) => b.weight - a.weight || a.sections - b.sections || a.i - b.i);
-  const filed = new Set<string>();
+    mathMax(...arrayMap(part.alternatives, (alternative) => weight(alternative.fields)));
+  const order = arraySort(
+    arrayMap(parts, (part, i) => ({
+      part,
+      i,
+      weight: specificity(part),
+      sections: sections(part.mask),
+    })),
+    (a, b) => b.weight - a.weight || a.sections - b.sections || a.i - b.i,
+  );
+  const filed = new NativeSet<string>();
   const masks: number[] = [];
   for (const { part } of order) {
-    const met = part.alternatives.some(({ bit: at, fields }) =>
-      agreeing(at, fields).some((key) => filed.has(key)),
+    const met = arraySome(part.alternatives, ({ bit: at, fields }) =>
+      arraySome(agreeing(at, fields), (key) => setHas(filed, key)),
     );
     if (met) continue;
     for (const { bit: at, fields } of part.alternatives) {
-      for (const key of keysOf(at, fields)) filed.add(key);
+      for (const key of keysOf(at, fields)) setAdd(filed, key);
     }
-    masks.push(part.mask);
+    arrayPush(masks, part.mask);
   }
   return masks;
 }

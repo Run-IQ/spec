@@ -6,7 +6,7 @@
 import { expect, it } from 'vitest';
 import { verifyProof } from '../../src/index.js';
 import type { RuleDefinitionInput } from '../../src/index.js';
-import { MAX_VERIFY_OPTIONS_NODES } from '../../src/proof/verify.js';
+import { MAX_VERIFY_OPTIONS_NODES } from '../../src/values.js';
 import { optionError } from '../helpers.js';
 import { ruleA, ruleB, signed, TRUSTED } from '../proof-cases.js';
 
@@ -24,6 +24,17 @@ it('options that take nearly their whole budget leave the proof its own', () => 
   expect(out.issues).toEqual(['unexpected rule: big@2']);
 }, 120_000);
 
+it('two valid rules that exceed the total together throw, naming the bound', () => {
+  const half = (id: string) => ({ ...big(6_000_000), id });
+  const error = optionError(() =>
+    verifyProof(signed(), { trustedKeys: TRUSTED, rules: [ruleA, ruleB, half('h1'), half('h2')] }),
+  );
+  expect(error.option).toBe('options');
+  expect(error.message).toBe(
+    'options are too large: more than 10000000 values (at options.rules[3])',
+  );
+}, 120_000);
+
 it('options over their own bound throw, the option named', () => {
   const error = optionError(() =>
     verifyProof(signed(), {
@@ -31,6 +42,8 @@ it('options over their own bound throw, the option named', () => {
       rules: [ruleA, ruleB, big(MAX_VERIFY_OPTIONS_NODES + 1)],
     }),
   );
-  expect(error.option).toBe('options.rules[2]');
-  expect(error.message).toContain('too large');
+  expect(error.option).toBe('options');
+  expect(error.message).toBe(
+    'options are too large: more than 10000000 values (at options.rules[2])',
+  );
 }, 120_000);

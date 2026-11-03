@@ -18,6 +18,23 @@ import { inputSalter, readSeed } from './seed.js';
 import { createLeafHasher, inputDigestOf } from './tree.js';
 import type { ProofInput } from './types.js';
 import { readValidInput } from './validate.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeUint8Array,
+  arrayAt,
+  arrayFlatMap,
+  arrayForEach,
+  arrayIsArray,
+  arrayMap,
+  arrayPop,
+  arrayPush,
+  arraySort,
+  mapGet,
+  uint8ArrayEvery,
+  uint8ArraySet,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 /**
  * The disclosure of the facts of `input` at the pointers `present`, and the proofs that the
@@ -49,7 +66,7 @@ export function discloseFacts(
 ): FactDisclosure {
   return withValueBudget(() => {
     const seedBytes = readSeed(seed);
-    if (seedBytes.every((byte) => byte === 0)) {
+    if (uint8ArrayEvery(seedBytes, (byte) => byte === 0)) {
       throw newSpecError('INVALID_DISCLOSURE', 'unsalted input cannot be disclosed');
     }
     const requests = readRequests(present, absent);
@@ -86,12 +103,12 @@ interface Found {
 /** The requests of both lists, sorted by `comparePointers`, each pointer once. */
 function readRequests(present: readonly string[], absent: readonly string[]): Request[] {
   const requests = [
-    ...readPointers(present, 'present').map((p) => ({ ...p, present: true })),
-    ...readPointers(absent, 'absent').map((p) => ({ ...p, present: false })),
+    ...arrayMap(readPointers(present, 'present'), (p) => ({ ...p, present: true })),
+    ...arrayMap(readPointers(absent, 'absent'), (p) => ({ ...p, present: false })),
   ];
   if (requests.length === 0) throw newSpecError('INVALID_DISCLOSURE', 'nothing to disclose');
-  requests.sort((a, b) => compareSegments(a.segments, b.segments));
-  requests.forEach((request, i) => {
+  arraySort(requests, (a, b) => compareSegments(a.segments, b.segments));
+  arrayForEach(requests, (request, i) => {
     const previous = requests[i - 1];
     if (previous !== undefined && compareSegments(previous.segments, request.segments) === 0) {
       throw newSpecError(
@@ -110,17 +127,17 @@ function readPointers(
 ): { pointer: string; segments: string[] }[] {
   let items: unknown[];
   try {
-    if (!Array.isArray(list)) {
+    if (!arrayIsArray(list)) {
       throw newSpecError('INVALID_DISCLOSURE', `${name} must be an array of JSON pointers`);
     }
     const read = readList(list, name);
-    if (!Array.isArray(read)) throw newSpecError('INVALID_DISCLOSURE', read.message);
+    if (!arrayIsArray(read)) throw newSpecError('INVALID_DISCLOSURE', read.message);
     items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_DISCLOSURE', unreadableMessage(name, error));
   }
-  return items.map((pointer) => {
+  return arrayMap(items, (pointer) => {
     if (typeof pointer !== 'string') {
       // As `parsePointer` refuses it; `typeName` runs no caller code.
       throw newSpecError(
@@ -149,19 +166,19 @@ function walkLeaves(
   const valueSalter = inputSalter(seed, 'value:');
   const hasher = createLeafHasher();
   const hashes = new PackedHashes();
-  const found: Found[] = requests.map(() => ({ leaves: [] }));
+  const found: Found[] = arrayMap(requests, () => ({ leaves: [] }));
   const open: number[] = [];
   let next = 0;
   let previous: { content: LeafContent; segments: string[]; index: number } | undefined;
   let previousSeen: Seen | undefined;
-  const previousBytes = new Uint8Array(96);
+  const previousBytes = new NativeUint8Array(96);
   const seenBefore = (): Seen | undefined => {
     if (previous !== undefined && previousSeen === undefined) {
       previousSeen = {
         ...previous,
-        salt: bytesToHex(previousBytes.subarray(0, 32)),
-        valueSalt: bytesToHex(previousBytes.subarray(32, 64)),
-        commitment: bytesToHex(previousBytes.subarray(64)),
+        salt: bytesToHex(uint8ArraySubarray(previousBytes, 0, 32)),
+        valueSalt: bytesToHex(uint8ArraySubarray(previousBytes, 32, 64)),
+        commitment: bytesToHex(uint8ArraySubarray(previousBytes, 64)),
       };
     }
     return previousSeen;
@@ -184,27 +201,30 @@ function walkLeaves(
         valueSalt: bytesToHex(valueSalt),
         commitment: bytesToHex(hasher.commitment),
       });
-    for (let top = open.at(-1); top !== undefined; top = open.at(-1)) {
+    for (let top = arrayAt(open, -1); top !== undefined; top = arrayAt(open, -1)) {
       const request = requests[top];
       if (request === undefined || isWithin(request.segments, segments)) break;
       setAfter(found[top], seen());
-      open.pop();
+      arrayPop(open);
     }
     for (let request = requests[next]; request !== undefined; request = requests[next]) {
       if (compareSegments(request.segments, segments) > 0) break;
       const entry = found[next];
       const before = seenBefore();
       if (entry !== undefined && before !== undefined) entry.before = before;
-      if (isWithin(request.segments, segments)) open.push(next);
+      if (isWithin(request.segments, segments)) arrayPush(open, next);
       else setAfter(entry, seen());
       next += 1;
     }
-    for (const k of open) found[k]?.leaves.push(seen());
+    for (const k of open) {
+      const entry = found[k];
+      if (entry !== undefined) arrayPush(entry.leaves, seen());
+    }
     previous = { content: leaf, segments, index };
     previousSeen = here;
-    previousBytes.set(salt, 0);
-    previousBytes.set(valueSalt, 32);
-    previousBytes.set(hasher.commitment, 64);
+    uint8ArraySet(previousBytes, salt, 0);
+    uint8ArraySet(previousBytes, valueSalt, 32);
+    uint8ArraySet(previousBytes, hasher.commitment, 64);
   });
   // The requests after the last leaf: that leaf is before them.
   for (; next < requests.length; next++) {
@@ -231,7 +251,7 @@ function buildDisclosure(
   const facts: { pointer: string; leaves: Seen[]; before?: Seen; after?: Seen }[] = [];
   const absences: { pointer: string; before?: Seen; after?: Seen }[] = [];
   let shownAbove: Request | undefined;
-  requests.forEach((request, i) => {
+  arrayForEach(requests, (request, i) => {
     const { leaves, before, after } = found[i] ?? { leaves: [] };
     const cited = citeName(request.pointer);
     const [first] = leaves;
@@ -239,7 +259,7 @@ function buildDisclosure(
       if (first !== undefined) {
         throw newSpecError('INVALID_DISCLOSURE', `pointer is present: ${cited}`);
       }
-      absences.push({
+      arrayPush(absences, {
         pointer: request.pointer,
         ...(before && { before }),
         ...(after && { after }),
@@ -259,7 +279,7 @@ function buildDisclosure(
     const atPointer = first.segments.length === request.segments.length;
     const { content } = first;
     const length = content.kind === 'array' ? content.length : undefined;
-    facts.push({
+    arrayPush(facts, {
       pointer: request.pointer,
       leaves,
       ...(!atPointer && before && { before }),
@@ -267,14 +287,16 @@ function buildDisclosure(
     });
   });
   const shown = [
-    ...facts.flatMap((fact) => [...fact.leaves, fact.before, fact.after]),
-    ...absences.flatMap((absence) => [absence.before, absence.after]),
+    ...arrayFlatMap(facts, (fact) => [...fact.leaves, fact.before, fact.after]),
+    ...arrayFlatMap(absences, (absence) => [absence.before, absence.after]),
   ];
-  const indices = [...new Set(shown.flatMap((seen) => (seen ? [seen.index] : [])))];
+  const indices = [...new NativeSet(arrayFlatMap(shown, (seen) => (seen ? [seen.index] : [])))];
   const size = hashes.length;
   const { paths, root } = hashes.pathsAndRoot(indices);
-  const pathOf = new Map(indices.map((index, k) => [index, (paths[k] ?? []).map(bytesToHex)]));
-  const path = (seen: Seen): string[] => [...(pathOf.get(seen.index) ?? [])];
+  const pathOf = new NativeMap(
+    arrayMap(indices, (index, k) => [index, arrayMap(paths[k] ?? [], bytesToHex)]),
+  );
+  const path = (seen: Seen): string[] => [...(mapGet(pathOf, seen.index) ?? [])];
   const disclosed = (seen: Seen): DisclosedLeaf => ({
     ...seen.content,
     salt: seen.salt,
@@ -300,12 +322,12 @@ function buildDisclosure(
     format: DISCLOSURE_FORMAT,
     inputDigest: bytesToHex(inputDigestOf(size, root)),
     size,
-    facts: facts.map((fact): DisclosedFact => ({
+    facts: arrayMap(facts, (fact): DisclosedFact => ({
       pointer: fact.pointer,
-      leaves: fact.leaves.map(disclosed),
+      leaves: arrayMap(fact.leaves, disclosed),
       ...framed(fact),
     })),
-    absent: absences.map((absence): AbsenceProof => ({
+    absent: arrayMap(absences, (absence): AbsenceProof => ({
       pointer: absence.pointer,
       ...framed(absence),
     })),

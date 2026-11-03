@@ -1,26 +1,39 @@
 import { citeName } from '../errors.js';
 import { RESERVED_RULE_FIELDS } from './definition.js';
+import {
+  arrayFind,
+  arrayIncludes,
+  arrayMap,
+  arrayPush,
+  mathAbs,
+  reflectOwnKeys,
+  stringSlice,
+  stringToLowerCase,
+  symbolToString,
+} from '../intrinsics.js';
 
 /** The reserved names by their lowercase form, in the order of `RESERVED_RULE_FIELDS`. */
-const LOWERCASE: ReadonlyArray<readonly [string, string]> = RESERVED_RULE_FIELDS.map((name) => [
-  name,
-  name.toLowerCase(),
-]);
+const LOWERCASE: ReadonlyArray<readonly [string, string]> = arrayMap(
+  RESERVED_RULE_FIELDS,
+  (name) => [name, stringToLowerCase(name)],
+);
 
 /**
  * Internal: whether `a` and `b` differ by at most one edit: a letter more, a letter less, a
  * letter changed, or two neighbouring letters swapped. Equal texts differ by none.
  */
 function oneEditApart(a: string, b: string): boolean {
-  if (Math.abs(a.length - b.length) > 1) return false;
+  if (mathAbs(a.length - b.length) > 1) return false;
   let i = 0;
   while (i < a.length && i < b.length && a[i] === b[i]) i++;
   if (a.length === b.length) {
-    if (a.slice(i + 1) === b.slice(i + 1)) return true;
-    return a[i] === b[i + 1] && a[i + 1] === b[i] && a.slice(i + 2) === b.slice(i + 2);
+    if (stringSlice(a, i + 1) === stringSlice(b, i + 1)) return true;
+    return (
+      a[i] === b[i + 1] && a[i + 1] === b[i] && stringSlice(a, i + 2) === stringSlice(b, i + 2)
+    );
   }
   const [longer, shorter] = a.length > b.length ? [a, b] : [b, a];
-  return longer.slice(i + 1) === shorter.slice(i);
+  return stringSlice(longer, i + 1) === stringSlice(shorter, i);
 }
 
 /**
@@ -31,8 +44,8 @@ export function misspellingOf(
   key: string,
   names: ReadonlyArray<readonly [string, string]> = LOWERCASE,
 ): string | undefined {
-  const lower = key.toLowerCase();
-  return names.find(([, candidate]) => oneEditApart(candidate, lower))?.[0];
+  const lower = stringToLowerCase(key);
+  return arrayFind(names, ([, candidate]) => oneEditApart(candidate, lower))?.[0];
 }
 
 /**
@@ -53,9 +66,9 @@ export function unknownRuleFieldMessage(key: string): string {
  */
 export function unknownRuleKeys(rule: object): string[] {
   const out: string[] = [];
-  for (const key of Reflect.ownKeys(rule)) {
-    if (typeof key === 'symbol') out.push(key.toString());
-    else if (!RESERVED_RULE_FIELDS.includes(key)) out.push(key);
+  for (const key of reflectOwnKeys(rule)) {
+    if (typeof key === 'symbol') arrayPush(out, symbolToString(key));
+    else if (!arrayIncludes(RESERVED_RULE_FIELDS, key)) arrayPush(out, key);
   }
   return out;
 }

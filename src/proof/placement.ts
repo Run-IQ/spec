@@ -6,6 +6,23 @@ import { declarationOf, instanceKey } from './output-values.js';
 import { ruleKey as key } from './precedence.js';
 import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayFilter,
+  arrayFlat,
+  arrayMap,
+  arrayPush,
+  mapGet,
+  mapHas,
+  mapKeys,
+  mapSet,
+  objectHasOwn,
+  setAdd,
+  setHas,
+  stringIndexOf,
+  stringSlice,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: where the entries of a proof sit (their stratum, the rule set of
 // the output they feed), what they name (models, undeclared reads) and their rounding. Linear in
@@ -13,8 +30,8 @@ import { isLifted, LIFTS } from './lifts.js';
 
 /** The rule set a qualified rule id or output name designates (D-37). */
 function ruleSetOf(name: string): string {
-  const colon = name.indexOf(':');
-  return colon < 0 ? LOCAL_RULE_SET : name.slice(0, colon);
+  const colon = stringIndexOf(name, ':');
+  return colon < 0 ? LOCAL_RULE_SET : stringSlice(name, 0, colon);
 }
 
 /**
@@ -34,28 +51,28 @@ function ruleSetOf(name: string): string {
 export function strataProblems(
   p: ProofView,
   listed: ReadonlyMap<string, ProofOutput>,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const issues: string[] = [];
-  const placed = new Set<string>();
-  for (const name of p.strata.flat()) {
-    if (!listed.has(name)) {
+  const placed = new NativeSet<string>();
+  for (const name of arrayFlat(p.strata)) {
+    if (!mapHas(listed, name)) {
       const message = `stratum output unknown: ${citeName(name)}`;
       const output = { output: name };
-      if (!isLifted(hidden, LIFTS.strataOutputs, { message, output })) issues.push(message);
+      if (!isLifted(hidden, LIFTS.strataOutputs, { message, output })) arrayPush(issues, message);
     }
-    if (placed.has(name)) issues.push(`stratum output repeated: ${citeName(name)}`);
-    placed.add(name);
+    if (setHas(placed, name)) arrayPush(issues, `stratum output repeated: ${citeName(name)}`);
+    setAdd(placed, name);
   }
-  for (const name of listed.keys()) {
-    if (!placed.has(name)) issues.push(`output not in strata: ${citeName(name)}`);
+  for (const name of mapKeys(listed)) {
+    if (!setHas(placed, name)) arrayPush(issues, `output not in strata: ${citeName(name)}`);
   }
-  const members = p.strata.map((names) => new Set(names));
+  const members = arrayMap(p.strata, (names) => new NativeSet(names));
   const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
     const names = members[entry.stratum];
-    if (!names) issues.push(`stratum out of range: ${citeName(key(entry))}`);
-    else if (output !== undefined && !names.has(output)) {
-      issues.push(`step stratum mismatch: ${citeName(key(entry))}`);
+    if (!names) arrayPush(issues, `stratum out of range: ${citeName(key(entry))}`);
+    else if (output !== undefined && !setHas(names, output)) {
+      arrayPush(issues, `step stratum mismatch: ${citeName(key(entry))}`);
     }
   };
   for (const entry of [...p.applied, ...p.skipped, ...p.pending]) place(entry, entry.output);
@@ -70,26 +87,31 @@ export function strataProblems(
  * id@version`.
  */
 export function feedProblems(p: ProofView): string[] {
-  const imports = new Map<string, Set<string>>();
+  const imports = new NativeMap<string, Set<string>>();
   for (const set of p.ruleSets) {
-    if (set.kind === 'pack') imports.set(set.id, new Set(set.imports ?? []));
+    if (set.kind === 'pack') mapSet(imports, set.id, new NativeSet(set.imports ?? []));
   }
   const issues: string[] = [];
   for (const entry of [...p.applied, ...p.skipped, ...p.pending]) {
     if (entry.output === undefined) continue;
     const own = ruleSetOf(entry.ruleId);
     const target = ruleSetOf(entry.output);
-    if (own === target || imports.get(own)?.has(target) === true) continue;
-    issues.push(`rule feeds an output of a rule set it does not import: ${citeName(key(entry))}`);
+    const imported = mapGet(imports, own);
+    if (own === target || (imported !== undefined && setHas(imported, target))) continue;
+    arrayPush(
+      issues,
+      `rule feeds an output of a rule set it does not import: ${citeName(key(entry))}`,
+    );
   }
   return issues;
 }
 
 /** Internal: each model of an applied step that `versions.models` does not list. */
 export function modelProblems(p: ProofView): string[] {
-  return p.applied
-    .filter((step) => !Object.hasOwn(p.versions.models, step.model))
-    .map((step) => `model not in versions: ${citeName(step.model)}`);
+  return arrayMap(
+    arrayFilter(p.applied, (step) => !objectHasOwn(p.versions.models, step.model)),
+    (step) => `model not in versions: ${citeName(step.model)}`,
+  );
 }
 
 /**
@@ -104,14 +126,14 @@ export function unroundedProblems(
 ): string[] {
   const issues: string[] = [];
   for (const step of p.applied) {
-    const output = listed.get(step.output);
+    const output = mapGet(listed, step.output);
     if (step.unrounded === undefined || output === undefined) continue;
     const { rounding } = declarationOf(output);
     const cited = citeName(instanceKey(step));
     if (rounding?.at !== 'contribution') {
-      issues.push(`unrounded value without rounding at contribution: ${cited}`);
+      arrayPush(issues, `unrounded value without rounding at contribution: ${cited}`);
     } else if (!roundsTo(step, rounding)) {
-      issues.push(`unrounded value does not round to its contribution: ${cited}`);
+      arrayPush(issues, `unrounded value does not round to its contribution: ${cited}`);
     }
   }
   return issues;
@@ -137,8 +159,12 @@ function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1])
  * or exception is `determined`: it is at best `provisional`.
  */
 export function undeclaredReadProblems(p: ProofView): string[] {
-  const undeclared = new Set(p.readsUndeclared.map(key));
-  return [...p.applied, ...p.skipped, ...p.exceptions]
-    .filter((entry) => entry.status === 'determined' && undeclared.has(key(entry)))
-    .map((entry) => `rule with undeclared reads cannot be determined: ${citeName(key(entry))}`);
+  const undeclared = new NativeSet(arrayMap(p.readsUndeclared, key));
+  return arrayMap(
+    arrayFilter(
+      [...p.applied, ...p.skipped, ...p.exceptions],
+      (entry) => entry.status === 'determined' && setHas(undeclared, key(entry)),
+    ),
+    (entry) => `rule with undeclared reads cannot be determined: ${citeName(key(entry))}`,
+  );
 }

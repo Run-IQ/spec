@@ -24,7 +24,7 @@ import { definitionFindings } from '../src/proof/definition-checks.js';
 import { clearIntlCaches, intlRuntime } from '../src/proof/intl-calendar.js';
 import * as windowModule from '../src/rule/window.js';
 import { lastValuesSpent } from '../src/values.js';
-import { isOwnOptionsError, newOptionsError } from '../src/errors.js';
+import { isOwnOptionsError, newOptionsError, withOptionsScope } from '../src/errors.js';
 import type { ProofView } from '../src/proof/types.js';
 import { normalizeRuleDefinition } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
@@ -134,7 +134,14 @@ describe('AA3: only the errors this package created are trusted', () => {
 
   it('a caller-built VerifyOptionsError is not an own error', () => {
     expect(isOwnOptionsError(forged())).toBe(false);
-    expect(isOwnOptionsError(optionError(() => verifyProof(signed(), 5 as never)))).toBe(true);
+    // Own only for the call that raised it, and only while that call runs.
+    const [during, raised] = withOptionsScope(() => {
+      const made = newOptionsError('o', 'm');
+      return [isOwnOptionsError(made), made] as const;
+    });
+    expect(during).toBe(true);
+    expect(isOwnOptionsError(raised)).toBe(false);
+    expect(isOwnOptionsError(optionError(() => verifyProof(signed(), 5 as never)))).toBe(false);
   });
 
   it('the factory cuts the message and the option like an issue text', () => {
@@ -142,7 +149,6 @@ describe('AA3: only the errors this package created are trusted', () => {
     expect(error.option).toHaveLength(1025);
     expect(error.message).toHaveLength(1025);
     expect(error.message.endsWith('…')).toBe(true);
-    expect(isOwnOptionsError(error)).toBe(true);
   });
 
   it('thrown from a getter of the proof: cited and cut, the verdict stays invalid', () => {

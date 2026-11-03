@@ -1,5 +1,25 @@
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { isoOf, parseTime } from '../intrinsics.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayFind,
+  arrayIncludes,
+  arrayJoin,
+  arrayMap,
+  arrayPush,
+  arraySlice,
+  isoOf,
+  mapGet,
+  mapSet,
+  objectKeys,
+  parseTime,
+  regExpTest,
+  setAdd,
+  setHas,
+  setSize,
+  stringSlice,
+  stringStartsWith,
+} from '../intrinsics.js';
 import { citeName, isOwnError, isOwnOptionsError, newOptionsError, reasonOf } from '../errors.js';
 import type { RuleDefinition } from '../rule/definition.js';
 import { LOCAL_RULE_SET, qualifiedFrom } from '../rule/ruleSet.js';
@@ -30,7 +50,7 @@ import type { ProofView } from './types.js';
  * `SHORT_CIRCUITED`, `RULE_CONFLICT`: against the exceptions and the ties). Every other reason,
  * unknown ones included, is named in a notice: it was not checked against its definition.
  */
-const CHECKED_REASONS: ReadonlySet<string> = new Set([
+const CHECKED_REASONS: ReadonlySet<string> = new NativeSet([
   'INACTIVE_DATE',
   'CONDITION_FALSE',
   'DIMENSION_MISMATCH',
@@ -61,9 +81,9 @@ export interface DefinitionFindings {
  */
 function outputsOf(definition: RuleDefinition): Set<string> {
   const own = definition.ruleSet ?? LOCAL_RULE_SET;
-  const outputs = new Set([qualifiedFrom(own, definition.output ?? DEFAULT_OUTPUT)]);
+  const outputs = new NativeSet([qualifiedFrom(own, definition.output ?? DEFAULT_OUTPUT)]);
   for (const exception of definition.exceptions ?? []) {
-    if (exception.kind === 'shortCircuit') outputs.add(qualifiedFrom(own, exception.output));
+    if (exception.kind === 'shortCircuit') setAdd(outputs, qualifiedFrom(own, exception.output));
   }
   return outputs;
 }
@@ -103,8 +123,8 @@ function position(ref: string, bound: string): Position {
     return at >= midnight + DAY_MS ? 'notBefore' : 'undecided';
   }
   const at = parseTime(bound);
-  const first = isoOf(at - DAY_MS).slice(0, 10);
-  const last = isoOf(at + DAY_MS).slice(0, 10);
+  const first = stringSlice(isoOf(at - DAY_MS), 0, 10);
+  const last = stringSlice(isoOf(at + DAY_MS), 0, 10);
   if (ref < first) return 'before';
   return ref > last ? 'notBefore' : 'undecided';
 }
@@ -142,7 +162,7 @@ function windowHolds(
   const effective = definition.timeZone ?? zone;
   const at = proof.evaluatedAt;
   if (calendar !== undefined) return decided(withCallerCalendar(definition, at, zone, calendar));
-  if (FIXED_ZONE.test(effective)) {
+  if (regExpTest(FIXED_ZONE, effective)) {
     return decided(windowContains(definition, at, zone, fixedOffsetCalendar('verifyProof')));
   }
   const byBounds = decidedByBounds(at, definition.effectiveFrom, definition.effectiveUntil);
@@ -164,7 +184,8 @@ function windowHolds(
     // that database is the one the proof was made with. A bound far from the instant never
     // reaches here, and needs no database. Only the release the engine recorded counts: the
     // proof holds one (`consistency`), and a plugin or a model cannot name the database.
-    const recorded = proof.versions.components.find(
+    const recorded = arrayFind(
+      proof.versions.components,
       (entry) => entry.name === 'tzdata' && entry.declaredBy === 'engine',
     )?.version;
     if (recorded === undefined) return 'no tzdata recorded by the engine';
@@ -215,7 +236,7 @@ function withCallerCalendar(
   } catch (error) {
     // `windowContains` names what the calendar answered `calendar.<method> ...`.
     const answered =
-      isOwnError(error) && /^calendar\.(toCivilDate|startOfDay) /.test(error.message);
+      isOwnError(error) && regExpTest(/^calendar\.(toCivilDate|startOfDay) /, error.message);
     if (threw || answered) {
       throw newOptionsError(
         'options.calendar',
@@ -250,14 +271,15 @@ export const WINDOW_KINDS = [
  * releases): the pointer or the zone is not part of the kind.
  */
 function windowKind(why: string): { kind: string; detail?: string } {
-  if (why.startsWith('effectiveOn is ')) return { kind: WINDOW_KINDS[0] };
-  if (why.startsWith('zone ')) {
+  if (stringStartsWith(why, 'effectiveOn is ')) return { kind: WINDOW_KINDS[0] };
+  if (stringStartsWith(why, 'zone ')) {
     return {
       kind: WINDOW_KINDS[2],
-      detail: why.slice(5, -' unknown to this verifier'.length),
+      detail: stringSlice(why, 5, -' unknown to this verifier'.length),
     };
   }
-  if (why.startsWith('tzdata ')) return { kind: WINDOW_KINDS[3], detail: why.slice(7) };
+  if (stringStartsWith(why, 'tzdata '))
+    return { kind: WINDOW_KINDS[3], detail: stringSlice(why, 7) };
   return { kind: why };
 }
 
@@ -298,11 +320,11 @@ export function definitionFindings(
   calendar?: CivilCalendar,
   runtime: { tzdata: string | undefined } = { tzdata: runtimeTzdata() },
 ): void {
-  const windows = new Map<string, boolean | string>();
-  const undecided = new Map<string, string[]>();
+  const windows = new NativeMap<string, boolean | string>();
+  const undecided = new NativeMap<string, string[]>();
   const unnamed: string[] = [];
   const holds = (key: string, definition: RuleDefinition): boolean | undefined => {
-    let held = windows.get(key);
+    let held = mapGet(windows, key);
     if (held === undefined) {
       try {
         held = windowHolds(proof, definition, calendar, runtime.tzdata);
@@ -312,11 +334,11 @@ export function definitionFindings(
         report.invalid(`window check failed: ${reasonOf(error)} (${citeName(key)})`);
         held = 'the check failed';
       }
-      windows.set(key, held);
+      mapSet(windows, key, held);
       if (typeof held === 'string' && held !== 'the check failed') {
-        const keys = undecided.get(held) ?? [];
-        keys.push(key);
-        undecided.set(held, keys);
+        const keys = mapGet(undecided, held) ?? [];
+        arrayPush(keys, key);
+        mapSet(undecided, held, keys);
       }
     }
     return typeof held === 'boolean' ? held : undefined;
@@ -324,19 +346,19 @@ export function definitionFindings(
 
   for (const step of proof.applied) {
     const key = ruleKey(step);
-    const definition = matched.get(key);
+    const definition = mapGet(matched, key);
     if (definition === undefined) continue;
     const at = citeName(instanceKey(step));
     if (holds(key, definition) === false) report.invalid(`rule applied outside its window: ${at}`);
     if (step.model !== definition.model)
       report.invalid(`applied model differs from its rule: ${at}`);
-    if (!outputsOf(definition).has(step.output)) {
+    if (!setHas(outputsOf(definition), step.output)) {
       report.invalid(`applied output differs from its rule: ${at}`);
     }
   }
   for (const entry of proof.pending) {
     const key = ruleKey(entry);
-    const definition = matched.get(key);
+    const definition = mapGet(matched, key);
     if (definition === undefined) continue;
     if (holds(key, definition) === false) {
       report.invalid(`rule pending outside its window: ${citeName(instanceKey(entry))}`);
@@ -344,7 +366,7 @@ export function definitionFindings(
   }
   for (const skip of proof.skipped) {
     const key = ruleKey(skip);
-    const definition = matched.get(key);
+    const definition = mapGet(matched, key);
     if (definition === undefined) continue;
     const at = citeName(instanceKey(skip));
     if (skip.reason === 'INACTIVE_DATE') {
@@ -356,7 +378,7 @@ export function definitionFindings(
         report.invalid(`CONDITION_FALSE on a rule without a condition: ${at}`);
       }
     } else if (skip.reason === 'DIMENSION_MISMATCH') {
-      if (Object.keys(definition.dimensions).length === 0) {
+      if (objectKeys(definition.dimensions).length === 0) {
         report.invalid(`DIMENSION_MISMATCH on a rule without dimensions: ${at}`);
       }
     } else if (skip.reason === 'NOT_REQUESTED') {
@@ -366,18 +388,18 @@ export function definitionFindings(
         // An exclusion for an output not asked for names that output: without it, nothing can
         // be compared with `requested`.
         report.invalid(`NOT_REQUESTED without an output: ${at}`);
-      } else if (proof.requested.includes(skip.output)) {
+      } else if (arrayIncludes(proof.requested, skip.output)) {
         report.invalid(`NOT_REQUESTED on a requested output: ${at}`);
       }
     }
-    if (!CHECKED_REASONS.has(skip.reason) && !unnamed.includes(skip.reason)) {
-      unnamed.push(skip.reason);
+    if (!setHas(CHECKED_REASONS, skip.reason) && !arrayIncludes(unnamed, skip.reason)) {
+      arrayPush(unnamed, skip.reason);
     }
     const output = skip.output;
     if (
       output !== undefined &&
-      BEFORE_EXCEPTIONS.has(skip.reason) &&
-      !outputsOf(definition).has(output)
+      setHas(BEFORE_EXCEPTIONS, skip.reason) &&
+      !setHas(outputsOf(definition), output)
     ) {
       report.invalid(`skipped output differs from its rule: ${at}`);
     }
@@ -385,32 +407,36 @@ export function definitionFindings(
 
   // One notice per kind of cause, whatever the number of rules: the number of notices of a
   // verdict is fixed, and none is ever cut.
-  const kinds = new Map<string, { causes: Set<string>; details: Set<string>; keys: string[] }>();
+  const kinds = new NativeMap<
+    string,
+    { causes: Set<string>; details: Set<string>; keys: string[] }
+  >();
   for (const [why, keys] of undecided) {
     const { kind, detail } = windowKind(why);
-    const group = kinds.get(kind) ?? {
-      causes: new Set<string>(),
-      details: new Set<string>(),
+    const group = mapGet(kinds, kind) ?? {
+      causes: new NativeSet<string>(),
+      details: new NativeSet<string>(),
       keys: [],
     };
-    group.causes.add(why);
-    if (detail !== undefined) group.details.add(detail);
-    group.keys.push(...keys);
-    kinds.set(kind, group);
+    setAdd(group.causes, why);
+    if (detail !== undefined) setAdd(group.details, detail);
+    arrayPush(group.keys, ...keys);
+    mapSet(kinds, kind, group);
   }
   for (const [kind, { causes, details, keys }] of kinds) {
     if (keys.length === 1) {
       report.unchecked(`window not checked: ${citeName(keys[0]!)} (${[...causes][0]})`);
       continue;
     }
-    const named = keys.slice(0, MAX_NAMED_RULES).map(citeName).join(', ');
+    const named = arrayJoin(arrayMap(arraySlice(keys, 0, MAX_NAMED_RULES), citeName), ', ');
     const more = keys.length > MAX_NAMED_RULES ? ` and ${keys.length - MAX_NAMED_RULES} more` : '';
-    const shown = [...details].slice(0, MAX_NAMED_DETAILS);
-    const extra = details.size > shown.length ? `, and ${details.size - shown.length} more` : '';
-    const what = shown.length > 0 ? `${kind}: ${shown.join(', ')}${extra}` : kind;
+    const shown = arraySlice([...details], 0, MAX_NAMED_DETAILS);
+    const extra =
+      setSize(details) > shown.length ? `, and ${setSize(details) - shown.length} more` : '';
+    const what = shown.length > 0 ? `${kind}: ${arrayJoin(shown, ', ')}${extra}` : kind;
     report.unchecked(`window not checked for ${keys.length} rules (${what}): ${named}${more}`);
   }
-  for (const reason of unnamed.slice(0, MAX_NAMED_REASONS)) {
+  for (const reason of arraySlice(unnamed, 0, MAX_NAMED_REASONS)) {
     report.unchecked(`reason not checked: ${citeName(reason)}`);
   }
   if (unnamed.length > MAX_NAMED_REASONS) {

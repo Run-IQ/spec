@@ -49,6 +49,16 @@ import {
   readEffectiveOn,
   readRuleWindow,
 } from './window.js';
+import {
+  NativeSet,
+  arrayForEach,
+  arrayIsArray,
+  arraySort,
+  numberIsFinite,
+  objectDefineProperty,
+  objectKeys,
+  stringIncludes,
+} from '../intrinsics.js';
 
 /**
  * Builds the canonical definition of a rule, so that the same data always gives the same
@@ -147,7 +157,7 @@ function normalizeForm(input: RuleDefinitionInput, stored: boolean): RuleDefinit
 
 function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
-  if (!spendValues(Object.keys(input).length)) invalidRule(tooLargeMessage('rule definition'));
+  if (!spendValues(objectKeys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
   // The keys alone, before any value: an unknown field is refused whatever it holds.
   for (const key of unknownRuleKeys(input)) invalidRule(unknownRuleFieldMessage(key));
@@ -258,7 +268,7 @@ function given(value: unknown, field: string): unknown {
 function readExtensions(value: unknown): Record<string, JsonValue> | undefined {
   if (!isPlainObject(value)) invalidRule(EXTENSIONS_NOT_OBJECT);
   const json = readJson(value, 'extensions') as Record<string, JsonValue>;
-  const keys = Object.keys(json);
+  const keys = objectKeys(json);
   // A name with no value is written by omitting it: `null` at the first level is refused, as
   // at the top level of the rule. Deeper, `null` is data.
   for (const key of keys) {
@@ -278,7 +288,7 @@ function readRuleSet(value: unknown): string {
 /** A non-empty `id` without `:`, which separates a rule set from a name (D-4). */
 function requireId(value: unknown): string {
   const id = requireString(value, 'id');
-  if (id.includes(':')) invalidRule('id must not contain ":"');
+  if (stringIncludes(id, ':')) invalidRule('id must not contain ":"');
   return id;
 }
 
@@ -303,7 +313,7 @@ function requireParams(value: unknown): unknown {
 
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('condition'));
   for (const key of keys) {
     // A member whose value is `undefined` is absent, known or not.
@@ -322,10 +332,10 @@ function normalizeDimensions(input: unknown): Record<string, DimensionSpec> {
   const value = given(input, 'dimensions');
   if (value === undefined) return {};
   if (!isPlainObject(value)) invalidRule('dimensions must be an object of dimension specs');
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('dimensions'));
   const out: Record<string, DimensionSpec> = {};
-  for (const key of keys.sort()) {
+  for (const key of arraySort(keys)) {
     const v = value[key];
     if (isUnnamable(key)) invalidRule(unnamableNameMessage('dimensions', 'dimension', key));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
@@ -345,19 +355,19 @@ function normalizeDimensions(input: unknown): Record<string, DimensionSpec> {
 function normalizeTags(input: unknown): string[] {
   const value = given(input, 'tags');
   if (value === undefined) return [];
-  if (!Array.isArray(value)) invalidRule('tags must be an array of strings');
+  if (!arrayIsArray(value)) invalidRule('tags must be an array of strings');
   const tags = readList(value, 'tags');
-  if (!Array.isArray(tags)) invalidRule(tags.message);
+  if (!arrayIsArray(tags)) invalidRule(tags.message);
   for (const tag of tags) {
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }
-  tags.forEach((tag, i) => {
+  arrayForEach(tags, (tag, i) => {
     if (tag === '') invalidRule(`tags[${i}] must be a non-empty string`);
     if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       invalidRule(loneSurrogateMessage(`tags[${i}]`));
     }
   });
-  return [...new Set(tags as string[])].sort();
+  return arraySort([...new NativeSet(tags as string[])]);
 }
 
 function requireString(value: unknown, field: string): string {
@@ -374,7 +384,7 @@ function requireVersion(value: unknown): number {
 }
 
 function requireNumber(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== 'number' || !numberIsFinite(value)) {
     invalidRule(`${citeName(field)} must be a finite number`);
   }
   return value;
@@ -382,7 +392,7 @@ function requireNumber(value: unknown, field: string): number {
 
 /** Plain assignment would turn a `__proto__` key into a prototype change. */
 function defineField(target: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(target, key, {
+  objectDefineProperty(target, key, {
     value,
     enumerable: true,
     writable: true,

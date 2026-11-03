@@ -7,6 +7,7 @@ import type { JsonPointer } from '../path/pointer.js';
 import type { Subject } from '../path/subject.js';
 import type { RuleException } from '../rule/exceptions.js';
 import type { CivilDate, Instant } from '../time/civil.js';
+import { objectFreeze } from '../intrinsics.js';
 
 /** The format a decision proof declares in `format`. */
 export const PROOF_FORMAT = 'run-iq.proof/1';
@@ -36,7 +37,7 @@ export type ProofSection =
   | 'readsUndeclared';
 
 /** The sections of a proof in their order (D-16), the order of their leaves. Frozen. */
-export const PROOF_SECTIONS: readonly ProofSection[] = Object.freeze([
+export const PROOF_SECTIONS: readonly ProofSection[] = objectFreeze([
   'rules',
   'outputs',
   'items',

@@ -13,6 +13,17 @@ import {
 } from './read.js';
 import type { Reader } from './read.js';
 import type { InputLeaf } from './tree.js';
+import {
+  arrayIsArray,
+  arrayMap,
+  arrayPush,
+  mapGet,
+  mapHas,
+  numberIsSafeInteger,
+  numberMAX_SAFE_INTEGER,
+  objectIs,
+  regExpTest,
+} from '../intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: the read-once copy of a fact disclosure (`run-iq.disclosure/1`)
@@ -100,27 +111,27 @@ export function readDisclosure(
   const fields = readFields(value, '', 'disclosure', DISCLOSURE_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, '', DISCLOSURE_KEYS, add);
-  const field = (key: string): unknown => fields.values.get(key);
+  const field = (key: string): unknown => mapGet(fields.values, key);
   const format = field('format');
   if (typeof format === 'string' && format !== DISCLOSURE_FORMAT) return citeName(format);
-  if (fields.values.has('format') && format !== DISCLOSURE_FORMAT) {
+  if (mapHas(fields.values, 'format') && format !== DISCLOSURE_FORMAT) {
     add('/format', '/format must be a string');
   }
   const inputDigest = field('inputDigest');
-  if (fields.values.has('inputDigest') && !isHexHash(inputDigest)) {
+  if (mapHas(fields.values, 'inputDigest') && !isHexHash(inputDigest)) {
     add('/inputDigest', '/inputDigest must be 64 lowercase hex characters');
   }
   const rawSize = field('size');
   const size = isCount(rawSize, MAX_JSON_VALUES) ? rawSize : undefined;
-  if (fields.values.has('size') && size === undefined) {
+  if (mapHas(fields.values, 'size') && size === undefined) {
     add('/size', `/size must be an integer from 0 to ${MAX_JSON_VALUES}`);
   }
-  const facts = fields.values.has('facts')
+  const facts = mapHas(fields.values, 'facts')
     ? readCopies('/facts', field('facts'), reader, size, 'facts', (item, at) =>
         readFactCopy(item, at, size, reader),
       )
     : undefined;
-  const absent = fields.values.has('absent')
+  const absent = mapHas(fields.values, 'absent')
     ? readCopies('/absent', field('absent'), reader, undefined, 'absences', (item, at) =>
         readAbsenceCopy(item, at, size, reader),
       )
@@ -132,12 +143,12 @@ export function readDisclosure(
 
 /** True for 64 lowercase hex characters. */
 function isHexHash(value: unknown): value is string {
-  return typeof value === 'string' && HEX_HASH.test(value);
+  return typeof value === 'string' && regExpTest(HEX_HASH, value);
 }
 
 /** True for an integer from 0 to `max`. */
 function isCount(value: unknown, max: number): value is number {
-  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 && value <= max;
+  return typeof value === 'number' && numberIsSafeInteger(value) && value >= 0 && value <= max;
 }
 
 /**
@@ -167,7 +178,7 @@ function readCopies<T>(
     const element = readElement(list, i, path, reader.add);
     if (element === 'failed') continue;
     const item = readItem(element.value, `${path}/${i}`);
-    if (item !== undefined) copies.push(item);
+    if (item !== undefined) arrayPush(copies, item);
   }
   return copies;
 }
@@ -180,7 +191,7 @@ function readLength(
 ): { list: readonly unknown[]; length: number } | undefined {
   let list: readonly unknown[] | undefined;
   try {
-    if (Array.isArray(value)) list = value;
+    if (arrayIsArray(value)) list = value;
   } catch (error) {
     reader.add(path, unreadableMessage(path, error));
     return undefined;
@@ -191,7 +202,7 @@ function readLength(
   }
   const read = readMember(list, 'length', path, reader.add);
   if (read === 'failed') return undefined;
-  if (!isCount(read.value, Number.MAX_SAFE_INTEGER)) {
+  if (!isCount(read.value, numberMAX_SAFE_INTEGER)) {
     reader.add(path, `${path} has an invalid length`);
     return undefined;
   }
@@ -229,14 +240,19 @@ function readFactCopy(
   const fields = readFields(value, at, at, FACT_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, at, ['pointer', 'leaves'], add);
-  const pointer = fields.values.has('pointer')
-    ? readPointer(fields.values.get('pointer'), `${at}/pointer`, add)
+  const pointer = mapHas(fields.values, 'pointer')
+    ? readPointer(mapGet(fields.values, 'pointer'), `${at}/pointer`, add)
     : undefined;
   let leaves: LeafCopy[] | undefined;
-  if (fields.values.has('leaves')) {
+  if (mapHas(fields.values, 'leaves')) {
     const path = `${at}/leaves`;
-    const read = readCopies(path, fields.values.get('leaves'), reader, size, 'leaves', (item, i) =>
-      readLeafCopy(item, i, size, reader),
+    const read = readCopies(
+      path,
+      mapGet(fields.values, 'leaves'),
+      reader,
+      size,
+      'leaves',
+      (item, i) => readLeafCopy(item, i, size, reader),
     );
     if (read !== undefined && read.length === 0 && reader.issues.length === 0) {
       add(path, `${path} must hold at least one leaf`);
@@ -258,8 +274,8 @@ function readNeighbours(
   reader: Reader,
 ): { before?: NeighbourCopy; after?: NeighbourCopy } | undefined {
   const neighbour = (key: string): NeighbourCopy | undefined | 'failed' => {
-    if (!values.has(key)) return undefined;
-    return readNeighbourCopy(values.get(key), `${at}/${key}`, size, reader) ?? 'failed';
+    if (!mapHas(values, key)) return undefined;
+    return readNeighbourCopy(mapGet(values, key), `${at}/${key}`, size, reader) ?? 'failed';
   };
   const before = neighbour('before');
   const after = neighbour('after');
@@ -277,11 +293,11 @@ function readPlace(
   size: number | undefined,
   reader: Reader,
 ): { index: number; path: string[] } | undefined {
-  const rawIndex = values.get('index');
+  const rawIndex = mapGet(values, 'index');
   const index = isCount(rawIndex, size === undefined ? MAX_JSON_VALUES : size - 1)
     ? rawIndex
     : undefined;
-  if (values.has('index') && index === undefined) {
+  if (mapHas(values, 'index') && index === undefined) {
     reader.add(
       `${at}/index`,
       size === undefined
@@ -289,8 +305,8 @@ function readPlace(
         : `${at}/index must be an integer below the size of the tree (${size})`,
     );
   }
-  const path = values.has('path')
-    ? readAuditPath(values.get('path'), `${at}/path`, reader, index, size)
+  const path = mapHas(values, 'path')
+    ? readAuditPath(mapGet(values, 'path'), `${at}/path`, reader, index, size)
     : undefined;
   return path === undefined || index === undefined ? undefined : { index, path };
 }
@@ -308,9 +324,9 @@ function readLeafCopy(
   const fields = readFields(value, at, at, LEAF_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, at, ['pointer', 'kind', 'salt', 'valueSalt', 'index', 'path'], add);
-  const has = (key: string): boolean => fields.values.has(key);
+  const has = (key: string): boolean => mapHas(fields.values, key);
   const text = (key: string): string | undefined => {
-    const member = fields.values.get(key);
+    const member = mapGet(fields.values, key);
     if (typeof member === 'string') return member;
     if (has(key)) add(`${at}/${key}`, `${at}/${key} must be a string`);
     return undefined;
@@ -322,9 +338,9 @@ function readLeafCopy(
   if (kind !== undefined && !isLeafKind(kind)) {
     add(`${at}/kind`, `${at}/kind must be one of value, array, object`);
   }
-  const scalar = fields.values.get('value');
+  const scalar = mapGet(fields.values, 'value');
   if (has('value') && !isScalar(scalar)) add(`${at}/value`, `${at}/value must be a JSON scalar`);
-  const length = fields.values.get('length');
+  const length = mapGet(fields.values, 'length');
   if (has('length') && typeof length !== 'number') {
     add(`${at}/length`, `${at}/length must be a number`);
   }
@@ -336,7 +352,7 @@ function readLeafCopy(
     pointer,
     kind,
     // -0 has no JSON form: a leaf holds 0 (`inputLeafHash` reads it so).
-    ...(isScalar(scalar) && { value: Object.is(scalar, -0) ? 0 : scalar }),
+    ...(isScalar(scalar) && { value: objectIs(scalar, -0) ? 0 : scalar }),
     ...(typeof length === 'number' && { length }),
     salt,
     valueSalt,
@@ -357,14 +373,14 @@ function readNeighbourCopy(
   const fields = readFields(value, at, at, NEIGHBOUR_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, at, NEIGHBOUR_KEYS, add);
-  const pointer = fields.values.get('pointer');
-  if (fields.values.has('pointer') && typeof pointer !== 'string') {
+  const pointer = mapGet(fields.values, 'pointer');
+  if (mapHas(fields.values, 'pointer') && typeof pointer !== 'string') {
     add(`${at}/pointer`, `${at}/pointer must be a string`);
   }
-  const [salt, commitment] = ['salt', 'commitment'].map((key) => {
-    const hex = fields.values.get(key);
+  const [salt, commitment] = arrayMap(['salt', 'commitment'], (key) => {
+    const hex = mapGet(fields.values, key);
     if (isHexHash(hex)) return hex;
-    if (fields.values.has(key))
+    if (mapHas(fields.values, key))
       add(`${at}/${key}`, `${at}/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
@@ -424,7 +440,7 @@ function readAuditPath(
   for (let i = 0; i < length; i++) {
     const element = readElement(list, i, at, reader.add);
     if (element === 'failed') continue;
-    if (isHexHash(element.value)) hashes.push(element.value);
+    if (isHexHash(element.value)) arrayPush(hashes, element.value);
     else reader.add(`${at}/${i}`, `${at}/${i} must be 64 lowercase hex characters`);
   }
   return hashes;
@@ -444,8 +460,8 @@ function readAbsenceCopy(
   const fields = readFields(value, at, at, ABSENCE_KEYS, reader);
   if (fields === undefined) return undefined;
   requireFields(fields, at, ['pointer'], add);
-  const pointer = fields.values.has('pointer')
-    ? readPointer(fields.values.get('pointer'), `${at}/pointer`, add)
+  const pointer = mapHas(fields.values, 'pointer')
+    ? readPointer(mapGet(fields.values, 'pointer'), `${at}/pointer`, add)
     : undefined;
   const neighbours = readNeighbours(fields.values, at, size, reader);
   if (pointer === undefined || neighbours === undefined) return undefined;

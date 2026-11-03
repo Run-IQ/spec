@@ -29,11 +29,36 @@ import type {
 } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
 import type { OutputIdentity } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayEvery,
+  arrayFilter,
+  arrayIndexOf,
+  arrayPop,
+  arrayPush,
+  arraySlice,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  mapValues,
+  mathMax,
+  setAdd,
+  setHas,
+  setSize,
+} from '../intrinsics.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
-const ORDERED: ReadonlySet<string> = new Set(['number', 'decimal', 'enum', 'date', 'dateTime']);
+const ORDERED: ReadonlySet<string> = new NativeSet([
+  'number',
+  'decimal',
+  'enum',
+  'date',
+  'dateTime',
+]);
 
-const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
+const rankOf = (status: OutputStatus): number => arrayIndexOf(OUTPUT_STATUSES, status);
 
 /** How messages cite an item: `name at subject`. */
 export function citeItem(output: string, subject: string): string {
@@ -57,7 +82,7 @@ interface Node {
   tie: boolean;
 }
 
-const newNode = (): Node => ({ children: new Map(), skip: -1, tie: false });
+const newNode = (): Node => ({ children: new NativeMap(), skip: -1, tie: false });
 
 /**
  * The feeds of the items of one per output, by subject. A step or a pending rule goes to the
@@ -90,18 +115,18 @@ class ItemTrie {
   /** An exclusion at `subject` (every item without), of status `rank`, `tie` when tied. */
   exclude(subject: string | undefined, rank: number, tie: boolean): void {
     if (subject === undefined) {
-      this.everywhere = Math.max(this.everywhere, rank);
+      this.everywhere = mathMax(this.everywhere, rank);
       this.tiedEverywhere ||= tie;
       return;
     }
     const containing = this.deepest(subject);
     if (containing !== undefined) {
-      containing.candidates = Math.max(containing.candidates, rank);
+      containing.candidates = mathMax(containing.candidates, rank);
       containing.tie ||= tie;
     }
     const node = this.walk(subject, true);
     if (node !== undefined) {
-      node.skip = Math.max(node.skip, rank);
+      node.skip = mathMax(node.skip, rank);
       node.tie ||= tie;
     }
   }
@@ -109,26 +134,26 @@ class ItemTrie {
   /** Passes down the strongest exclusion of each node, and its ties, to the items below it. */
   settle(): void {
     const stack: [Node, number, boolean][] = [[this.root, this.everywhere, this.tiedEverywhere]];
-    for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
+    for (let next = arrayPop(stack); next !== undefined; next = arrayPop(stack)) {
       const [node, above, tiedAbove] = next;
-      const rank = Math.max(above, node.skip);
+      const rank = mathMax(above, node.skip);
       const tie = tiedAbove || node.tie;
       if (node.item !== undefined) {
-        node.item.candidates = Math.max(node.item.candidates, rank);
+        node.item.candidates = mathMax(node.item.candidates, rank);
         node.item.tie ||= tie;
       }
-      for (const child of node.children.values()) stack.push([child, rank, tie]);
+      for (const child of mapValues(node.children)) arrayPush(stack, [child, rank, tie]);
     }
   }
 
   private walk(subject: string, create: boolean, visit?: (node: Node) => void): Node | undefined {
     let node = this.root;
     for (const segment of parsePointer(subject)) {
-      let child = node.children.get(segment);
+      let child = mapGet(node.children, segment);
       if (child === undefined) {
         if (!create) return undefined;
         child = newNode();
-        node.children.set(segment, child);
+        mapSet(node.children, segment, child);
       }
       node = child;
       visit?.(node);
@@ -150,19 +175,19 @@ interface Feeds {
 }
 
 function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
-  const outputs = new Map<string, Feed>();
-  const items = new Map<ProofItem, Feed>();
-  const tries = new Map<string, ItemTrie>();
+  const outputs = new NativeMap<string, Feed>();
+  const items = new NativeMap<ProofItem, Feed>();
+  const tries = new NativeMap<string, ItemTrie>();
   for (const [name, output] of listed) {
-    if (output.per === undefined) outputs.set(name, newFeed());
-    else tries.set(name, new ItemTrie());
+    if (output.per === undefined) mapSet(outputs, name, newFeed());
+    else mapSet(tries, name, new ItemTrie());
   }
   for (const item of p.items) {
-    const trie = tries.get(item.output);
+    const trie = mapGet(tries, item.output);
     if (trie === undefined) continue;
     const feed = newFeed();
     // A repeated item is reported by `orderProblems`; only the first is fed.
-    if (trie.add(item.subject, feed)) items.set(item, feed);
+    if (trie.add(item.subject, feed)) mapSet(items, item, feed);
   }
   const strays: Stray[] = [];
   const route = (
@@ -170,47 +195,47 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     output: string,
     what: string,
   ): Feed | undefined => {
-    const direct = outputs.get(output);
+    const direct = mapGet(outputs, output);
     if (direct !== undefined) return direct;
-    const trie = tries.get(output);
+    const trie = mapGet(tries, output);
     if (trie === undefined) return undefined;
     const feed = entry.subject === undefined ? undefined : trie.deepest(entry.subject);
     if (feed === undefined) {
       const message = `${what} feeds no item: ${citeName(instanceKey(entry))}`;
-      const item = elementOf(listed.get(output)?.per, entry.subject);
-      strays.push(item === undefined ? { message } : { message, output: { output, item } });
+      const item = elementOf(mapGet(listed, output)?.per, entry.subject);
+      arrayPush(strays, item === undefined ? { message } : { message, output: { output, item } });
     }
     return feed;
   };
   for (const step of p.applied) {
     const feed = route(step, step.output, 'step');
     if (feed === undefined) continue;
-    feed.steps.push(step);
+    arrayPush(feed.steps, step);
     feed.tie ||= ties.reaches(step);
   }
   for (const entry of p.pending) {
     if (entry.output === undefined) continue;
     const feed = route(entry, entry.output, 'pending rule');
     if (feed === undefined) continue;
-    feed.pending.push(entry.ruleId);
-    feed.waiting.push(entry);
+    arrayPush(feed.pending, entry.ruleId);
+    arrayPush(feed.waiting, entry);
     feed.tie ||= ties.reaches(entry);
   }
   for (const skip of p.skipped) {
     // A per output is fed by instances (D-21): an exclusion without subject is grouped.
-    const perOutput = skip.output !== undefined && tries.has(skip.output);
+    const perOutput = skip.output !== undefined && mapHas(tries, skip.output);
     if (perOutput && skip.subject === undefined && skip.instances === undefined) {
       // Grouped (instances aside): no item, visible or not, would feed it.
-      strays.push({ message: `exclusion feeds no item: ${citeName(instanceKey(skip))}` });
+      arrayPush(strays, { message: `exclusion feeds no item: ${citeName(instanceKey(skip))}` });
     }
     exclude(skip, outputs, tries, ties.reaches(skip));
   }
   for (const name of ties.shortCircuits) {
-    const direct = outputs.get(name);
+    const direct = mapGet(outputs, name);
     if (direct !== undefined) direct.tie = true;
-    tries.get(name)?.exclude(undefined, -1, true);
+    mapGet(tries, name)?.exclude(undefined, -1, true);
   }
-  for (const trie of tries.values()) trie.settle();
+  for (const trie of mapValues(tries)) trie.settle();
   return { outputs, items, strays };
 }
 
@@ -222,12 +247,12 @@ function exclude(
 ): void {
   if (skip.output === undefined) return;
   const rank = rankOf(skip.status);
-  const direct = outputs.get(skip.output);
+  const direct = mapGet(outputs, skip.output);
   if (direct !== undefined) {
-    direct.candidates = Math.max(direct.candidates, rank);
+    direct.candidates = mathMax(direct.candidates, rank);
     direct.tie ||= tie;
   }
-  tries.get(skip.output)?.exclude(skip.subject, rank, tie);
+  mapGet(tries, skip.output)?.exclude(skip.subject, rank, tie);
 }
 
 /** What an output and an item share: a status, a value, bounds, a selection. */
@@ -243,14 +268,14 @@ function entryProblems(entry: Entry, cite: () => string, output: ProofOutput): s
   const issues: string[] = [];
   const undetermined = entry.status === 'undetermined';
   if (undetermined && entry.value !== undefined) {
-    issues.push(`undetermined output has a value: ${cite()}`);
+    arrayPush(issues, `undetermined output has a value: ${cite()}`);
   }
   const { bounds } = entry;
   if (bounds !== undefined) append(issues, boundsProblems(bounds, undetermined, cite, output));
   if (entry.selected !== undefined) {
-    if (undetermined) issues.push(`selected on an undetermined output: ${cite()}`);
-    else if (!SELECTING.has(output.combine)) {
-      issues.push(`selected on a ${output.combine} output: ${cite()}`);
+    if (undetermined) arrayPush(issues, `selected on an undetermined output: ${cite()}`);
+    else if (!setHas(SELECTING, output.combine)) {
+      arrayPush(issues, `selected on a ${output.combine} output: ${cite()}`);
     }
   }
   return issues;
@@ -265,7 +290,7 @@ function boundsProblems(
   if (!undetermined) return [`bounds on a settled output: ${cite()}`];
   const { min, max } = bounds;
   if (min === undefined && max === undefined) return [`bounds without min or max: ${cite()}`];
-  if (!ORDERED.has(output.type)) return [`bounds on an unordered output: ${cite()}`];
+  if (!setHas(ORDERED, output.type)) return [`bounds on an unordered output: ${cite()}`];
   const compare = comparator(declarationOf(output));
   if (min !== undefined && max !== undefined && compare(min, max) === 1) {
     return [`bounds min above max: ${cite()}`];
@@ -297,7 +322,7 @@ export function outputProblems(
   context: Context,
 ): string[] {
   const issues: string[] = [];
-  const nonPer = new Set<string>();
+  const nonPer = new NativeSet<string>();
   for (const [name, output] of listed) {
     const cited = (): string => citeName(name);
     if (output.per === undefined) {
@@ -306,19 +331,19 @@ export function outputProblems(
     }
     const { value, bounds, selected, contributors, pending } = output;
     if (value !== undefined || bounds !== undefined || selected !== undefined) {
-      issues.push(`per output carries a value: ${cited()}`);
+      arrayPush(issues, `per output carries a value: ${cited()}`);
     }
     if (contributors.length > 0 || pending.length > 0) {
-      issues.push(`per output carries contributors: ${cited()}`);
+      arrayPush(issues, `per output carries contributors: ${cited()}`);
     }
   }
   for (const item of p.items) {
-    const output = listed.get(item.output);
+    const output = mapGet(listed, item.output);
     if (output === undefined) continue;
     if (output.per === undefined) {
-      if (!nonPer.has(item.output))
-        issues.push(`item of a non-per output: ${citeName(item.output)}`);
-      nonPer.add(item.output);
+      if (!setHas(nonPer, item.output))
+        arrayPush(issues, `item of a non-per output: ${citeName(item.output)}`);
+      setAdd(nonPer, item.output);
       continue;
     }
     append(
@@ -326,7 +351,7 @@ export function outputProblems(
       entryProblems(item, () => citeItem(item.output, item.subject), output),
     );
     if (!inCollection(output.per, item.subject)) {
-      issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
+      arrayPush(issues, `item outside its per collection: ${citeItem(item.output, item.subject)}`);
     }
   }
   const { hidden } = context;
@@ -334,7 +359,7 @@ export function outputProblems(
   // The item a stray step or pending rule feeds may be redacted.
   for (const { message, output } of feeds.strays) {
     if (output === undefined || !isLifted(hidden, LIFTS.itemsOfCollection, { message, output })) {
-      issues.push(message);
+      arrayPush(issues, message);
     }
   }
   const targets = targetsOf(p, listed, feeds);
@@ -352,10 +377,10 @@ export function outputProblems(
           }),
         )
       ) {
-        issues.push(message);
+        arrayPush(issues, message);
       }
     } else if (!pendingInOrder(pending, feed, context.standings)) {
-      issues.push(`pending not in contribution order: ${target.cite()}`);
+      arrayPush(issues, `pending not in contribution order: ${target.cite()}`);
     }
     append(issues, completenessProblems(target, feed, context.standings, hidden));
     append(issues, rankProblems(target, hidden));
@@ -379,7 +404,7 @@ function elementOf(per: string | undefined, subject: string | undefined): string
   const depth = parsePointer(per).length + 1;
   const segments = parsePointer(subject);
   if (segments.length < depth) return undefined;
-  const element = formatPointer(segments.slice(0, depth));
+  const element = formatPointer(arraySlice(segments, 0, depth));
   return inCollection(per, element) ? element : undefined;
 }
 
@@ -393,10 +418,13 @@ function pendingHidden(
   fed: readonly string[],
   hidden: (id: string) => boolean,
 ): boolean {
-  const listed = new Set(named);
-  if (listed.size !== named.length || fed.some((id) => !listed.has(id))) return false;
-  const found = new Set(fed);
-  return named.filter((id) => !found.has(id)).every(hidden);
+  const listed = new NativeSet(named);
+  if (setSize(listed) !== named.length || arraySome(fed, (id) => !setHas(listed, id))) return false;
+  const found = new NativeSet(fed);
+  return arrayEvery(
+    arrayFilter(named, (id) => !setHas(found, id)),
+    hidden,
+  );
 }
 
 interface Fed {
@@ -407,18 +435,18 @@ interface Fed {
 
 /** The outputs without `per` and the items, as targets of combination, with their feeds. */
 function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds: Feeds): Fed[] {
-  const itemsOf = new Map<string, ProofItem[]>();
+  const itemsOf = new NativeMap<string, ProofItem[]>();
   for (const item of p.items) {
-    const list = itemsOf.get(item.output);
-    if (list === undefined) itemsOf.set(item.output, [item]);
-    else list.push(item);
+    const list = mapGet(itemsOf, item.output);
+    if (list === undefined) mapSet(itemsOf, item.output, [item]);
+    else arrayPush(list, item);
   }
   const fed: Fed[] = [];
   for (const [name, output] of listed) {
     const declaration = declarationOf(output);
-    const direct = feeds.outputs.get(name);
+    const direct = mapGet(feeds.outputs, name);
     if (direct !== undefined) {
-      fed.push({
+      arrayPush(fed, {
         target: {
           ...output,
           cite: () => citeName(name),
@@ -432,8 +460,8 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
       });
       continue;
     }
-    for (const item of itemsOf.get(name) ?? []) {
-      const feed = feeds.items.get(item);
+    for (const item of mapGet(itemsOf, name) ?? []) {
+      const feed = mapGet(feeds.items, item);
       if (feed === undefined) continue;
       const target: Target = {
         ...item,
@@ -443,7 +471,7 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
         whole: false,
         place: { output: name, item: item.subject },
       };
-      fed.push({ target, feed, pending: item.pending });
+      arrayPush(fed, { target, feed, pending: item.pending });
     }
   }
   return fed;
@@ -458,19 +486,23 @@ function statusProblems(
 ): string[] {
   const { hidden } = context;
   const issues: string[] = [];
-  const strongest = new Map<string, number>();
+  const strongest = new NativeMap<string, number>();
   for (const item of p.items) {
-    if (!feeds.items.has(item)) continue;
-    strongest.set(item.output, Math.max(strongest.get(item.output) ?? 0, rankOf(item.status)));
+    if (!mapHas(feeds.items, item)) continue;
+    mapSet(
+      strongest,
+      item.output,
+      mathMax(mapGet(strongest, item.output) ?? 0, rankOf(item.status)),
+    );
   }
   // A redacted item may be the strongest.
   for (const [name, output] of listed) {
     if (output.per === undefined) continue;
-    const differs = rankOf(output.status) !== (strongest.get(name) ?? 0);
+    const differs = rankOf(output.status) !== (mapGet(strongest, name) ?? 0);
     const message = `per output status differs from its items: ${citeName(name)}`;
     const item = { output: name };
     if (differs && !isLifted(hidden, LIFTS.perOutputItems, { message, output: item })) {
-      issues.push(message);
+      arrayPush(issues, message);
     }
   }
   for (const { target, feed } of targets) {

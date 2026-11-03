@@ -1,6 +1,16 @@
-import { citeName, quoteText } from '../errors.js';
+import { citeName, quoteText, unreadableMessage } from '../errors.js';
 import { isPlainObject, spendValues, tooLargeMessage } from '../values.js';
 import { incrementProblem, MAX_ROUNDING_SCALE, scaleOfIncrement } from './decimal.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayJoin,
+  arraySome,
+  mapSet,
+  numberIsSafeInteger,
+  objectKeys,
+  setHas,
+} from '../intrinsics.js';
 
 /**
  * How a value is rounded to `scale` decimal places, or to a multiple of `increment`:
@@ -40,7 +50,7 @@ const ROUNDING_MODES: readonly RoundingMode[] = [
   'floor',
 ];
 const ROUNDING_TARGETS: readonly NonNullable<OutputRounding['at']>[] = ['output', 'contribution'];
-const ROUNDING_KEYS = new Set(['scale', 'increment', 'mode', 'at']);
+const ROUNDING_KEYS = new NativeSet(['scale', 'increment', 'mode', 'at']);
 /** The output types a rounding applies to. */
 const ROUNDABLE: readonly string[] = ['number', 'decimal'];
 
@@ -70,7 +80,7 @@ export function checkRounding(rounding: unknown, path: string, add: Add): Roundi
     add(path, `${citeName(path)} must be an object { scale or increment, mode, at? }`);
     return undefined;
   }
-  const keys = Object.keys(rounding);
+  const keys = objectKeys(rounding);
   if (!spendValues(keys.length)) {
     add(path, tooLargeMessage(path));
     return undefined;
@@ -80,21 +90,33 @@ export function checkRounding(rounding: unknown, path: string, add: Add): Roundi
     failed = true;
     add(where, message);
   };
-  const members = new Map<string, unknown>(keys.map((key) => [key, rounding[key]]));
+  const members = new NativeMap<string, unknown>();
+  for (const key of keys) {
+    try {
+      mapSet(members, key, rounding[key]);
+    } catch (error) {
+      // A getter that throws is named with its own pointer.
+      add(`${path}.${key}`, unreadableMessage(`${path}.${key}`, error));
+      return undefined;
+    }
+  }
   const copy: Record<string, unknown> = {};
   for (const [key, member] of members) {
     if (member === undefined) continue;
-    if (ROUNDING_KEYS.has(key)) copy[key] = member;
+    if (setHas(ROUNDING_KEYS, key)) copy[key] = member;
     else fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
   }
   const { scale, increment, mode, at } = copy;
   checkStep(scale, increment, path, fail);
   if (mode === undefined) fail(`${path}.mode`, `${citeName(path)}.mode is required`);
   else if (!isOneOf(mode, ROUNDING_MODES)) {
-    fail(`${path}.mode`, `${citeName(path)}.mode must be one of ${ROUNDING_MODES.join(', ')}`);
+    fail(
+      `${path}.mode`,
+      `${citeName(path)}.mode must be one of ${arrayJoin(ROUNDING_MODES, ', ')}`,
+    );
   }
   if (at !== undefined && !isOneOf(at, ROUNDING_TARGETS)) {
-    fail(`${path}.at`, `${citeName(path)}.at must be one of ${ROUNDING_TARGETS.join(', ')}`);
+    fail(`${path}.at`, `${citeName(path)}.at must be one of ${arrayJoin(ROUNDING_TARGETS, ', ')}`);
   }
   if (failed || !isOneOf(mode, ROUNDING_MODES)) return { copy };
   const normal: OutputRounding = { mode };
@@ -167,18 +189,18 @@ export function roundingNotApplicable(path: string, add: Add): void {
 
 /** Internal: true for an output type a rounding (or a unit) applies to. */
 export function isRoundable(type: unknown): boolean {
-  return ROUNDABLE.some((item) => item === type);
+  return arraySome(ROUNDABLE, (item) => item === type);
 }
 
 function isScale(value: unknown): boolean {
   return (
     typeof value === 'number' &&
-    Number.isSafeInteger(value) &&
+    numberIsSafeInteger(value) &&
     value >= 0 &&
     value <= MAX_ROUNDING_SCALE
   );
 }
 
 function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {
-  return allowed.some((item) => item === value);
+  return arraySome(allowed, (item) => item === value);
 }

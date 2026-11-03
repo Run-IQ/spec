@@ -1,6 +1,15 @@
 import { comparePointers } from '../path/pointer.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
 import type { ProofException, ProofView } from './types.js';
+import {
+  NativeMap,
+  arrayForEach,
+  arrayPush,
+  mapGet,
+  mapHas,
+  mapSet,
+  mathSign,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the contribution order of D-5 and D-23 (precedence, priority
 // descending, rule identity, subject), from the rule sets and the priorities a proof records.
@@ -26,18 +35,18 @@ const byText = (a: string, b: string): number => (a < b ? -1 : a > b ? 1 : 0);
 
 /** The standings of the rules of `p` (the first entry of a rule listed twice). */
 export function standingsOf(p: ProofView): Map<string, Standing> {
-  const places = new Map<string, number>();
-  p.ruleSets.forEach((set, i) => {
+  const places = new NativeMap<string, number>();
+  arrayForEach(p.ruleSets, (set, i) => {
     const name = set.kind === 'pack' ? set.id : set.kind === 'local' ? LOCAL_RULE_SET : undefined;
-    if (name !== undefined && !places.has(name)) places.set(name, i);
+    if (name !== undefined && !mapHas(places, name)) mapSet(places, name, i);
   });
-  const standings = new Map<string, Standing>();
+  const standings = new NativeMap<string, Standing>();
   for (const rule of p.rules) {
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
-    if (standings.has(key)) continue;
-    standings.set(key, {
+    if (mapHas(standings, key)) continue;
+    mapSet(standings, key, {
       // A pack not listed is reported by `citationProblems`; it is placed last too.
-      precedence: places.get(rule.ruleSet) ?? p.ruleSets.length,
+      precedence: mapGet(places, rule.ruleSet) ?? p.ruleSets.length,
       priority: rule.priority,
       ruleSet: rule.ruleSet,
       id: rule.id,
@@ -51,7 +60,7 @@ export function standingsOf(p: ProofView): Map<string, Standing> {
 export function byStanding(a: Standing, b: Standing): number {
   return (
     a.precedence - b.precedence ||
-    Math.sign(b.priority - a.priority) ||
+    mathSign(b.priority - a.priority) ||
     byText(a.ruleSet, b.ruleSet) ||
     byText(a.id, b.id) ||
     a.version - b.version
@@ -98,8 +107,8 @@ export function inStandingOrder(
 export function exceptionOrderProblems(p: ProofView, standings: Standings): string[] {
   const issues: string[] = [];
   let previous: { standing: Standing; exception: ProofException } | undefined;
-  p.exceptions.forEach((exception, i) => {
-    const standing = standings.get(ruleKey(exception));
+  arrayForEach(p.exceptions, (exception, i) => {
+    const standing = mapGet(standings, ruleKey(exception));
     if (standing === undefined) {
       previous = undefined;
       return;
@@ -109,7 +118,7 @@ export function exceptionOrderProblems(p: ProofView, standings: Standings): stri
         previous.exception.stratum - exception.stratum ||
         byStanding(previous.standing, standing) ||
         bySubject(previous.exception.subject, exception.subject);
-      if (order > 0) issues.push(`exceptions not sorted at ${i}`);
+      if (order > 0) arrayPush(issues, `exceptions not sorted at ${i}`);
     }
     previous = { standing, exception };
   });

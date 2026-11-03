@@ -3,6 +3,7 @@ import { fixedOffsetCalendar, readReferenceDate } from '../time/civil.js';
 import { dateTimeOf, notADateMessage } from '../values.js';
 import { windowContains } from './window.js';
 import type { RuleWindow } from './window.js';
+import { numberIsNaN } from '../intrinsics.js';
 
 const OFFSETS_ONLY = fixedOffsetCalendar('isEffectiveAt');
 
@@ -26,7 +27,7 @@ export function isEffectiveAt(rule: RuleWindow, at: Date): boolean {
   } catch {
     time = undefined;
   }
-  if (time === undefined || Number.isNaN(time)) {
+  if (time === undefined || numberIsNaN(time)) {
     throw newSpecError('INVALID_DATE', named ?? 'at must be a valid Date');
   }
   // An instant is never 'unknown': only a civil date can fall inside a day cut by a bound.

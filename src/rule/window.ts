@@ -12,6 +12,7 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { typeName } from '../values.js';
 import type { ForEach } from './forEach.js';
+import { arrayIncludes, stringStartsWith } from '../intrinsics.js';
 
 /**
  * The validity window of a rule, as `windowContains` reads it: the bounds in any form
@@ -202,7 +203,8 @@ export function effectiveOnProblem(value: string): string | undefined {
   }
   const [head, ...rest] = segments;
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;
-  if (rest.includes('-')) return "effectiveOn must not hold a '-' segment: '-' is not an index";
+  if (arrayIncludes(rest, '-'))
+    return "effectiveOn must not hold a '-' segment: '-' is not an index";
   if (head === '$dates') {
     if (rest.length === 1 && isReservedName(rest[0] ?? '')) {
       return reservedDatePointerMessage('effectiveOn');
@@ -228,7 +230,7 @@ export function effectiveOnContextProblem(
   pointer: string,
   forEach: ForEach | undefined,
 ): string | undefined {
-  if (pointer.startsWith('/$item/')) {
+  if (stringStartsWith(pointer, '/$item/')) {
     if (forEach === undefined) return 'effectiveOn reads $item without forEach';
     if ('segments' in forEach) {
       return 'effectiveOn reads $item without forEach.path: a segment has no item';
@@ -237,7 +239,7 @@ export function effectiveOnContextProblem(
       ? undefined
       : 'effectiveOn reads $item with forEach.groupBy: a group has no single item';
   }
-  if (pointer.startsWith('/$segment/')) {
+  if (stringStartsWith(pointer, '/$segment/')) {
     return forEach !== undefined && 'segments' in forEach
       ? undefined
       : 'effectiveOn reads $segment without segments';

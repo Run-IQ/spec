@@ -40,6 +40,14 @@ import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
 import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
+import {
+  arrayEvery,
+  arrayForEach,
+  arrayIsArray,
+  numberIsFinite,
+  objectKeys,
+  stringIncludes,
+} from '../intrinsics.js';
 
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
 
@@ -157,7 +165,7 @@ function definitionIssues(
     errors.add('', 'a rule definition must be a plain object');
     return result(errors);
   }
-  if (!spendValues(Object.keys(value).length)) {
+  if (!spendValues(objectKeys(value).length)) {
     errors.add('', tooLargeMessage('rule definition'));
     return result(errors);
   }
@@ -166,7 +174,7 @@ function definitionIssues(
     errors.add(citeName(key), unknownRuleFieldMessage(key));
   }
   checkNonEmptyString(value.id, 'id', errors);
-  if (typeof value.id === 'string' && value.id.includes(':')) {
+  if (typeof value.id === 'string' && stringIncludes(value.id, ':')) {
     errors.add('id', 'id must not contain ":"');
   }
   const ruleSetValue = given(value.ruleSet, 'ruleSet', errors);
@@ -179,7 +187,7 @@ function definitionIssues(
   checkNonEmptyString(value.model, 'model', errors);
   if (value.params === undefined) errors.add('params', 'params is required');
   else checkJson(value.params, 'params', errors);
-  if (typeof value.priority !== 'number' || !Number.isFinite(value.priority)) {
+  if (typeof value.priority !== 'number' || !numberIsFinite(value.priority)) {
     errors.add('priority', 'priority must be a finite number');
   }
 
@@ -265,7 +273,7 @@ function checkExtensions(value: unknown, errors: Issues): void {
   }
   const json = toJsonOrIssue(value, 'extensions', errors);
   if (!isPlainObject(json)) return;
-  for (const key of Object.keys(json)) {
+  for (const key of objectKeys(json)) {
     if (json[key] === null) errors.add(`extensions.${key}`, nullFieldMessage(`extensions.${key}`));
   }
 }
@@ -360,7 +368,7 @@ function checkCondition(value: unknown, errors: Issues): void {
     errors.add('condition', 'condition must be an object { dsl, value }');
     return;
   }
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) {
     errors.add('condition', tooLargeMessage('condition'));
     return;
@@ -381,7 +389,7 @@ function checkDimensions(value: unknown, errors: Issues): void {
     errors.add('dimensions', 'dimensions must be an object of dimension specs');
     return;
   }
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) {
     errors.add('dimensions', tooLargeMessage('dimensions'));
     return;
@@ -407,16 +415,16 @@ function checkDimensions(value: unknown, errors: Issues): void {
 }
 
 function checkTags(value: unknown, errors: Issues): void {
-  const tags = Array.isArray(value) ? readList(value, 'tags') : undefined;
-  if (tags !== undefined && !Array.isArray(tags)) {
+  const tags = arrayIsArray(value) ? readList(value, 'tags') : undefined;
+  if (tags !== undefined && !arrayIsArray(tags)) {
     errors.add(tags.path, tags.message);
     return;
   }
-  if (!tags || !tags.every((t) => typeof t === 'string')) {
+  if (!tags || !arrayEvery(tags, (t) => typeof t === 'string')) {
     errors.add('tags', 'tags must be an array of strings');
     return;
   }
-  tags.forEach((tag, i) => {
+  arrayForEach(tags, (tag, i) => {
     if (tag === '') errors.add(`tags[${i}]`, `tags[${i}] must be a non-empty string`);
     else if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       errors.add(`tags[${i}]`, loneSurrogateMessage(`tags[${i}]`));

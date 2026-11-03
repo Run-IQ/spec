@@ -1,7 +1,7 @@
 import {
   citeName,
   isOwnOptionsError,
-  newOptionsError,
+  withOptionsScope,
   reasonOf,
   unreadableMessage,
 } from '../errors.js';
@@ -11,7 +11,13 @@ import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js'
 import type { CivilCalendar } from '../time/civil.js';
 import { canonicalRulePayload } from '../rule/payload.js';
 import { LOCAL_RULE_SET, qualifyName } from '../rule/ruleSet.js';
-import { isPlainObject, readList, withValueBudget } from '../values.js';
+import {
+  isPlainObject,
+  MAX_VERIFY_OPTIONS_NODES,
+  optionsLimits,
+  readList,
+  withValueBudget,
+} from '../values.js';
 import { misspellingOf } from '../rule/fields.js';
 import { extend } from './collect.js';
 import { carrierRuleFindings } from './carrier-rules.js';
@@ -25,9 +31,34 @@ import { proofView } from './redact.js';
 import type { Redactions } from './redact.js';
 import { treeDigest } from './tree.js';
 import { signatureMatches } from './sign.js';
-import { readTrustedKeys } from './trusted-keys.js';
+import { optionsFailure, readTrustedKeys } from './trusted-keys.js';
 import type { DecisionProof, ProofVerification, ProofView } from './types.js';
 import { readDecisionProof } from './validate.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayFilter,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayJoin,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  functionCall,
+  jsonParse,
+  mapGet,
+  mapHas,
+  mapSet,
+  numberIsSafeInteger,
+  objectFreeze,
+  reflectOwnKeys,
+  setAdd,
+  setHas,
+  setSize,
+  stringToLowerCase,
+  symbolToString,
+} from '../intrinsics.js';
 
 /**
  * An issue, and what it does: `invalid` makes the proof invalid, `warning` keeps it from being
@@ -132,18 +163,22 @@ export function verifyProof(
     maxProofTimeZones?: number;
   },
 ): ProofVerification {
-  try {
-    // The options have a budget of their own (`MAX_VERIFY_OPTIONS_NODES`), so that nothing a
-    // caller passes can use up the budget of the proof: a correct proof is never called too
-    // large for what the options hold.
-    const options = withValueBudget(() => readOptions(o), MAX_VERIFY_OPTIONS_NODES);
-    return withValueBudget(() => verify(p, options));
-  } catch (error) {
-    // A mistake of the caller in the options is never a verdict on the proof.
-    if (isOwnOptionsError(error)) throw error;
-    // A hostile value (a Proxy, a throwing getter) can still throw while being read.
-    return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
-  }
+  // One scope per call: the errors this call raises about its options are its own, and no
+  // other error (one built by a caller, or raised by an earlier call) is rethrown as such.
+  return withOptionsScope(() => {
+    try {
+      // The options have a budget of their own (`MAX_VERIFY_OPTIONS_NODES`), so that nothing a
+      // caller passes can use up the budget of the proof: a correct proof is never called too
+      // large for what the options hold.
+      const options = withValueBudget(() => readOptions(o), optionsLimits.nodes);
+      return withValueBudget(() => verify(p, options));
+    } catch (error) {
+      // A mistake of the caller in the options is never a verdict on the proof.
+      if (isOwnOptionsError(error)) throw error;
+      // A hostile value (a Proxy, a throwing getter) can still throw while being read.
+      return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
+    }
+  });
 }
 
 function verify(p: unknown, options: Options): ProofVerification {
@@ -151,52 +186,54 @@ function verify(p: unknown, options: Options): ProofVerification {
   if (!proof) return { status: 'invalid', issues: boundMessages(errors) };
 
   const findings: Finding[] = [];
-  if (treeDigest(proof) !== proof.digest) findings.push(invalidFinding('digest mismatch'));
+  if (treeDigest(proof) !== proof.digest) arrayPush(findings, invalidFinding('digest mismatch'));
   const { view, redactions } = proofView(proof);
-  const zones = new Set<string>([proof.timeZone]);
+  const zones = new NativeSet<string>([proof.timeZone]);
   for (const set of proof.ruleSets)
-    if (set.kind !== 'referential' && set.timeZone) zones.add(set.timeZone);
-  if (zones.size > options.maxProofTimeZones) {
-    findings.push(
+    if (set.kind !== 'referential' && set.timeZone) setAdd(zones, set.timeZone);
+  if (setSize(zones) > options.maxProofTimeZones) {
+    arrayPush(
+      findings,
       invalidFinding(
-        `proof names ${zones.size} time zones, more than maxProofTimeZones (${options.maxProofTimeZones})`,
+        `proof names ${setSize(zones)} time zones, more than maxProofTimeZones (${options.maxProofTimeZones})`,
       ),
     );
   }
   const context = contextOf(view, redactions.hidden);
   for (const message of inconsistencies(view, context, redactions.positions)) {
-    findings.push(invalidFinding(message));
+    arrayPush(findings, invalidFinding(message));
   }
   if (redactions.count > 0) {
-    findings.push({
+    arrayPush(findings, {
       message: `redacted entries: ${redactions.count}`,
       level: 'notice',
       fixed: true,
     });
     if (!proof.inputSalted) {
-      findings.push({ message: 'redacted entries in an unsalted proof', level: 'warning' });
+      arrayPush(findings, { message: 'redacted entries in an unsalted proof', level: 'warning' });
     }
   }
   const unchecked: string[] = [];
   extend(findings, optionFindings(view, proof, options, context, redactions, unchecked));
   // Every problem lifted, when the redacted entries cannot explain them all with the rules given.
-  for (const message of unexplained(redactions.hidden)) findings.push(invalidFinding(message));
+  for (const message of unexplained(redactions.hidden))
+    arrayPush(findings, invalidFinding(message));
   const lifted = liftedChecks(redactions.hidden);
   for (const { check, redacted } of lifted) {
-    const message = `check lifted: ${check} (${redacted.join(', ')} redacted)`;
-    findings.push({ message, level: 'notice', fixed: true });
+    const message = `check lifted: ${check} (${arrayJoin(redacted, ', ')} redacted)`;
+    arrayPush(findings, { message, level: 'notice', fixed: true });
   }
 
   // What was not checked is said under a verdict that claims something, never under `invalid`,
   // which stops at its problem.
-  const refused = findings.some((finding) => finding.level === 'invalid');
+  const refused = arraySome(findings, (finding) => finding.level === 'invalid');
   if (!refused) {
-    unchecked.push(NOT_REPLAYED);
+    arrayPush(unchecked, NOT_REPLAYED);
     // Fixed in number (a handful of kinds, never one per rule), so never cut.
-    for (const message of unchecked) findings.push({ message, level: 'notice' });
+    for (const message of unchecked) arrayPush(findings, { message, level: 'notice' });
   }
   const issues = boundWithFixed(findings);
-  const trusted = !findings.some((finding) => finding.level === 'warning');
+  const trusted = !arraySome(findings, (finding) => finding.level === 'warning');
   if (refused) {
     return redactions.count > 0
       ? { status: 'invalid', issues, redacted: redactions.count, lifted }
@@ -226,11 +263,7 @@ interface Options {
   maxProofTimeZones: number;
 }
 
-/**
- * The most values the options of one call may hold (the rules given count with their `params`):
- * past it, the call throws `VerifyOptionsError`. The proof has its own budget.
- */
-export const MAX_VERIFY_OPTIONS_NODES = 10_000_000;
+export { MAX_VERIFY_OPTIONS_NODES };
 
 /** The distinct time zones a proof may name (`maxProofTimeZones`, by default). */
 export const MAX_PROOF_TIME_ZONES = 64;
@@ -244,11 +277,9 @@ export const MAX_PROOF_TIME_ZONES = 64;
  * lists a rule twice. What the rules say about the proof stays a verdict.
  */
 function readOptions(o: unknown): Options {
-  const fail = (option: string, message: string): never => {
-    throw newOptionsError(option, message);
-  };
+  const fail = optionsFailure('options');
   const none: Options = {
-    keys: new Map(),
+    keys: new NativeMap(),
     rules: undefined,
     calendar: undefined,
     maxProofTimeZones: MAX_PROOF_TIME_ZONES,
@@ -267,9 +298,9 @@ function readOptions(o: unknown): Options {
     );
   }
   try {
-    for (const key of Reflect.ownKeys(record)) {
-      if (typeof key === 'string' && OPTION_KEYS.includes(key)) continue;
-      const name = typeof key === 'symbol' ? key.toString() : key;
+    for (const key of reflectOwnKeys(record)) {
+      if (typeof key === 'string' && arrayIncludes(OPTION_KEYS, key)) continue;
+      const name = typeof key === 'symbol' ? symbolToString(key) : key;
       const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
       const hint = wanted === undefined ? '' : ` (did you mean ${wanted}?)`;
       fail(`options.${citeName(name)}`, `options.${citeName(name)} is not an option${hint}`);
@@ -286,7 +317,7 @@ function readOptions(o: unknown): Options {
     }
   };
   const max = read('maxProofTimeZones');
-  if (max !== undefined && !(typeof max === 'number' && Number.isSafeInteger(max) && max > 0)) {
+  if (max !== undefined && !(typeof max === 'number' && numberIsSafeInteger(max) && max > 0)) {
     fail('options.maxProofTimeZones', 'options.maxProofTimeZones must be a positive integer');
   }
   const calendar = readCalendar(read('calendar'), fail);
@@ -305,23 +336,23 @@ function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
   if (rules === undefined) return undefined;
   let items: unknown;
   try {
-    if (!Array.isArray(rules)) return fail('options.rules', 'options.rules must be an array');
+    if (!arrayIsArray(rules)) return fail('options.rules', 'options.rules must be an array');
     items = readList(rules, 'options.rules');
   } catch (error) {
     if (isOwnOptionsError(error)) throw error;
     return fail('options.rules', unreadableMessage('options.rules', error));
   }
-  if (!Array.isArray(items)) {
+  if (!arrayIsArray(items)) {
     return fail('options.rules', (items as { message: string }).message);
   }
   const out: GivenRules = {
-    given: new Map(),
-    priorities: new Map(),
-    carriers: new Set(),
-    definitions: new Map(),
-    identities: new Map(),
+    given: new NativeMap(),
+    priorities: new NativeMap(),
+    carriers: new NativeSet(),
+    definitions: new NativeMap(),
+    identities: new NativeMap(),
   };
-  items.forEach((rule, i) => {
+  arrayForEach(items, (rule, i) => {
     const at = `options.rules[${i}]`;
     let key: string;
     let checksum: string;
@@ -332,26 +363,26 @@ function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
       // rule exactly when `computeRuleChecksum` does.
       const payload = canonicalRulePayload(rule as RuleDefinitionInput);
       // The payload is the canonical JSON of a normalized definition.
-      definition = JSON.parse(payload) as RuleDefinition;
+      definition = jsonParse(payload) as RuleDefinition;
       id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
       key = `${id}@${definition.version}`;
       checksum = sha256Hex(payload);
     } catch (error) {
       return fail(at, `${at} is not a valid rule: ${reasonOf(error)}`);
     }
-    if (out.given.has(key)) return fail(at, `${at} repeats the rule ${citeName(key)}`);
-    out.given.set(key, checksum);
-    out.priorities.set(key, definition.priority);
-    if ((definition.exceptions ?? []).length > 0) out.carriers.add(key);
-    out.definitions.set(key, definition);
-    out.identities.set(key, { id, version: definition.version });
+    if (mapHas(out.given, key)) return fail(at, `${at} repeats the rule ${citeName(key)}`);
+    mapSet(out.given, key, checksum);
+    mapSet(out.priorities, key, definition.priority);
+    if ((definition.exceptions ?? []).length > 0) setAdd(out.carriers, key);
+    mapSet(out.definitions, key, definition);
+    mapSet(out.identities, key, { id, version: definition.version });
   });
   return out;
 }
 
 /** The options `verifyProof` reads: any other key is a mistake, never ignored. */
 const OPTION_KEYS: readonly string[] = ['trustedKeys', 'rules', 'calendar', 'maxProofTimeZones'];
-const OPTION_NAMES = OPTION_KEYS.map((name) => [name, name.toLowerCase()] as const);
+const OPTION_NAMES = arrayMap(OPTION_KEYS, (name) => [name, stringToLowerCase(name)] as const);
 
 /**
  * The findings of the options against the proof: the signature against `trustedKeys`, the rules
@@ -368,7 +399,7 @@ function optionFindings(
   const findings: Finding[] = [];
   extend(findings, signatureFindings(proof, options.keys));
   if (options.rules === undefined) {
-    unchecked.push(RULES_NOT_CHECKED);
+    arrayPush(unchecked, RULES_NOT_CHECKED);
     return findings;
   }
   extend(
@@ -382,7 +413,7 @@ function signatureFindings(p: DecisionProof, keys: Map<string, Uint8Array>): Fin
   const warning = (message: string): Finding[] => [{ message, level: 'warning' }];
   if (!p.signature) return warning('unsigned');
   const { keyId, value } = p.signature;
-  const publicKey = keys.get(keyId);
+  const publicKey = mapGet(keys, keyId);
   if (!publicKey) return warning('untrusted key');
   if (!signatureMatches(p.digest, value, publicKey)) {
     return [invalidFinding('signature invalid')];
@@ -400,34 +431,34 @@ function ruleFindings(
 ): Finding[] {
   const findings: Finding[] = [];
   const invalid = (message: string): void => {
-    findings.push(invalidFinding(message));
+    arrayPush(findings, invalidFinding(message));
   };
   const { given: checksums, priorities, carriers, definitions, identities } = given;
 
-  const cited = new Set<string>();
-  const matched = new Map<string, RuleDefinition>();
+  const cited = new NativeSet<string>();
+  const matched = new NativeMap<string, RuleDefinition>();
   for (const ref of p.rules) {
     const key = `${qualifyName(ref.ruleSet, ref.id)}@${ref.version}`;
-    cited.add(key);
-    const checksum = checksums.get(key);
-    const definition = definitions.get(key);
-    if (checksum === ref.checksum && definition !== undefined) matched.set(key, definition);
+    setAdd(cited, key);
+    const checksum = mapGet(checksums, key);
+    const definition = mapGet(definitions, key);
+    if (checksum === ref.checksum && definition !== undefined) mapSet(matched, key, definition);
     if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);
     else if (checksum !== ref.checksum) invalid(`rule checksum mismatch: ${citeName(key)}`);
-    else if (priorities.get(key) !== ref.priority) {
+    else if (mapGet(priorities, key) !== ref.priority) {
       invalid(`rule priority mismatch: ${citeName(key)}`);
     }
   }
   // A rule given that the proof does not show may be one of its redacted rules: those are
   // compared by number (D-16).
-  const hiddenRules = redactions.bySection.get('rules') ?? 0;
+  const hiddenRules = mapGet(redactions.bySection, 'rules') ?? 0;
   // The keys of `given`, with their rules.
-  const uncited = [...identities].filter(([key]) => !cited.has(key));
+  const uncited = arrayFilter([...identities], ([key]) => !setHas(cited, key));
   if (hiddenRules === 0) {
     for (const [key] of uncited) invalid(`unexpected rule: ${citeName(key)}`);
   } else {
     const plural = hiddenRules === 1 ? 'rule' : 'rules';
-    findings.push({
+    arrayPush(findings, {
       message: `rules check incomplete: ${hiddenRules} redacted ${plural}`,
       level: 'warning',
     });
@@ -450,11 +481,11 @@ function ruleFindings(
   // only their definitions say which rules those are.
   for (const entry of p.pending) {
     const key = `${entry.ruleId}@${entry.version}`;
-    if (!checksums.has(key)) continue;
+    if (!mapHas(checksums, key)) continue;
     const at = citeName(instanceKey(entry));
-    if (carriers.has(key) && entry.fired === undefined) {
+    if (setHas(carriers, key) && entry.fired === undefined) {
       invalid(`fired missing: ${at}`);
-    } else if (!carriers.has(key) && entry.fired !== undefined) {
+    } else if (!setHas(carriers, key) && entry.fired !== undefined) {
       invalid(`fired on a rule without exceptions: ${at}`);
     }
   }
@@ -462,15 +493,15 @@ function ruleFindings(
   definitionFindings(
     p,
     matched,
-    { invalid, unchecked: (message) => unchecked.push(message) },
+    { invalid, unchecked: (message) => arrayPush(unchecked, message) },
     calendar,
   );
   // A redacted entry has no rule to compare with its definition: say so, never skip it.
   for (const section of ['applied', 'skipped', 'pending'] as const) {
-    const hidden = redactions.bySection.get(section) ?? 0;
+    const hidden = mapGet(redactions.bySection, section) ?? 0;
     if (hidden > 0) {
       const entries = hidden === 1 ? 'entry' : 'entries';
-      unchecked.push(`${hidden} ${section} ${entries} redacted: not checked against rules`);
+      arrayPush(unchecked, `${hidden} ${section} ${entries} redacted: not checked against rules`);
     }
   }
   return findings;
@@ -498,8 +529,8 @@ function readCalendar(value: unknown, fail: Fail): CivilCalendar | undefined {
   }
   const civil = toCivilDate as CivilCalendar['toCivilDate'];
   const start = startOfDay as CivilCalendar['startOfDay'];
-  return Object.freeze({
-    toCivilDate: (instant: string, zone: string) => civil.call(value, instant, zone),
-    startOfDay: (day: string, zone: string) => start.call(value, day, zone),
+  return objectFreeze({
+    toCivilDate: (instant: string, zone: string) => functionCall(civil, value, instant, zone),
+    startOfDay: (day: string, zone: string) => functionCall(start, value, day, zone),
   });
 }
