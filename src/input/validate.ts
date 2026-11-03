@@ -15,6 +15,7 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  notADateMessage,
   MAX_INPUT_LEAF_TEXT,
 } from '../values.js';
 import { assertionKeyProblem, DATE_FORMS, readAssertion } from './assertions.js';
@@ -36,6 +37,17 @@ import {
 } from './read.js';
 import type { LeafCount, Reader } from './read.js';
 import type { FactAssertion, ProofInput } from './types.js';
+import {
+  arrayIsArray,
+  arrayPush,
+  mapGet,
+  mapHas,
+  numberIsSafeInteger,
+  objectDefineProperty,
+  objectEntries,
+  objectKeys,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 const INPUT_KEYS: readonly string[] = ['data', 'meta'];
 const META_KEYS: readonly string[] = [
@@ -169,7 +181,7 @@ function check(
   );
   // The leaves are those the input tree hashes (D-15), counted as the input was read.
   if (issues.length === 0 && leafText > MAX_INPUT_LEAF_TEXT) {
-    issues.push({ path: '', message: POINTER_TEXT_MESSAGE });
+    arrayPush(issues, { path: '', message: POINTER_TEXT_MESSAGE });
   }
   return { issues, reads, snapshot: issues.length === 0 ? snapshot : undefined, leafText };
 }
@@ -195,21 +207,23 @@ function readInput(value: unknown, reader: Reader): ProofInput | undefined {
   if (fields === undefined) return undefined;
   requireFields(fields, '', INPUT_KEYS, add);
   let data: JsonValue | undefined;
-  if (fields.values.has('data')) {
-    const value = fields.values.get('data');
+  if (mapHas(fields.values, 'data')) {
+    const value = mapGet(fields.values, 'data');
     if (expectPlainObject(value, '/data', PLAIN_OBJECT, add)) {
       const walked = walkJson(value, '/data', reader, true);
       countLeaves(reader, '/data', walked);
       data = walked.copy;
     }
   }
-  const meta = fields.values.has('meta') ? readMeta(fields.values.get('meta'), reader) : undefined;
+  const meta = mapHas(fields.values, 'meta')
+    ? readMeta(mapGet(fields.values, 'meta'), reader)
+    : undefined;
   if (reader.copies === undefined || !isJsonObject(data) || meta === undefined) return undefined;
   return { data, meta };
 }
 
 function isJsonObject(value: JsonValue | undefined): value is { [k: string]: JsonValue } {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !arrayIsArray(value);
 }
 
 function readMeta(value: unknown, reader: Reader): ProofInput['meta'] | undefined {
@@ -219,7 +233,7 @@ function readMeta(value: unknown, reader: Reader): ProofInput['meta'] | undefine
   if (fields === undefined) return undefined;
   requireFields(fields, '/meta', META_KEYS, add);
   const field = (key: string): { value: unknown } | undefined =>
-    fields.values.has(key) ? { value: fields.values.get(key) } : undefined;
+    mapHas(fields.values, key) ? { value: mapGet(fields.values, key) } : undefined;
 
   const tenantId = field('tenantId');
   if (tenantId !== undefined) checkText(tenantId.value, '/meta/tenantId', add);
@@ -297,7 +311,7 @@ function eachMember<T>(
     // Plain assignment would turn a `__proto__` key into a prototype change.
     if (member !== undefined && reader.copies !== undefined) {
       copyWork.values += 1;
-      Object.defineProperty(copy, key, {
+      objectDefineProperty(copy, key, {
         value: member,
         enumerable: true,
         writable: true,
@@ -316,9 +330,15 @@ function readDates(
   const path = '/meta/dates';
   return eachMember(value, path, reader, (key, at, date) => {
     if (isUnnamable(key)) reader.add(path, unnamableNameMessage(path, 'date', key));
-    else if (key.startsWith('$')) reader.add(at, reservedDateNameMessage(at));
+    else if (stringStartsWith(key, '$')) reader.add(at, reservedDateNameMessage(at));
     else if (!isCivilDate(date) && !isInstant(date)) {
-      reader.add(at, `${citeName(at)} must be ${DATE_FORMS}`);
+      const notDate = notADateMessage(date);
+      reader.add(
+        at,
+        notDate === undefined
+          ? `${citeName(at)} must be ${DATE_FORMS}`
+          : `${citeName(at)} must be ${DATE_FORMS}; got ${notDate}`,
+      );
     } else {
       countText(reader, at.length);
       return date;
@@ -342,14 +362,14 @@ function eachElement(
   const { add } = reader;
   let length: unknown;
   try {
-    if (!Array.isArray(value)) return 'not a list';
+    if (!arrayIsArray(value)) return 'not a list';
     length = value.length;
   } catch (error) {
     add(path, unreadableMessage(path, error));
     return 'failed';
   }
   // Only a Proxy can announce such a length.
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+  if (typeof length !== 'number' || !numberIsSafeInteger(length) || length < 0) {
     return 'not a list';
   }
   announce(reader, length, path);
@@ -388,7 +408,7 @@ class SortedTexts {
     this.last = item;
     if (this.copy !== undefined) {
       copyWork.values += 1;
-      this.copy.push(item);
+      arrayPush(this.copy, item);
     }
     return true;
   }
@@ -421,7 +441,7 @@ function readDimensions(
       reader.add(path, unnamableNameMessage(path, 'dimension', key));
       return undefined;
     }
-    if (key.startsWith('$')) {
+    if (stringStartsWith(key, '$')) {
       reader.add(at, reservedDimensionNameMessage(at));
       return undefined;
     }
@@ -484,11 +504,11 @@ function readAssertions(
     const read = readAssertion(assertion, at, reader);
     // Its fields are its leaves (D-15); `source` holds the leaves of its own fields.
     if (read !== undefined) {
-      for (const [field, member] of Object.entries(read)) {
+      for (const [field, member] of objectEntries(read)) {
         const fieldAt = `${at}/${field}`;
         if (typeof member !== 'object') countText(reader, fieldAt.length);
         else
-          for (const name of Object.keys(member))
+          for (const name of objectKeys(member))
             countText(reader, fieldAt.length + 1 + name.length);
       }
     }

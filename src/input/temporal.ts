@@ -14,6 +14,14 @@ import {
   walkJson,
 } from './read.js';
 import type { Reader } from './read.js';
+import {
+  arrayIsArray,
+  arrayPush,
+  mapGet,
+  mapHas,
+  numberIsSafeInteger,
+  setHas,
+} from '../intrinsics.js';
 
 const PERIOD_KEYS: readonly string[] = ['from', 'until', 'value'];
 const SHAPE = 'a period { from, until, value }';
@@ -63,7 +71,7 @@ function readFact(value: unknown, path: string, reader: Reader): void {
   let list: readonly unknown[] | undefined;
   let length: unknown;
   try {
-    if (Array.isArray(value)) {
+    if (arrayIsArray(value)) {
       list = value;
       length = value.length;
     }
@@ -75,7 +83,7 @@ function readFact(value: unknown, path: string, reader: Reader): void {
   if (
     list === undefined ||
     typeof length !== 'number' ||
-    !Number.isSafeInteger(length) ||
+    !numberIsSafeInteger(length) ||
     length < 0
   ) {
     add(path, `${citeName(path)} must be a list of periods { from, until, value }`);
@@ -92,7 +100,7 @@ function readFact(value: unknown, path: string, reader: Reader): void {
     const read = readElement(list, index, path, add);
     if (read === 'failed') continue;
     const span = readPeriod(read.value, at, reader);
-    if (span !== undefined) spans.push({ index, ...span });
+    if (span !== undefined) arrayPush(spans, { index, ...span });
   }
   checkOrder(spans, path, reader);
 }
@@ -106,25 +114,25 @@ function readPeriod(value: unknown, path: string, reader: Reader): Omit<Span, 'i
   const { values } = fields;
   requireFields(fields, path, ['from'], add);
   const untilPath = childPointer(path, 'until');
-  if (!values.has('until') && !fields.failed.has('until')) {
+  if (!mapHas(values, 'until') && !setHas(fields.failed, 'until')) {
     add(untilPath, `${citeName(untilPath)} is required: null has no end`);
   }
   requireFields(fields, path, ['value'], add);
 
-  const from = values.get('from');
+  const from = mapGet(values, 'from');
   const fromPath = childPointer(path, 'from');
-  if (values.has('from') && !isCivilDate(from)) {
+  if (mapHas(values, 'from') && !isCivilDate(from)) {
     add(fromPath, `${citeName(fromPath)} must be a civil date YYYY-MM-DD`);
   }
-  const until = values.get('until');
+  const until = mapGet(values, 'until');
   const untilValid = until === null || isCivilDate(until);
-  if (values.has('until') && !untilValid) {
+  if (mapHas(values, 'until') && !untilValid) {
     add(untilPath, `${citeName(untilPath)} must be a civil date YYYY-MM-DD or null`);
   }
-  const encoding = values.has('value')
-    ? walkJson(values.get('value'), childPointer(path, 'value'), reader).encoding
+  const encoding = mapHas(values, 'value')
+    ? walkJson(mapGet(values, 'value'), childPointer(path, 'value'), reader).encoding
     : undefined;
-  if (!isCivilDate(from) || !values.has('until') || !untilValid) return undefined;
+  if (!isCivilDate(from) || !mapHas(values, 'until') || !untilValid) return undefined;
   const end = isCivilDate(until) ? until : null;
   if (end !== null && end <= from) {
     add(untilPath, `${citeName(untilPath)} must be after from ${from}: the period is empty`);

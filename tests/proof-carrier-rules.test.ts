@@ -6,6 +6,7 @@ import type { Entry } from './proof-builders.js';
 import { ruleA } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { withoutDefinitionChecks } from './notices.js';
 
 // With `rules`, the definitions say which rules a carrier targets (`matchesSelector`, as core
 // resolves targets statically) and which exceptions it carries.
@@ -13,6 +14,9 @@ import type { Trace } from './proof-trace.js';
 /** A rule `id` of `ruleA`'s model and priority, with `extra`. */
 const rule = (id: string, extra: Partial<RuleDefinitionInput> = {}): RuleDefinitionInput => ({
   ...ruleA,
+  // What the traces of `traceProof` say of every rule: its model, and a condition to be false.
+  model: 'M',
+  condition: { dsl: 'jsonlogic', value: true },
   id,
   ...extra,
 });
@@ -29,7 +33,9 @@ function issues(trace: Trace, definitions: RuleDefinitionInput[]): string[] {
     ...ref,
     checksum: computeRuleChecksum(byId.get(String(ref.id))!),
   }));
-  return verifyProof(handSealed({ ...content, rules: listed }), { rules: definitions }).issues;
+  return withoutDefinitionChecks(
+    verifyProof(handSealed({ ...content, rules: listed }), { rules: definitions }).issues,
+  );
 }
 
 const root = { ruleId: 'X', reason: 'UNDETERMINED', detail: 'missing /a', fired: false };
@@ -128,9 +134,9 @@ describe('given the rules, the targets of a carrier that did not fire wait for i
       { ids: ['T'] },
       { tags: ['b', 'vat'] },
       { outputs: ['value'] },
-      { models: [ruleA.model] },
+      { models: ['M'] },
       { dimensions: { country: 'TG' } },
-      { ids: ['U', 'T'], tags: ['vat'], models: [ruleA.model] },
+      { ids: ['U', 'T'], tags: ['vat'], models: ['M'] },
     ];
     for (const targets of selecting) {
       const carrier = rule('X', { exceptions: [{ kind: 'inhibit', targets }] });
@@ -317,7 +323,11 @@ describe('given the rules, an excluded carrier that fired records exactly its ex
 
   it('one excluded after its exceptions ran fired them all', () => {
     for (const reason of ['INVALID_PARAMS', 'DOMINATED', 'LATER_REASON']) {
-      expect(issues(excluded(reason, 1), definitions)).toEqual(['unsigned']);
+      // A reason this check does not know is named: it was not checked against the rule.
+      expect(issues(excluded(reason, 1), definitions)).toEqual([
+        'unsigned',
+        `reason not checked: ${reason}`,
+      ]);
       expect(issues(excluded(reason, 0), definitions)).toEqual(refused);
       expect(issues(excluded(reason, 2), definitions)).toEqual(refused);
     }

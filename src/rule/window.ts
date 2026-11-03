@@ -1,4 +1,5 @@
 import { isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
+import { nullFieldMessage } from './fields.js';
 import { parsePointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import {
@@ -11,6 +12,7 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { typeName } from '../values.js';
 import type { ForEach } from './forEach.js';
+import { arrayIncludes, stringStartsWith } from '../intrinsics.js';
 
 /**
  * The validity window of a rule, as `windowContains` reads it: the bounds in any form
@@ -20,7 +22,7 @@ import type { ForEach } from './forEach.js';
 export interface RuleWindow {
   readonly effectiveFrom: Date | string;
   readonly effectiveUntil?: Date | string | null | undefined;
-  readonly timeZone?: string | null | undefined;
+  readonly timeZone?: string | undefined;
 }
 
 /** A window read and checked: bounds as civil dates or canonical instants, zone normalized. */
@@ -100,7 +102,8 @@ function position(
 
 /**
  * Internal: the window of the fields read from a rule, checked, its zone being the rule's
- * (`null` and absence alike) or `defaultZone`. Messages start with `prefix`.
+ * (absent, `undefined`; a `null` is refused: `timeZone is null: omit the field instead`) or
+ * `defaultZone`. Messages start with `prefix`.
  */
 export function resolveWindow(
   fields: { readonly from: unknown; readonly until: unknown; readonly timeZone: unknown },
@@ -108,8 +111,11 @@ export function resolveWindow(
   prefix: string,
 ): ResolvedWindow {
   return prefixed(prefix, () => {
+    if (fields.timeZone === null) throw newSpecError('INVALID_RULE', nullFieldMessage('timeZone'));
     const zone =
-      fields.timeZone == null ? defaultZone : requireTimeZone(fields.timeZone, 'INVALID_RULE');
+      fields.timeZone === undefined
+        ? defaultZone
+        : requireTimeZone(fields.timeZone, 'INVALID_RULE');
     return { ...readRuleWindow(fields.from, fields.until), zone };
   });
 }
@@ -197,7 +203,8 @@ export function effectiveOnProblem(value: string): string | undefined {
   }
   const [head, ...rest] = segments;
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;
-  if (rest.includes('-')) return "effectiveOn must not hold a '-' segment: '-' is not an index";
+  if (arrayIncludes(rest, '-'))
+    return "effectiveOn must not hold a '-' segment: '-' is not an index";
   if (head === '$dates') {
     if (rest.length === 1 && isReservedName(rest[0] ?? '')) {
       return reservedDatePointerMessage('effectiveOn');
@@ -223,7 +230,7 @@ export function effectiveOnContextProblem(
   pointer: string,
   forEach: ForEach | undefined,
 ): string | undefined {
-  if (pointer.startsWith('/$item/')) {
+  if (stringStartsWith(pointer, '/$item/')) {
     if (forEach === undefined) return 'effectiveOn reads $item without forEach';
     if ('segments' in forEach) {
       return 'effectiveOn reads $item without forEach.path: a segment has no item';
@@ -232,7 +239,7 @@ export function effectiveOnContextProblem(
       ? undefined
       : 'effectiveOn reads $item with forEach.groupBy: a group has no single item';
   }
-  if (pointer.startsWith('/$segment/')) {
+  if (stringStartsWith(pointer, '/$segment/')) {
     return forEach !== undefined && 'segments' in forEach
       ? undefined
       : 'effectiveOn reads $segment without segments';

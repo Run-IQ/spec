@@ -13,6 +13,7 @@ import type { OutputPart } from './proof-builders.js';
 import { isOnStep, numberToDecimal, stepWorkDone } from '../src/decision/decimal.js';
 import { unsalted } from './proof-cases.js';
 import { handSealed, withCounts } from './helpers.js';
+import { withoutUnchecked } from './notices.js';
 
 const LONE = String.fromCharCode(0xd800);
 
@@ -22,7 +23,9 @@ const proofOf = (output: OutputPart, contributions: JsonValue[] = []): ProofView
 
 /** What `verifyProof` reports on `p` sealed by hand, past the digest and the signature. */
 function inconsistencies(p: ProofView): string[] {
-  return verifyProof(handSealed(p)).issues.filter((issue) => issue !== 'unsigned');
+  return withoutUnchecked(verifyProof(handSealed(p)).issues).filter(
+    (issue) => issue !== 'unsigned',
+  );
 }
 
 describe('an increment has at most 20 digits before the point, as after it', () => {

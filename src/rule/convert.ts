@@ -1,25 +1,31 @@
-import { isCanonicalText, canonicalSha256Hex } from '../canonical.js';
+import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
+import { NativeDate, NativeString, jsonParse } from '../intrinsics.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
-import { normalizeRuleDefinition } from './normalize.js';
-import { canonicalRulePayload } from './payload.js';
+import { normalizeRuleDefinition, normalizeStoredRuleDefinition } from './normalize.js';
 import type { StoredRuleRecord } from './stored.js';
 
 /**
  * Payload and checksum to store for a rule: `payload` is the canonical JSON of the normalized
  * definition, `checksum` its sha256 hex (equal to `computeRuleChecksum(input)`).
- * A `checksum` in `input` is ignored. Throws `SpecError` like `normalizeRuleDefinition`.
+ * A `checksum` in `input` is ignored. Throws `SpecError` like `normalizeRuleDefinition`: it
+ * reads a rule as an author writes it (`effectiveUntil: null` is refused: omit the field).
  *
  * It re-seals: whatever the input held, the result carries a fresh checksum. A caller that
  * loaded a rule, edits it and re-seals it should first check the loaded rule with
  * `verifyRuleChecksum`, or tampering before the edit goes unnoticed.
  */
 export function toStoredPayload(input: RuleDefinitionInput): { payload: string; checksum: string } {
-  const payload = canonicalRulePayload(input);
+  // What an author writes: the authored path, so a `null` that would widen the rule is refused
+  // here, before it is stored. Read back, the payload goes through `fromStoredRecord`.
+  const payload = withValueBudget(() => {
+    const definition = normalizeRuleDefinition(input);
+    return ownCopy(() => canonicalize(definition));
+  });
   return { payload, checksum: sha256Hex(payload) };
 }
 
@@ -35,7 +41,7 @@ export function toStoredPayload(input: RuleDefinitionInput): { payload: string; 
  */
 export function toExecutableRule(input: RuleDefinitionInput): ExecutableRule {
   return withValueBudget(() => {
-    const definition = normalizeRuleDefinition(input);
+    const definition = normalizeStoredRuleDefinition(input);
     // The normalized copy's values were counted when they were read from `input`.
     return executableOf(
       definition,
@@ -76,7 +82,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let parsed: unknown;
   try {
-    parsed = JSON.parse(payload as string);
+    parsed = jsonParse(payload as string);
   } catch (error) {
     fail(`payload is not valid JSON (${reasonOf(error)})`);
   }
@@ -90,7 +96,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let definition: RuleDefinition;
   try {
-    definition = normalizeRuleDefinition(parsed as RuleDefinitionInput);
+    definition = normalizeStoredRuleDefinition(parsed as unknown as RuleDefinitionInput);
   } catch (error) {
     // The error of `normalizeRuleDefinition` is its own: its message, already cited, as it is.
     return fail(`invalid definition: ${reasonOf(error)}`);
@@ -103,7 +109,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
   const computed = sha256Hex(payload as string);
   if (computed !== checksum) {
     fail(
-      `checksum mismatch: the record holds ${citeName(String(checksum))}, the payload gives ` +
+      `checksum mismatch: the record holds ${citeName(NativeString(checksum))}, the payload gives ` +
         `${computed}`,
     );
   }
@@ -116,7 +122,7 @@ function executableOf(definition: RuleDefinition, checksum: string): ExecutableR
   rule.effectiveUntil =
     definition.effectiveUntil === null ? null : boundOf(definition.effectiveUntil);
   rule.checksum = checksum;
-  return rule as ExecutableRule;
+  return rule as unknown as ExecutableRule;
 }
 
 /**
@@ -142,10 +148,10 @@ function nameOf(value: unknown): string {
     ? 'an object'
     : typeof value === 'function'
       ? 'a function'
-      : String(value);
+      : NativeString(value);
 }
 
 /** A civil date stays a string; a canonical instant becomes a `Date`. */
 function boundOf(bound: string): string | Date {
-  return isCivilDate(bound) ? bound : new Date(bound);
+  return isCivilDate(bound) ? bound : new NativeDate(bound);
 }

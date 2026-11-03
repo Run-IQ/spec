@@ -88,7 +88,11 @@ describe('rules', () => {
     ['params', { params: { a: undefined } }, 'params.a'],
     ['a params item', { params: { list: [1, undefined] } }, 'params.list[1]'],
     ['condition.value', { condition: { dsl: 'd', value: { a: undefined } } }, 'condition.value.a'],
-    ['an extension', { extra: { deep: [{ a: undefined }] } }, 'extra.deep[0].a'],
+    [
+      'an extension',
+      { extensions: { extra: { deep: [{ a: undefined }] } } },
+      'extensions.extra.deep[0].a',
+    ],
     [
       'the params of a substitute',
       { exceptions: [{ kind: 'substitute', targets: { ids: ['r0'] }, params: { a: undefined } }] },
@@ -121,10 +125,7 @@ describe('rules', () => {
   });
 
   it('takes an undefined member of an object the format defines as absent', () => {
-    expectRuleAbsent(
-      { ...BASE_RULE, output: undefined, ruleSet: undefined, ghost: undefined },
-      BASE_RULE,
-    );
+    expectRuleAbsent({ ...BASE_RULE, output: undefined, ruleSet: undefined }, BASE_RULE);
     const condition = { dsl: 'd', value: 1 };
     expectRuleAbsent(
       { ...BASE_RULE, condition: { ...condition, ghost: undefined } },
@@ -253,7 +254,7 @@ describe('inputs', () => {
     const plain = proofInput({ assertions: { '/revenue': HUMAN_ASSERTION } });
     const withUndefined = {
       ...plain,
-      extra: undefined,
+      extensions: undefined,
       meta: {
         ...plain.meta,
         note: undefined,

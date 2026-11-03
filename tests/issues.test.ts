@@ -9,8 +9,15 @@ import {
   validateTemporalFact,
   verifyProof,
 } from '../src/index.js';
-import { BASE_PROOF } from './proof-cases.js';
-import { BASE_RULE, expectBoundedIssues, proofInput, specError, ueReferential } from './helpers.js';
+import { unsigned } from './proof-cases.js';
+import {
+  BASE_RULE,
+  expectBoundedIssues,
+  handSealed,
+  proofInput,
+  specError,
+  ueReferential,
+} from './helpers.js';
 
 /** `{ k0: value, k1: value, … }` with `n` keys. */
 const manyKeys = (n: number, value: unknown): Record<string, unknown> =>
@@ -75,9 +82,9 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
       'tags[0] contains a lone UTF-16 surrogate',
     ],
     [
-      'an over-long extension key with a lone surrogate',
+      'an over-long unknown field with a lone surrogate',
       { [`${LONG}\uD800`]: 1 },
-      `rule definition has an extension key with a lone UTF-16 surrogate: "${'x'.repeat(256)}…"`,
+      `unknown rule field: ${'x'.repeat(256)}…`,
     ],
     ['an over-long id holding ":"', { id: `${LONG}:` }, 'id must not contain ":"'],
     [
@@ -168,12 +175,18 @@ describe('one bound on every list of issues (ruling 9G round 4)', () => {
     expect(verdict.issues).toEqual(result.errors);
   });
 
-  it('verifyProof bounds its findings too (one per rule given)', () => {
-    const rules = Array.from({ length: 500 }, () => 1);
-    const verdict = verifyProof(BASE_PROOF, { rules: rules as never });
+  it('verifyProof bounds its findings too (one per listed rule that nothing decides)', () => {
+    const content = unsigned();
+    const extra = Array.from({ length: 500 }, (_, i) => ({
+      ...content.rules[0]!,
+      id: `zz${String(i).padStart(3, '0')}`,
+    }));
+    (content as { rules: unknown }).rules = [...content.rules, ...extra];
+    const verdict = verifyProof(handSealed(content));
     expect(verdict.status).toBe('invalid');
-    expect(verdict.issues).toHaveLength(101);
-    expect(verdict.issues[100]).toBe('further problems not listed (limit 100)');
+    // 99 findings, then the notice that says how many were left out.
+    expect(verdict.issues).toHaveLength(100);
+    expect(verdict.issues[99]).toMatch(/^further problems not listed \(limit 100\): \d+ left out$/);
   });
 
   it('validateProofInput and validateTemporalFact list at most 100 problems', () => {

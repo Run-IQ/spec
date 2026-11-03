@@ -1,4 +1,17 @@
 import { newSpecError } from '../errors.js';
+import {
+  NativeMap,
+  NativeString,
+  arrayIsArray,
+  arrayMap,
+  arrayPop,
+  arrayPush,
+  arraySort,
+  mapGet,
+  mapSet,
+  objectEntries,
+  stringReplace,
+} from '../intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: the leaves of a decision input (D-15), walked over a plain copy
@@ -23,7 +36,7 @@ export type LeafContent =
 
 /** A key as a JSON pointer segment writes it (RFC 6901): `~` as `~0`, `/` as `~1`. */
 function escapeSegment(key: string): string {
-  return key.replace(/~/g, '~0').replace(/\//g, '~1');
+  return stringReplace(stringReplace(key, /~/g, '~0'), /\//g, '~1');
 }
 
 /** True for a JSON scalar. */
@@ -46,16 +59,16 @@ function notJson(pointer: string): never {
 
 /** The members of a list or an object as `[key, child]`, a list's keys its indices. */
 function membersOf(node: object): [string, unknown][] {
-  if (Array.isArray(node)) {
+  if (arrayIsArray(node)) {
     const list: readonly unknown[] = node;
-    return list.map((child, i): [string, unknown] => [String(i), child]);
+    return arrayMap(list, (child, i): [string, unknown] => [NativeString(i), child]);
   }
-  return Object.entries(node);
+  return objectEntries(node);
 }
 
 /** The members of a list or an object, keys sorted in UTF-16 code units. */
 function sortedMembers(node: object): [string, unknown][] {
-  return membersOf(node).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return arraySort(membersOf(node), ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
 }
 
 /**
@@ -65,21 +78,21 @@ function sortedMembers(node: object): [string, unknown][] {
  * however many paths lead to it.
  */
 export function forEachLeaf(root: unknown, visit: (leaf: LeafContent) => void): void {
-  const sorted = new Map<object, [string, unknown][]>();
+  const sorted = new NativeMap<object, [string, unknown][]>();
   const stack: [unknown, string][] = [[root, '']];
-  for (let top = stack.pop(); top !== undefined; top = stack.pop()) {
+  for (let top = arrayPop(stack); top !== undefined; top = arrayPop(stack)) {
     const [value, pointer] = top;
     if (isScalar(value)) {
       visit({ pointer, kind: 'value', value });
       continue;
     }
     if (typeof value !== 'object') notJson(pointer);
-    let members = sorted.get(value);
+    let members = mapGet(sorted, value);
     if (members === undefined) {
       members = sortedMembers(value);
-      sorted.set(value, members);
+      mapSet(sorted, value, members);
     }
-    if (Array.isArray(value)) visit({ pointer, kind: 'array', length: members.length });
+    if (arrayIsArray(value)) visit({ pointer, kind: 'array', length: members.length });
     else if (members.length === 0) {
       visit({ pointer, kind: 'object' });
       continue;
@@ -87,7 +100,8 @@ export function forEachLeaf(root: unknown, visit: (leaf: LeafContent) => void): 
     // Pushed in reverse, so that they are visited in order.
     for (let i = members.length - 1; i >= 0; i--) {
       const member = members[i];
-      if (member !== undefined) stack.push([member[1], `${pointer}/${escapeSegment(member[0])}`]);
+      if (member !== undefined)
+        arrayPush(stack, [member[1], `${pointer}/${escapeSegment(member[0])}`]);
     }
   }
 }

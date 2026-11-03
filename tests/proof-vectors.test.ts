@@ -13,6 +13,7 @@ import { fromHex, hex, nodeHmac, nodeSha256, referenceRoot } from './hashing.js'
 import { treeDigestOf } from './helpers.js';
 import inputVector from './vectors/input-v1.json';
 import vector from './vectors/proof-v1.json';
+import { UNCHECKED } from './notices.js';
 
 const SEED = fromHex(vector.seed);
 const PLAN = vector.sealed;
@@ -51,7 +52,10 @@ describe('the frozen proof-v1 vector (D-14, D-16), recomputed by an independent 
     expect(hex(merkleRoot(leaves))).toBe(PLAN.merkleRoot);
     expect(sealed.digest).toBe(PLAN.digest);
     expect(nodeProofDigest(leaves)).toBe(PLAN.digest);
-    expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
   });
 
   it('salts each entry with the first 16 bytes of HMAC-SHA256(seed, "proof:" + section + ":" + index)', () => {

@@ -10,6 +10,28 @@ import { PROOF_SECTIONS } from './types.js';
 import type { DecisionProof, Redacted, UnsignedProof } from './types.js';
 import { readProofContent, readProofLeaf } from './validate.js';
 import type { ProofLeaf } from './validate.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeString,
+  NativeUint8Array,
+  arrayForEach,
+  arrayFrom,
+  arrayIsArray,
+  arrayJoin,
+  arraySort,
+  jsonStringify,
+  mapGet,
+  mapSet,
+  objectEntries,
+  objectKeys,
+  regExpTest,
+  setHas,
+  uint8ArrayFrom,
+  uint8ArrayLength,
+  uint8ArraySet,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 export type { ProofLeaf } from './validate.js';
 
@@ -22,19 +44,19 @@ export type { ProofLeaf } from './validate.js';
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The keys that are not in the header leaf: the ten sections, `digest` and `signature`. */
-const NOT_HEADER: ReadonlySet<string> = new Set([...PROOF_SECTIONS, 'digest', 'signature']);
+const NOT_HEADER: ReadonlySet<string> = new NativeSet([...PROOF_SECTIONS, 'digest', 'signature']);
 
 /** The start of every leaf of a proof of `format`: `0x00 ‖ utf8(format) ‖ 0x00`, built once. */
 function leafPrefix(format: string): Uint8Array {
-  let prefix = LEAF_PREFIXES.get(format);
+  let prefix = mapGet(LEAF_PREFIXES, format);
   if (prefix === undefined) {
-    prefix = Uint8Array.from([0, ...utf8ToBytes(format), 0]);
-    LEAF_PREFIXES.set(format, prefix);
+    prefix = uint8ArrayFrom([0, ...utf8ToBytes(format), 0]);
+    mapSet(LEAF_PREFIXES, format, prefix);
   }
   return prefix;
 }
 
-const LEAF_PREFIXES = new Map<string, Uint8Array>();
+const LEAF_PREFIXES = new NativeMap<string, Uint8Array>();
 
 /** True when `entry`, an entry of a validated snapshot, is redacted. */
 export function isRedacted(entry: object): entry is Redacted {
@@ -44,8 +66,8 @@ export function isRedacted(entry: object): entry is Redacted {
 /** Internal: the header of `p` (a snapshot): every member but the sections, digest, signature. */
 export function headerOf(p: object): Record<string, unknown> {
   const header: Record<string, unknown> = {};
-  for (const [key, value] of Object.entries(p)) {
-    if (!NOT_HEADER.has(key)) header[key] = value;
+  for (const [key, value] of objectEntries(p)) {
+    if (!setHas(NOT_HEADER, key)) header[key] = value;
   }
   return header;
 }
@@ -70,7 +92,8 @@ function hashLeafInto(
     hashShortInto(out, leafPrefix(format), leaf);
     return;
   }
-  out.set(
+  uint8ArraySet(
+    out,
     withSha256((stream) => {
       stream.bytes(leafPrefix(format));
       stream.text('{"e":');
@@ -100,10 +123,10 @@ function shortText(value: unknown, depth: number): string | undefined {
     if (value.length > SHORT_UNITS) return undefined;
     text = quoted(value);
   } else if (typeof value === 'number' || typeof value === 'boolean' || value === null) {
-    text = String(value);
+    text = NativeString(value);
   } else if (depth === 0 || typeof value !== 'object') {
     return undefined;
-  } else if (Array.isArray(value)) {
+  } else if (arrayIsArray(value)) {
     text = '[';
     for (let k = 0; k < value.length; k++) {
       const member = shortText(value[k], depth - 1);
@@ -114,7 +137,7 @@ function shortText(value: unknown, depth: number): string | undefined {
     text += ']';
   } else {
     const record = value as Record<string, unknown>;
-    const keys = Object.keys(record).sort();
+    const keys = arraySort(objectKeys(record));
     text = '{';
     for (let k = 0; k < keys.length; k++) {
       const key = keys[k] as string;
@@ -130,7 +153,7 @@ function shortText(value: unknown, depth: number): string | undefined {
 
 /** `text` as `JSON.stringify` writes it: as it is between quotes when nothing needs escaping. */
 function quoted(text: string): string {
-  return NEEDS_ESCAPE.test(text) ? JSON.stringify(text) : `"${text}"`;
+  return regExpTest(NEEDS_ESCAPE, text) ? jsonStringify(text) : `"${text}"`;
 }
 
 /** What `JSON.stringify` escapes in a well-formed string: a quote, a backslash, a control. */
@@ -140,17 +163,20 @@ const NEEDS_ESCAPE = /["\\\u0000-\u001f]/;
 /** The sha256 states and the buffer `hashShortInto` reuses (it never calls out). */
 const SHORT_FRESH = sha256.create();
 const SHORT_WORK = SHORT_FRESH.clone();
-let shortBuffer = new Uint8Array(1_024);
+let shortBuffer = new NativeUint8Array(1_024);
 
 /** Writes into `out` `sha256(prefix ‖ utf8(text))`, `text` short: encoded once, hashed once. */
 function hashShortInto(out: Uint8Array, prefix: Uint8Array, text: string): void {
-  const room = prefix.length + 3 * text.length;
-  if (room > shortBuffer.length) shortBuffer = new Uint8Array(room);
-  shortBuffer.set(prefix);
-  const { written } = SHORT_ENCODER.encodeInto(text, shortBuffer.subarray(prefix.length));
-  const bytes = prefix.length + written;
+  const room = uint8ArrayLength(prefix) + 3 * text.length;
+  if (room > uint8ArrayLength(shortBuffer)) shortBuffer = new NativeUint8Array(room);
+  uint8ArraySet(shortBuffer, prefix);
+  const { written } = SHORT_ENCODER.encodeInto(
+    text,
+    uint8ArraySubarray(shortBuffer, uint8ArrayLength(prefix)),
+  );
+  const bytes = uint8ArrayLength(prefix) + written;
   SHORT_FRESH._cloneInto(SHORT_WORK);
-  SHORT_WORK.update(shortBuffer.subarray(0, bytes));
+  SHORT_WORK.update(uint8ArraySubarray(shortBuffer, 0, bytes));
   SHORT_WORK.digestInto(out);
   hashWork.calls += 1;
   hashWork.bytes += bytes;
@@ -172,9 +198,9 @@ export function packedLeafHashes(p: UnsignedProof): PackedHashes {
   hashLeafInto(hashes.next(), p.format, 'header', undefined, headerOf(p));
   hashes.push();
   for (const section of PROOF_SECTIONS) {
-    (record[section] ?? []).forEach((entry, i) => {
+    arrayForEach(record[section] ?? [], (entry, i) => {
       const out = hashes.next();
-      if (isRedacted(entry)) out.set(hexToBytes(entry.redacted));
+      if (isRedacted(entry)) uint8ArraySet(out, hexToBytes(entry.redacted));
       else hashLeafInto(out, p.format, section, i, entry);
       hashes.push();
     });
@@ -211,7 +237,7 @@ export function proofLeafHashes(p: DecisionProof | UnsignedProof): Uint8Array[] 
     const { proof, errors } = readProofContent(p);
     if (!proof) throw newSpecError('INVALID_PROOF', `Cannot hash the proof: ${errors[0]}`);
     const hashes = packedLeafHashes(proof);
-    return Array.from({ length: hashes.length }, (_, i) => hashes.copyAt(i));
+    return arrayFrom({ length: hashes.length }, (_, i) => hashes.copyAt(i));
   });
 }
 
@@ -241,23 +267,23 @@ export function proofLeafHash(leaf: ProofLeaf, format: string): Uint8Array {
       const problem =
         typeof tag === 'string'
           ? `unknown format: ${citeName(tag)}`
-          : `format must be one of ${PROOF_FORMATS.join(', ')}`;
+          : `format must be one of ${arrayJoin(PROOF_FORMATS, ', ')}`;
       throw newSpecError('INVALID_PROOF', `invalid proof leaf: ${problem}`);
     }
     const { leaf: read, errors } = readProofLeaf(leaf);
     if (read === undefined) {
       throw newSpecError('INVALID_PROOF', `invalid proof leaf: ${errors[0] ?? 'unreadable'}`);
     }
-    const out = new Uint8Array(32);
+    const out = new NativeUint8Array(32);
     if (read.s === 'header') {
-      const own = String(read.e.format);
+      const own = NativeString(read.e.format);
       if (own !== format) {
         const message = `invalid proof leaf: the header is of format ${own}, not ${format}`;
         throw newSpecError('INVALID_PROOF', message);
       }
       hashLeafInto(out, format, 'header', undefined, read.e);
     } else if (isRedacted(read.e)) {
-      out.set(hexToBytes(read.e.redacted));
+      uint8ArraySet(out, hexToBytes(read.e.redacted));
     } else {
       hashLeafInto(out, format, read.s, read.i, read.e);
     }
@@ -290,7 +316,7 @@ export function verifyProofInclusion(
   const tag: unknown = format;
   if (!isProofFormat(tag)) return false;
   const expected: unknown = digest;
-  if (typeof expected !== 'string' || !DIGEST_HEX.test(expected)) return false;
+  if (typeof expected !== 'string' || !regExpTest(DIGEST_HEX, expected)) return false;
   const root = rootFromPath(leafHash, index, size, path);
   return root !== undefined && bytesToHex(sizedDigest(format, size, root)) === expected;
 }

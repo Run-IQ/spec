@@ -41,8 +41,8 @@ describe('computeRuleChecksum', () => {
   });
 
   it("un champ d'extension entre dans le checksum", () => {
-    expect(computeRuleChecksum({ ...base, jurisdiction: 'NATIONAL' })).not.toBe(
-      computeRuleChecksum({ ...base, jurisdiction: 'REGIONAL' }),
+    expect(computeRuleChecksum({ ...base, extensions: { jurisdiction: 'NATIONAL' } })).not.toBe(
+      computeRuleChecksum({ ...base, extensions: { jurisdiction: 'REGIONAL' } }),
     );
   });
 
@@ -100,7 +100,7 @@ describe('computeRuleChecksum', () => {
     const forEach = { path: '/enfants', key: 'id' };
     expect(computeRuleChecksum({ ...base, forEach })).not.toBe(h);
     expect(computeRuleChecksum({ ...base, ruleSet: 'rgpd' })).not.toBe(h);
-    expect(computeRuleChecksum({ ...base, forEach: null, ruleSet: 'local' })).toBe(h);
+    expect(computeRuleChecksum({ ...base, forEach: undefined, ruleSet: 'local' })).toBe(h);
   });
 
   it('valeur de référence figée avec forEach et ruleSet (Task 9F)', () => {

@@ -42,7 +42,7 @@ const rules = [
     tags: ['tax', 'income', 'tax'],
     dimensions: { country: 'TG' },
     condition: { dsl: 'jsonlogic', value: { '>': [{ var: 'income' }, 0] } },
-    jurisdiction: 'NATIONAL',
+    extensions: { jurisdiction: 'NATIONAL' },
   },
   {
     id: 'flat',
@@ -51,7 +51,6 @@ const rules = [
     params: { amount: 1000 },
     priority: 0,
     effectiveFrom: '2025-06-01T12:30:00Z',
-    effectiveUntil: null,
     checksum: 'ignored',
   },
 ];

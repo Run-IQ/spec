@@ -6,6 +6,21 @@ import type { JsonValue } from '../canonical.js';
 import { extend } from './collect.js';
 import type { ProofBounds, ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayEvery,
+  arrayFlatMap,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  mapValues,
+  numberIsFinite,
+  setAdd,
+  setHas,
+} from '../intrinsics.js';
 
 /** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
 export function declarationOf(output: ProofOutput): OutputDeclaration {
@@ -24,9 +39,9 @@ export function declarationOf(output: ProofOutput): OutputDeclaration {
 /** The values an output or an item holds besides its contributions: its value, its bounds. */
 function heldValues(entry: { value?: JsonValue; bounds?: ProofBounds }): JsonValue[] {
   const held: JsonValue[] = [];
-  if (entry.value !== undefined) held.push(entry.value);
-  if (entry.bounds?.min !== undefined) held.push(entry.bounds.min);
-  if (entry.bounds?.max !== undefined) held.push(entry.bounds.max);
+  if (entry.value !== undefined) arrayPush(held, entry.value);
+  if (entry.bounds?.min !== undefined) arrayPush(held, entry.bounds.min);
+  if (entry.bounds?.max !== undefined) arrayPush(held, entry.bounds.max);
   return held;
 }
 
@@ -44,21 +59,24 @@ interface Fed {
  * `shortCircuit` imposed: a value of the output, never a count's boolean.
  */
 function fedOutputs(p: ProofView): Fed[] {
-  const byName = new Map<string, Fed>();
+  const byName = new NativeMap<string, Fed>();
   for (const output of p.outputs) {
-    if (!byName.has(output.name)) byName.set(output.name, { output, held: [], steps: [] });
+    if (!mapHas(byName, output.name)) mapSet(byName, output.name, { output, held: [], steps: [] });
   }
   for (const output of p.outputs) {
-    const fed = byName.get(output.name);
+    const fed = mapGet(byName, output.name);
     if (fed !== undefined) extend(fed.held, heldValues(output));
   }
   for (const item of p.items) {
     // An item of an output without `per` is reported by `outputProblems`.
-    const fed = byName.get(item.output);
+    const fed = mapGet(byName, item.output);
     if (fed?.output.per !== undefined) extend(fed.held, heldValues(item));
   }
-  for (const step of p.applied) byName.get(step.output)?.steps.push(step);
-  return [...byName.values()];
+  for (const step of p.applied) {
+    const found = mapGet(byName, step.output);
+    if (found !== undefined) arrayPush(found.steps, step);
+  }
+  return [...mapValues(byName)];
 }
 
 /** The key of a rule instance: its qualified id, version and subject. */
@@ -80,10 +98,10 @@ export function imposedKey(
  * step of its carrier instance on the output it targets (`imposedKey`), not another step of it.
  */
 export function imposedSteps(p: ProofView): Set<string> {
-  const imposed = new Set<string>();
+  const imposed = new NativeSet<string>();
   for (const exception of p.exceptions) {
     if (exception.kind === 'shortCircuit' && exception.output !== undefined) {
-      imposed.add(imposedKey(exception, exception.output));
+      setAdd(imposed, imposedKey(exception, exception.output));
     }
   }
   return imposed;
@@ -112,20 +130,21 @@ export function imposedSteps(p: ProofView): Set<string> {
  */
 export function offDeclarationValues(
   p: ProofView,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const imposed = imposedSteps(p);
   const issues: string[] = [];
   for (const { output, held, steps } of fedOutputs(p)) {
     const declaration = declarationOf(output);
     const cited = citeName(output.name);
-    if (held.some((value) => !hasForm(value, declaration))) {
-      issues.push(`output value does not match its declaration: ${cited}`);
+    if (arraySome(held, (value) => !hasForm(value, declaration))) {
+      arrayPush(issues, `output value does not match its declaration: ${cited}`);
     } else if (output.value !== undefined && !valueOnStep(output.value, declaration)) {
-      issues.push(`output value not rounded as declared: ${cited}`);
+      arrayPush(issues, `output value not rounded as declared: ${cited}`);
     }
     const contributionForm = (step: ProofStep): boolean => {
-      const asValue = imposed.has(imposedKey(step, step.output)) || declaration.combine !== 'count';
+      const asValue =
+        setHas(imposed, imposedKey(step, step.output)) || declaration.combine !== 'count';
       const form = (value: JsonValue): boolean =>
         asValue
           ? hasForm(value, declaration)
@@ -137,13 +156,13 @@ export function offDeclarationValues(
               }));
       return form(step.contribution) && (step.unrounded === undefined || form(step.unrounded));
     };
-    if (steps.some((step) => !contributionForm(step))) {
-      issues.push(`contribution does not match its output declaration: ${cited}`);
+    if (arraySome(steps, (step) => !contributionForm(step))) {
+      arrayPush(issues, `contribution does not match its output declaration: ${cited}`);
     } else if (
       declaration.rounding?.at === 'contribution' &&
-      steps.some((step) => !onStep(step.contribution, declaration))
+      arraySome(steps, (step) => !onStep(step.contribution, declaration))
     ) {
-      issues.push(`contribution not rounded as declared: ${cited}`);
+      arrayPush(issues, `contribution not rounded as declared: ${cited}`);
     }
   }
   return issues;
@@ -163,12 +182,12 @@ export function nonCanonicalDecimals(p: ProofView): string[] {
     if (output.type !== 'decimal') continue;
     const values = [
       ...held,
-      ...steps.flatMap((step) =>
+      ...arrayFlatMap(steps, (step) =>
         step.unrounded === undefined ? [step.contribution] : [step.contribution, step.unrounded],
       ),
     ];
-    if (!values.every(canonical))
-      issues.push(`decimal value not canonical: ${citeName(output.name)}`);
+    if (!arrayEvery(values, canonical))
+      arrayPush(issues, `decimal value not canonical: ${citeName(output.name)}`);
   }
   return issues;
 }
@@ -195,7 +214,7 @@ function valueOnStep(value: JsonValue, declaration: OutputDeclaration): boolean 
 function onStep(value: JsonValue, declaration: OutputDeclaration): boolean {
   const { rounding } = declaration;
   if (rounding === undefined) return true;
-  if (typeof value === 'number' && Number.isFinite(value)) {
+  if (typeof value === 'number' && numberIsFinite(value)) {
     return isOnStep(numberToDecimal(value), rounding);
   }
   // A decimal that is not canonical is reported by `nonCanonicalDecimals`.

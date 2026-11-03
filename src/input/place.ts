@@ -7,6 +7,16 @@ import { MAX_INPUT_LEAF_TEXT, MAX_JSON_DEPTH, MAX_JSON_VALUES } from '../values.
 import { assertionKeyProblem, DATE_FORMS } from './assertions.js';
 import type { JsonScalar } from './leaves.js';
 import { ASSERTION_METHODS, ASSERTION_STATUSES } from './types.js';
+import {
+  arrayIncludes,
+  arrayJoin,
+  arrayReduce,
+  arraySlice,
+  objectHasOwn,
+  objectValues,
+  regExpTest,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: where a leaf of the input tree (D-15) can sit in a valid input,
@@ -42,7 +52,7 @@ const META_PARTS: Readonly<Record<string, string>> = {
   assertions: '/meta/assertions',
 };
 /** The shortest pointers of all the leaves of a valid input: `/data` and one per meta part. */
-const LEAST_TEXT = Object.values(META_PARTS).reduce((sum, pointer) => sum + pointer.length, 5);
+const LEAST_TEXT = arrayReduce(objectValues(META_PARTS), (sum, pointer) => sum + pointer.length, 5);
 /** The values a valid input always holds: `data`, `meta` and the six members of `meta`. */
 const LEAST_VALUES = 8;
 
@@ -68,11 +78,11 @@ const date = (value: JsonScalar): string | undefined =>
 const oneOf =
   (choices: readonly string[]) =>
   (value: JsonScalar): string | undefined =>
-    typeof value === 'string' && choices.includes(value)
+    typeof value === 'string' && arrayIncludes(choices, value)
       ? undefined
-      : `/value must be one of ${choices.join(', ')}`;
+      : `/value must be one of ${arrayJoin(choices, ', ')}`;
 const sha256 = (value: JsonScalar): string | undefined =>
-  typeof value === 'string' && SHA256_HEX.test(value)
+  typeof value === 'string' && regExpTest(SHA256_HEX, value)
     ? undefined
     : '/value must be a lowercase sha256 hex string';
 
@@ -124,13 +134,13 @@ export function leafPlace(segments: readonly string[]): LeafPlace | string {
   const [head, part, name, field, sub] = segments;
   if (head === 'data') {
     if (part === undefined) return place(['object'], '/data');
-    if (part.startsWith('$')) return 'a root key of /data starting with "$" is reserved';
+    if (stringStartsWith(part, '$')) return 'a root key of /data starting with "$" is reserved';
     return freePlace('/data', segments.length - 1);
   }
   if (head !== 'meta') return 'it is not below /data or /meta';
   if (part === undefined) return '/meta always holds its six members, so it is never a leaf';
   const partPointer = META_PARTS[part];
-  if (partPointer === undefined || !Object.hasOwn(META_PARTS, part)) {
+  if (partPointer === undefined || !objectHasOwn(META_PARTS, part)) {
     return `/meta has no member ${quoteText(part)}`;
   }
   const depth = segments.length - 2;
@@ -147,20 +157,21 @@ export function leafPlace(segments: readonly string[]): LeafPlace | string {
         (field === undefined ? place(['value'], partPointer, depth, date) : 'a date is a string')
       );
     case 'tags':
-      if (!INDEX.test(name)) return 'a tag is named by its index, written 0|[1-9][0-9]*';
+      if (!regExpTest(INDEX, name)) return 'a tag is named by its index, written 0|[1-9][0-9]*';
       return field === undefined ? place(['value'], partPointer, depth, text) : 'a tag is a string';
     case 'dimensions': {
       const problem = nameProblem(name, 'dimension');
       if (problem !== undefined) return problem;
       const value = (v: JsonScalar): string | undefined => dimensionValueProblem(v, '/value');
       if (field === undefined) return place(['value', 'array'], partPointer, depth, value);
-      if (!INDEX.test(field)) return 'a dimension value is named by its index, 0|[1-9][0-9]*';
+      if (!regExpTest(INDEX, field))
+        return 'a dimension value is named by its index, 0|[1-9][0-9]*';
       return sub === undefined ? place(['value'], partPointer, depth, value) : 'below a string';
     }
     case 'context':
       return freePlace(partPointer, depth);
     default:
-      return assertionPlace(segments.slice(2), partPointer, depth);
+      return assertionPlace(arraySlice(segments, 2), partPointer, depth);
   }
 }
 
@@ -178,12 +189,12 @@ function assertionPlace(
   }
   if (field === 'source') {
     if (sub === undefined) return 'a source holds proofDigest and output, so it is never a leaf';
-    if (!SOURCE_FIELDS.includes(sub)) return `a source has no field ${quoteText(sub)}`;
+    if (!arrayIncludes(SOURCE_FIELDS, sub)) return `a source has no field ${quoteText(sub)}`;
     return below === undefined
       ? place(['value'], partPointer, depth, FIELD_VALUES[sub] ?? any)
       : 'a field of a source is a scalar';
   }
-  if (!FIELDS.includes(field)) return `an assertion has no field ${quoteText(field)}`;
+  if (!arrayIncludes(FIELDS, field)) return `an assertion has no field ${quoteText(field)}`;
   return sub === undefined
     ? place(['value'], partPointer, depth, FIELD_VALUES[field] ?? any)
     : 'a field of an assertion is a scalar';
@@ -206,7 +217,7 @@ function freePlace(root: string, depth: number): LeafPlace | string {
 /** Why `name` names no date or dimension, or `undefined`. */
 function nameProblem(name: string, kind: string): string | undefined {
   if (isUnnamable(name)) return `a ${kind} name is never empty or "-"`;
-  if (name.startsWith('$')) return `a ${kind} name never starts with "$"`;
+  if (stringStartsWith(name, '$')) return `a ${kind} name never starts with "$"`;
   return undefined;
 }
 

@@ -50,6 +50,23 @@ import {
   version,
   GROUPED_REASONS,
 } from './fields.js';
+import {
+  NativeSet,
+  NativeString,
+  arrayFilter,
+  arrayJoin,
+  arrayMap,
+  arraySlice,
+  arraySome,
+  mapGet,
+  numberIsSafeInteger,
+  objectEntries,
+  objectFromEntries,
+  objectHasOwn,
+  regExpTest,
+  stringReplace,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the shape of a decision proof, as `validateProof` checks it and
 // `schema/decision-proof.schema.json` describes it.
@@ -108,10 +125,10 @@ const RULE_SET: Shape = {
   summary: '{ kind, … }',
   fields: {},
   gate: (members, path): RuleValidationIssue | Shape => {
-    const kind = members.get('kind');
+    const kind = mapGet(members, 'kind');
     const at = `${path}.kind`;
     if (kind === undefined) return { path: at, message: `${citeName(at)} is required` };
-    if (typeof kind === 'string' && Object.hasOwn(RULE_SET_KINDS, kind)) {
+    if (typeof kind === 'string' && objectHasOwn(RULE_SET_KINDS, kind)) {
       const shape = RULE_SET_KINDS[kind];
       if (shape !== undefined) return shape;
     }
@@ -126,7 +143,7 @@ const COMPONENT: Shape = {
     version: nonEmptyString,
     digest: sha256,
     declaredBy: stringCheck('a non-empty string', (text, path) =>
-      DECLARED_BY.test(text)
+      regExpTest(DECLARED_BY, text)
         ? undefined
         : `${citeName(path)} must be engine, plugin:<name> or model:<name>`,
     ),
@@ -186,7 +203,7 @@ const OUTPUT: Shape = {
     bounds: objectOf(BOUNDS),
     selected: objectOf(SELECTION),
     // Read here, checked as a declaration by `outputOf`.
-    ...Object.fromEntries(DECLARATION_KEYS.map((key) => [key, document])),
+    ...objectFromEntries(arrayMap(DECLARATION_KEYS, (key) => [key, document])),
     salt,
   },
   optional: [
@@ -211,10 +228,10 @@ const OUTPUT: Shape = {
  */
 function outputOf(shape: Shape): Check {
   return (value, path, add) => {
-    const read = checkObject(value, path, shape, add, new Set());
+    const read = checkObject(value, path, shape, add, new NativeSet());
     if (read === undefined) return undefined;
     const { copy } = read;
-    if (read.members.get('redacted') !== undefined) return copy;
+    if (mapGet(read.members, 'redacted') !== undefined) return copy;
     const declaration: Record<string, unknown> = {};
     for (const key of DECLARATION_KEYS) {
       if (copy[key] !== undefined) declaration[key] = copy[key];
@@ -292,7 +309,8 @@ const STEP: Shape = {
     unrounded: json,
     sourceRef: nonEmptyString,
     matches: mapOf(objectOf(MATCH), 'matches', {
-      name: (name, at) => (name.startsWith('$') ? reservedDimensionNameMessage(at) : undefined),
+      name: (name, at) =>
+        stringStartsWith(name, '$') ? reservedDimensionNameMessage(at) : undefined,
       nonEmpty: 'absent matches nothing',
     }),
     rank,
@@ -302,7 +320,7 @@ const STEP: Shape = {
 };
 
 const instances = scalarCheck((value, path, add) => {
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 2) {
+  if (typeof value !== 'number' || !numberIsSafeInteger(value) || value < 2) {
     add(path, `${citeName(path)} must be an integer, 2 or more`);
   }
 });
@@ -327,8 +345,8 @@ const SKIP: Shape = {
     const at = `${path}.instances`;
     if (copy.subject !== undefined) {
       add(at, `${citeName(at)} applies only to an entry without subject`);
-    } else if (!GROUPED_REASONS.some((reason) => reason === copy.reason)) {
-      const reasons = `${GROUPED_REASONS.slice(0, 3).join(', ')} or NOT_REQUESTED`;
+    } else if (!arraySome(GROUPED_REASONS, (reason) => reason === copy.reason)) {
+      const reasons = `${arrayJoin(arraySlice(GROUPED_REASONS, 0, 3), ', ')} or NOT_REQUESTED`;
       add(at, `${citeName(at)} applies only to ${reasons}`);
     }
   },
@@ -365,7 +383,7 @@ const PENDING: Shape = {
     } else if (copy.reason !== 'PENDING_CARRIER' && copy.carrier !== undefined) {
       add(at, `${citeName(at)} applies only to PENDING_CARRIER`);
     }
-    if (copy.reason === 'ERROR' && !hasErrorCause(String(copy.detail))) {
+    if (copy.reason === 'ERROR' && !hasErrorCause(NativeString(copy.detail))) {
       const detail = `${path}.detail`;
       add(detail, `${citeName(detail)} must be <CAUSE>: <message>, its cause one of ERROR_CAUSES`);
     }
@@ -394,7 +412,7 @@ const EXCEPTION: Shape = {
   optional: ['subject', 'output'],
   refine: (copy, path, add) => {
     // Checked once kind is: an unknown kind is its own problem.
-    if (!KINDS.some((kind) => kind === copy.kind)) return;
+    if (!arraySome(KINDS, (kind) => kind === copy.kind)) return;
     const at = `${path}.output`;
     if (copy.kind === 'shortCircuit' && copy.output === undefined) {
       add(at, `${citeName(at)} is required for a shortCircuit`);
@@ -417,7 +435,7 @@ const FACT_READ: Shape = {
   },
   optional: ASSERTION_KEYS,
   refine: (copy, path, add) => {
-    const given = ASSERTION_KEYS.filter((key) => copy[key] !== undefined).length;
+    const given = arrayFilter(ASSERTION_KEYS, (key) => copy[key] !== undefined).length;
     if (given !== 0 && given !== ASSERTION_KEYS.length) {
       add(path, `${citeName(path)} must have method, status and assertionDigest together, or none`);
     }
@@ -440,7 +458,7 @@ const SIGNATURE: Shape = {
     alg: constant('ed25519'),
     keyId: nonEmptyString,
     value: scalarCheck((value, path, add) => {
-      if (typeof value !== 'string' || !SIGNATURE_BASE64URL.test(value)) {
+      if (typeof value !== 'string' || !regExpTest(SIGNATURE_BASE64URL, value)) {
         add(
           path,
           `${citeName(path)} must be an ed25519 signature in unpadded base64url (86 characters)`,
@@ -453,7 +471,7 @@ const SIGNATURE: Shape = {
 /** A format listed in `PROOF_FORMATS`; an unknown one is reported by `formatGate`. */
 const proofFormat = scalarCheck((value, path, add) => {
   if (!isProofFormat(value)) {
-    add(path, `${citeName(path)} must be one of ${PROOF_FORMATS.join(', ')}`);
+    add(path, `${citeName(path)} must be one of ${arrayJoin(PROOF_FORMATS, ', ')}`);
   }
 });
 
@@ -462,7 +480,7 @@ const proofFormat = scalarCheck((value, path, add) => {
  * single issue: its other fields follow rules this version cannot check.
  */
 function formatGate(members: ReadonlyMap<string, unknown>): RuleValidationIssue | undefined {
-  const format = members.get('format');
+  const format = mapGet(members, 'format');
   if (typeof format !== 'string' || isProofFormat(format)) return undefined;
   return { path: 'format', message: `unknown format: ${citeName(format)}` };
 }
@@ -475,7 +493,7 @@ const REDACTED: Shape = {
   summary: '{ redacted }',
   fields: {
     redacted: scalarCheck((value, path, add) => {
-      if (typeof value !== 'string' || !/^[0-9a-f]{64}$/.test(value)) {
+      if (typeof value !== 'string' || !regExpTest(/^[0-9a-f]{64}$/, value)) {
         add(path, `${citeName(path)} must be a leaf hash: 64 lowercase hex characters`);
       }
     }),
@@ -486,7 +504,7 @@ const REDACTED: Shape = {
 function redactable(shape: Shape): Shape {
   return {
     ...shape,
-    gate: (members) => (members.get('redacted') !== undefined ? REDACTED : undefined),
+    gate: (members) => (mapGet(members, 'redacted') !== undefined ? REDACTED : undefined),
   };
 }
 
@@ -494,7 +512,7 @@ function redactable(shape: Shape): Shape {
 function unsalted(shape: Shape): Shape {
   const fields = { ...shape.fields };
   delete fields.salt;
-  return { ...shape, summary: shape.summary.replace(', salt }', ' }'), fields };
+  return { ...shape, summary: stringReplace(shape.summary, ', salt }', ' }'), fields };
 }
 
 /** The entry shapes of the ten sections (`outputs` aside: `outputOf`), salted. */
@@ -513,7 +531,7 @@ const ENTRIES: Readonly<Record<Exclude<ProofSection, 'outputs'>, Shape>> = {
 /** The check of an entry of each section, as `variant` reads it. */
 function entryChecks(variant: (shape: Shape) => Shape): Record<ProofSection, Check> {
   const checks = { outputs: outputOf(variant(OUTPUT)) } as Record<ProofSection, Check>;
-  for (const [section, shape] of Object.entries(ENTRIES)) {
+  for (const [section, shape] of objectEntries(ENTRIES)) {
     checks[section as ProofSection] = objectOf(variant(shape));
   }
   return checks;
@@ -526,8 +544,8 @@ const UNSALTED_ENTRY = entryChecks(unsalted);
 
 /** `counts`: the number of entries of each section, each a safe integer from 0. */
 const COUNTS: Shape = {
-  summary: `{ ${PROOF_SECTIONS.join(', ')} }`,
-  fields: Object.fromEntries(PROOF_SECTIONS.map((section) => [section, stratum])),
+  summary: `{ ${arrayJoin(PROOF_SECTIONS, ', ')} }`,
+  fields: objectFromEntries(arrayMap(PROOF_SECTIONS, (section) => [section, stratum])),
 };
 
 /** The fields of the header of a proof before sealing (`UnsaltedProof`): without `counts`. */
@@ -554,8 +572,8 @@ const HEADER_FIELDS: Readonly<Record<string, Check>> = {
 
 /** The section fields: each a list of entries checked by `entries`. */
 function sectionFields(entries: Readonly<Record<ProofSection, Check>>): Record<string, Check> {
-  return Object.fromEntries(
-    PROOF_SECTIONS.map((section) => [section, listOf(entries[section])]),
+  return objectFromEntries(
+    arrayMap(PROOF_SECTIONS, (section) => [section, listOf(entries[section])]),
   ) as Record<string, Check>;
 }
 

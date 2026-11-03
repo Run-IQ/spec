@@ -2,6 +2,13 @@ import { reservedOutputNameMessage } from '../decision/output.js';
 import { citeName, newSpecError, quoteText } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { typeName } from '../values.js';
+import {
+  regExpTest,
+  stringIncludes,
+  stringIndexOf,
+  stringSlice,
+  stringSplit,
+} from '../intrinsics.js';
 
 /**
  * The name of the rule set of the rules that belong to no pack (D-4). A rule without `ruleSet`
@@ -22,7 +29,7 @@ const NO_DOT = 'must not contain ".": a version is never part of a rule set id';
 
 /** Internal: the problem of a string that is not a rule set id, after its subject. */
 function idProblem(value: string): string {
-  return value.includes('.') ? NO_DOT : `must match ${RULE_SET_GRAMMAR}`;
+  return stringIncludes(value, '.') ? NO_DOT : `must match ${RULE_SET_GRAMMAR}`;
 }
 
 /**
@@ -31,7 +38,7 @@ function idProblem(value: string): string {
  * Never throws.
  */
 export function isRuleSetId(value: unknown): value is string {
-  return typeof value === 'string' && RULE_SET_ID.test(value);
+  return typeof value === 'string' && regExpTest(RULE_SET_ID, value);
 }
 
 /**
@@ -53,7 +60,9 @@ export function packIdProblem(value: unknown): string | undefined {
   if (value === LOCAL_RULE_SET) {
     return 'pack id "local" is reserved: it names the rules without a rule set';
   }
-  return RULE_SET_ID.test(value) ? undefined : `pack id ${quoteText(value)} ${idProblem(value)}`;
+  return regExpTest(RULE_SET_ID, value)
+    ? undefined
+    : `pack id ${quoteText(value)} ${idProblem(value)}`;
 }
 
 /**
@@ -67,15 +76,15 @@ export function qualifyName(ruleSet: string, name: string): string {
   if (typeof ruleSet !== 'string') {
     nameError(`a rule set id must be a string, got ${describeType(ruleSet)}`);
   }
-  if (!RULE_SET_ID.test(ruleSet)) {
+  if (!regExpTest(RULE_SET_ID, ruleSet)) {
     nameError(
-      ruleSet.includes('.')
+      stringIncludes(ruleSet, '.')
         ? `${quoteText(ruleSet)} ${NO_DOT}`
         : `${quoteText(ruleSet)} is not a rule set id (${RULE_SET_GRAMMAR})`,
     );
   }
   if (typeof name !== 'string') nameError(`a name must be a string, got ${describeType(name)}`);
-  if (name === '' || name.includes(':')) {
+  if (name === '' || stringIncludes(name, ':')) {
     nameError(`${quoteText(name)} is not a bare name: it is empty or holds ":"`);
   }
   return ruleSet === LOCAL_RULE_SET ? name : `${ruleSet}:${name}`;
@@ -94,7 +103,7 @@ function describeType(value: unknown): string {
  * a bare one qualified by `ruleSet` (D-37). Throws like `qualifyName`.
  */
 export function qualifiedFrom(ruleSet: string, name: string): string {
-  return name.includes(':') ? name : qualifyName(ruleSet, name);
+  return stringIncludes(name, ':') ? name : qualifyName(ruleSet, name);
 }
 
 /**
@@ -103,14 +112,16 @@ export function qualifiedFrom(ruleSet: string, name: string): string {
  * meaning, one spelling, one checksum. `name` must be valid (`citedNameProblem`).
  */
 export function shortestFrom(ruleSet: string, name: string): string {
-  const colon = name.indexOf(':');
-  return colon >= 0 && name.slice(0, colon) === ruleSet ? name.slice(colon + 1) : name;
+  const colon = stringIndexOf(name, ':');
+  return colon >= 0 && stringSlice(name, 0, colon) === ruleSet
+    ? stringSlice(name, colon + 1)
+    : name;
 }
 
 /** Internal: the rule set a valid cited `name` designates from a rule of `ruleSet`. */
 export function ruleSetOf(ruleSet: string, name: string): string {
-  const colon = name.indexOf(':');
-  return colon >= 0 ? name.slice(0, colon) : ruleSet;
+  const colon = stringIndexOf(name, ':');
+  return colon >= 0 ? stringSlice(name, 0, colon) : ruleSet;
 }
 
 /**
@@ -118,7 +129,7 @@ export function ruleSetOf(ruleSet: string, name: string): string {
  * of a `.` (a version) for a string holding one, else the grammar.
  */
 export function ruleSetIdMessage(path: string, value: unknown): string {
-  return typeof value === 'string' && value.includes('.')
+  return typeof value === 'string' && stringIncludes(value, '.')
     ? `${citeName(path)} ${NO_DOT}`
     : `${citeName(path)} must be a rule set id matching ${RULE_SET_GRAMMAR}`;
 }
@@ -138,9 +149,9 @@ export function citedNameProblem(
 ): string | undefined {
   if (kind === 'output') {
     if (isReservedName(name)) return reservedOutputNameMessage(path);
-    if (name.includes('.')) return `${citeName(path)} name must not contain "."`;
+    if (stringIncludes(name, '.')) return `${citeName(path)} name must not contain "."`;
   }
-  const parts = name.split(':');
+  const parts = stringSplit(name, ':');
   if (parts.length === 1) return undefined;
   if (parts.length > 2) {
     return `${citeName(path)} name must hold at most one ":": <rule set>:<name>`;
@@ -149,7 +160,7 @@ export function citedNameProblem(
   if (set === LOCAL_RULE_SET) {
     return `${citeName(path)} name must not be qualified by "local": a local name is written bare`;
   }
-  if (!RULE_SET_ID.test(set)) {
+  if (!regExpTest(RULE_SET_ID, set)) {
     return `${citeName(path)} name must start with a rule set id before ":": ${RULE_SET_GRAMMAR}`;
   }
   if (bare === '') {

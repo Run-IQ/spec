@@ -28,9 +28,10 @@ import {
   TRUSTED,
   unsigned,
 } from './proof-cases.js';
-import { handSealed, specError, treeDigestOf, withCounts } from './helpers.js';
+import { handSealed, optionError, specError, treeDigestOf, withCounts } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
+import { NOT_REPLAYED, UNCHECKED } from './notices.js';
 
 const nodeSha256 = (text: string): string =>
   createHash('sha256').update(text, 'utf8').digest('hex');
@@ -235,7 +236,7 @@ describe('createSigningKeyPair', () => {
     const proof = signProof(sealed(), keys.privateKey, 'k');
     expect(verifyProof(proof, { trustedKeys: { k: keys.publicKey } })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: UNCHECKED,
     });
   });
 
@@ -350,7 +351,7 @@ describe('verifyProof: authentic', () => {
   it('a proof signed with a trusted key', () => {
     expect(verifyProof(signed(), { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: UNCHECKED,
     });
   });
 
@@ -363,7 +364,7 @@ describe('verifyProof: authentic', () => {
     for (const rules of [RULES, [ruleB, ruleA]]) {
       expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules })).toEqual({
         status: 'authentic',
-        issues: [],
+        issues: [NOT_REPLAYED],
       });
     }
   });
@@ -383,18 +384,24 @@ describe('verifyProof: authentic', () => {
 
 describe('verifyProof: consistent, never authentic', () => {
   it('a sealed proof without signature', () => {
-    expect(verifyProof(sealed())).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed())).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expect(verifyProof(sealed(), { trustedKeys: TRUSTED, rules: RULES })).toEqual({
       status: 'consistent',
-      issues: ['unsigned'],
+      issues: ['unsigned', NOT_REPLAYED],
     });
   });
 
   it('a valid signature whose key is not listed', () => {
-    expect(verifyProof(signed())).toEqual({ status: 'consistent', issues: ['untrusted key'] });
+    expect(verifyProof(signed())).toEqual({
+      status: 'consistent',
+      issues: ['untrusted key', ...UNCHECKED],
+    });
     expect(verifyProof(signed(), { trustedKeys: { other: RFC_PUBLIC } })).toEqual({
       status: 'consistent',
-      issues: ['untrusted key'],
+      issues: ['untrusted key', ...UNCHECKED],
     });
   });
 
@@ -402,14 +409,16 @@ describe('verifyProof: consistent, never authentic', () => {
     const proof = signProof(sealed(), RFC_SECRET, 'toString');
     expect(verifyProof(proof, { trustedKeys: {} })).toEqual({
       status: 'consistent',
-      issues: ['untrusted key'],
+      issues: ['untrusted key', ...UNCHECKED],
     });
   });
 
   it('a trusted key that is not a hex ed25519 public key', () => {
-    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': 'abc' } })).toEqual({
-      status: 'consistent',
-      issues: ['trusted key malformed'],
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: { 'executor-1': 'abc' } })),
+    ).toMatchObject({
+      option: 'options.trustedKeys.executor-1',
+      message: 'options.trustedKeys.executor-1 is malformed',
     });
   });
 });

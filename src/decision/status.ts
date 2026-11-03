@@ -1,5 +1,6 @@
 import { newSpecError, quoteText } from '../errors.js';
 import { typeName } from '../values.js';
+import { arrayFindIndex, arrayJoin, objectFreeze } from '../intrinsics.js';
 
 /**
  * How sure an output is (D-7), from the weakest doubt to the strongest:
@@ -13,7 +14,7 @@ import { typeName } from '../values.js';
 export type OutputStatus = 'determined' | 'provisional' | 'conflict' | 'undetermined';
 
 /** The output statuses from the weakest to the strongest (D-7). Frozen. */
-export const OUTPUT_STATUSES: readonly OutputStatus[] = Object.freeze([
+export const OUTPUT_STATUSES: readonly OutputStatus[] = objectFreeze([
   'determined',
   'provisional',
   'conflict',
@@ -33,12 +34,12 @@ export function joinStatus(a: OutputStatus, b: OutputStatus): OutputStatus {
 }
 
 function rankOf(status: unknown): number {
-  const rank = OUTPUT_STATUSES.findIndex((item) => item === status);
+  const rank = arrayFindIndex(OUTPUT_STATUSES, (item) => item === status);
   if (rank >= 0) return rank;
   const cited =
     typeof status === 'string' ? quoteText(status) : `a value of type ${typeName(status)}`;
   throw newSpecError(
     'INVALID_PROOF',
-    `not an output status: ${cited} (expected one of ${OUTPUT_STATUSES.join(', ')})`,
+    `not an output status: ${cited} (expected one of ${arrayJoin(OUTPUT_STATUSES, ', ')})`,
   );
 }

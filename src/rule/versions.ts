@@ -9,9 +9,32 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
 import { isRuleVersion } from './definition.js';
+import { nullFieldMessage } from './fields.js';
 import { isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { DEFAULT_EFFECTIVE_ON, readEffectiveOn, resolveWindow } from './window.js';
 import type { ResolvedWindow, RuleWindow } from './window.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayEntries,
+  arrayFilter,
+  arrayIsArray,
+  arrayMap,
+  arrayPush,
+  arraySlice,
+  arraySort,
+  jsonStringify,
+  mapDelete,
+  mapGet,
+  mapKeys,
+  mapSet,
+  mapValues,
+  setAdd,
+  setHas,
+  setSize,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /** One rule version as `findOverlappingVersions` reads it. */
 export interface VersionedRuleWindow extends RuleWindow {
@@ -125,28 +148,29 @@ function scan(
     state.steps += 1;
     return compareText(a, b);
   };
-  scanning: for (const ruleSet of [...groups.keys()].sort(byText)) {
-    const ids = groups.get(ruleSet) ?? new Map<string, Version[]>();
-    for (const id of [...ids.keys()].sort(byText)) {
-      const listed = new Set<string>();
+  scanning: for (const ruleSet of arraySort([...mapKeys(groups)], byText)) {
+    const ids = mapGet(groups, ruleSet) ?? new NativeMap<string, Version[]>();
+    for (const id of arraySort([...mapKeys(ids)], byText)) {
+      const listed = new NativeSet<string>();
       const emit = (a: Version, b: Version, kind: VersionOverlap['kind']): boolean => {
         state.steps += 1;
         const versions: [number, number] =
           a.version < b.version ? [a.version, b.version] : [b.version, a.version];
         const key = `${versions[0]}:${versions[1]}`;
-        if (listed.has(key)) return true;
+        if (setHas(listed, key)) return true;
         if (state.found.length >= MAX_OVERLAPS) {
           state.truncated = true;
           return false;
         }
-        listed.add(key);
-        state.found.push({ ruleSet, id, versions, kind });
+        setAdd(listed, key);
+        arrayPush(state.found, { ruleSet, id, versions, kind });
         return true;
       };
-      if (!scanGroup(ids.get(id) ?? [], calendar, state, emit)) break scanning;
+      if (!scanGroup(mapGet(ids, id) ?? [], calendar, state, emit)) break scanning;
     }
   }
-  const overlaps = state.found.sort(
+  const overlaps = arraySort(
+    state.found,
     (x, y) =>
       compareText(x.ruleSet, y.ruleSet) ||
       compareText(x.id, y.id) ||
@@ -169,15 +193,15 @@ function scanGroup(
   state: Scan,
   emit: Emit,
 ): boolean {
-  const parts = new Map<string | undefined, Version[]>();
+  const parts = new NativeMap<string | undefined, Version[]>();
   for (const version of versions) {
-    const part = parts.get(version.effectiveOn);
-    if (part === undefined) parts.set(version.effectiveOn, [version]);
-    else part.push(version);
+    const part = mapGet(parts, version.effectiveOn);
+    if (part === undefined) mapSet(parts, version.effectiveOn, [version]);
+    else arrayPush(part, version);
   }
-  const list = [...parts.values()];
-  for (const [i, part] of list.entries()) {
-    for (const other of list.slice(i + 1)) {
+  const list = [...mapValues(parts)];
+  for (const [i, part] of arrayEntries(list)) {
+    for (const other of arraySlice(list, i + 1)) {
       for (const a of part) {
         for (const b of other) if (!emit(a, b, 'effectiveOn')) return false;
       }
@@ -213,7 +237,7 @@ function sweepOverlaps(
 ): boolean {
   const kindOf = (v: Version): string =>
     `${isCivilDate(v.window.from) ? 'c' : 'i'}:${v.window.zone}`;
-  const mixed = new Set(versions.map(kindOf)).size > 1;
+  const mixed = setSize(new NativeSet(arrayMap(versions, kindOf))) > 1;
   const instants: Entry[] = [];
   const days: Entry[] = [];
   for (const version of versions) {
@@ -222,16 +246,16 @@ function sweepOverlaps(
     const civil = isCivilDate(window.from);
     if (!civil || mixed) {
       const [from, until] = instantSpan(window, calendar);
-      instants.push({ version, from, until, kind });
+      arrayPush(instants, { version, from, until, kind });
     }
     if (civil || mixed) {
       const [from, until] = civilDays(window, calendar);
-      days.push({ version, from, until, kind });
+      arrayPush(days, { version, from, until, kind });
     }
   }
   return (
-    sweep(instants, (kind) => kind.startsWith('c:'), state, emit) &&
-    sweep(days, (kind) => kind.startsWith('i:'), state, emit)
+    sweep(instants, (kind) => stringStartsWith(kind, 'c:'), state, emit) &&
+    sweep(days, (kind) => stringStartsWith(kind, 'i:'), state, emit)
   );
 }
 
@@ -247,13 +271,14 @@ function sweep(
   state: Scan,
   emit: Emit,
 ): boolean {
-  const sorted = entries
-    .filter((entry) => entry.until === null || entry.from < entry.until)
-    .sort((a, b) => {
+  const sorted = arraySort(
+    arrayFilter(entries, (entry) => entry.until === null || entry.from < entry.until),
+    (a, b) => {
       state.steps += 1;
       return compareText(a.from, b.from) || a.version.version - b.version.version;
-    });
-  const active = new Map<string, Entry[]>();
+    },
+  );
+  const active = new NativeMap<string, Entry[]>();
   for (const entry of sorted) {
     for (const [kind, bucket] of active) {
       state.steps += 1;
@@ -262,15 +287,15 @@ function sweep(
       for (const other of bucket) {
         state.steps += 1;
         if (other.until !== null && other.until <= entry.from) continue;
-        kept.push(other);
+        arrayPush(kept, other);
         if (!emit(other.version, entry.version, 'overlap')) return false;
       }
-      if (kept.length === 0) active.delete(kind);
-      else active.set(kind, kept);
+      if (kept.length === 0) mapDelete(active, kind);
+      else mapSet(active, kind, kept);
     }
-    const bucket = active.get(entry.kind);
-    if (bucket === undefined) active.set(entry.kind, [entry]);
-    else bucket.push(entry);
+    const bucket = mapGet(active, entry.kind);
+    if (bucket === undefined) mapSet(active, entry.kind, [entry]);
+    else arrayPush(bucket, entry);
   }
   return true;
 }
@@ -287,33 +312,33 @@ export function readVersionGroups(
   rules: ReadonlyArray<VersionedRuleWindow>,
   zone: string,
 ): Map<string, Map<string, Version[]>> {
-  const groups = new Map<string, Map<string, Version[]>>();
-  const seen = new Set<string>();
+  const groups = new NativeMap<string, Map<string, Version[]>>();
+  const seen = new NativeSet<string>();
   let items: unknown[];
   try {
-    if (!Array.isArray(rules)) {
+    if (!arrayIsArray(rules)) {
       throw newSpecError('INVALID_RULE', 'rules must be an array of rules');
     }
     const read = readList(rules, 'rules');
-    if (!Array.isArray(read)) throw newSpecError('INVALID_RULE', read.message);
+    if (!arrayIsArray(read)) throw newSpecError('INVALID_RULE', read.message);
     items = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
     throw newSpecError('INVALID_RULE', unreadableMessage('rules', error));
   }
 
-  for (const [index, item] of items.entries()) {
+  for (const [index, item] of arrayEntries(items)) {
     const rule = readRule(item, index, zone);
-    const key = JSON.stringify([rule.ruleSet, rule.id, rule.version.version]);
-    if (seen.has(key)) {
+    const key = jsonStringify([rule.ruleSet, rule.id, rule.version.version]);
+    if (setHas(seen, key)) {
       throw newSpecError('INVALID_RULE', `duplicate rule ${rule.name}`);
     }
-    seen.add(key);
-    let ids = groups.get(rule.ruleSet);
-    if (ids === undefined) groups.set(rule.ruleSet, (ids = new Map()));
-    const versions = ids.get(rule.id);
-    if (versions === undefined) ids.set(rule.id, [rule.version]);
-    else versions.push(rule.version);
+    setAdd(seen, key);
+    let ids = mapGet(groups, rule.ruleSet);
+    if (ids === undefined) mapSet(groups, rule.ruleSet, (ids = new NativeMap()));
+    const versions = mapGet(ids, rule.id);
+    if (versions === undefined) mapSet(ids, rule.id, [rule.version]);
+    else arrayPush(versions, rule.version);
   }
   return groups;
 }
@@ -345,7 +370,7 @@ function readRule(
   }
   const { id, version, ruleSet, effectiveOn } = fields;
   const name = `${typeof id === 'string' ? citeName(id) : typeName(id)}@${
-    typeof version === 'number' ? String(version) : typeName(version)
+    typeof version === 'number' ? NativeString(version) : typeName(version)
   }`;
   const prefix = `rule ${name}: `;
   const requireText = (value: unknown, field: string): string => {
@@ -362,12 +387,18 @@ function readRule(
   if (!isRuleVersion(version)) {
     throw newSpecError('INVALID_RULE', `${prefix}version must be a positive integer`);
   }
-  const set = ruleSet == null ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
+  if (ruleSet === null) {
+    throw newSpecError('INVALID_RULE', prefix + nullFieldMessage('ruleSet'));
+  }
+  if (effectiveOn === null) {
+    throw newSpecError('INVALID_RULE', prefix + nullFieldMessage('effectiveOn'));
+  }
+  const set = ruleSet === undefined ? LOCAL_RULE_SET : requireText(ruleSet, 'ruleSet');
   if (!isRuleSetId(set)) {
     throw newSpecError('INVALID_RULE', prefix + ruleSetIdMessage('ruleSet', set));
   }
   const window = resolveWindow(fields, zone, prefix);
-  const read = effectiveOn == null ? undefined : readEffectiveOn(effectiveOn, prefix);
+  const read = effectiveOn === undefined ? undefined : readEffectiveOn(effectiveOn, prefix);
   // The default reference date is the absent one, as normalization writes it.
   const pointer = read === DEFAULT_EFFECTIVE_ON ? undefined : read;
   return { ruleSet: set, id: ruleId, name, version: { version, window, effectiveOn: pointer } };

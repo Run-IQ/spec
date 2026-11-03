@@ -4,6 +4,19 @@ import type { Subject } from '../path/subject.js';
 import { full } from './collect.js';
 import { instanceKey } from './output-values.js';
 import type { ProofPending, ProofView } from './types.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayPop,
+  arrayPush,
+  mapGet,
+  mapHas,
+  mapSet,
+  objectFreeze,
+  setHas,
+  stringIndexOf,
+  stringSlice,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: what the pending entries of a proof say of its pending carriers
 // (R18, D-8): whether each fired its exceptions, and which pending carrier holds a rule
@@ -14,7 +27,7 @@ import type { ProofPending, ProofView } from './types.js';
  * text before the first `:`) exactly one of these. A new cause is a change of the format. The
  * one list: core imports it, and `schema/decision-proof.schema.json` is generated from it.
  */
-export const ERROR_CAUSES = Object.freeze([
+export const ERROR_CAUSES = objectFreeze([
   'DSL_ERROR',
   'TIMEOUT',
   'DSL_NOT_FOUND',
@@ -35,22 +48,25 @@ export const ERROR_CAUSES = Object.freeze([
 /** One cause of `ERROR_CAUSES`. */
 export type ErrorCause = (typeof ERROR_CAUSES)[number];
 
-const CAUSES: ReadonlySet<string> = new Set<string>(ERROR_CAUSES);
+const CAUSES: ReadonlySet<string> = new NativeSet<string>(ERROR_CAUSES);
 
 /** The cause of an `ERROR` `detail`: the text before its first `:`, if any. */
 function causeOf(detail: string): string | undefined {
-  const colon = detail.indexOf(':');
-  return colon < 0 ? undefined : detail.slice(0, colon);
+  const colon = stringIndexOf(detail, ':');
+  return colon < 0 ? undefined : stringSlice(detail, 0, colon);
 }
 
 /** True when `detail` is `<CAUSE>: <message>` with a cause of `ERROR_CAUSES`. */
 export function hasErrorCause(detail: string): boolean {
   const cause = causeOf(detail);
-  return cause !== undefined && CAUSES.has(cause);
+  return cause !== undefined && setHas(CAUSES, cause);
 }
 
 /** The causes of a pending `ERROR` after which a carrier fired: its condition held (R18). */
-const FIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>(['INVALID_PARAMS', 'MODEL_ERROR']);
+const FIRING_CAUSES: ReadonlySet<string> = new NativeSet<ErrorCause>([
+  'INVALID_PARAMS',
+  'MODEL_ERROR',
+]);
 
 /**
  * The causes of a pending `ERROR` after which a carrier did not fire: its condition failed
@@ -58,7 +74,7 @@ const FIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>(['INVALID_PARAMS'
  * `INVALID_RULE`, `TEMPORAL_OVERLAP`; `NOT_A_COLLECTION` and `INVALID_GROUP_VALUE`, its
  * instances not formed, D-2).
  */
-const UNFIRING_CAUSES: ReadonlySet<string> = new Set<ErrorCause>([
+const UNFIRING_CAUSES: ReadonlySet<string> = new NativeSet<ErrorCause>([
   'DSL_ERROR',
   'TIMEOUT',
   'DSL_NOT_FOUND',
@@ -84,8 +100,8 @@ function firedOf(entry: ProofPending): boolean | undefined {
   if (entry.reason === 'PENDING_CARRIER') return false;
   if (entry.reason !== 'ERROR') return undefined;
   const cause = causeOf(entry.detail) ?? '';
-  if (FIRING_CAUSES.has(cause)) return true;
-  if (UNFIRING_CAUSES.has(cause)) return false;
+  if (setHas(FIRING_CAUSES, cause)) return true;
+  if (setHas(UNFIRING_CAUSES, cause)) return false;
   return undefined;
 }
 
@@ -99,7 +115,7 @@ export function firedProblems(p: ProofView, problems: string[]): void {
     if (entry.fired === undefined) continue;
     const fixed = firedOf(entry);
     if (fixed !== undefined && fixed !== entry.fired) {
-      problems.push(`fired contradicts its reason: ${citeName(instanceKey(entry))}`);
+      arrayPush(problems, `fired contradicts its reason: ${citeName(instanceKey(entry))}`);
     }
   }
 }
@@ -128,42 +144,42 @@ export function pendingCarrierProblems(
   problems: string[],
   carriersHidden: (message: string) => boolean = () => false,
 ): void {
-  const holds = new Map<ProofPending, Hold | 'open'>();
+  const holds = new NativeMap<ProofPending, Hold | 'open'>();
   const follow = (start: ProofPending): void => {
     const path: ProofPending[] = [];
     let entry = start;
     let last: Hold;
     for (;;) {
-      const known = holds.get(entry);
+      const known = mapGet(holds, entry);
       if (known !== undefined) {
         last = known === 'root' ? 'root' : 'rootless';
         break;
       }
-      holds.set(entry, 'open');
-      path.push(entry);
+      mapSet(holds, entry, 'open');
+      arrayPush(path, entry);
       const link = entry.carrier;
-      const carrier = link === undefined ? undefined : waiting.get(instanceKey(link));
+      const carrier = link === undefined ? undefined : mapGet(waiting, instanceKey(link));
       if (carrier === undefined || carrier.fired !== false) {
-        holds.set(entry, 'none');
-        path.pop();
+        mapSet(holds, entry, 'none');
+        arrayPop(path);
         last = 'rootless';
         break;
       }
       if (carrier.reason !== 'PENDING_CARRIER') {
-        holds.set(entry, 'root');
-        path.pop();
+        mapSet(holds, entry, 'root');
+        arrayPop(path);
         last = 'root';
         break;
       }
       entry = carrier;
     }
-    for (const passed of path) holds.set(passed, last);
+    for (const passed of path) mapSet(holds, passed, last);
   };
   for (const entry of p.pending) {
     if (full(problems)) return;
     if (entry.reason !== 'PENDING_CARRIER') continue;
-    if (!holds.has(entry)) follow(entry);
-    const hold = holds.get(entry);
+    if (!mapHas(holds, entry)) follow(entry);
+    const hold = mapGet(holds, entry);
     const at = citeName(instanceKey(entry));
     const problem =
       hold === 'none'
@@ -172,13 +188,14 @@ export function pendingCarrierProblems(
           ? `pending carrier without a root: ${at}`
           : undefined;
     // The carrier or the root may be the redacted entry.
-    if (problem !== undefined && !carriersHidden(problem)) problems.push(problem);
+    if (problem !== undefined && !carriersHidden(problem)) arrayPush(problems, problem);
     const carrier =
-      entry.carrier === undefined ? undefined : waiting.get(instanceKey(entry.carrier));
+      entry.carrier === undefined ? undefined : mapGet(waiting, instanceKey(entry.carrier));
     if (carrier === undefined) continue;
-    if (carrier.stratum > entry.stratum) problems.push(`pending carrier after its target: ${at}`);
+    if (carrier.stratum > entry.stratum)
+      arrayPush(problems, `pending carrier after its target: ${at}`);
     if (!inScope(carrier.subject, entry.subject)) {
-      problems.push(`pending carrier out of scope: ${at}`);
+      arrayPush(problems, `pending carrier out of scope: ${at}`);
     }
   }
 }

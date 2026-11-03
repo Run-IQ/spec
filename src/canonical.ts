@@ -1,9 +1,30 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from './errors.js';
+import {
+  NativeRangeError,
+  NativeSet,
+  NativeString,
+  arrayIsArray,
+  arrayPop,
+  arrayPush,
+  arraySort,
+  isoOf,
+  numberIsFinite,
+  numberIsNaN,
+  numberIsSafeInteger,
+  objectDefineProperty,
+  objectIs,
+  objectKeys,
+  setAdd,
+  setDelete,
+  setHas,
+  stringStartsWith,
+} from './intrinsics.js';
 import { withSha256, writeJsonString } from './stream.js';
 import type { TextOut } from './stream.js';
 import {
   dateTimeOf,
+  notADateMessage,
   hasLoneSurrogate,
   holeMessage,
   isPlainObject,
@@ -130,8 +151,9 @@ export function toJsonDocument(
   value: unknown,
   path: string,
   freeFormAt: (depth: number, key: string) => boolean,
+  guarded = false,
 ): JsonValue {
-  const options = { guarded: false, maxDepth: MAX_JSON_DEPTH, freeForm: false, freeFormAt };
+  const options = { guarded, maxDepth: MAX_JSON_DEPTH, freeForm: false, freeFormAt };
   return write(value, path, options, new ValueSink());
 }
 
@@ -165,15 +187,15 @@ class StreamSink implements Sink<void> {
 
   leaf(value: Leaf): void {
     this.before();
-    if (typeof value === 'number') this.out.text(String(value));
+    if (typeof value === 'number') this.out.text(NativeString(value));
     else if (typeof value === 'string') writeJsonString(this.out, value);
-    else this.out.text(value === null ? 'null' : String(value));
+    else this.out.text(value === null ? 'null' : NativeString(value));
   }
 
   open(array: boolean): void {
     this.before();
     this.out.text(array ? '[' : '{');
-    this.containers.push({ array, written: false });
+    arrayPush(this.containers, { array, written: false });
   }
 
   key(name: string): void {
@@ -186,7 +208,7 @@ class StreamSink implements Sink<void> {
   }
 
   close(): void {
-    const top = this.containers.pop();
+    const top = arrayPop(this.containers);
     if (top !== undefined) this.out.text(top.array ? ']' : '}');
   }
 
@@ -217,7 +239,7 @@ class StringOut implements TextOut {
     try {
       this.value += piece;
     } catch (error) {
-      if (error instanceof RangeError) fail(this.path, 'too long to write as one string');
+      if (error instanceof NativeRangeError) fail(this.path, 'too long to write as one string');
       throw error;
     }
   }
@@ -232,7 +254,7 @@ class CompareOut implements TextOut {
 
   text(piece: string): void {
     if (!this.same) return;
-    if (this.expected.startsWith(piece, this.at)) this.at += piece.length;
+    if (stringStartsWith(this.expected, piece, this.at)) this.at += piece.length;
     else this.same = false;
   }
 
@@ -248,13 +270,13 @@ class ValueSink implements Sink<JsonValue> {
   private pending = '';
 
   leaf(value: Leaf): void {
-    this.add(Object.is(value, -0) ? 0 : value);
+    this.add(objectIs(value, -0) ? 0 : value);
   }
 
   open(array: boolean): void {
     const container: JsonValue[] | { [k: string]: JsonValue } = array ? [] : {};
     this.add(container);
-    this.containers.push(container);
+    arrayPush(this.containers, container);
   }
 
   key(name: string): void {
@@ -262,7 +284,7 @@ class ValueSink implements Sink<JsonValue> {
   }
 
   close(): void {
-    this.containers.pop();
+    arrayPop(this.containers);
   }
 
   result(): JsonValue {
@@ -272,10 +294,10 @@ class ValueSink implements Sink<JsonValue> {
   private add(value: JsonValue): void {
     const parent = this.containers[this.containers.length - 1];
     if (parent === undefined) this.root = value;
-    else if (Array.isArray(parent)) parent.push(value);
+    else if (arrayIsArray(parent)) arrayPush(parent, value);
     else {
       // Plain assignment would turn a `__proto__` key into a prototype change.
-      Object.defineProperty(parent, this.pending, {
+      objectDefineProperty(parent, this.pending, {
         value,
         enumerable: true,
         writable: true,
@@ -329,7 +351,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
       return fail(at, `a value that could not be read: ${reasonOf(error)}`);
     }
   };
-  const ancestors = new Set<object>();
+  const ancestors = new NativeSet<object>();
   const stack: Frame[] = [];
   /** The path of `member` of `parent` (the root without one), built only when needed. */
   const pathOf = (parent: Frame | undefined, member: string | number): string => {
@@ -355,7 +377,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
         sink.leaf(value);
         return;
       case 'number':
-        if (!Number.isFinite(value)) fail(pathOf(parent, member), String(value));
+        if (!numberIsFinite(value)) fail(pathOf(parent, member), NativeString(value));
         sink.leaf(value);
         return;
       case 'object':
@@ -372,17 +394,19 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
     const path = pathOf(parent, member);
     const time = read(path, () => dateTimeOf(node));
     if (time !== undefined) {
-      if (Number.isNaN(time)) fail(path, 'an invalid Date');
-      sink.leaf(new Date(time).toISOString());
+      if (numberIsNaN(time)) fail(path, 'an invalid Date');
+      sink.leaf(isoOf(time));
       return;
     }
-    if (ancestors.has(node)) fail(path, 'a circular reference');
+    const notDate = read(path, () => notADateMessage(node));
+    if (notDate !== undefined) fail(path, notDate);
+    if (setHas(ancestors, node)) fail(path, 'a circular reference');
     let keys: string[] | undefined;
     let length: number;
-    if (read(path, () => Array.isArray(node))) {
+    if (read(path, () => arrayIsArray(node))) {
       const claimed: unknown = read(path, () => (node as unknown[]).length);
       // Only a Proxy claims a length that is not a count.
-      if (typeof claimed !== 'number' || !Number.isSafeInteger(claimed) || claimed < 0) {
+      if (typeof claimed !== 'number' || !numberIsSafeInteger(claimed) || claimed < 0) {
         fail(path, 'an array with an invalid length');
       }
       length = claimed as number;
@@ -391,7 +415,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
         const name = read(path, () => constructorName(node));
         fail(path, `an instance of ${citeName(name)}`);
       }
-      keys = read(path, () => Object.keys(node).sort());
+      keys = read(path, () => arraySort(objectKeys(node)));
       length = keys.length;
     }
     if (length > 0 && stack.length >= maxDepth) {
@@ -405,9 +429,9 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
     if (!spendValues(length)) {
       throw newSpecError('NON_SERIALIZABLE', tooLargeMessage(path || '(root)'), path);
     }
-    ancestors.add(node);
+    setAdd(ancestors, node);
     sink.open(keys === undefined);
-    stack.push({ node, path, keys, length, freeForm, index: 0 });
+    arrayPush(stack, { node, path, keys, length, freeForm, index: 0 });
   };
   /** Element `i` of the array of `frame`, read once; a hole or an `undefined` is refused. */
   const element = (frame: Frame, i: number): unknown => {
@@ -427,8 +451,8 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
     const frame = stack[stack.length - 1];
     if (frame === undefined) break;
     if (frame.index >= frame.length) {
-      stack.pop();
-      ancestors.delete(frame.node);
+      arrayPop(stack);
+      setDelete(ancestors, frame.node);
       sink.close();
       continue;
     }

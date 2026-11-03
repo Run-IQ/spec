@@ -8,6 +8,19 @@ import {
   spendValues,
   tooLargeMessage,
 } from '../values.js';
+import {
+  NativeSet,
+  arrayEvery,
+  arrayFind,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arraySort,
+  objectKeys,
+  stringIncludes,
+  stringIndexOf,
+  stringSlice,
+} from '../intrinsics.js';
 
 /**
  * What a rule asks of one dimension of the input (D-18):
@@ -56,7 +69,7 @@ export function dimensionValueProblem(value: unknown, path: string): string | un
   if (typeof value !== 'string') return `${citeName(path)} must be a string`;
   if (value === '') return `${citeName(path)} must not be empty`;
   if (hasLoneSurrogate(value)) return loneSurrogateMessage(path);
-  const colon = value.indexOf(':');
+  const colon = stringIndexOf(value, ':');
   if (colon === 0) return `${citeName(path)} has an empty code system before ":"`;
   if (colon === value.length - 1) return `${citeName(path)} has an empty code after ":"`;
   return undefined;
@@ -67,10 +80,10 @@ export function dimensionValueProblem(value: unknown, path: string): string | un
  * for an unqualified value.
  */
 export function splitQualified(value: string): { system: string | undefined; code: string } {
-  const colon = value.indexOf(':');
+  const colon = stringIndexOf(value, ':');
   return colon < 0
     ? { system: undefined, code: value }
-    : { system: value.slice(0, colon), code: value.slice(colon + 1) };
+    : { system: stringSlice(value, 0, colon), code: stringSlice(value, colon + 1) };
 }
 
 type Add = (path: string, message: string) => void;
@@ -112,7 +125,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     valid = false;
     add(at, message);
   };
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) {
     fail(path, tooLargeMessage(path));
     return undefined;
@@ -122,7 +135,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     const member = value[key];
     // A member whose value is `undefined` is absent, known or not.
     if (member === undefined) continue;
-    if (!SPEC_KEYS.includes(key)) {
+    if (!arrayIncludes(SPEC_KEYS, key)) {
       fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
       continue;
     }
@@ -152,7 +165,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     );
   }
   if (anyOf !== undefined && except !== undefined) {
-    const repeated = except.find((v) => anyOf.includes(v));
+    const repeated = arrayFind(except, (v) => arrayIncludes(anyOf, v));
     if (repeated !== undefined) {
       fail(`${path}.except`, `${citeName(path)}.except repeats anyOf value ${quoteText(repeated)}`);
     }
@@ -177,7 +190,7 @@ function readValues(
   plain: boolean,
   fail: Add,
 ): string[] | undefined {
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     fail(
       path,
       `${citeName(path)} must be ${required ? 'a non-empty array' : 'an array'} of values`,
@@ -185,7 +198,7 @@ function readValues(
     return undefined;
   }
   const items = readList(value, path);
-  if (!Array.isArray(items)) {
+  if (!arrayIsArray(items)) {
     fail(items.path, items.message);
     return undefined;
   }
@@ -194,18 +207,18 @@ function readValues(
     return undefined;
   }
   let valid = true;
-  items.forEach((item, i) => {
+  arrayForEach(items, (item, i) => {
     const at = `${path}[${i}]`;
     const problem = dimensionValueProblem(item, at);
     if (problem !== undefined) {
       valid = false;
       fail(at, problem);
-    } else if (plain && typeof item === 'string' && item.includes(':')) {
+    } else if (plain && typeof item === 'string' && stringIncludes(item, ':')) {
       valid = false;
       fail(at, `${citeName(at)} must not be qualified: the referential fixes the code system`);
     }
   });
-  return valid ? [...new Set(items as string[])].sort() : undefined;
+  return valid ? arraySort([...new NativeSet(items as string[])]) : undefined;
 }
 
 function normalForm(
@@ -257,7 +270,7 @@ export function sameDimensionSpec(a: unknown, b: unknown): boolean {
 }
 
 function sameList(a: readonly string[], b: readonly string[]): boolean {
-  return a.length === b.length && a.every((v, i) => v === b[i]);
+  return a.length === b.length && arrayEvery(a, (v, i) => v === b[i]);
 }
 
 /**

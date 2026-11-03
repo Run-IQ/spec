@@ -60,7 +60,6 @@ describe('EXCEPTION_MODEL', () => {
 
   it.each([
     ['absent', undefined],
-    ['null', null],
     ['an empty list', []],
   ])('requires exceptions: refuses them %s', (_label, exceptions) => {
     const value = { ...carrier, exceptions };
@@ -69,6 +68,19 @@ describe('EXCEPTION_MODEL', () => {
       'a rule of model "@run-iq/exception" only carries exceptions';
     expect(issuesOf(value)).toEqual([{ path: 'exceptions', message }]);
     expect(normalizeError(value)).toMatchObject({ code: 'INVALID_RULE', message });
+  });
+
+  it('refuses null exceptions, naming the field first', () => {
+    const value = { ...carrier, exceptions: null } as never;
+    expect(issuesOf(value).map((issue) => issue.message)).toEqual([
+      'exceptions is null: omit the field instead',
+      'exceptions must list at least one exception: ' +
+        'a rule of model "@run-iq/exception" only carries exceptions',
+    ]);
+    expect(normalizeError(value)).toMatchObject({
+      code: 'INVALID_RULE',
+      message: 'exceptions is null: omit the field instead',
+    });
   });
 
   it('refuses an output', () => {
@@ -101,9 +113,14 @@ describe('EXCEPTION_MODEL', () => {
     expect(normalizeError(value)).toMatchObject({ code: 'INVALID_RULE', message });
   });
 
-  it('accepts a null output, which means absent', () => {
-    expect(validateRuleDefinition({ ...carrier, output: null }).valid).toBe(true);
-    expect(computeRuleChecksum({ ...carrier, output: null })).toBe(computeRuleChecksum(carrier));
+  it('accepts an undefined output, which means absent; a null one is refused', () => {
+    expect(validateRuleDefinition({ ...carrier, output: undefined }).valid).toBe(true);
+    expect(computeRuleChecksum({ ...carrier, output: undefined })).toBe(
+      computeRuleChecksum(carrier),
+    );
+    expect(validateRuleDefinition({ ...carrier, output: null } as never).errors).toEqual([
+      'output is null: omit the field instead',
+    ]);
   });
 
   it('reports both problems at once', () => {

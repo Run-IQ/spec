@@ -5,6 +5,7 @@ import { specError } from './helpers.js';
 import { unsaltedSalt } from './proof-cases.js';
 import { unsalted } from './proof-cases.js';
 import { handSealed } from './helpers.js';
+import { withoutUnchecked } from './notices.js';
 
 type Entry = Record<string, unknown>;
 
@@ -104,7 +105,7 @@ function problems(c: Case): string[] {
   const content = proofOf(c);
   const proof = handSealed(content);
   expect(validateProof(proof).issues).toEqual([]);
-  const found = verifyProof(proof).issues.filter((issue) => issue !== 'unsigned');
+  const found = withoutUnchecked(verifyProof(proof).issues).filter((issue) => issue !== 'unsigned');
   const seal = (): unknown => sealProof(unsalted(content as unknown as UnsignedProof));
   const [first] = found;
   if (first === undefined) expect(seal).not.toThrow();

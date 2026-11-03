@@ -17,6 +17,20 @@ import {
 import type { Add, Reader } from './read.js';
 import { ASSERTION_METHODS, ASSERTION_STATUSES } from './types.js';
 import type { AssertionMethod, AssertionStatus, FactAssertion } from './types.js';
+import {
+  arrayFilter,
+  arrayIncludes,
+  arrayJoin,
+  arraySome,
+  arraySort,
+  mapGet,
+  mapHas,
+  reflectOwnKeys,
+  regExpTest,
+  setSize,
+  stringCharCodeAt,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 const ASSERTION_KEYS: readonly string[] = [
   'by',
@@ -60,12 +74,13 @@ export function governingAssertion(
   pointer: JsonPointer,
 ): { pointer: JsonPointer; assertion: FactAssertion } | undefined {
   parseReadPointer(pointer);
-  const keys = guarded('assertions', () => Reflect.ownKeys(assertions));
+  const keys = guarded('assertions', () => reflectOwnKeys(assertions));
   // A valid pointer has one written form, so a key covers `pointer` exactly when its text
   // starts `pointer`'s at a segment boundary: no prefix of `pointer` is ever built.
-  const covering = keys
-    .filter((key): key is string => typeof key === 'string' && covers(key, pointer))
-    .sort((a, b) => b.length - a.length);
+  const covering = arraySort(
+    arrayFilter(keys, (key): key is string => typeof key === 'string' && covers(key, pointer)),
+    (a, b) => b.length - a.length,
+  );
   for (const key of covering) {
     const found = guarded('assertions', () => assertions[key]);
     if (found !== undefined) return { pointer: key, assertion: found };
@@ -75,8 +90,8 @@ export function governingAssertion(
 
 /** True when the pointer `key` names `pointer` or one of its ancestors (segment-wise). */
 function covers(key: string, pointer: string): boolean {
-  if (!pointer.startsWith(key)) return false;
-  return pointer.length === key.length || pointer.charCodeAt(key.length) === SLASH;
+  if (!stringStartsWith(pointer, key)) return false;
+  return pointer.length === key.length || stringCharCodeAt(pointer, key.length) === SLASH;
 }
 
 const SLASH = 0x2f;
@@ -150,16 +165,16 @@ export function assertionKeyProblem(key: string): string | undefined {
   } catch {
     return `assertion key ${quoted} must be a JSON pointer`;
   }
-  if (segments.includes('-')) {
+  if (arrayIncludes(segments, '-')) {
     return `assertion key ${quoted} must not hold "-": it is not an index`;
   }
   const [head, ...rest] = segments;
-  if (head === undefined || !head.startsWith('$')) return undefined;
+  if (head === undefined || !stringStartsWith(head, '$')) return undefined;
   const name = rest[0];
   // A date or dimension name is never empty and never starts with `$` (ruling 9G round 2).
   const named =
     (head === '$dates' || head === '$dimensions') &&
-    (name === undefined || (rest.length === 1 && name !== '' && !name.startsWith('$')));
+    (name === undefined || (rest.length === 1 && name !== '' && !stringStartsWith(name, '$')));
   return named
     ? undefined
     : `assertion key ${quoted} must name a fact, /$dates/<name> or /$dimensions/<name>`;
@@ -185,17 +200,20 @@ export function readAssertion(
     'source? }';
   if (!expectPlainObject(value, path, shape, add, label)) return undefined;
   const fields = readFields(value, path, label, ASSERTION_KEYS, reader, { add });
-  if (fields === undefined || fields.failed.size > 0) valid = false;
+  if (fields === undefined || setSize(fields.failed) > 0) valid = false;
   if (fields === undefined) return undefined;
   requireFields(fields, path, REQUIRED_KEYS, add);
-  const field = (key: string): unknown => fields.values.get(key);
-  const has = (key: string): boolean => fields.values.has(key);
+  const field = (key: string): unknown => mapGet(fields.values, key);
+  const has = (key: string): boolean => mapHas(fields.values, key);
   const at = (key: string): string => childPointer(path, key);
 
   if (has('by')) checkText(field('by'), at('by'), add);
   const method = field('method');
   if (has('method') && !isAssertionMethod(method)) {
-    add(at('method'), `${citeName(at('method'))} must be one of ${ASSERTION_METHODS.join(', ')}`);
+    add(
+      at('method'),
+      `${citeName(at('method'))} must be one of ${arrayJoin(ASSERTION_METHODS, ', ')}`,
+    );
   }
   const when = field('at');
   if (has('at') && !isCivilDate(when) && !isInstant(when)) {
@@ -203,7 +221,10 @@ export function readAssertion(
   }
   const status = field('status');
   if (has('status') && !isAssertionStatus(status)) {
-    add(at('status'), `${citeName(at('status'))} must be one of ${ASSERTION_STATUSES.join(', ')}`);
+    add(
+      at('status'),
+      `${citeName(at('status'))} must be one of ${arrayJoin(ASSERTION_STATUSES, ', ')}`,
+    );
   }
   if (has('basis')) checkText(field('basis'), at('basis'), add);
   const evidence = field('evidenceDigest');
@@ -249,15 +270,15 @@ export function readAssertion(
 }
 
 function isAssertionMethod(value: unknown): value is AssertionMethod {
-  return ASSERTION_METHODS.some((method) => method === value);
+  return arraySome(ASSERTION_METHODS, (method) => method === value);
 }
 
 function isAssertionStatus(value: unknown): value is AssertionStatus {
-  return ASSERTION_STATUSES.some((status) => status === value);
+  return arraySome(ASSERTION_STATUSES, (status) => status === value);
 }
 
 function isSha256(value: unknown): value is string {
-  return typeof value === 'string' && SHA256_HEX.test(value);
+  return typeof value === 'string' && regExpTest(SHA256_HEX, value);
 }
 
 /**
@@ -271,7 +292,7 @@ function readSourceField(
   add: Add,
   reader: Reader,
 ): FactAssertion['source'] {
-  const present = fields.has('source');
+  const present = mapHas(fields, 'source');
   if (method === 'decision' && !present) {
     add(path, `${citeName(path)} is required with method "decision"`);
     return undefined;
@@ -281,7 +302,7 @@ function readSourceField(
     add(path, `${citeName(path)} is only allowed with method "decision"`);
     return undefined;
   }
-  return readSource(fields.get('source'), path, add, reader);
+  return readSource(mapGet(fields, 'source'), path, add, reader);
 }
 
 function readSource(
@@ -295,26 +316,26 @@ function readSource(
   }
   const fields = readFields(value, path, path, SOURCE_KEYS, reader, { add });
   if (fields === undefined) return undefined;
-  let valid = fields.failed.size === 0;
+  let valid = setSize(fields.failed) === 0;
   const fail: Add = (at, message) => {
     valid = false;
     add(at, message);
   };
   requireFields(fields, path, ['proofDigest', 'output'], fail);
-  const digest = fields.values.get('proofDigest');
+  const digest = mapGet(fields.values, 'proofDigest');
   const digestPath = childPointer(path, 'proofDigest');
-  if (fields.values.has('proofDigest') && !isSha256(digest)) {
+  if (mapHas(fields.values, 'proofDigest') && !isSha256(digest)) {
     fail(digestPath, `${citeName(digestPath)} must be a lowercase sha256 hex string`);
   }
-  const output = fields.values.get('output');
+  const output = mapGet(fields.values, 'output');
   const outputPath = childPointer(path, 'output');
-  if (fields.values.has('output') && checkText(output, outputPath, fail)) {
+  if (mapHas(fields.values, 'output') && checkText(output, outputPath, fail)) {
     const problem = citedNameProblem(output, outputPath, 'output');
     if (problem !== undefined) fail(outputPath, problem);
   }
-  const subject = fields.values.get('subject');
+  const subject = mapGet(fields.values, 'subject');
   const subjectPath = childPointer(path, 'subject');
-  if (fields.values.has('subject') && !isSubject(subject)) {
+  if (mapHas(fields.values, 'subject') && !isSubject(subject)) {
     fail(
       subjectPath,
       `${citeName(subjectPath)} must be a subject: a JSON pointer whose reserved segments are ` +

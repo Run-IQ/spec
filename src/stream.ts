@@ -1,5 +1,15 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import {
+  NativeUint8Array,
+  jsonStringify,
+  mathMin,
+  stringCharCodeAt,
+  stringSlice,
+  uint8ArrayLength,
+  uint8ArraySet,
+  uint8ArraySubarray,
+} from './intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: hashing a text without ever building it whole. Every digest of
@@ -50,7 +60,7 @@ interface NobleHash<T> {
  * `digestInto`, fed bytes and texts (UTF-8) in between through one fixed buffer.
  */
 export class HashStream implements TextOut {
-  private readonly buffer = new Uint8Array(STREAM_BUFFER_BYTES);
+  private readonly buffer = new NativeUint8Array(STREAM_BUFFER_BYTES);
   private used = 0;
   private pending = '';
   private readonly reset: () => void;
@@ -92,16 +102,16 @@ export class HashStream implements TextOut {
   /** Writes `bytes`. */
   bytes(bytes: Uint8Array): void {
     this.encodePending();
-    if (bytes.length > STREAM_BUFFER_BYTES - this.used) {
+    if (uint8ArrayLength(bytes) > STREAM_BUFFER_BYTES - this.used) {
       this.flush();
-      if (bytes.length >= STREAM_BUFFER_BYTES) {
-        hashWork.bytes += bytes.length;
+      if (uint8ArrayLength(bytes) >= STREAM_BUFFER_BYTES) {
+        hashWork.bytes += uint8ArrayLength(bytes);
         this.update(bytes);
         return;
       }
     }
-    this.buffer.set(bytes, this.used);
-    this.used += bytes.length;
+    uint8ArraySet(this.buffer, bytes, this.used);
+    this.used += uint8ArrayLength(bytes);
   }
 
   /**
@@ -137,12 +147,12 @@ export class HashStream implements TextOut {
   private encode(text: string): void {
     let at = 0;
     while (at < text.length) {
-      let end = Math.min(text.length, at + TEXT_PIECE);
-      const last = text.charCodeAt(end - 1);
+      let end = mathMin(text.length, at + TEXT_PIECE);
+      const last = stringCharCodeAt(text, end - 1);
       if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
       if (STREAM_BUFFER_BYTES - this.used < (end - at) * 3) this.flush();
-      const piece = at === 0 && end === text.length ? text : text.slice(at, end);
-      this.used += encoder.encodeInto(piece, this.buffer.subarray(this.used)).written;
+      const piece = at === 0 && end === text.length ? text : stringSlice(text, at, end);
+      this.used += encoder.encodeInto(piece, uint8ArraySubarray(this.buffer, this.used)).written;
       at = end;
     }
   }
@@ -150,7 +160,7 @@ export class HashStream implements TextOut {
   private flush(): void {
     if (this.used === 0) return;
     hashWork.bytes += this.used;
-    this.update(this.buffer.subarray(0, this.used));
+    this.update(uint8ArraySubarray(this.buffer, 0, this.used));
     this.used = 0;
   }
 }
@@ -162,16 +172,16 @@ export class HashStream implements TextOut {
  */
 export function writeJsonString(out: TextOut, text: string): void {
   if (text.length <= TEXT_PIECE) {
-    out.text(JSON.stringify(text));
+    out.text(jsonStringify(text));
     return;
   }
   out.text('"');
   let at = 0;
   while (at < text.length) {
-    let end = Math.min(text.length, at + TEXT_PIECE);
-    const last = text.charCodeAt(end - 1);
+    let end = mathMin(text.length, at + TEXT_PIECE);
+    const last = stringCharCodeAt(text, end - 1);
     if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
-    out.text(JSON.stringify(text.slice(at, end)).slice(1, -1));
+    out.text(stringSlice(jsonStringify(stringSlice(text, at, end)), 1, -1));
     at = end;
   }
   out.text('"');
@@ -190,7 +200,7 @@ export function withSha256(use: (stream: HashStream) => void): Uint8Array {
   idleSha256 = undefined;
   try {
     use(stream.start());
-    const out = new Uint8Array(32);
+    const out = new NativeUint8Array(32);
     stream.digestInto(out);
     return out;
   } finally {

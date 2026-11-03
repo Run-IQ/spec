@@ -11,6 +11,7 @@ import { specError } from './helpers.js';
 import { baseContent, entries, salted, unsaltedSalt } from './proof-cases.js';
 import { unsalted } from './proof-cases.js';
 import { handSealed } from './helpers.js';
+import { withoutUnchecked } from './notices.js';
 
 const hex = (c: string): string => c.repeat(64);
 
@@ -24,7 +25,7 @@ export type Entry = Record<string, unknown>;
 export function problems(content: Content): string[] {
   const proof = handSealed(content);
   expect(validateProof(proof).issues).toEqual([]);
-  const found = verifyProof(proof).issues.filter((issue) => issue !== 'unsigned');
+  const found = withoutUnchecked(verifyProof(proof).issues).filter((issue) => issue !== 'unsigned');
   // The cast lets a hand-built value reach sealProof, which checks it.
   const seal = (): unknown => sealProof(unsalted(content as unknown as UnsignedProof));
   const [first] = found;

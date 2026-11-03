@@ -21,8 +21,24 @@ import type {
   UnsaltedProof,
   UnsignedProof,
 } from './types.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayForEach,
+  arrayIsArray,
+  arrayJoin,
+  arrayMap,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  numberIsSafeInteger,
+  setAdd,
+  setHas,
+  stringIncludes,
+} from '../intrinsics.js';
 
-const SEAL_KEYS: ReadonlySet<string> = new Set(['digest', 'signature']);
+const SEAL_KEYS: ReadonlySet<string> = new NativeSet(['digest', 'signature']);
 
 /**
  * Checks a decision proof without throwing and reports every problem found, each with its path
@@ -89,8 +105,8 @@ export function validateProof(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
-  const { issues } = withValueBudget(() => collect(value, DECISION_PROOF, new Set()));
-  return { errors: issues.map((issue) => issue.message), issues };
+  const { issues } = withValueBudget(() => collect(value, DECISION_PROOF, new NativeSet()));
+  return { errors: arrayMap(issues, (issue) => issue.message), issues };
 }
 
 /** Internal: a proof read by `readDecisionProof` or `readUnsignedProof`. */
@@ -107,11 +123,11 @@ export type ProofRead<T> = { proof: T; errors: [] } | { proof: undefined; errors
 export function readDecisionProof(value: unknown, forSigning = false): ProofRead<DecisionProof> {
   const reserve = forSigning ? signatureReserve : undefined;
   const { issues, snapshot } = withValueBudget(() =>
-    collect(value, DECISION_PROOF, new Set(), reserve),
+    collect(value, DECISION_PROOF, new NativeSet(), reserve),
   );
   return conforms<DecisionProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
-    : { proof: undefined, errors: issues.map((issue) => issue.message) };
+    : { proof: undefined, errors: arrayMap(issues, (issue) => issue.message) };
 }
 
 /**
@@ -122,7 +138,7 @@ export function readProofContent(value: unknown): ProofRead<UnsignedProof> {
   const { issues, snapshot } = withValueBudget(() => collect(value, UNSIGNED_PROOF, SEAL_KEYS));
   return conforms<UnsignedProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
-    : { proof: undefined, errors: issues.map((issue) => issue.message) };
+    : { proof: undefined, errors: arrayMap(issues, (issue) => issue.message) };
 }
 
 /**
@@ -137,7 +153,7 @@ export function readUnsaltedProof(value: unknown): ProofRead<UnsaltedProof> {
   );
   return conforms<UnsaltedProof>(snapshot, issues)
     ? { proof: snapshot, errors: [] }
-    : { proof: undefined, errors: issues.map((issue) => issue.message) };
+    : { proof: undefined, errors: arrayMap(issues, (issue) => issue.message) };
 }
 
 /**
@@ -163,21 +179,21 @@ export function readProofLeaf(value: unknown): { leaf?: ProofLeaf; errors: strin
   let leaf: ProofLeaf | undefined;
   try {
     withValueBudget(() => {
-      const read = checkObject(value, '', LEAF, add, new Set());
+      const read = checkObject(value, '', LEAF, add, new NativeSet());
       if (read === undefined) return;
       const { s, i } = read.copy;
-      const isSection = PROOF_SECTIONS.some((section) => section === s);
+      const isSection = arraySome(PROOF_SECTIONS, (section) => section === s);
       if (s !== 'header' && !isSection) {
-        add('s', `s must be header or a section: ${PROOF_SECTIONS.join(', ')}`);
+        add('s', `s must be header or a section: ${arrayJoin(PROOF_SECTIONS, ', ')}`);
         return;
       }
       if (s === 'header' && i !== undefined) add('i', 'i applies only to an entry of a section');
       if (s !== 'header' && i === undefined) add('i', 'i is required for an entry of a section');
-      const entry = read.members.get('e');
+      const entry = mapGet(read.members, 'e');
       if (entry === undefined) return;
       const copy =
         s === 'header'
-          ? checkObject(entry, 'e', PROOF_HEADER, add, new Set())?.copy
+          ? checkObject(entry, 'e', PROOF_HEADER, add, new NativeSet())?.copy
           : SECTION_ENTRY[s as ProofSection](entry, 'e', add);
       // Checked: a plain copy of a header or of an entry of `s`.
       leaf = { ...read.copy, e: copy } as ProofLeaf;
@@ -185,7 +201,7 @@ export function readProofLeaf(value: unknown): { leaf?: ProofLeaf; errors: strin
   } catch (error) {
     return { errors: [unreadableMessage('leaf', error)] };
   }
-  const errors = issues.toArray().map((issue) => issue.message);
+  const errors = arrayMap(issues.toArray(), (issue) => issue.message);
   return errors.length === 0 && leaf !== undefined ? { leaf, errors } : { errors };
 }
 
@@ -197,7 +213,7 @@ const LEAF: Shape = {
       if (typeof value !== 'string') add(path, `${citeName(path)} must be a string`);
     }),
     i: scalarCheck((value, path, add) => {
-      if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) {
+      if (typeof value !== 'number' || !numberIsSafeInteger(value) || value < 0) {
         add(path, `${citeName(path)} must be a non-negative integer`);
       }
     }),
@@ -215,7 +231,7 @@ const COUNTS_VALUES = 1 + PROOF_SECTIONS.length;
  * among them: the content sealed has none) and its `digest`.
  */
 function digestReserve(members: ReadonlyMap<string, unknown>): number {
-  return COUNTS_VALUES + (members.has('digest') ? 0 : 1);
+  return COUNTS_VALUES + (mapHas(members, 'digest') ? 0 : 1);
 }
 
 /**
@@ -223,8 +239,8 @@ function digestReserve(members: ReadonlyMap<string, unknown>): number {
  * three members, less those already counted (a valid `signature` has exactly three).
  */
 function signatureReserve(members: ReadonlyMap<string, unknown>): number {
-  if (!members.has('signature')) return 4;
-  return members.get('signature') === undefined ? 3 : 0;
+  if (!mapHas(members, 'signature')) return 4;
+  return mapGet(members, 'signature') === undefined ? 3 : 0;
 }
 
 /** `issues` are those found while reading `snapshot` as a `T`: none means it is a `T`. */
@@ -272,22 +288,22 @@ function collect(
  */
 function checkUniqueRules(rules: unknown, add: Add): void {
   // The list itself was checked (and any problem of it reported) by the shape of `rules`.
-  if (!Array.isArray(rules)) return;
-  const seen = new Set<string>();
-  rules.forEach((rule: unknown, i) => {
+  if (!arrayIsArray(rules)) return;
+  const seen = new NativeSet<string>();
+  arrayForEach(rules, (rule: unknown, i) => {
     if (
       !isPlainObject(rule) ||
       typeof rule.id !== 'string' ||
       rule.id === '' ||
-      rule.id.includes(':') ||
+      stringIncludes(rule.id, ':') ||
       !isRuleSetId(rule.ruleSet) ||
       !isRuleVersion(rule.version)
     ) {
       return;
     }
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
-    if (seen.has(key)) add(`rules[${i}]`, `rules[${i}] repeats ${citeName(key)}`);
-    seen.add(key);
+    if (setHas(seen, key)) add(`rules[${i}]`, `rules[${i}] repeats ${citeName(key)}`);
+    setAdd(seen, key);
   });
 }
 
@@ -302,7 +318,7 @@ function checkCounts(content: Record<string, unknown> | undefined, add: Add): vo
   for (const section of PROOF_SECTIONS) {
     const list = content?.[section];
     const count = counts[section];
-    if (!Array.isArray(list) || typeof count !== 'number' || count === list.length) continue;
+    if (!arrayIsArray(list) || typeof count !== 'number' || count === list.length) continue;
     const entries = list.length === 1 ? 'entry' : 'entries';
     const at = `counts.${section}`;
     add(at, `${at} is ${count}, ${section} has ${list.length} ${entries}`);
@@ -316,15 +332,15 @@ function checkCounts(content: Record<string, unknown> | undefined, add: Add): vo
  */
 function checkRepeatedLeaves(content: Record<string, unknown> | undefined, add: Add): void {
   if (content === undefined) return;
-  const first = new Map<string, string>();
+  const first = new NativeMap<string, string>();
   for (const section of PROOF_SECTIONS) {
     const list = content[section];
-    if (!Array.isArray(list)) continue;
-    list.forEach((entry: unknown, i) => {
+    if (!arrayIsArray(list)) continue;
+    arrayForEach(list, (entry: unknown, i) => {
       if (!isPlainObject(entry) || typeof entry.redacted !== 'string') return;
       const at = `${section}[${i}]`;
-      const seen = first.get(entry.redacted);
-      if (seen === undefined) first.set(entry.redacted, at);
+      const seen = mapGet(first, entry.redacted);
+      if (seen === undefined) mapSet(first, entry.redacted, at);
       else add(at, `${at} repeats the redacted leaf of ${seen}`);
     });
   }

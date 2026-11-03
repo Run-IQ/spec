@@ -16,7 +16,14 @@ import {
 } from '../values.js';
 import { isTimeZone, readReferenceDate, timeZoneMessage } from '../time/civil.js';
 import type { CivilDate, Instant } from '../time/civil.js';
-import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { isRuleVersion } from './definition.js';
+import {
+  CHECKSUM_NOT_STRING,
+  EXTENSIONS_NOT_OBJECT,
+  nullFieldMessage,
+  unknownRuleFieldMessage,
+  unknownRuleKeys,
+} from './fields.js';
 import {
   isUnnamable,
   readDimensionSpec,
@@ -33,8 +40,15 @@ import { readForEach } from './forEach.js';
 import type { ForEach } from './forEach.js';
 import { citedNameProblem, isRuleSetId, LOCAL_RULE_SET, ruleSetIdMessage } from './ruleSet.js';
 import { effectiveOnContextProblem, effectiveOnIssue, windowShapeProblem } from './window.js';
+import {
+  arrayEvery,
+  arrayForEach,
+  arrayIsArray,
+  numberIsFinite,
+  objectKeys,
+  stringIncludes,
+} from '../intrinsics.js';
 
-const RESERVED = new Set(RESERVED_RULE_FIELDS);
 const OPTIONAL_STRINGS = ['output', 'dominanceGroup', 'sourceRef'] as const;
 
 export type { RuleValidationIssue } from '../issues.js';
@@ -61,12 +75,18 @@ type Issues = IssueList;
  * not target, and an exception carrier's `<other set>:value` output (JSON Schema cannot relate
  * them to the rule's `ruleSet`). Each dimension must be a `DimensionSpec`; JSON
  * Schema cannot refuse an `except` value repeated in `anyOf`. Every text (a string field, a tag,
- * a dimension key or value, an extension key, any string inside `params`, `condition.value`,
+ * a dimension key or value, any string inside `params`, `condition.value`,
  * `forEach`, `exceptions` or an
  * extension) that holds a lone UTF-16 surrogate is refused, as `canonicalize` refuses it: a
  * valid rule always has a checksum. JSON Schema cannot express this check. Like
  * normalize, it also accepts `Date` objects for the dates and refuses non-JSON values (Map,
  * Set, class instances, functions, `NaN`, `Infinity`...).
+ *
+ * It refuses a top-level key that is not a reserved field (`unknown rule field: <key>`, with
+ * `(did you mean <field>?)` for a misspelling), whatever its value: what a plugin adds goes under
+ * `extensions`, a plain object of free-form JSON. It refuses `null` in an optional field
+ * (`<field> is null: omit the field instead`) and in `dimensions` (`dimensions.<name> is null:
+ * ...`), `effectiveUntil` and `checksum` included, as `normalizeRuleDefinition` does.
  *
  * `checksum` is ignored, as in normalize.
  *
@@ -96,8 +116,35 @@ export function validateRuleDefinition(value: unknown): {
   errors: string[];
   issues: RuleValidationIssue[];
 } {
+  return validateForm(value, false);
+}
+
+/**
+ * `validateRuleDefinition` for a rule in its normalized or stored form, as a consumer reads it
+ * back from a store (`hydrateRule`): the same checks, with one difference. `effectiveUntil:
+ * null`, the internal encoding of "no end" that `normalizeRuleDefinition` writes, is accepted.
+ * It accepts nothing else that the authored validator refuses, a `null` `checksum` and `null`
+ * in any other field included. Use it to list the problems of a row
+ * `toExecutableRule` refused; use `validateRuleDefinition` for what an author writes.
+ */
+export function validateStoredRuleDefinition(value: unknown): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
+  return validateForm(value, true);
+}
+
+function validateForm(
+  value: unknown,
+  stored: boolean,
+): {
+  valid: boolean;
+  errors: string[];
+  issues: RuleValidationIssue[];
+} {
   try {
-    return withValueBudget(() => definitionIssues(value));
+    return withValueBudget(() => definitionIssues(value, stored));
   } catch (error) {
     const unreadable = new IssueList();
     unreadable.add('', unreadableMessage('rule definition', error));
@@ -105,7 +152,10 @@ export function validateRuleDefinition(value: unknown): {
   }
 }
 
-function definitionIssues(value: unknown): {
+function definitionIssues(
+  value: unknown,
+  stored: boolean,
+): {
   valid: boolean;
   errors: string[];
   issues: RuleValidationIssue[];
@@ -115,18 +165,21 @@ function definitionIssues(value: unknown): {
     errors.add('', 'a rule definition must be a plain object');
     return result(errors);
   }
-  if (!spendValues(Object.keys(value).length)) {
+  if (!spendValues(objectKeys(value).length)) {
     errors.add('', tooLargeMessage('rule definition'));
     return result(errors);
   }
 
+  for (const key of unknownRuleKeys(value)) {
+    errors.add(citeName(key), unknownRuleFieldMessage(key));
+  }
   checkNonEmptyString(value.id, 'id', errors);
-  if (typeof value.id === 'string' && value.id.includes(':')) {
+  if (typeof value.id === 'string' && stringIncludes(value.id, ':')) {
     errors.add('id', 'id must not contain ":"');
   }
-  const ruleSetValue = value.ruleSet;
+  const ruleSetValue = given(value.ruleSet, 'ruleSet', errors);
   let ruleSet: string | undefined = LOCAL_RULE_SET;
-  if (ruleSetValue != null) {
+  if (ruleSetValue !== undefined) {
     ruleSet = isRuleSetId(ruleSetValue) ? ruleSetValue : undefined;
     if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet', ruleSetValue));
   }
@@ -134,62 +187,95 @@ function definitionIssues(value: unknown): {
   checkNonEmptyString(value.model, 'model', errors);
   if (value.params === undefined) errors.add('params', 'params is required');
   else checkJson(value.params, 'params', errors);
-  if (typeof value.priority !== 'number' || !Number.isFinite(value.priority)) {
+  if (typeof value.priority !== 'number' || !numberIsFinite(value.priority)) {
     errors.add('priority', 'priority must be a finite number');
   }
 
   const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
-  const until =
-    value.effectiveUntil == null ? null : checkDate(value.effectiveUntil, 'effectiveUntil', errors);
+  const untilValue = value.effectiveUntil;
+  if (untilValue === null && !stored) {
+    errors.add('effectiveUntil', nullFieldMessage('effectiveUntil'));
+  }
+  const checksum = value.checksum;
+  if (checksum === null) {
+    errors.add('checksum', nullFieldMessage('checksum'));
+  } else if (checksum !== undefined && typeof checksum !== 'string') {
+    errors.add('checksum', CHECKSUM_NOT_STRING);
+  }
+  const until = untilValue == null ? null : checkDate(untilValue, 'effectiveUntil', errors);
   if (from !== undefined && until !== undefined) {
     const problem = windowShapeProblem(from, until);
     if (problem !== undefined) errors.add('effectiveUntil', problem);
   }
-  if (value.timeZone != null && !isTimeZone(value.timeZone)) {
-    errors.add('timeZone', timeZoneMessage(value.timeZone));
+  const timeZone = given(value.timeZone, 'timeZone', errors);
+  if (timeZone !== undefined && !isTimeZone(timeZone)) {
+    errors.add('timeZone', timeZoneMessage(timeZone));
   }
-  const effectiveOn = value.effectiveOn;
-  const pointer = effectiveOn == null ? undefined : checkEffectiveOn(effectiveOn, errors);
+  const effectiveOn = given(value.effectiveOn, 'effectiveOn', errors);
+  const pointer = effectiveOn === undefined ? undefined : checkEffectiveOn(effectiveOn, errors);
 
-  if (value.condition != null) checkCondition(value.condition, errors);
+  const condition = given(value.condition, 'condition', errors);
+  if (condition !== undefined) checkCondition(condition, errors);
+  let output: unknown;
   for (const field of OPTIONAL_STRINGS) {
-    if (value[field] != null) checkNonEmptyString(value[field], field, errors);
+    const text = given(value[field], field, errors);
+    if (text !== undefined) checkNonEmptyString(text, field, errors);
+    if (field === 'output') output = text;
   }
-  const output = value.output;
   if (typeof output === 'string' && output !== '') {
     const problem = citedNameProblem(output, 'output', 'output');
     if (problem !== undefined) errors.add('output', problem);
   }
-  if (value.dimensions != null) checkDimensions(value.dimensions, errors);
-  if (value.tags != null) checkTags(value.tags, errors);
-  if (value.exceptions != null) checkExceptions(value.exceptions, ruleSet, errors);
+  const dimensions = given(value.dimensions, 'dimensions', errors);
+  if (dimensions !== undefined) checkDimensions(dimensions, errors);
+  const tags = given(value.tags, 'tags', errors);
+  if (tags !== undefined) checkTags(tags, errors);
+  const exceptions = given(value.exceptions, 'exceptions', errors);
+  if (exceptions !== undefined) checkExceptions(exceptions, ruleSet, errors);
   const modelIssues = exceptionModelIssues({
     model: value.model,
-    output: normalizedOutput(value.output, ruleSet),
-    exceptions: value.exceptions,
+    output: normalizedOutput(output, ruleSet),
+    exceptions,
   });
   for (const issue of modelIssues) errors.add(issue.path, issue.message);
 
   // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
-  const forEachValue = value.forEach;
-  const forEach = forEachValue == null ? null : checkForEach(forEachValue, errors);
+  const forEachValue = given(value.forEach, 'forEach', errors);
+  const forEach = forEachValue === undefined ? null : checkForEach(forEachValue, errors);
   if (pointer !== undefined && forEach !== undefined) {
     const problem = effectiveOnContextProblem(pointer, forEach ?? undefined);
     if (problem !== undefined) errors.add('effectiveOn', problem);
   }
 
-  for (const key of Object.keys(value)) {
-    if (RESERVED.has(key)) continue;
-    const extension = value[key];
-    if (extension == null) continue;
-    if (hasLoneSurrogate(key)) {
-      errors.add('', extensionKeyMessage(key));
-      continue;
-    }
-    toJsonOrIssue(extension, key, errors);
-  }
+  const extensions = given(value.extensions, 'extensions', errors);
+  if (extensions !== undefined) checkExtensions(extensions, errors);
 
   return result(errors);
+}
+
+/**
+ * `value` itself, read once; `undefined` when absent. `null` is refused, with the field named:
+ * a lost column must not widen a rule. The caller checks the value of a given field only.
+ */
+function given(value: unknown, field: string, errors: Issues): unknown {
+  if (value === null) {
+    errors.add(field, nullFieldMessage(field));
+    return undefined;
+  }
+  return value;
+}
+
+/** The `extensions` object: plain, free names, values free-form JSON; a name's `null` is refused. */
+function checkExtensions(value: unknown, errors: Issues): void {
+  if (!isPlainObject(value)) {
+    errors.add('extensions', EXTENSIONS_NOT_OBJECT);
+    return;
+  }
+  const json = toJsonOrIssue(value, 'extensions', errors);
+  if (!isPlainObject(json)) return;
+  for (const key of objectKeys(json)) {
+    if (json[key] === null) errors.add(`extensions.${key}`, nullFieldMessage(`extensions.${key}`));
+  }
 }
 
 function result(issues: Issues): {
@@ -204,11 +290,6 @@ function checkNonEmptyString(value: unknown, field: string, errors: Issues): voi
   if (typeof value !== 'string' || value === '') {
     errors.add(field, `${citeName(field)} must be a non-empty string`);
   } else if (hasLoneSurrogate(value)) errors.add(field, loneSurrogateMessage(field));
-}
-
-/** Internal: the message refusing an extension key that holds a lone UTF-16 surrogate. */
-export function extensionKeyMessage(key: string): string {
-  return `rule definition has an extension key with a lone UTF-16 surrogate: ${quoteText(key)}`;
 }
 
 /** Internal: the message refusing a dimension key that holds a lone UTF-16 surrogate. */
@@ -287,7 +368,7 @@ function checkCondition(value: unknown, errors: Issues): void {
     errors.add('condition', 'condition must be an object { dsl, value }');
     return;
   }
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) {
     errors.add('condition', tooLargeMessage('condition'));
     return;
@@ -308,7 +389,7 @@ function checkDimensions(value: unknown, errors: Issues): void {
     errors.add('dimensions', 'dimensions must be an object of dimension specs');
     return;
   }
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) {
     errors.add('dimensions', tooLargeMessage('dimensions'));
     return;
@@ -323,23 +404,27 @@ function checkDimensions(value: unknown, errors: Issues): void {
       errors.add(`dimensions.${key}`, reservedDimensionNameMessage(`dimensions.${key}`));
       continue;
     }
-    if (v == null) continue; // the dimension is unset: normalize drops the key
+    if (v === undefined) continue; // the dimension is unset: normalize drops the key
+    if (v === null) {
+      errors.add(`dimensions.${key}`, nullFieldMessage(`dimensions.${key}`));
+      continue;
+    }
     if (hasLoneSurrogate(key)) errors.add('dimensions', dimensionKeyMessage(key));
     else readDimensionSpec(v, `dimensions.${key}`, (path, message) => errors.add(path, message));
   }
 }
 
 function checkTags(value: unknown, errors: Issues): void {
-  const tags = Array.isArray(value) ? readList(value, 'tags') : undefined;
-  if (tags !== undefined && !Array.isArray(tags)) {
+  const tags = arrayIsArray(value) ? readList(value, 'tags') : undefined;
+  if (tags !== undefined && !arrayIsArray(tags)) {
     errors.add(tags.path, tags.message);
     return;
   }
-  if (!tags || !tags.every((t) => typeof t === 'string')) {
+  if (!tags || !arrayEvery(tags, (t) => typeof t === 'string')) {
     errors.add('tags', 'tags must be an array of strings');
     return;
   }
-  tags.forEach((tag, i) => {
+  arrayForEach(tags, (tag, i) => {
     if (tag === '') errors.add(`tags[${i}]`, `tags[${i}] must be a non-empty string`);
     else if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       errors.add(`tags[${i}]`, loneSurrogateMessage(`tags[${i}]`));

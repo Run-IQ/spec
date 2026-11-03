@@ -9,6 +9,7 @@ import {
   normalizeRuleDefinition,
   sha256Hex,
   SpecError,
+  VerifyOptionsError,
   toCanonicalDecimal,
   validateOutputDeclaration,
   validateProofInput,
@@ -470,13 +471,13 @@ describe('every exported function: hostile arguments give an own SpecError or a 
   const valid: unknown[] = [BASE_RULE, '2020-01-01', 'UTC', fixedCalendar];
   const functions = new Map<string, (...args: unknown[]) => unknown>();
   for (const [name, value] of [...Object.entries(api), ...Object.entries(canonicalEntry)]) {
-    if (typeof value === 'function' && value !== SpecError) {
+    if (typeof value === 'function' && value !== SpecError && value !== VerifyOptionsError) {
       functions.set(name, value as (...args: unknown[]) => unknown);
     }
   }
 
   it('covers every exported function', () => {
-    expect(functions.size).toBe(76);
+    expect(functions.size).toBe(77);
   });
 
   it.each([...functions.keys()])('%s', (name) => {
@@ -493,7 +494,7 @@ describe('every exported function: hostile arguments give an own SpecError or a 
             call(...args);
           } catch (error) {
             const bounded =
-              isOwnError(error) &&
+              (isOwnError(error) || error instanceof VerifyOptionsError) &&
               error.message.length <= 2048 &&
               (error.path === undefined || error.path.length <= 2048);
             if (!bounded) refused.push(`${label} at ${position}, others ${fill}`);

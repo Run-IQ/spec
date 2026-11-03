@@ -6,6 +6,14 @@ import { contentDigest } from './digest.js';
 import { proofView } from './redact.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
+import {
+  arrayPush,
+  regExpTest,
+  stringCharAt,
+  stringIndexOf,
+  uint8ArrayFrom,
+  uint8ArrayLength,
+} from '../intrinsics.js';
 
 const KEY_HEX = /^[0-9a-fA-F]{64}$/;
 const BASE64URL = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_';
@@ -75,7 +83,7 @@ export function signText(text: string, secretKey: Uint8Array): string {
 
 /** Internal: the 32 bytes of a hex ed25519 key (either case), or `undefined` if malformed. */
 export function keyBytes(hex: unknown): Uint8Array | undefined {
-  return typeof hex === 'string' && KEY_HEX.test(hex) ? hexToBytes(hex) : undefined;
+  return typeof hex === 'string' && regExpTest(KEY_HEX, hex) ? hexToBytes(hex) : undefined;
 }
 
 /**
@@ -107,14 +115,14 @@ export function signatureMatches(message: string, value: string, publicKey: Uint
 
 function toBase64Url(bytes: Uint8Array): string {
   let out = '';
-  for (let i = 0; i < bytes.length; i += 3) {
+  for (let i = 0; i < uint8ArrayLength(bytes); i += 3) {
     const a = bytes[i] ?? 0;
     const b = bytes[i + 1];
     const c = bytes[i + 2];
     const n = (a << 16) | ((b ?? 0) << 8) | (c ?? 0);
-    out += BASE64URL.charAt((n >> 18) & 63) + BASE64URL.charAt((n >> 12) & 63);
-    if (b !== undefined) out += BASE64URL.charAt((n >> 6) & 63);
-    if (c !== undefined) out += BASE64URL.charAt(n & 63);
+    out += stringCharAt(BASE64URL, (n >> 18) & 63) + stringCharAt(BASE64URL, (n >> 12) & 63);
+    if (b !== undefined) out += stringCharAt(BASE64URL, (n >> 6) & 63);
+    if (c !== undefined) out += stringCharAt(BASE64URL, n & 63);
   }
   return out;
 }
@@ -126,15 +134,15 @@ function fromBase64Url(text: string): Uint8Array | undefined {
   let buffer = 0;
   let bits = 0;
   for (const char of text) {
-    const digit = BASE64URL.indexOf(char);
+    const digit = stringIndexOf(BASE64URL, char);
     if (digit < 0) return undefined;
     buffer = ((buffer << 6) | digit) & 0xffff;
     bits += 6;
     if (bits >= 8) {
       bits -= 8;
-      bytes.push((buffer >> bits) & 0xff);
+      arrayPush(bytes, (buffer >> bits) & 0xff);
     }
   }
   if ((buffer & ((1 << bits) - 1)) !== 0) return undefined;
-  return Uint8Array.from(bytes);
+  return uint8ArrayFrom(bytes);
 }

@@ -9,12 +9,13 @@ import {
 import type { JsonValue, RuleDefinitionInput } from '../src/index.js';
 import { MAX_JSON_DEPTH } from '../src/values.js';
 import { nested, specError, tooDeepIssue } from './helpers.js';
+import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 
 /** Copy of `obj` without `key` (as if the property had never been written). */
 function without(obj: object, key: string): RuleDefinitionInput {
   const copy: Record<string, unknown> = { ...obj };
   delete copy[key];
-  return copy as RuleDefinitionInput;
+  return copy as unknown as RuleDefinitionInput;
 }
 
 const base = {
@@ -30,7 +31,7 @@ const base = {
 const FREE_FORM_FIELDS: [string, (value: JsonValue) => RuleDefinitionInput][] = [
   ['params', (value) => ({ ...base, params: value })],
   ['condition.value', (value) => ({ ...base, condition: { dsl: 'jsonlogic', value } })],
-  ['ext', (value) => ({ ...base, ext: value })],
+  ['extensions', (value) => ({ ...base, extensions: value as Record<string, JsonValue> })],
 ];
 
 const invalidDate = expect.objectContaining({ code: 'INVALID_DATE' });
@@ -67,8 +68,7 @@ describe('normalizeRuleDefinition: shape', () => {
       dominanceGroup: 'VAT',
       exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
       sourceRef: 'CGI art. 1',
-      jurisdiction: 'NATIONAL',
-      meta: { a: 1 },
+      extensions: { jurisdiction: 'NATIONAL', meta: { a: 1 } },
     });
     expect(def).toEqual({
       id: 'r1',
@@ -87,8 +87,7 @@ describe('normalizeRuleDefinition: shape', () => {
       dominanceGroup: 'VAT',
       exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
       sourceRef: 'CGI art. 1',
-      jurisdiction: 'NATIONAL',
-      meta: { a: 1 },
+      extensions: { jurisdiction: 'NATIONAL', meta: { a: 1 } },
     });
   });
 
@@ -106,7 +105,7 @@ describe('normalizeRuleDefinition: shape', () => {
       sourceRef: undefined,
       timeZone: undefined,
       effectiveOn: undefined,
-      jurisdiction: undefined,
+      extensions: undefined,
     });
     expect(Object.keys(def).sort()).toEqual(
       [
@@ -310,11 +309,18 @@ describe('normalizeRuleDefinition: validity window [from, until)', () => {
     }
   });
 
-  it('a null effectiveUntil goes with both forms', () => {
-    expect(normalizeRuleDefinition({ ...base, effectiveUntil: null }).effectiveUntil).toBeNull();
+  it('a null effectiveUntil is refused as authored, and accepted read back', () => {
+    const authored = { ...base, effectiveUntil: null } as unknown as RuleDefinitionInput;
+    expect(() => normalizeRuleDefinition(authored)).toThrow(
+      'effectiveUntil is null: omit the field instead',
+    );
+    expect(normalizeStoredRuleDefinition(authored).effectiveUntil).toBeNull();
     expect(
-      normalizeRuleDefinition({ ...base, effectiveFrom: new Date(0), effectiveUntil: null })
-        .effectiveUntil,
+      normalizeStoredRuleDefinition({
+        ...base,
+        effectiveFrom: new Date(0),
+        effectiveUntil: null,
+      } as unknown as RuleDefinitionInput).effectiveUntil,
     ).toBeNull();
   });
 });
@@ -335,8 +341,8 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     expect(normalizeRuleDefinition({ ...base, timeZone: '-00:00' }).timeZone).toBe('UTC');
   });
 
-  it('drops a null timeZone and a null effectiveOn, as absent', () => {
-    const rule = normalizeRuleDefinition({ ...base, timeZone: null, effectiveOn: null });
+  it('drops an undefined timeZone and an undefined effectiveOn, as absent', () => {
+    const rule = normalizeRuleDefinition({ ...base, timeZone: undefined, effectiveOn: undefined });
     expect(rule).not.toHaveProperty('timeZone');
     expect(rule).not.toHaveProperty('effectiveOn');
   });
@@ -393,7 +399,7 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     ],
     ['/$segment/until', {}, 'effectiveOn must be /$segment/from to read a segment'],
     ['/$item/emission', {}, 'effectiveOn reads $item without forEach'],
-    ['/$item/emission', { forEach: null }, 'effectiveOn reads $item without forEach'],
+    ['/$item/emission', { forEach: undefined }, 'effectiveOn reads $item without forEach'],
     ['/$segment/from', {}, 'effectiveOn reads $segment without segments'],
     [
       '/$segment/from',
@@ -462,8 +468,8 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     const out = normalizeRuleDefinition(rule);
     expect(reads).toBe(1);
     expect(out.forEach).toEqual({ path: '/x', key: 'id' });
-    expect(normalizeRuleDefinition(out)).toEqual(out);
-    expect(validateRuleDefinition(out).valid).toBe(true);
+    expect(normalizeStoredRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition({ ...out, effectiveUntil: undefined }).valid).toBe(true);
     reads = 0;
     expect(validateRuleDefinition(rule).valid).toBe(true);
   });
@@ -481,15 +487,15 @@ describe('normalizeRuleDefinition: timeZone and effectiveOn', () => {
     expect(reads).toBe(1);
     expect(out.forEach).toEqual({ segments: { from: '/$dates/a', until: '/$dates/b', facts: [] } });
     expect(out.effectiveOn).toBe('/$segment/from');
-    expect(normalizeRuleDefinition(out)).toEqual(out);
-    expect(validateRuleDefinition(out).valid).toBe(true);
+    expect(normalizeStoredRuleDefinition(out)).toEqual(out);
+    expect(validateRuleDefinition({ ...out, effectiveUntil: undefined }).valid).toBe(true);
   });
 
   it('timeZone and effectiveOn enter the checksum', () => {
     const h = computeRuleChecksum(base);
     expect(computeRuleChecksum({ ...base, timeZone: 'Europe/Paris' })).not.toBe(h);
     expect(computeRuleChecksum({ ...base, effectiveOn: '/$dates/facture' })).not.toBe(h);
-    expect(computeRuleChecksum({ ...base, timeZone: null, effectiveOn: undefined })).toBe(h);
+    expect(computeRuleChecksum({ ...base, timeZone: undefined, effectiveOn: undefined })).toBe(h);
   });
 });
 
@@ -641,11 +647,11 @@ describe('unreadable rule definitions', () => {
     ]);
     const meta = {};
     throwing(meta, 'owner', new Error('y'));
-    const extension = { ...base, meta };
+    const extension = { ...base, extensions: { meta } };
     expect(specError(() => normalizeRuleDefinition(extension)).message).toBe(
-      'meta could not be read: y',
+      'extensions could not be read: y',
     );
-    expect(validateRuleDefinition(extension).errors).toEqual(['meta could not be read: y']);
+    expect(validateRuleDefinition(extension).errors).toEqual(['extensions could not be read: y']);
   });
 
   it(`accepts a free-form value ${MAX_JSON_DEPTH} levels deep, refuses one level more`, () => {
@@ -754,14 +760,14 @@ describe('lone UTF-16 surrogates in a rule definition', () => {
       `dimensions has a key with a lone UTF-16 surrogate: "${escaped}"`,
       'INVALID_RULE',
     ],
+    ['a top-level key', { [LONE]: 1 }, escaped, `unknown rule field: ${escaped}`, 'INVALID_RULE'],
     [
-      'an extension key',
-      { [LONE]: 1 },
-      '',
-      `rule definition has an extension key with a lone UTF-16 surrogate: "${escaped}"`,
-      'INVALID_RULE',
+      'an extension value',
+      { extensions: { ext: { a: LONE } } },
+      'extensions.ext.a',
+      notJson('extensions.ext.a'),
+      'NON_SERIALIZABLE',
     ],
-    ['an extension value', { ext: { a: LONE } }, 'ext.a', notJson('ext.a'), 'NON_SERIALIZABLE'],
     [
       'params',
       { params: { base: LONE } },
@@ -804,8 +810,8 @@ describe('lone UTF-16 surrogates in a rule definition', () => {
     },
   );
 
-  it('ignores a key with a lone surrogate whose value is null, as normalize drops it', () => {
-    const rule = { ...base, dimensions: { [LONE]: null }, [LONE]: null } as RuleDefinitionInput;
+  it('ignores a dimension with a lone surrogate whose value is undefined, as normalize drops it', () => {
+    const rule = { ...base, dimensions: { [LONE]: undefined } } as RuleDefinitionInput;
     expect(validateRuleDefinition(rule).valid).toBe(true);
     expect(computeRuleChecksum(rule)).toBe(computeRuleChecksum(base));
   });

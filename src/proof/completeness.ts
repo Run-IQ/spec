@@ -8,12 +8,28 @@ import { inStandingOrder, outranks, ruleKey } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { ProofPending, ProofSection, ProofStep } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayEvery,
+  arrayFind,
+  arrayIndexOf,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  mathMax,
+  setHas,
+  setSize,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: what an output or item owes its trace beyond its value: its
 // completeness (D-7, the table of Task 9M2), the order of its pending rules (D-5), the ranks of
 // competing instances (D-21), and a status that is the strongest of its causes (D-7).
 
-const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
+const rankOf = (status: OutputStatus): number => arrayIndexOf(OUTPUT_STATUSES, status);
 const CONFLICT = rankOf('conflict');
 
 /** What feeds one output or item: its steps, its pending rules, its strongest exclusion. */
@@ -37,10 +53,12 @@ export function inCollection(per: string, subject: string): boolean {
   const pattern = parsePointer(per);
   const segments = parsePointer(subject);
   if (segments.length !== pattern.length + 1) return false;
-  const element = (segment: string | undefined): boolean => segment?.startsWith('@') === true;
+  const element = (segment: string | undefined): boolean =>
+    segment !== undefined && stringStartsWith(segment, '@');
   return (
-    pattern.every((part, i) => (part === '*' ? element(segments[i]) : part === segments[i])) &&
-    element(segments[pattern.length])
+    arrayEvery(pattern, (part, i) =>
+      part === '*' ? element(segments[i]) : part === segments[i],
+    ) && element(segments[pattern.length])
   );
 }
 
@@ -58,20 +76,21 @@ function undeterminedByTrace(target: Target, feed: Feed, standings: Standings): 
   }
   if (combine === 'highestPriority') return !outranksPending(target, feed, standings);
   const decisive = combine === 'any' ? true : combine === 'all' ? false : undefined;
-  return decisive === undefined || !feed.steps.some((step) => step.contribution === decisive);
+  return decisive === undefined || !arraySome(feed.steps, (step) => step.contribution === decisive);
 }
 
 /** True when the winner of `target` stands strictly above every pending rule feeding it. */
 function outranksPending(target: Target, feed: Feed, standings: Standings): boolean {
   const { selected } = target;
   if (selected === undefined) return false;
-  const winner = feed.steps.find(
+  const winner = arrayFind(
+    feed.steps,
     (step) => step.ruleId === selected.ruleId && step.subject === selected.subject,
   );
-  const top = winner === undefined ? undefined : standings.get(ruleKey(winner));
+  const top = winner === undefined ? undefined : mapGet(standings, ruleKey(winner));
   if (top === undefined) return false;
-  return feed.waiting.every((entry) => {
-    const standing = standings.get(ruleKey(entry));
+  return arrayEvery(feed.waiting, (entry) => {
+    const standing = mapGet(standings, ruleKey(entry));
     return standing !== undefined && outranks(top, standing);
   });
 }
@@ -87,7 +106,7 @@ export function completenessProblems(
   target: Target,
   feed: Feed,
   standings: Standings,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const byTrace = undeterminedByTrace(target, feed, standings);
   if (target.status === 'undetermined') {
@@ -116,12 +135,12 @@ export function completenessProblems(
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
 export function samePending(named: readonly string[], pending: readonly string[]): boolean {
-  const expected = new Set(pending);
-  const given = new Set(named);
+  const expected = new NativeSet(pending);
+  const given = new NativeSet(named);
   return (
-    given.size === named.length &&
-    given.size === expected.size &&
-    named.every((id) => expected.has(id))
+    setSize(given) === named.length &&
+    setSize(given) === setSize(expected) &&
+    arrayEvery(named, (id) => setHas(expected, id))
   );
 }
 
@@ -131,11 +150,12 @@ export function pendingInOrder(
   feed: Feed,
   standings: Standings,
 ): boolean {
-  const first = new Map<string, Standing | undefined>();
+  const first = new NativeMap<string, Standing | undefined>();
   for (const entry of feed.waiting) {
-    if (!first.has(entry.ruleId)) first.set(entry.ruleId, standings.get(ruleKey(entry)));
+    if (!mapHas(first, entry.ruleId))
+      mapSet(first, entry.ruleId, mapGet(standings, ruleKey(entry)));
   }
-  return inStandingOrder(pending, (id) => first.get(id));
+  return inStandingOrder(pending, (id) => mapGet(first, id));
 }
 
 /**
@@ -147,29 +167,30 @@ export function pendingInOrder(
  */
 export function rankProblems(
   target: Target,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const competing = target.whole && target.declaration.combine === 'highestPriority';
   const issues: string[] = [];
-  const instances = new Map<string, number>();
+  const instances = new NativeMap<string, number>();
   if (competing) {
     for (const step of target.steps) {
       if (step.subject !== undefined) {
-        instances.set(ruleKey(step), (instances.get(ruleKey(step)) ?? 0) + 1);
+        mapSet(instances, ruleKey(step), (mapGet(instances, ruleKey(step)) ?? 0) + 1);
       }
     }
   }
   for (const step of target.steps) {
     const cited = (): string => citeName(instanceKey(step));
     if (!competing || step.subject === undefined) {
-      if (step.rank !== undefined) issues.push(`rank on a step that does not compete: ${cited()}`);
+      if (step.rank !== undefined)
+        arrayPush(issues, `rank on a step that does not compete: ${cited()}`);
     } else if (step.rank === undefined) {
-      issues.push(`rank missing: ${cited()}`);
-    } else if (step.rank >= (instances.get(ruleKey(step)) ?? 0)) {
+      arrayPush(issues, `rank missing: ${cited()}`);
+    } else if (step.rank >= (mapGet(instances, ruleKey(step)) ?? 0)) {
       // Another instance of the rule, hidden.
       const message = `rank out of range: ${cited()}`;
       const rule = { id: step.ruleId, version: step.version };
-      if (!isLifted(hidden, LIFTS.rankRange, { message, rule })) issues.push(message);
+      if (!isLifted(hidden, LIFTS.rankRange, { message, rule })) arrayPush(issues, message);
     }
   }
   return issues;
@@ -189,28 +210,29 @@ export function rankProblems(
 export function causeProblems(
   target: Target,
   feed: Feed,
-  hidden: ReadonlySet<ProofSection> = new Set(),
-  ties: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
+  ties: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const issues: string[] = [];
   const rank = rankOf(target.status);
   let steps = -1;
-  for (const step of feed.steps) steps = Math.max(steps, rankOf(step.status));
-  if (steps > rank) issues.push(`output status weaker than its contributions: ${target.cite()}`);
+  for (const step of feed.steps) steps = mathMax(steps, rankOf(step.status));
+  if (steps > rank)
+    arrayPush(issues, `output status weaker than its contributions: ${target.cite()}`);
   if (feed.candidates > rank) {
-    issues.push(`output status weaker than its candidates: ${target.cite()}`);
+    arrayPush(issues, `output status weaker than its candidates: ${target.cite()}`);
   }
   const tie = feed.tie ? CONFLICT : -1;
   if (tie > rank) {
     // The tie may be the visible part's alone: a hidden entry may undo it (`ties`).
     const message = `output status weaker than its tie: ${target.cite()}`;
-    if (!isLifted(hidden, LIFTS.tieStatus, { message, ties })) issues.push(message);
+    if (!isLifted(hidden, LIFTS.tieStatus, { message, ties })) arrayPush(issues, message);
   }
   const settled = target.status !== 'undetermined';
-  const stronger = settled && rank > Math.max(0, steps, feed.candidates, tie);
+  const stronger = settled && rank > mathMax(0, steps, feed.candidates, tie);
   const message = `output status stronger than its causes: ${target.cite()}`;
   if (stronger && !isLifted(hidden, LIFTS.causes, { message, output: target.place, ties })) {
-    issues.push(message);
+    arrayPush(issues, message);
   }
   return issues;
 }

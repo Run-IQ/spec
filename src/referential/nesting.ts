@@ -1,5 +1,26 @@
 import { citeName } from '../errors.js';
 import type { CivilDate } from '../time/civil.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayForEach,
+  arrayJoin,
+  arrayPop,
+  arrayPush,
+  arraySlice,
+  arraySort,
+  arrayUnshift,
+  mapDelete,
+  mapGet,
+  mapHas,
+  mapIteratorNext,
+  mapKeys,
+  mapSet,
+  mathMax,
+  setAdd,
+  setDelete,
+  setHas,
+} from '../intrinsics.js';
 
 /** The start of a period with no `from`: before every civil date. */
 export const ALWAYS = '';
@@ -65,22 +86,22 @@ function sweep(
   work: Work,
   problems: NestingProblems,
 ): void {
-  const starts = new Map<CivilDate, Edge[]>();
-  const ends = new Map<CivilDate, Edge[]>();
+  const starts = new NativeMap<CivilDate, Edge[]>();
+  const ends = new NativeMap<CivilDate, Edge[]>();
   for (const edge of edges) {
     pushTo(starts, edge.from, edge);
     if (edge.until !== null) pushTo(ends, edge.until, edge);
   }
-  const dates = [...new Set([...starts.keys(), ...ends.keys()])].sort();
+  const dates = arraySort([...new NativeSet([...mapKeys(starts), ...mapKeys(ends)])]);
   const graph = new Graph(work);
-  const added = new Set<Edge>();
+  const added = new NativeSet<Edge>();
   for (const date of dates) {
-    for (const edge of ends.get(date) ?? []) {
+    for (const edge of mapGet(ends, date) ?? []) {
       graph.step();
-      if (added.delete(edge)) graph.remove(edge.group, edge.member);
+      if (setDelete(added, edge)) graph.remove(edge.group, edge.member);
     }
     const starting: Edge[] = [];
-    for (const edge of (starts.get(date) ?? []).sort(compareEdges)) {
+    for (const edge of arraySort(mapGet(starts, date) ?? [], compareEdges)) {
       graph.step();
       const cycle = graph.cycle(edge.group, edge.member);
       if (cycle !== undefined) {
@@ -88,8 +109,8 @@ function sweep(
         continue;
       }
       graph.add(edge.group, edge.member);
-      added.add(edge);
-      starting.push(edge);
+      setAdd(added, edge);
+      arrayPush(starting, edge);
     }
     // Depth once every membership of the date is in: a new longest chain goes through one of
     // them, and each height is marked and recomputed at most once per date.
@@ -104,9 +125,9 @@ function sweep(
 }
 
 function pushTo(map: Map<CivilDate, Edge[]>, key: CivilDate, edge: Edge): void {
-  const list = map.get(key);
-  if (list) list.push(edge);
-  else map.set(key, [edge]);
+  const list = mapGet(map, key);
+  if (list) arrayPush(list, edge);
+  else mapSet(map, key, [edge]);
 }
 
 function compareEdges(a: Edge, b: Edge): number {
@@ -118,12 +139,12 @@ function compareEdges(a: Edge, b: Edge): number {
 /** `cycle A > B > A from <date>`, the cycle written from its smallest group name. */
 function cycleMessage(cycle: readonly string[], date: CivilDate): string {
   let start = 0;
-  cycle.forEach((name, i) => {
+  arrayForEach(cycle, (name, i) => {
     if (name < (cycle[start] ?? name)) start = i;
   });
-  const rotated = [...cycle.slice(start), ...cycle.slice(0, start)];
+  const rotated = [...arraySlice(cycle, start), ...arraySlice(cycle, 0, start)];
   const when = date === ALWAYS ? 'from the beginning' : `from ${date}`;
-  return `cycle ${citeName([...rotated, rotated[0] ?? ''].join(' > '))} ${when}`;
+  return `cycle ${citeName(arrayJoin([...rotated, rotated[0] ?? ''], ' > '))} ${when}`;
 }
 
 /** Adjacency of one direction: node -> neighbour -> number of active memberships. */
@@ -141,14 +162,14 @@ interface Side {
 
 /** The active memberships of one date, with cached heights. */
 class Graph {
-  private readonly children: Adjacency = new Map();
-  private readonly parents: Adjacency = new Map();
+  private readonly children: Adjacency = new NativeMap();
+  private readonly parents: Adjacency = new NativeMap();
   /** Groups on the longest chain going down from a group, itself included; exact unless stale. */
-  private readonly heightBelow = new Map<string, number>();
-  private readonly staleBelow = new Set<string>();
+  private readonly heightBelow = new NativeMap<string, number>();
+  private readonly staleBelow = new NativeSet<string>();
   /** Groups on the longest chain going up to a group, itself included; exact unless stale. */
-  private readonly heightAbove = new Map<string, number>();
-  private readonly staleAbove = new Set<string>();
+  private readonly heightAbove = new NativeMap<string, number>();
+  private readonly staleAbove = new NativeSet<string>();
 
   constructor(private readonly work: Work) {}
 
@@ -182,11 +203,12 @@ class Graph {
     for (let head = 0; head < queue.length; head++) {
       const node = queue[head] ?? '';
       this.step();
-      if (stale.has(node)) continue;
-      stale.add(node);
-      for (const neighbour of next.get(node)?.keys() ?? []) {
+      if (setHas(stale, node)) continue;
+      setAdd(stale, node);
+      const adjacent = mapGet(next, node);
+      for (const neighbour of adjacent === undefined ? [] : mapKeys(adjacent)) {
         this.step();
-        if (!stale.has(neighbour)) queue.push(neighbour);
+        if (!setHas(stale, neighbour)) arrayPush(queue, neighbour);
       }
     }
   }
@@ -212,31 +234,31 @@ class Graph {
     heights: Map<string, number>,
     stale: Set<string>,
   ): number {
-    const fresh = (node: string): boolean => heights.has(node) && !stale.has(node);
+    const fresh = (node: string): boolean => mapHas(heights, node) && !setHas(stale, node);
     const stack: { node: string; neighbours: Iterator<string>; best: number }[] = [];
     const open = (node: string): void => {
-      stack.push({ node, neighbours: neighbours(next, node), best: 1 });
+      arrayPush(stack, { node, neighbours: neighbours(next, node), best: 1 });
     };
-    if (fresh(start)) return heights.get(start) ?? 1;
+    if (fresh(start)) return mapGet(heights, start) ?? 1;
     open(start);
     while (stack.length > 0) {
       const frame = stack[stack.length - 1];
       if (frame === undefined) break;
       this.step();
-      const step = frame.neighbours.next();
+      const step = mapIteratorNext(frame.neighbours);
       if (step.done) {
-        heights.set(frame.node, frame.best);
-        stale.delete(frame.node);
-        stack.pop();
+        mapSet(heights, frame.node, frame.best);
+        setDelete(stale, frame.node);
+        arrayPop(stack);
         const parent = stack[stack.length - 1];
-        if (parent !== undefined) parent.best = Math.max(parent.best, 1 + frame.best);
+        if (parent !== undefined) parent.best = mathMax(parent.best, 1 + frame.best);
         continue;
       }
       const neighbour = step.value;
-      if (fresh(neighbour)) frame.best = Math.max(frame.best, 1 + (heights.get(neighbour) ?? 1));
+      if (fresh(neighbour)) frame.best = mathMax(frame.best, 1 + (mapGet(heights, neighbour) ?? 1));
       else open(neighbour);
     }
-    return heights.get(start) ?? 1;
+    return mapGet(heights, start) ?? 1;
   }
 
   /**
@@ -272,29 +294,35 @@ class Graph {
         this.step();
         continue;
       }
-      const result = own.pending.next();
+      const result = mapIteratorNext(own.pending);
       if (result.done) {
         own.pending = undefined;
         continue;
       }
       this.step();
       const neighbour = result.value;
-      if (own.from.has(neighbour)) return undefined;
+      if (mapHas(own.from, neighbour)) return undefined;
       const current = own.queue[own.head - 1] ?? '';
-      own.from.set(neighbour, current);
-      if (other.from.has(neighbour)) return neighbour;
-      own.queue.push(neighbour);
+      mapSet(own.from, neighbour, current);
+      if (mapHas(other.from, neighbour)) return neighbour;
+      arrayPush(own.queue, neighbour);
       return undefined;
     }
   }
 }
 
 function neighbours(next: Adjacency, node: string): Iterator<string> {
-  return (next.get(node) ?? new Map<string, number>()).keys();
+  return mapKeys(mapGet(next, node) ?? new NativeMap<string, number>());
 }
 
 function side(next: Adjacency, start: string): Side {
-  return { next, from: new Map([[start, null]]), queue: [start], head: 0, pending: undefined };
+  return {
+    next,
+    from: new NativeMap([[start, null]]),
+    queue: [start],
+    head: 0,
+    pending: undefined,
+  };
 }
 
 /**
@@ -303,34 +331,35 @@ function side(next: Adjacency, start: string): Side {
  */
 function closeCycle(group: string, forward: Side, backward: Side, meet: string): string[] {
   const down: string[] = [];
-  for (let at: string | null | undefined = meet; at != null; at = forward.from.get(at)) {
-    down.unshift(at);
+  for (let at: string | null | undefined = meet; at != null; at = mapGet(forward.from, at)) {
+    arrayUnshift(down, at);
   }
   const up: string[] = [];
-  for (let at = backward.from.get(meet); at != null; at = backward.from.get(at)) up.push(at);
+  for (let at = mapGet(backward.from, meet); at != null; at = mapGet(backward.from, at))
+    arrayPush(up, at);
   // `down` runs member..meet; `up` runs from after meet to group.
   const path = [group, ...down, ...up];
-  path.pop(); // the closing `group`
+  arrayPop(path); // the closing `group`
   return path;
 }
 
 /** Adds one to `from -> to`; true when the link is new. */
 function link(adjacency: Adjacency, from: string, to: string): boolean {
-  const targets = adjacency.get(from) ?? new Map<string, number>();
-  adjacency.set(from, targets);
-  const count = targets.get(to) ?? 0;
-  targets.set(to, count + 1);
+  const targets = mapGet(adjacency, from) ?? new NativeMap<string, number>();
+  mapSet(adjacency, from, targets);
+  const count = mapGet(targets, to) ?? 0;
+  mapSet(targets, to, count + 1);
   return count === 0;
 }
 
 /** Removes one from `from -> to`; true when the link is gone. */
 function unlink(adjacency: Adjacency, from: string, to: string): boolean {
-  const targets = adjacency.get(from);
-  const count = targets?.get(to) ?? 0;
+  const targets = mapGet(adjacency, from);
+  const count = (targets === undefined ? undefined : mapGet(targets, to)) ?? 0;
   if (count > 1) {
-    targets?.set(to, count - 1);
+    if (targets !== undefined) mapSet(targets, to, count - 1);
     return false;
   }
-  targets?.delete(to);
+  if (targets !== undefined) mapDelete(targets, to);
   return count === 1;
 }

@@ -5,6 +5,7 @@ import { compareCanonicalDecimals } from './decimal.js';
 import { matchesValue, validDeclaration } from './output.js';
 import { article } from './read-declaration.js';
 import type { OutputDeclaration, OutputType } from './output.js';
+import { NativeNumber, NativeString, arrayIncludes, arrayIndexOf } from '../intrinsics.js';
 
 /** The output types whose values have an order. */
 const ORDERED: readonly OutputType[] = ['number', 'decimal', 'enum', 'date', 'dateTime'];
@@ -30,7 +31,7 @@ export function compareOutputValues(
 ): -1 | 0 | 1 {
   const normal = withValueBudget(() => validDeclaration(declaration));
   const { type, values = [] } = normal;
-  if (!ORDERED.includes(type)) {
+  if (!arrayIncludes(ORDERED, type)) {
     throw newSpecError(
       'INVALID_RULE',
       `${article(type)} ${type} output has no order: ` +
@@ -50,14 +51,14 @@ export function compareOutputValues(
   // `matchesValue` holds: a and b are numbers for a number, strings for every other type.
   switch (type) {
     case 'decimal':
-      return compareCanonicalDecimals(String(a), String(b));
+      return compareCanonicalDecimals(NativeString(a), NativeString(b));
     case 'enum':
-      return order(values.indexOf(String(a)), values.indexOf(String(b)));
+      return order(arrayIndexOf(values, NativeString(a)), arrayIndexOf(values, NativeString(b)));
     case 'number':
-      return order(Number(a), Number(b));
+      return order(NativeNumber(a), NativeNumber(b));
     default:
       // A civil date and a canonical instant are fixed-width texts: their order is that of time.
-      return order(String(a), String(b));
+      return order(NativeString(a), NativeString(b));
   }
 }
 

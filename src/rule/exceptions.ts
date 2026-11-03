@@ -24,6 +24,25 @@ import {
 } from './ruleSet.js';
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
+import {
+  NativeSet,
+  arrayEvery,
+  arrayFind,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayJoin,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  arraySort,
+  objectEntries,
+  objectFromEntries,
+  objectHasOwn,
+  objectKeys,
+  setHas,
+  stringIncludes,
+} from '../intrinsics.js';
 
 /**
  * Which rules an exception targets. Fields combine by AND; the values of one field by OR
@@ -117,24 +136,24 @@ function matches(rule: unknown, selector: unknown, carrier: unknown): boolean {
   requireRuleSet(carrier, 'carrier ruleSet');
   if (!constrains(wanted)) return false;
   const { ids, tags, dimensions, outputs, models } = wanted;
-  const targeted = new Set(wanted.ruleSets?.length ? wanted.ruleSets : [carrier]);
-  if (!targeted.has(ruleSet)) return false;
+  const targeted = new NativeSet(wanted.ruleSets?.length ? wanted.ruleSets : [carrier]);
+  if (!setHas(targeted, ruleSet)) return false;
   if (ids?.length) {
     const id = qualifyName(ruleSet, target.id);
-    if (!ids.some((name) => qualifiedFrom(carrier, name) === id)) return false;
+    if (!arraySome(ids, (name) => qualifiedFrom(carrier, name) === id)) return false;
   }
   if (tags?.length) {
-    const own = new Set(target.tags);
-    if (!tags.some((tag) => own.has(tag))) return false;
+    const own = new NativeSet(target.tags);
+    if (!arraySome(tags, (tag) => setHas(own, tag))) return false;
   }
   if (outputs?.length) {
     const output = qualifiedFrom(ruleSet, target.output ?? DEFAULT_OUTPUT);
-    if (!outputs.some((name) => qualifiedFrom(carrier, name) === output)) return false;
+    if (!arraySome(outputs, (name) => qualifiedFrom(carrier, name) === output)) return false;
   }
-  if (models?.length && !models.includes(target.model)) return false;
+  if (models?.length && !arrayIncludes(models, target.model)) return false;
   if (dimensions) {
-    for (const [key, value] of Object.entries(dimensions)) {
-      if (!Object.hasOwn(target.dimensions, key)) return false;
+    for (const [key, value] of objectEntries(dimensions)) {
+      if (!objectHasOwn(target.dimensions, key)) return false;
       if (!sameDimensionSpec(target.dimensions[key], value)) return false;
     }
   }
@@ -217,7 +236,7 @@ function copySelector(selector: unknown): RuleSelector {
 
 /** A shallow copy of the own enumerable entries of `value`, as data (`__proto__` included). */
 function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
-  return Object.fromEntries(Object.keys(value).map((key) => [key, value[key]]));
+  return objectFromEntries(arrayMap(objectKeys(value), (key) => [key, value[key]]));
 }
 
 /**
@@ -225,12 +244,15 @@ function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
  * at most `MAX_JSON_VALUES` elements, counted before any is read); `INVALID_RULE` otherwise.
  */
 function stringList(value: unknown, path: string): string[] {
-  const items = Array.isArray(value) ? readCallerList(value, path) : undefined;
-  if (items !== undefined && !Array.isArray(items)) selectorError(items.message);
-  if (items === undefined || !items.every((item): item is string => typeof item === 'string')) {
+  const items = arrayIsArray(value) ? readCallerList(value, path) : undefined;
+  if (items !== undefined && !arrayIsArray(items)) selectorError(items.message);
+  if (
+    items === undefined ||
+    !arrayEvery(items, (item): item is string => typeof item === 'string')
+  ) {
     selectorError(`${citeName(path)} must be an array of strings`);
   }
-  return items;
+  return items as string[];
 }
 
 function selectorError(message: string): never {
@@ -289,14 +311,14 @@ export function readRuleExceptions(
     issues.add(at, message);
   };
   if (value === null) return { exceptions: [], issues };
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     add(path, `${citeName(path)} must be an array of exceptions`);
     return { exceptions: [], issues };
   }
   const exceptions: RuleException[] = [];
-  value.forEach((item, i) => {
+  arrayForEach(value, (item, i) => {
     const exception = readException(item, `${path}[${i}]`, ruleSet, add);
-    if (exception) exceptions.push(exception);
+    if (exception) arrayPush(exceptions, exception);
   });
   return { exceptions: issues.length === 0 ? exceptions : [], issues };
 }
@@ -318,13 +340,13 @@ export function exceptionModelIssues(rule: {
   if (rule.model !== EXCEPTION_MODEL) return [];
   const issues: RuleValidationIssue[] = [];
   if (rule.output !== undefined) {
-    issues.push({
+    arrayPush(issues, {
       path: 'output',
       message: `output must be absent: a rule of model "${EXCEPTION_MODEL}" produces no output`,
     });
   }
-  if (rule.exceptions == null || (Array.isArray(rule.exceptions) && rule.exceptions.length === 0)) {
-    issues.push({
+  if (rule.exceptions == null || (arrayIsArray(rule.exceptions) && rule.exceptions.length === 0)) {
+    arrayPush(issues, {
       path: 'exceptions',
       message:
         'exceptions must list at least one exception: ' +
@@ -347,7 +369,7 @@ export function normalizedOutput(output: unknown, ruleSet: string | undefined): 
     return output;
   }
   if (ruleSet === undefined) {
-    return output.includes(':') || output === DEFAULT_OUTPUT ? undefined : output;
+    return stringIncludes(output, ':') || output === DEFAULT_OUTPUT ? undefined : output;
   }
   const shortest = shortestFrom(ruleSet, output);
   return shortest === DEFAULT_OUTPUT ? undefined : shortest;
@@ -369,11 +391,11 @@ function checkReach(
   path: string,
   fail: Add,
 ): void {
-  const targeted = new Set(targetedList);
-  const packTargeted = targetedList.some((set) => set !== LOCAL_RULE_SET);
-  lists.ids?.forEach((name, i) => {
+  const targeted = new NativeSet(targetedList);
+  const packTargeted = arraySome(targetedList, (set) => set !== LOCAL_RULE_SET);
+  arrayForEach(lists.ids ?? [], (name, i) => {
     const set = ruleSetOf(carrier, name);
-    if (!targeted.has(set)) {
+    if (!setHas(targeted, set)) {
       fail(
         `${path}.ids[${i}]`,
         `${citeName(path)}.ids[${i}] names a rule of ${quoteText(set)}, a rule set the selector ` +
@@ -382,9 +404,9 @@ function checkReach(
       );
     }
   });
-  lists.outputs?.forEach((name, i) => {
+  arrayForEach(lists.outputs ?? [], (name, i) => {
     const set = ruleSetOf(carrier, name);
-    if (!targeted.has(set) && (set === LOCAL_RULE_SET || !packTargeted)) {
+    if (!setHas(targeted, set) && (set === LOCAL_RULE_SET || !packTargeted)) {
       fail(
         `${path}.outputs[${i}]`,
         `${citeName(path)}.outputs[${i}] names an output of ${quoteText(set)}: ` +
@@ -409,9 +431,9 @@ function readException(
     add(path, `${citeName(path)} must be an object with a kind`);
     return undefined;
   }
-  const kind = KINDS.find((k) => k === item.kind);
+  const kind = arrayFind(KINDS, (k) => k === item.kind);
   if (kind === undefined) {
-    add(`${path}.kind`, `${citeName(path)}.kind must be one of ${KINDS.join(', ')}`);
+    add(`${path}.kind`, `${citeName(path)}.kind must be one of ${arrayJoin(KINDS, ', ')}`);
     return undefined;
   }
   let valid = true;
@@ -419,8 +441,8 @@ function readException(
     valid = false;
     add(at, message);
   };
-  for (const key of Object.keys(item)) {
-    if (!KEYS_BY_KIND[kind].includes(key)) {
+  for (const key of objectKeys(item)) {
+    if (!arrayIncludes(KEYS_BY_KIND[kind], key)) {
       fail(
         `${path}.${key}`,
         `${citeName(path)} has an unknown key ${quoteText(key)} for kind ${kind}`,
@@ -471,7 +493,10 @@ function readSelector(
   if (value === undefined || !isJsonObject(value)) {
     add(
       path,
-      `${citeName(path)} must be a selector { ${SELECTOR_KEYS.map((k) => `${k}?`).join(', ')} }`,
+      `${citeName(path)} must be a selector { ${arrayJoin(
+        arrayMap(SELECTOR_KEYS, (k) => `${k}?`),
+        ', ',
+      )} }`,
     );
     return undefined;
   }
@@ -480,8 +505,8 @@ function readSelector(
     valid = false;
     add(at, message);
   };
-  for (const key of Object.keys(value)) {
-    if (!SELECTOR_KEYS.includes(key)) {
+  for (const key of objectKeys(value)) {
+    if (!arrayIncludes(SELECTOR_KEYS, key)) {
       fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
     }
   }
@@ -492,7 +517,7 @@ function readSelector(
     const list = readList(value[field], `${path}.${field}`, true, fail);
     if (list === undefined) continue;
     if (field === 'ids' || field === 'outputs') {
-      list.forEach((name, i) => {
+      arrayForEach(list, (name, i) => {
         const at = `${path}.${field}[${i}]`;
         const problem = citedNameProblem(name, at, field === 'ids' ? 'rule' : 'output');
         if (problem !== undefined) fail(at, problem);
@@ -509,14 +534,14 @@ function readSelector(
     let list = lists[field];
     if (list === undefined || list.length === 0) continue;
     if (carrier !== undefined && (field === 'ids' || field === 'outputs')) {
-      list = list.map((name) => shortestFrom(carrier, name));
+      list = arrayMap(list, (name) => shortestFrom(carrier, name));
     }
-    selector[field] = [...new Set(list)].sort();
+    selector[field] = arraySort([...new NativeSet(list)]);
   }
   const dimensions = readDimensions(value.dimensions, `${path}.dimensions`, fail);
-  if (dimensions && Object.keys(dimensions).length > 0) selector.dimensions = dimensions;
+  if (dimensions && objectKeys(dimensions).length > 0) selector.dimensions = dimensions;
   if (ruleSets !== undefined && ruleSets.length > 0) {
-    const sorted = [...new Set(ruleSets)].sort();
+    const sorted = arraySort([...new NativeSet(ruleSets)]);
     // Listing only the carrier's rule set is the default: one meaning, one spelling.
     if (!(sorted.length === 1 && sorted[0] === carrier)) selector.ruleSets = sorted;
   }
@@ -536,7 +561,7 @@ function readRuleSets(value: JsonValue | undefined, path: string, fail: Add): st
   const list = readList(value, path, true, fail);
   if (list === undefined) return undefined;
   let valid = true;
-  list.forEach((id, i) => {
+  arrayForEach(list, (id, i) => {
     if (!isRuleSetId(id)) {
       valid = false;
       fail(`${path}[${i}]`, ruleSetIdMessage(`${path}[${i}]`, id));
@@ -554,7 +579,7 @@ function readList(
 ): string[] | undefined {
   if (value === undefined) return undefined;
   const expected = nonEmpty ? 'a non-empty string' : 'a string';
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     fail(
       path,
       `${citeName(path)} must be an array of ${nonEmpty ? 'non-empty strings' : 'strings'}`,
@@ -562,11 +587,11 @@ function readList(
     return undefined;
   }
   const strings: string[] = [];
-  value.forEach((item, i) => {
+  arrayForEach(value, (item, i) => {
     if (typeof item !== 'string' || (nonEmpty && item === '')) {
       fail(`${path}[${i}]`, `${citeName(path)}[${i}] must be ${expected}`);
     } else {
-      strings.push(item);
+      arrayPush(strings, item);
     }
   });
   return strings.length === value.length ? strings : undefined;
@@ -583,7 +608,7 @@ function readDimensions(
     return undefined;
   }
   const entries: [string, DimensionSpec][] = [];
-  for (const key of Object.keys(value).sort()) {
+  for (const key of arraySort(objectKeys(value))) {
     if (isUnnamable(key)) {
       fail(path, unnamableNameMessage(path, 'dimension', key));
       continue;
@@ -593,10 +618,10 @@ function readDimensions(
       continue;
     }
     const spec = readDimensionSpec(value[key], `${path}.${key}`, fail);
-    if (spec !== undefined) entries.push([key, spec]);
+    if (spec !== undefined) arrayPush(entries, [key, spec]);
   }
   // `Object.fromEntries` defines own properties: a `__proto__` key stays data.
-  return Object.fromEntries(entries);
+  return objectFromEntries(entries);
 }
 
 function readNonEmptyString(
@@ -612,11 +637,11 @@ function readNonEmptyString(
 /** True when at least one field of the selector is non-empty. */
 function constrains(selector: RuleSelector): boolean {
   return (
-    SELECTOR_LISTS.some((field) => (selector[field]?.length ?? 0) > 0) ||
-    Object.keys(selector.dimensions ?? {}).length > 0
+    arraySome(SELECTOR_LISTS, (field) => (selector[field]?.length ?? 0) > 0) ||
+    objectKeys(selector.dimensions ?? {}).length > 0
   );
 }
 
 function isJsonObject(value: JsonValue | undefined): value is { [k: string]: JsonValue } {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !arrayIsArray(value);
 }

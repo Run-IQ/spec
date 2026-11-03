@@ -1,4 +1,5 @@
 import { newSpecError, reasonOf, unreadableMessage } from '../errors.js';
+import { mapGet, mapHas, nowIso, regExpTest } from '../intrinsics.js';
 import { checkText, childPointer, expectPlainObject, readFields, runCheck } from '../input/read.js';
 import { keyBytes, signText } from '../proof/sign.js';
 import type { Instant } from '../time/civil.js';
@@ -35,7 +36,7 @@ export function createAttestation(
 ): Attestation {
   return withValueBudget(() => {
     const digest: unknown = proofDigest;
-    if (typeof digest !== 'string' || !HEX_DIGEST.test(digest)) {
+    if (typeof digest !== 'string' || !regExpTest(HEX_DIGEST, digest)) {
       throw newSpecError('INVALID_ATTESTATION', 'proofDigest must be 64 lowercase hex characters');
     }
     const id: unknown = keyId;
@@ -49,7 +50,7 @@ export function createAttestation(
       subject: { proofDigest: digest },
       keyId: id,
       ...(role === undefined ? {} : { role }),
-      at: at ?? new Date().toISOString(),
+      at: at ?? nowIso(),
     };
     return { ...body, signature: signAttestationBody(body, privateKeyHex) };
   });
@@ -69,10 +70,10 @@ function readOptions(o: unknown): { role?: string; at?: string } {
         join: (_path, key) => childPointer('', key),
       });
       if (fields === undefined) return;
-      const role = fields.values.get('role');
-      if (fields.values.has('role') && checkText(role, '/role', add)) read.role = role;
-      const at = fields.values.get('at');
-      if (fields.values.has('at') && checkInstant(at, '/at', add)) read.at = at;
+      const role = mapGet(fields.values, 'role');
+      if (mapHas(fields.values, 'role') && checkText(role, '/role', add)) read.role = role;
+      const at = mapGet(fields.values, 'at');
+      if (mapHas(fields.values, 'at') && checkInstant(at, '/at', add)) read.at = at;
     },
     (error) => ({ path: '', message: unreadableMessage('options', error) }),
   );

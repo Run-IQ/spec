@@ -130,12 +130,20 @@ describe('the ruleSet field', () => {
     expect(normalizeRuleDefinition({ ...BASE_RULE, ruleSet: 'rgpd' }).ruleSet).toBe('rgpd');
   });
 
-  it("drops 'local' and null, as absent: one rule, one checksum", () => {
-    for (const ruleSet of ['local', null, undefined]) {
+  it("drops 'local' and undefined, as absent: one rule, one checksum", () => {
+    for (const ruleSet of ['local', undefined]) {
       const value = { ...BASE_RULE, ruleSet };
       expect(normalizeRuleDefinition(value)).not.toHaveProperty('ruleSet');
       expect(computeRuleChecksum(value)).toBe(computeRuleChecksum(BASE_RULE));
     }
+  });
+
+  it('refuses a null ruleSet: the field must be omitted', () => {
+    expectRuleRefused(
+      { ...BASE_RULE, ruleSet: null } as never,
+      'ruleSet',
+      'ruleSet is null: omit the field instead',
+    );
   });
 
   it.each([['Local'], ['a:b'], [''], [' rgpd'], [3], [{ id: 'rgpd' }]])(

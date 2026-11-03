@@ -17,6 +17,29 @@ import type { Ties } from './ties.js';
 import type { ProofSection, ProofSelection, ProofStep } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
 import type { OutputIdentity } from './lifts.js';
+import {
+  NativeBoolean,
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayEvery,
+  arrayFilter,
+  arrayFind,
+  arrayFlat,
+  arrayIsArray,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  mapValues,
+  mathSign,
+  setAdd,
+  setHas,
+  setSize,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /** An output, or an item of an output `per` element, and the applied steps that feed it. */
 export interface Target {
@@ -53,7 +76,7 @@ export interface Context {
 const NO_FIRST = 'no instance at rank 0: ';
 
 /** The strategies whose value is one contribution, named by `selected` (D-27). */
-export const SELECTING: ReadonlySet<string> = new Set(['max', 'min', 'highestPriority']);
+export const SELECTING: ReadonlySet<string> = new NativeSet(['max', 'min', 'highestPriority']);
 
 /**
  * What the contributions give: a value, no value, no value they can give (the contributors of a
@@ -69,7 +92,7 @@ export function comparator(
   switch (type) {
     case 'number':
       return (a, b) =>
-        typeof a === 'number' && typeof b === 'number' ? Math.sign(a - b) || 0 : undefined;
+        typeof a === 'number' && typeof b === 'number' ? mathSign(a - b) || 0 : undefined;
     case 'decimal':
       return (a, b) =>
         typeof a === 'string' &&
@@ -79,11 +102,11 @@ export function comparator(
           ? compareCanonicalDecimals(a, b)
           : undefined;
     case 'enum': {
-      const rank = new Map(values.map((value, i) => [value, i]));
+      const rank = new NativeMap(arrayMap(values, (value, i) => [value, i]));
       return (a, b) => {
-        const x = typeof a === 'string' ? rank.get(a) : undefined;
-        const y = typeof b === 'string' ? rank.get(b) : undefined;
-        return x === undefined || y === undefined ? undefined : Math.sign(x - y);
+        const x = typeof a === 'string' ? mapGet(rank, a) : undefined;
+        const y = typeof b === 'string' ? mapGet(rank, b) : undefined;
+        return x === undefined || y === undefined ? undefined : mathSign(x - y);
       };
     }
     case 'date':
@@ -102,7 +125,7 @@ export function comparator(
  * digest.
  */
 function keyOf(value: JsonValue): string {
-  if (value === null || typeof value !== 'object') return `${typeof value}:${String(value)}`;
+  if (value === null || typeof value !== 'object') return `${typeof value}:${NativeString(value)}`;
   // A snapshot value, counted when it was read.
   return `#${ownCopy(() => canonicalSha256Hex(value))}`;
 }
@@ -124,7 +147,7 @@ function finish(value: JsonValue, declaration: OutputDeclaration): JsonValue | u
 
 /** The value the steps (in contribution order) give under `declaration`. */
 function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): Expected {
-  const values = steps.map((step) => step.contribution);
+  const values = arrayMap(steps, (step) => step.contribution);
   const unknown: Expected = { unknown: true };
   const settle = (value: JsonValue | undefined): Expected =>
     value === undefined ? unknown : { value };
@@ -132,26 +155,29 @@ function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): E
   switch (declaration.combine) {
     case 'sum': {
       if (declaration.type === 'number') {
-        const numbers = values.filter((value): value is number => typeof value === 'number');
+        const numbers = arrayFilter(values, (value): value is number => typeof value === 'number');
         if (numbers.length !== values.length) return unknown;
         const rounding =
           declaration.rounding?.at === 'contribution' ? undefined : declaration.rounding;
         return { value: sumNumbers(numbers, rounding) };
       }
-      const decimals = values.filter(
+      const decimals = arrayFilter(
+        values,
         (value): value is string => typeof value === 'string' && isCanonicalDecimal(value),
       );
       if (decimals.length !== values.length) return unknown;
       return settle(finish(sumDecimals(decimals), declaration));
     }
     case 'count':
-      if (!values.every((value) => typeof value === 'boolean')) return unknown;
-      return { value: values.filter((value) => value === true).length };
+      if (!arrayEvery(values, (value) => typeof value === 'boolean')) return unknown;
+      return { value: arrayFilter(values, (value) => value === true).length };
     case 'all':
     case 'any': {
-      if (!values.every((value) => typeof value === 'boolean')) return unknown;
+      if (!arrayEvery(values, (value) => typeof value === 'boolean')) return unknown;
       const all = declaration.combine === 'all';
-      return { value: all ? values.every((v) => v === true) : values.some((v) => v === true) };
+      return {
+        value: all ? arrayEvery(values, (v) => v === true) : arraySome(values, (v) => v === true),
+      };
     }
     case 'union':
       return unionOf(values);
@@ -164,7 +190,7 @@ function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): E
       const [head] = values;
       if (head === undefined) return unknown;
       const key = keyOf(head);
-      if (!values.every((value) => keyOf(value) === key)) return { disagree: true };
+      if (!arrayEvery(values, (value) => keyOf(value) === key)) return { disagree: true };
       return settle(finish(head, declaration));
     }
   }
@@ -192,15 +218,15 @@ function emptyValue(declaration: OutputDeclaration): Expected {
 
 /** The items of the lists in order, the first of those with the same canonical form kept. */
 function unionOf(values: readonly JsonValue[]): Expected {
-  const seen = new Set<string>();
+  const seen = new NativeSet<string>();
   const items: JsonValue[] = [];
   for (const value of values) {
-    if (!Array.isArray(value)) return { unknown: true };
+    if (!arrayIsArray(value)) return { unknown: true };
     for (const item of value) {
       const key = keyOf(item);
-      if (seen.has(key)) continue;
-      seen.add(key);
-      items.push(item);
+      if (setHas(seen, key)) continue;
+      setAdd(seen, key);
+      arrayPush(items, item);
     }
   }
   return { value: items };
@@ -228,11 +254,11 @@ function extremeIndex(
  * its place, and the buckets are read in order.
  */
 function inContributionOrder(target: Target): ProofStep[] {
-  const buckets = new Map<string, ProofStep[]>();
-  for (const id of target.contributors) if (!buckets.has(id)) buckets.set(id, []);
+  const buckets = new NativeMap<string, ProofStep[]>();
+  for (const id of target.contributors) if (!mapHas(buckets, id)) mapSet(buckets, id, []);
   const unnamed: ProofStep[] = [];
-  for (const step of target.steps) (buckets.get(step.ruleId) ?? unnamed).push(step);
-  return [...[...buckets.values()].flat(), ...unnamed];
+  for (const step of target.steps) arrayPush(mapGet(buckets, step.ruleId) ?? unnamed, step);
+  return [...arrayFlat([...mapValues(buckets)]), ...unnamed];
 }
 
 /**
@@ -241,23 +267,25 @@ function inContributionOrder(target: Target): ProofStep[] {
  */
 function contributorsMatch(target: Target, top: Top | undefined): boolean {
   const { contributors, steps, declaration } = target;
-  const named = new Set(contributors);
-  if (named.size !== contributors.length) return false;
+  const named = new NativeSet(contributors);
+  if (setSize(named) !== contributors.length) return false;
   if (top !== undefined)
-    return named.size === top.ids.size && contributors.every((id) => top.ids.has(id));
-  const fed = new Set(steps.map((step) => step.ruleId));
-  if (!contributors.every((id) => fed.has(id))) return false;
-  if (declaration.combine !== 'highestPriority') return named.size === fed.size;
-  return (named.size === 0) === (fed.size === 0);
+    return (
+      setSize(named) === setSize(top.ids) && arrayEvery(contributors, (id) => setHas(top.ids, id))
+    );
+  const fed = new NativeSet(arrayMap(steps, (step) => step.ruleId));
+  if (!arrayEvery(contributors, (id) => setHas(fed, id))) return false;
+  if (declaration.combine !== 'highestPriority') return setSize(named) === setSize(fed);
+  return (setSize(named) === 0) === (setSize(fed) === 0);
 }
 
 /** The standing of each contributor of `target`: that of the first step of its rule. */
 function contributorStanding(target: Target, standings: Standings) {
-  const first = new Map<string, Standing | undefined>();
+  const first = new NativeMap<string, Standing | undefined>();
   for (const step of target.steps) {
-    if (!first.has(step.ruleId)) first.set(step.ruleId, standings.get(ruleKey(step)));
+    if (!mapHas(first, step.ruleId)) mapSet(first, step.ruleId, mapGet(standings, ruleKey(step)));
   }
-  return (id: string): Standing | undefined => first.get(id);
+  return (id: string): Standing | undefined => mapGet(first, id);
 }
 
 /**
@@ -286,9 +314,11 @@ export function combinationProblems(target: Target, context: Context): string[] 
   const { declaration } = target;
   const cite = target.cite;
   const issues: string[] = [];
-  const carrier = target.steps.find((step) => context.imposed.has(imposedKey(step, step.output)));
+  const carrier = arrayFind(target.steps, (step) =>
+    setHas(context.imposed, imposedKey(step, step.output)),
+  );
   if (carrier !== undefined && target.steps.length > 1) {
-    issues.push(`steps beside a short circuit: ${cite()}`);
+    arrayPush(issues, `steps beside a short circuit: ${cite()}`);
   }
   const top =
     declaration.combine === 'highestPriority' && carrier === undefined
@@ -306,19 +336,22 @@ export function combinationProblems(target: Target, context: Context): string[] 
       ...(standing ? {} : { as: { rules: 'none' } }),
     });
   const differ = `contributors differ from applied steps: ${cite()}`;
-  if (!contributorsMatch(target, top) && !lifted(differ)) issues.push(differ);
+  if (!contributorsMatch(target, top) && !lifted(differ)) arrayPush(issues, differ);
   if (!inStandingOrder(target.contributors, contributorStanding(target, context.standings))) {
-    issues.push(`contributors not in contribution order: ${cite()}`);
+    arrayPush(issues, `contributors not in contribution order: ${cite()}`);
   }
   if (top !== undefined) {
     append(
       issues,
-      top.problems.filter((problem) => !problem.startsWith(NO_FIRST) || !lifted(problem)),
+      arrayFilter(
+        top.problems,
+        (problem) => !stringStartsWith(problem, NO_FIRST) || !lifted(problem),
+      ),
     );
   }
   if (target.status === 'undetermined') return issues;
   const following = valueProblems(target, context, carrier, top);
-  const hidden = following.length > 0 && following.map(lifted).every(Boolean);
+  const hidden = following.length > 0 && arrayEvery(arrayMap(following, lifted), NativeBoolean);
   return hidden ? issues : [...issues, ...following];
 }
 
@@ -353,16 +386,20 @@ function valueProblems(
   if ('none' in expected && declaration.combine === 'all') {
     return [...issues, `all output without contribution must be undetermined: ${cite()}`];
   }
-  if (SELECTING.has(declaration.combine) && has && !('unknown' in expected && top !== undefined)) {
+  if (
+    setHas(SELECTING, declaration.combine) &&
+    has &&
+    !('unknown' in expected && top !== undefined)
+  ) {
     const from = selectedStep(declaration, fed, carrier);
     const { selected } = target;
-    if (selected === undefined) issues.push(`selected missing: ${cite()}`);
+    if (selected === undefined) arrayPush(issues, `selected missing: ${cite()}`);
     else if (from === undefined || !sameStep(selected, from)) {
-      issues.push(`selected does not match the value: ${cite()}`);
+      arrayPush(issues, `selected does not match the value: ${cite()}`);
     }
   }
   if (!followsFrom(expected, target.value))
-    issues.push(`output value does not follow from its contributions: ${cite()}`);
+    arrayPush(issues, `output value does not follow from its contributions: ${cite()}`);
   return issues;
 }
 
@@ -389,7 +426,7 @@ function selectedStep(
   if (carrier !== undefined || declaration.combine === 'highestPriority') return steps[0];
   const index = extremeIndex(
     declaration,
-    steps.map((step) => step.contribution),
+    arrayMap(steps, (step) => step.contribution),
   );
   return index === undefined || steps.length === 0 ? undefined : steps[index];
 }

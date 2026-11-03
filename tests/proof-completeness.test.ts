@@ -7,6 +7,7 @@ import { traceProof } from './proof-trace.js';
 import type { Content, Entry, OutputPart } from './proof-builders.js';
 import { unsalted } from './proof-cases.js';
 import { withCounts } from './helpers.js';
+import { withoutDefinitionChecks } from './notices.js';
 
 /**
  * A proof of one output `value` fed by `r0`, `r1`… with `contributions` (priority `winner` for
@@ -113,6 +114,7 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
   it('given the rules, each recorded priority is that of its definition', () => {
     const definition = (id: string, priority: number): RuleDefinitionInput => ({
       ...ruleA,
+      model: 'M',
       id,
       priority,
     });
@@ -128,16 +130,26 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
         ...ref,
         checksum: computeRuleChecksum(rules[i]!),
       }));
-      return sealProof(unsalted({ ...content, rules: listed } as unknown as UnsignedProof));
+      return sealProof(
+        unsalted({
+          ...content,
+          evaluatedAt: '2025-06-01',
+          rules: listed,
+        } as unknown as UnsignedProof),
+      );
     };
     const honest = [definition('r0', 5000), definition('w', 1000)];
-    expect(verifyProof(proofWith(honest), { rules: honest }).issues).toEqual(['unsigned']);
+    expect(
+      withoutDefinitionChecks(verifyProof(proofWith(honest), { rules: honest }).issues),
+    ).toEqual(['unsigned']);
     // The definition of w says 6000: the proof recorded 1000, which hid its precedence.
     const hidden = [definition('r0', 5000), definition('w', 6000)];
-    expect(verifyProof(proofWith(hidden), { rules: hidden })).toEqual({
-      status: 'invalid',
-      issues: ['unsigned', 'rule priority mismatch: w@1'],
-    });
+    const found = verifyProof(proofWith(hidden), { rules: hidden });
+    expect(found.status).toBe('invalid');
+    expect(withoutDefinitionChecks(found.issues)).toEqual([
+      'unsigned',
+      'rule priority mismatch: w@1',
+    ]);
   });
 
   it.each([
@@ -175,11 +187,12 @@ describe('completeness (D-7, table of 9M2): a pending rule makes its output unde
 
   it('given the rules, a recorded -0 is the priority 0 of a definition', () => {
     const content = outputProof({ type: 'number', combine: 'sum', value: 1 }, [1]);
-    const rule: RuleDefinitionInput = { ...ruleA, id: 'r0', priority: 0 };
+    const rule: RuleDefinitionInput = { ...ruleA, model: 'M', id: 'r0', priority: 0 };
     content.rules[0] = { ...content.rules[0]!, checksum: computeRuleChecksum(rule), priority: -0 };
-    expect(verifyProof(sealProof(unsalted(content)), { rules: [rule] }).issues).toEqual([
-      'unsigned',
-    ]);
+    content.evaluatedAt = '2025-06-01';
+    expect(
+      withoutDefinitionChecks(verifyProof(sealProof(unsalted(content)), { rules: [rule] }).issues),
+    ).toEqual(['unsigned']);
   });
 
   it('refuses a rule without its priority', () => {

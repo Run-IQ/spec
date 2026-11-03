@@ -1,3 +1,11 @@
+import {
+  arrayFilter,
+  arrayMap,
+  arrayPush,
+  mathMax,
+  stringCharCodeAt,
+  stringSlice,
+} from './intrinsics.js';
 /**
  * Internal to `@run-iq/spec`: the one bound on every list of problems the package returns
  * (`validateRuleDefinition`, `validateOutputDeclaration`, `validateReferential`,
@@ -36,9 +44,9 @@ export const ISSUE_LIMIT_MESSAGE = `further problems not listed (limit ${MAX_ISS
  */
 export function boundIssueText(text: string): string {
   if (text.length <= MAX_ISSUE_TEXT) return text;
-  const last = text.charCodeAt(MAX_ISSUE_TEXT - 1);
+  const last = stringCharCodeAt(text, MAX_ISSUE_TEXT - 1);
   const splitsPair = last >= 0xd800 && last <= 0xdbff;
-  return `${text.slice(0, splitsPair ? MAX_ISSUE_TEXT - 1 : MAX_ISSUE_TEXT)}…`;
+  return `${stringSlice(text, 0, splitsPair ? MAX_ISSUE_TEXT - 1 : MAX_ISSUE_TEXT)}…`;
 }
 
 /**
@@ -56,7 +64,7 @@ export class IssueList {
       this.dropped = true;
       return false;
     }
-    this.entries.push({ path: boundIssueText(path), message: boundIssueText(message) });
+    arrayPush(this.entries, { path: boundIssueText(path), message: boundIssueText(message) });
     return true;
   }
 
@@ -79,13 +87,13 @@ export class IssueList {
   /** The problems, then the limit notice when a problem was not listed. */
   toArray(): RuleValidationIssue[] {
     const list = [...this.entries];
-    if (this.dropped) list.push({ path: '', message: ISSUE_LIMIT_MESSAGE });
+    if (this.dropped) arrayPush(list, { path: '', message: ISSUE_LIMIT_MESSAGE });
     return list;
   }
 
   /** The messages of `toArray`, in order. */
   messages(): string[] {
-    return this.toArray().map((issue) => issue.message);
+    return arrayMap(this.toArray(), (issue) => issue.message);
   }
 }
 
@@ -104,4 +112,28 @@ export function boundMessages(messages: Iterable<string>): string[] {
  */
 export function pathArgumentIssue(path: unknown): RuleValidationIssue {
   return { path: '', message: `path must be a string, got a value of type ${typeof path}` };
+}
+
+/**
+ * Internal: at most `MAX_ISSUES` messages, in the order found, but the items marked `fixed`
+ * (the notices that say what a verifier did not check) are never cut: the other items give way
+ * to them, and a last notice says how many were left out
+ * (`further problems not listed (limit 100): n left out`).
+ */
+export function boundWithFixed(items: readonly { message: string; fixed?: true }[]): string[] {
+  if (items.length <= MAX_ISSUES) return arrayMap(items, (item) => item.message);
+  const kept = arrayFilter(items, (item) => item.fixed === true).length;
+  let room = mathMax(0, MAX_ISSUES - kept - 1);
+  let left = 0;
+  const out: string[] = [];
+  for (const item of items) {
+    if (item.fixed === true) arrayPush(out, item.message);
+    else if (room > 0) {
+      room--;
+      arrayPush(out, item.message);
+    } else left++;
+  }
+  if (left > 0)
+    arrayPush(out, `further problems not listed (limit ${MAX_ISSUES}): ${left} left out`);
+  return out;
 }

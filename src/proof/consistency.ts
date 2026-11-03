@@ -26,6 +26,31 @@ import { PROOF_SECTIONS } from './types.js';
 import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
 import { isLifted, liftedOnSteps, LIFTS, unexplained } from './lifts.js';
 import type { RuleIdentity } from './lifts.js';
+import {
+  NativeMap,
+  NativeNumber,
+  NativeRegExp,
+  NativeSet,
+  arrayFilter,
+  arrayFlatMap,
+  arrayForEach,
+  arrayIncludes,
+  arrayJoin,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapKeys,
+  mapSet,
+  mapSize,
+  objectEntries,
+  regExpExec,
+  setAdd,
+  setHas,
+  stringIndexOf,
+  stringSlice,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the consistency of a proof `validateProof` accepts, as `sealProof`,
 // `signProof` and `verifyProof` check it. Every check is linear in the size of the proof: each
@@ -47,12 +72,12 @@ const bySubject = optional(comparePointers);
 
 /** The rule set a qualified rule id or output name designates (D-37). */
 function ruleSetOf(name: string): string {
-  const colon = name.indexOf(':');
-  return colon < 0 ? LOCAL_RULE_SET : name.slice(0, colon);
+  const colon = stringIndexOf(name, ':');
+  return colon < 0 ? LOCAL_RULE_SET : stringSlice(name, 0, colon);
 }
 
 /** The bare part of a qualified name. */
-const bareOf = (name: string): string => name.slice(name.indexOf(':') + 1);
+const bareOf = (name: string): string => stringSlice(name, stringIndexOf(name, ':') + 1);
 
 /** Rule identities: rule set, bare id, version. */
 const byRule: Compare<{ ruleId: string; version: number }> = (a, b) =>
@@ -77,8 +102,8 @@ function sortProblems<T>(
   const issues: string[] = [];
   for (let i = 1; i < list.length && !full(issues); i++) {
     const order = compare(list[i - 1] as T, list[i] as T);
-    if (order > 0) issues.push(unsorted(i));
-    else if (order === 0 && repeated !== undefined) issues.push(repeated(i));
+    if (order > 0) arrayPush(issues, unsorted(i));
+    else if (order === 0 && repeated !== undefined) arrayPush(issues, repeated(i));
   }
   return issues;
 }
@@ -87,7 +112,7 @@ const key = (entry: { ruleId: string; version: number }): string =>
   `${entry.ruleId}@${entry.version}`;
 
 /** No section hidden: a proof without redacted entries. */
-const NOTHING_HIDDEN: ReadonlySet<ProofSection> = new Set();
+const NOTHING_HIDDEN: ReadonlySet<ProofSection> = new NativeSet();
 
 /**
  * Internal: what the checks of `p` share, computed once: its imposed steps (`imposedSteps`),
@@ -112,17 +137,17 @@ export function placeInProof(
   message: string,
   positions: ReadonlyMap<ProofSection, readonly number[]>,
 ): string {
-  if (positions.size === 0) return message;
-  const found = PLACE.exec(message);
+  if (mapSize(positions) === 0) return message;
+  const found = regExpExec(PLACE, message);
   if (found === null) return message;
   const [whole, section = '', link = '', index = ''] = found;
-  const place = positions.get(section as ProofSection)?.[Number(index)];
+  const place = mapGet(positions, section as ProofSection)?.[NativeNumber(index)];
   if (place === undefined) return message;
-  return `${section}${link}${place}${message.slice(whole.length)}`;
+  return `${section}${link}${place}${stringSlice(message, whole.length)}`;
 }
 
 /** A message citing the place of an entry: `<section> not sorted at <i>`, `<section>[<i>]`. */
-const PLACE = new RegExp(`^(${PROOF_SECTIONS.join('|')})( not sorted at |\\[)(\\d+)`);
+const PLACE = new NativeRegExp(`^(${arrayJoin(PROOF_SECTIONS, '|')})( not sorted at |\\[)(\\d+)`);
 
 /**
  * Internal: every way `p` contradicts itself, each reported once, in this order: unlisted
@@ -138,7 +163,7 @@ const PLACE = new RegExp(`^(${PROOF_SECTIONS.join('|')})( not sorted at |\\[)(\\
 export function inconsistencies(
   p: ProofView,
   context: Context = contextOf(p),
-  positions: ReadonlyMap<ProofSection, readonly number[]> = new Map(),
+  positions: ReadonlyMap<ProofSection, readonly number[]> = new NativeMap(),
 ): string[] {
   const listed = listedOutputs(p);
   const { imposed, hidden } = context;
@@ -163,15 +188,15 @@ export function inconsistencies(
   ];
   // Each problem once, in the order found, up to what `verifyProof` lists.
   const issues: string[] = [];
-  const seen = new Set<string>();
+  const seen = new NativeSet<string>();
   for (const check of checks) {
     if (full(issues)) break;
     for (const issue of check()) {
       if (full(issues)) break;
       const message = placeInProof(issue, positions);
-      if (seen.has(message)) continue;
-      seen.add(message);
-      issues.push(message);
+      if (setHas(seen, message)) continue;
+      setAdd(seen, message);
+      arrayPush(issues, message);
     }
   }
   return issues;
@@ -179,8 +204,9 @@ export function inconsistencies(
 
 /** Each output name of `p`, with its first entry. */
 function listedOutputs(p: ProofView): Map<string, ProofOutput> {
-  const listed = new Map<string, ProofOutput>();
-  for (const output of p.outputs) if (!listed.has(output.name)) listed.set(output.name, output);
+  const listed = new NativeMap<string, ProofOutput>();
+  for (const output of p.outputs)
+    if (!mapHas(listed, output.name)) mapSet(listed, output.name, output);
   return listed;
 }
 
@@ -201,24 +227,24 @@ function forEachUnresolved(
   listed: ReadonlyMap<string, ProofOutput>,
   report: Unresolved,
 ): void {
-  const keys = new Set<string>();
-  const ids = new Set<string>();
+  const keys = new NativeSet<string>();
+  const ids = new NativeSet<string>();
   for (const rule of p.rules) {
     const id = qualifyName(rule.ruleSet, rule.id);
-    ids.add(id);
-    keys.add(`${id}@${rule.version}`);
+    setAdd(ids, id);
+    setAdd(keys, `${id}@${rule.version}`);
   }
   const sections = [p.applied, p.skipped, p.pending, p.exceptions, p.readsUndeclared];
   for (const section of sections) {
     for (const entry of section) {
       if (report.stop()) return;
-      if (!keys.has(key(entry))) {
+      if (!setHas(keys, key(entry))) {
         report.rule(citeName(key(entry)), { id: entry.ruleId, version: entry.version });
       }
     }
   }
   const cite = (id: string): void => {
-    if (!ids.has(id) && !report.stop()) report.rule(citeName(id), { id });
+    if (!setHas(ids, id) && !report.stop()) report.rule(citeName(id), { id });
   };
   for (const entry of [...p.outputs, ...p.items]) {
     for (const id of entry.contributors) cite(id);
@@ -227,7 +253,7 @@ function forEachUnresolved(
   }
   for (const exception of p.exceptions) for (const { ruleId } of exception.affected) cite(ruleId);
   const output = (name: string | undefined): void => {
-    if (name !== undefined && !listed.has(name) && !report.stop()) {
+    if (name !== undefined && !mapHas(listed, name) && !report.stop()) {
       report.output(citeName(name), name);
     }
   };
@@ -257,22 +283,27 @@ export function citationProblems(
     rule: (cited, rule) => {
       // A rules entry of that rule: `id@version`, or any version when cited by id.
       const message = `cited rule not listed: ${cited}`;
-      if (!isLifted(hidden, LIFTS.ruleCitations, { message, rule })) issues.push(message);
+      if (!isLifted(hidden, LIFTS.ruleCitations, { message, rule })) arrayPush(issues, message);
     },
     output: (cited, name) => {
       const message = `cited output not listed: ${cited}`;
       if (!isLifted(hidden, LIFTS.outputCitations, { message, output: { output: name } })) {
-        issues.push(message);
+        arrayPush(issues, message);
       }
     },
     stop: () => full(issues),
   });
-  const packs = new Set(p.ruleSets.flatMap((set) => (set.kind === 'pack' ? [set.id] : [])));
-  const sets = [...p.rules.map((rule) => rule.ruleSet), ...[...listed.keys()].map(ruleSetOf)];
+  const packs = new NativeSet(
+    arrayFlatMap(p.ruleSets, (set) => (set.kind === 'pack' ? [set.id] : [])),
+  );
+  const sets = [
+    ...arrayMap(p.rules, (rule) => rule.ruleSet),
+    ...arrayMap([...mapKeys(listed)], ruleSetOf),
+  ];
   for (const set of sets) {
     if (full(issues)) break;
-    if (set !== LOCAL_RULE_SET && !packs.has(set)) {
-      issues.push(`rule set not listed: ${citeName(set)}`);
+    if (set !== LOCAL_RULE_SET && !setHas(packs, set)) {
+      arrayPush(issues, `rule set not listed: ${citeName(set)}`);
     }
   }
   return issues;
@@ -285,21 +316,21 @@ export function citationProblems(
  */
 export function ruleSetProblems(p: ProofView): string[] {
   const issues: string[] = [];
-  const seen = new Set<string>();
-  const packs = new Set<string>();
+  const seen = new NativeSet<string>();
+  const packs = new NativeSet<string>();
   for (const set of p.ruleSets) {
     const name = set.kind === 'local' ? LOCAL_RULE_SET : set.id;
     const id = `${set.kind === 'referential' ? 'referential' : 'rule set'}:${name}`;
-    if (seen.has(id)) issues.push(`rule set listed twice: ${citeName(name)}`);
-    seen.add(id);
-    if (set.kind === 'pack') packs.add(set.id);
+    if (setHas(seen, id)) arrayPush(issues, `rule set listed twice: ${citeName(name)}`);
+    setAdd(seen, id);
+    if (set.kind === 'pack') setAdd(packs, set.id);
   }
-  p.ruleSets.forEach((set, i) => {
+  arrayForEach(p.ruleSets, (set, i) => {
     if (set.kind !== 'pack' || set.imports === undefined) return;
     const { id, imports } = set;
-    if (imports.includes(id)) issues.push(`rule set imports itself: ${citeName(id)}`);
-    if (imports.some((pack) => !packs.has(pack))) {
-      issues.push(`rule set imports a pack not listed: ${citeName(id)}`);
+    if (arrayIncludes(imports, id)) arrayPush(issues, `rule set imports itself: ${citeName(id)}`);
+    if (arraySome(imports, (pack) => !setHas(packs, pack))) {
+      arrayPush(issues, `rule set imports a pack not listed: ${citeName(id)}`);
     }
     const at = `ruleSets[${i}].imports`;
     append(
@@ -344,7 +375,7 @@ export function orderProblems(
   );
   push(
     sortProblems(
-      p.outputs.map((output) => output.name),
+      arrayMap(p.outputs, (output) => output.name),
       byText,
       (i) => `outputs not sorted at ${i}`,
       (i) => `duplicate output: ${citeName(p.outputs[i]?.name ?? '')}`,
@@ -382,7 +413,7 @@ export function orderProblems(
   );
   push(
     sortProblems(
-      p.factsRead.map((fact) => fact.path),
+      arrayMap(p.factsRead, (fact) => fact.path),
       comparePointers,
       (i) => `factsRead not sorted at ${i}`,
       (i) => `duplicate fact read: ${citeName(p.factsRead[i]?.path ?? '')}`,
@@ -390,7 +421,7 @@ export function orderProblems(
   );
   push(
     sortProblems(
-      p.missingFacts.map((fact) => fact.path),
+      arrayMap(p.missingFacts, (fact) => fact.path),
       comparePointers,
       (i) => `missingFacts not sorted at ${i}`,
       (i) => `duplicate missing fact: ${citeName(p.missingFacts[i]?.path ?? '')}`,
@@ -414,23 +445,24 @@ function decidedTwice(
   steps: readonly ProofStep[],
 ): string[] {
   const issues: string[] = [];
-  const decided = new Map<string, { whole: boolean; subjects: Set<string> }>();
+  const decided = new NativeMap<string, { whole: boolean; subjects: Set<string> }>();
   for (const entry of [...steps, ...p.skipped, ...p.pending]) {
     if (full(issues)) break;
     // The step a short circuit imposed is the effect of an exception, not a decision.
-    if ('model' in entry && imposed.has(imposedKey(entry, entry.output))) continue;
+    if ('model' in entry && setHas(imposed, imposedKey(entry, entry.output))) continue;
     const rule = key(entry);
     const grouped = 'instances' in entry && entry.instances !== undefined;
-    let state = decided.get(rule);
+    let state = mapGet(decided, rule);
     const twice =
       state !== undefined &&
-      (state.whole || (entry.subject === undefined ? !grouped : state.subjects.has(entry.subject)));
-    if (twice) issues.push(`rule decided twice: ${citeName(instanceKey(entry))}`);
+      (state.whole ||
+        (entry.subject === undefined ? !grouped : setHas(state.subjects, entry.subject)));
+    if (twice) arrayPush(issues, `rule decided twice: ${citeName(instanceKey(entry))}`);
     if (state === undefined) {
-      state = { whole: false, subjects: new Set() };
-      decided.set(rule, state);
+      state = { whole: false, subjects: new NativeSet() };
+      mapSet(decided, rule, state);
     }
-    if (entry.subject !== undefined) state.subjects.add(entry.subject);
+    if (entry.subject !== undefined) setAdd(state.subjects, entry.subject);
     else if (!grouped) state.whole = true;
   }
   return issues;
@@ -446,9 +478,10 @@ function requestedProblems(
   outputsHidden: (message: string, name: string) => boolean,
 ): string[] {
   const requested = p.requested ?? [];
-  const absent = requested.filter(
+  const absent = arrayFilter(
+    requested,
     (name) =>
-      !listed.has(name) && !outputsHidden(`requested output absent: ${citeName(name)}`, name),
+      !mapHas(listed, name) && !outputsHidden(`requested output absent: ${citeName(name)}`, name),
   );
   return [
     ...sortProblems(
@@ -457,7 +490,7 @@ function requestedProblems(
       (i) => `requested not sorted at ${i}`,
       (i) => `requested repeats ${citeName(requested[i] ?? '')}`,
     ),
-    ...absent.map((name) => `requested output absent: ${citeName(name)}`),
+    ...arrayMap(absent, (name) => `requested output absent: ${citeName(name)}`),
   ];
 }
 
@@ -477,13 +510,25 @@ function innerOrderProblems(p: ProofView): string[] {
       (i) => `component repeated at ${i}`,
     ),
   );
-  p.strata.forEach((names, i) => {
+  // One release of the time zone database, recorded by the engine: with two, the proof does not
+  // say which one decided its windows.
+  const releases = arrayFilter(
+    components,
+    (entry) => entry.name === 'tzdata' && entry.declaredBy === 'engine',
+  );
+  if (releases.length > 1) {
+    arrayPush(
+      issues,
+      `tzdata recorded ${releases.length} times by the engine: one release is allowed`,
+    );
+  }
+  arrayForEach(p.strata, (names, i) => {
     append(
       issues,
       sortProblems(names, byText, (j) => `strata[${i}] not sorted at ${j}`),
     );
   });
-  p.pending.forEach((entry, i) => {
+  arrayForEach(p.pending, (entry, i) => {
     const at = `pending[${i}].missing`;
     append(
       issues,
@@ -495,8 +540,8 @@ function innerOrderProblems(p: ProofView): string[] {
       ),
     );
   });
-  p.applied.forEach((step, i) => {
-    for (const [name, match] of Object.entries(step.matches ?? {})) {
+  arrayForEach(p.applied, (step, i) => {
+    for (const [name, match] of objectEntries(step.matches ?? {})) {
       for (const member of ['values', 'via'] as const) {
         const list = match[member];
         const at = `applied[${i}].matches.${name}.${member}`;
@@ -512,7 +557,7 @@ function innerOrderProblems(p: ProofView): string[] {
       }
     }
   });
-  p.exceptions.forEach((exception, i) => {
+  arrayForEach(p.exceptions, (exception, i) => {
     const { affected } = exception;
     const at = `exceptions[${i}].affected`;
     append(
