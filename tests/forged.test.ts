@@ -9,6 +9,7 @@ import {
   normalizeRuleDefinition,
   sha256Hex,
   SpecError,
+  VerifyOptionsError,
   toCanonicalDecimal,
   validateOutputDeclaration,
   validateProofInput,
@@ -470,7 +471,7 @@ describe('every exported function: hostile arguments give an own SpecError or a 
   const valid: unknown[] = [BASE_RULE, '2020-01-01', 'UTC', fixedCalendar];
   const functions = new Map<string, (...args: unknown[]) => unknown>();
   for (const [name, value] of [...Object.entries(api), ...Object.entries(canonicalEntry)]) {
-    if (typeof value === 'function' && value !== SpecError) {
+    if (typeof value === 'function' && value !== SpecError && value !== VerifyOptionsError) {
       functions.set(name, value as (...args: unknown[]) => unknown);
     }
   }

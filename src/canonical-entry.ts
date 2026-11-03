@@ -11,7 +11,7 @@
  */
 export { canonicalize, canonicalizeAt } from './canonical.js';
 export type { JsonValue } from './canonical.js';
-export { SpecError } from './errors.js';
+export { SpecError, VerifyOptionsError } from './errors.js';
 export type { SpecErrorCode } from './errors.js';
 export {
   comparePointers,

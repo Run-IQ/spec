@@ -9,6 +9,7 @@ import {
   PROOF_SECTIONS,
   proofLeafHashes,
   SpecError,
+  VerifyOptionsError,
   validateRuleDefinition,
 } from '../src/index.js';
 import { MAX_JSON_VALUES } from '../src/values.js';
@@ -32,6 +33,17 @@ export function specError(call: () => unknown): SpecError {
     throw error;
   }
   throw new Error('expected a SpecError');
+}
+
+/** The `VerifyOptionsError` a call to `verifyProof` throws for a mistake of the caller. */
+export function optionError(call: () => unknown): VerifyOptionsError {
+  try {
+    call();
+  } catch (error) {
+    if (error instanceof VerifyOptionsError) return error;
+    throw error;
+  }
+  throw new Error('expected a VerifyOptionsError');
 }
 
 const MINUTE = 60_000;

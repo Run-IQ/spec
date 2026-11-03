@@ -28,7 +28,7 @@ import {
   TRUSTED,
   unsigned,
 } from './proof-cases.js';
-import { handSealed, specError, treeDigestOf, withCounts } from './helpers.js';
+import { handSealed, optionError, specError, treeDigestOf, withCounts } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 import { NOT_REPLAYED, UNCHECKED } from './notices.js';
@@ -414,9 +414,11 @@ describe('verifyProof: consistent, never authentic', () => {
   });
 
   it('a trusted key that is not a hex ed25519 public key', () => {
-    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': 'abc' } })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.executor-1 is malformed'],
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: { 'executor-1': 'abc' } })),
+    ).toMatchObject({
+      option: 'options.trustedKeys.executor-1',
+      message: 'options.trustedKeys.executor-1 is malformed',
     });
   });
 });

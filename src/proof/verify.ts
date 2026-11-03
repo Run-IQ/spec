@@ -1,4 +1,4 @@
-import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
+import { citeName, reasonOf, unreadableMessage, VerifyOptionsError } from '../errors.js';
 import { sha256Hex } from '../hash.js';
 import { boundMessages, boundWithFixed } from '../issues.js';
 import type { RuleDefinition, RuleDefinitionInput } from '../rule/definition.js';
@@ -43,8 +43,9 @@ const RULES_NOT_CHECKED =
 const NOT_REPLAYED = 'conditions and amounts not checked: verifyProof does not replay the decision';
 
 /**
- * Verifies a decision proof without executing anything, and never throws: any malformed input
- * gives `invalid`. Issues are short, stable English strings.
+ * Verifies a decision proof without executing anything. Any malformed proof gives `invalid`; a
+ * mistake of the caller in the options (`VerifyOptionsError`, code `INVALID_OPTIONS`, naming the
+ * option) throws, never a verdict on the proof. Issues are short, stable English strings.
  *
  * 1. The shape (`validateProof`). A malformed proof is `invalid` with the validation messages,
  *    and nothing else is checked. A `format` outside `PROOF_FORMATS` gives the single
@@ -74,18 +75,17 @@ const NOT_REPLAYED = 'conditions and amounts not checked: verifyProof does not r
  *    carrier's decision: id@version`, `decision weaker than the exception that affected it:
  *    id@version`).
  * 4. The signature. `unsigned`, or `untrusted key` (its `keyId` is not an own key of
- *    `trustedKeys`), or `trusted key malformed` (not 64 hex characters, not a curve point, or
- *    a small-order point), leave it at best `consistent`: nothing proves who produced it.
+ *    `trustedKeys`), leave it at best `consistent`: nothing proves who produced it.
  *    `signature invalid` makes it `invalid`. `trustedKeys` maps a key id to a hex ed25519
- *    public key.
+ *    public key; a key that is malformed (not 64 hex characters, not a curve point, a
+ *    small-order point) is the caller's mistake and throws.
  * 5. With `rules`, the rules the decision claims to have received: the set of
  *    `{ ruleSet, id, version, checksum }` of `rules` (each checksum recomputed as
  *    `sha256Hex(canonicalRulePayload(rule))`, a rule without `ruleSet` being local) must equal
  *    the set in `proof.rules`. Each difference makes it `invalid`, the rule cited by its
  *    qualified id (D-37): `rule missing: id@version` (in the proof, not given),
  *    `unexpected rule: id@version` (given, not in the proof), `rule checksum mismatch:
- *    id@version`, `duplicate rule: id@version`, `rule invalid: rules[i]: <reason>`, and, for a
- *    rule whose checksum matches, `rule priority mismatch: id@version` when the priority the
+ *    id@version`, and, for a rule whose checksum matches, `rule priority mismatch: id@version` when the priority the
  *    proof records is not that of the definition (`-0` and `0` are the same priority). Then,
  *    in the order of `pending`, for a given rule: `fired missing: id@version[ at
  *    subject]` on a pending entry of a rule whose definition carries exceptions, and
@@ -100,8 +100,10 @@ const NOT_REPLAYED = 'conditions and amounts not checked: verifyProof does not r
  *    not given` make it `invalid` when the numbers differ. The checks of the exception records
  *    of carriers are not made while `skipped` or `exceptions` has a redacted entry.
  *
- * Malformed options (not an object, `trustedKeys` not an object, `rules` not an array) make it
- * `invalid` too, rather than being ignored.
+ * Malformed options throw `VerifyOptionsError` (`INVALID_OPTIONS`), the option named, before the
+ * proof is read: options that are not an object, an unknown key, `trustedKeys` that are not
+ * keys, `rules` that are not a list or hold a rule that is not valid or is listed twice, a
+ * calendar that is not one or that throws. They are never ignored and never a verdict.
  *
  * `issues` lists at most 100 messages, then `further problems not listed (limit 100)`
  * (`IssueList`, shared by every validator of the package).
@@ -123,12 +125,11 @@ export function verifyProof(
     maxProofTimeZones?: number;
   },
 ): ProofVerification {
-  // The options are the caller's: an unknown or unreadable one is a mistake of the caller, not a
-  // fault of the proof, so it throws (the key named) instead of blaming a correct proof.
-  const options = readOptions(o);
   try {
-    return withValueBudget(() => verify(p, options));
+    return withValueBudget(() => verify(p, readOptions(o)));
   } catch (error) {
+    // A mistake of the caller in the options is never a verdict on the proof.
+    if (error instanceof VerifyOptionsError) throw error;
     // A hostile value (a Proxy, a throwing getter) can still throw while being read.
     return { status: 'invalid', issues: [unreadableMessage('proof', error)] };
   }
@@ -196,13 +197,21 @@ function verify(p: unknown, options: Options): ProofVerification {
   return { status, issues, redacted: redactions.count, lifted };
 }
 
-/** The options of a call, read once. */
+/** The rules a caller gave, read once: their identity, checksum and priority. */
+interface GivenRules {
+  given: Map<string, string>;
+  priorities: Map<string, number>;
+  carriers: Set<string>;
+  definitions: Map<string, RuleDefinition>;
+  identities: Map<string, RuleIdentity>;
+}
+
+/** The options of a call, read and checked once: what the caller gave is the caller's. */
 interface Options {
-  /** False when the argument is given but is not an object: a verdict, as it always was. */
-  shapeOk: boolean;
-  trustedKeys: unknown;
-  rules: unknown;
-  calendar: unknown;
+  /** The public keys of `trustedKeys`, by key id. */
+  keys: Map<string, Uint8Array>;
+  rules: GivenRules | undefined;
+  calendar: CivilCalendar | undefined;
   maxProofTimeZones: number;
 }
 
@@ -210,58 +219,151 @@ interface Options {
 export const MAX_PROOF_TIME_ZONES = 64;
 
 /**
- * Reads the options once. An unknown key (a typo: `calender`), an option that cannot be read, or
- * a `maxProofTimeZones` that is not a positive integer throws `SpecError` (`INVALID_PROOF`) with
- * the option named: a mistake of the caller, never a verdict on the proof.
+ * Reads and checks every option once. A mistake of the caller throws `VerifyOptionsError`
+ * (`INVALID_OPTIONS`) naming the option, never a verdict on the proof: options that are not an
+ * object, an unknown key (`calender`), an option that cannot be read, a `maxProofTimeZones` that
+ * is not a positive integer, a calendar that is not one, `trustedKeys` that are not keys (a
+ * malformed one included), a `rules` list that is not a list, holds a rule that is not valid or
+ * lists a rule twice. What the rules say about the proof stays a verdict.
  */
 function readOptions(o: unknown): Options {
-  const fail = (message: string): never => {
-    throw newSpecError('INVALID_PROOF', message);
+  const fail = (option: string, message: string): never => {
+    throw new VerifyOptionsError(option, message);
   };
-  const empty: Options = {
-    shapeOk: true,
-    trustedKeys: undefined,
+  const none: Options = {
+    keys: new Map(),
     rules: undefined,
     calendar: undefined,
     maxProofTimeZones: MAX_PROOF_TIME_ZONES,
   };
-  if (o === undefined) return empty;
+  if (o === undefined) return none;
   let record: Record<string, unknown> | undefined;
   try {
     record = isPlainObject(o) ? o : undefined;
   } catch (error) {
-    return fail(unreadableMessage('options', error));
+    return fail('options', unreadableMessage('options', error));
   }
-  if (record === undefined) return { ...empty, shapeOk: false };
+  if (record === undefined) {
+    return fail(
+      'options',
+      'options must be an object { trustedKeys?, rules?, calendar?, maxProofTimeZones? }',
+    );
+  }
   try {
     for (const key of Reflect.ownKeys(record)) {
       if (typeof key === 'string' && OPTION_KEYS.includes(key)) continue;
       const name = typeof key === 'symbol' ? key.toString() : key;
       const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
       const hint = wanted === undefined ? '' : ` (did you mean ${wanted}?)`;
-      fail(`options.${citeName(name)} is not an option${hint}`);
+      fail(`options.${citeName(name)}`, `options.${citeName(name)} is not an option${hint}`);
     }
   } catch (error) {
-    return isOwnError(error) ? fail(error.message) : fail(unreadableMessage('options', error));
+    if (error instanceof VerifyOptionsError) throw error;
+    return fail('options', unreadableMessage('options', error));
   }
   const read = (name: string): unknown => {
     try {
       return record[name];
     } catch (error) {
-      return fail(unreadableMessage(`options.${name}`, error));
+      return fail(`options.${name}`, unreadableMessage(`options.${name}`, error));
     }
   };
   const max = read('maxProofTimeZones');
   if (max !== undefined && !(typeof max === 'number' && Number.isSafeInteger(max) && max > 0)) {
-    fail('options.maxProofTimeZones must be a positive integer');
+    fail('options.maxProofTimeZones', 'options.maxProofTimeZones must be a positive integer');
   }
+  const calendar = readCalendar(read('calendar'), fail);
   return {
-    shapeOk: true,
-    trustedKeys: read('trustedKeys'),
-    rules: read('rules'),
-    calendar: read('calendar'),
+    keys: readTrustedKeys(read('trustedKeys'), fail),
+    rules: readGivenRules(read('rules'), fail),
+    calendar,
     maxProofTimeZones: (max as number | undefined) ?? MAX_PROOF_TIME_ZONES,
   };
+}
+
+type Fail = (option: string, message: string) => never;
+
+/** The keys of `trustedKeys`, each read once: a key that is malformed is the caller's. */
+function readTrustedKeys(trustedKeys: unknown, fail: Fail): Map<string, Uint8Array> {
+  const keys = new Map<string, Uint8Array>();
+  if (trustedKeys === undefined) return keys;
+  let record: Record<string, unknown> | undefined;
+  try {
+    record = isPlainObject(trustedKeys) ? trustedKeys : undefined;
+  } catch (error) {
+    return fail('options.trustedKeys', unreadableMessage('options.trustedKeys', error));
+  }
+  if (record === undefined) {
+    return fail('options.trustedKeys', 'options.trustedKeys must be an object of hex public keys');
+  }
+  let ids: string[];
+  try {
+    ids = Object.keys(record);
+  } catch (error) {
+    return fail('options.trustedKeys', unreadableMessage('options.trustedKeys', error));
+  }
+  for (const id of ids) {
+    const path = citeName(`options.trustedKeys.${id}`);
+    let value: unknown;
+    try {
+      value = record[id];
+    } catch (error) {
+      return fail(path, unreadableMessage(path, error));
+    }
+    const bytes = publicKeyBytes(value);
+    if (!bytes) return fail(path, `${path} is malformed`);
+    keys.set(id, bytes);
+  }
+  return keys;
+}
+
+/** The rules of `rules`, each read once: a rule that is not valid or is listed twice is the caller's. */
+function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
+  if (rules === undefined) return undefined;
+  let items: unknown;
+  try {
+    if (!Array.isArray(rules)) return fail('options.rules', 'options.rules must be an array');
+    items = readList(rules, 'options.rules');
+  } catch (error) {
+    if (error instanceof VerifyOptionsError) throw error;
+    return fail('options.rules', unreadableMessage('options.rules', error));
+  }
+  if (!Array.isArray(items)) {
+    return fail('options.rules', (items as { message: string }).message);
+  }
+  const out: GivenRules = {
+    given: new Map(),
+    priorities: new Map(),
+    carriers: new Set(),
+    definitions: new Map(),
+    identities: new Map(),
+  };
+  items.forEach((rule, i) => {
+    const at = `options.rules[${i}]`;
+    let key: string;
+    let checksum: string;
+    let definition: RuleDefinition;
+    let id: string;
+    try {
+      // Read and counted as `canonicalRulePayload` reads any rule, so `verifyProof` accepts a
+      // rule exactly when `computeRuleChecksum` does.
+      const payload = canonicalRulePayload(rule as RuleDefinitionInput);
+      // The payload is the canonical JSON of a normalized definition.
+      definition = JSON.parse(payload) as RuleDefinition;
+      id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
+      key = `${id}@${definition.version}`;
+      checksum = sha256Hex(payload);
+    } catch (error) {
+      return fail(at, `${at} is not a valid rule: ${reasonOf(error)}`);
+    }
+    if (out.given.has(key)) return fail(at, `${at} repeats the rule ${citeName(key)}`);
+    out.given.set(key, checksum);
+    out.priorities.set(key, definition.priority);
+    if ((definition.exceptions ?? []).length > 0) out.carriers.add(key);
+    out.definitions.set(key, definition);
+    out.identities.set(key, { id, version: definition.version });
+  });
+  return out;
 }
 
 /** The options `verifyProof` reads: any other key is a mistake, never ignored. */
@@ -269,10 +371,8 @@ const OPTION_KEYS: readonly string[] = ['trustedKeys', 'rules', 'calendar', 'max
 const OPTION_NAMES = OPTION_KEYS.map((name) => [name, name.toLowerCase()] as const);
 
 /**
- * The findings of the options: their shape, the signature against `trustedKeys`, the rules
- * against `rules`. An option that cannot be read (a throwing getter, a Proxy trap) is an
- * options problem (`options could not be read: <reason>`, `options.rules could not be read:
- * <reason>`, …), never one of the proof.
+ * The findings of the options against the proof: the signature against `trustedKeys`, the rules
+ * given against the rules of the proof. The options themselves were checked before (`readOptions`).
  */
 function optionFindings(
   view: ProofView,
@@ -282,65 +382,24 @@ function optionFindings(
   redactions: Redactions,
   unchecked: string[],
 ): Finding[] {
-  const unreadable = (subject: string, error: unknown): Finding[] => [
-    invalidFinding(unreadableMessage(subject, error)),
-  ];
   const findings: Finding[] = [];
-  if (!options.shapeOk) {
-    findings.push(invalidFinding('options must be an object { trustedKeys?, rules?, calendar? }'));
-  }
-  const { trustedKeys, rules } = options;
-  let calendar: unknown = options.calendar;
-  if (calendar !== undefined && !isCalendar(calendar)) {
-    findings.push(
-      invalidFinding('options.calendar must be a calendar { toCivilDate, startOfDay }'),
-    );
-    calendar = undefined;
-  }
-  try {
-    extend(findings, signatureFindings(proof, trustedKeys));
-  } catch (error) {
-    return [...findings, ...unreadable('options.trustedKeys', error)];
-  }
-  if (rules === undefined) {
+  extend(findings, signatureFindings(proof, options.keys));
+  if (options.rules === undefined) {
     unchecked.push(RULES_NOT_CHECKED);
     return findings;
   }
-  try {
-    extend(
-      findings,
-      ruleFindings(
-        view,
-        rules,
-        context,
-        redactions,
-        unchecked,
-        calendar as CivilCalendar | undefined,
-      ),
-    );
-  } catch (error) {
-    extend(findings, unreadable('options.rules', error));
-  }
+  extend(
+    findings,
+    ruleFindings(view, options.rules, context, redactions, unchecked, options.calendar),
+  );
   return findings;
 }
 
-function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
+function signatureFindings(p: DecisionProof, keys: Map<string, Uint8Array>): Finding[] {
   const warning = (message: string): Finding[] => [{ message, level: 'warning' }];
-  if (trustedKeys !== undefined && !isPlainObject(trustedKeys)) {
-    return [invalidFinding('trustedKeys must be an object of hex public keys')];
-  }
-  // A broken trust anchor is a configuration error, whoever signed: every key is read.
-  const malformed: Finding[] = [];
-  const keys = new Map<string, Uint8Array | undefined>();
-  for (const id of trustedKeys === undefined ? [] : Object.keys(trustedKeys)) {
-    const bytes = publicKeyBytes((trustedKeys as Record<string, unknown>)[id]);
-    keys.set(id, bytes);
-    if (!bytes) malformed.push(invalidFinding(`${citeName(`trustedKeys.${id}`)} is malformed`));
-  }
-  if (malformed.length > 0) return malformed;
   if (!p.signature) return warning('unsigned');
   const { keyId, value } = p.signature;
-  const publicKey = Object.hasOwn(trustedKeys ?? {}, keyId) ? keys.get(keyId) : undefined;
+  const publicKey = keys.get(keyId);
   if (!publicKey) return warning('untrusted key');
   if (!signatureMatches(p.digest, value, publicKey)) {
     return [invalidFinding('signature invalid')];
@@ -350,60 +409,24 @@ function signatureFindings(p: DecisionProof, trustedKeys: unknown): Finding[] {
 
 function ruleFindings(
   p: ProofView,
-  rules: unknown,
+  given: GivenRules,
   context: Context,
   redactions: Redactions,
   unchecked: string[],
   calendar: CivilCalendar | undefined,
 ): Finding[] {
-  if (!Array.isArray(rules)) return [invalidFinding('rules must be an array')];
   const findings: Finding[] = [];
   const invalid = (message: string): void => {
     findings.push(invalidFinding(message));
   };
-
-  const items = readList(rules, 'rules');
-  if (!Array.isArray(items)) return [invalidFinding(items.message)];
-  const given = new Map<string, string>();
-  const priorities = new Map<string, number>();
-  const carriers = new Set<string>();
-  const definitions = new Map<string, RuleDefinition>();
-  const identities = new Map<string, RuleIdentity>();
-  items.forEach((rule, i) => {
-    let key: string;
-    let checksum: string;
-    let priority: number;
-    try {
-      // Read and counted as `canonicalRulePayload` reads any rule, so `verifyProof` accepts a
-      // rule exactly when `computeRuleChecksum` does. It validates any value; the cast only
-      // lets it be called.
-      const payload = canonicalRulePayload(rule as RuleDefinitionInput);
-      // The payload is the canonical JSON of a normalized definition.
-      const definition = JSON.parse(payload) as RuleDefinition;
-      const id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
-      key = `${id}@${definition.version}`;
-      checksum = sha256Hex(payload);
-      priority = definition.priority;
-      if ((definition.exceptions ?? []).length > 0) carriers.add(key);
-      if (!definitions.has(key)) definitions.set(key, definition);
-      identities.set(key, { id, version: definition.version });
-    } catch (error) {
-      invalid(`rule invalid: rules[${i}]: ${reasonOf(error)}`);
-      return;
-    }
-    if (given.has(key)) invalid(`duplicate rule: ${citeName(key)}`);
-    else {
-      given.set(key, checksum);
-      priorities.set(key, priority);
-    }
-  });
+  const { given: checksums, priorities, carriers, definitions, identities } = given;
 
   const cited = new Set<string>();
   const matched = new Map<string, RuleDefinition>();
   for (const ref of p.rules) {
     const key = `${qualifyName(ref.ruleSet, ref.id)}@${ref.version}`;
     cited.add(key);
-    const checksum = given.get(key);
+    const checksum = checksums.get(key);
     const definition = definitions.get(key);
     if (checksum === ref.checksum && definition !== undefined) matched.set(key, definition);
     if (checksum === undefined) invalid(`rule missing: ${citeName(key)}`);
@@ -444,7 +467,7 @@ function ruleFindings(
   // only their definitions say which rules those are.
   for (const entry of p.pending) {
     const key = `${entry.ruleId}@${entry.version}`;
-    if (!given.has(key)) continue;
+    if (!checksums.has(key)) continue;
     const at = citeName(instanceKey(entry));
     if (carriers.has(key) && entry.fired === undefined) {
       invalid(`fired missing: ${at}`);
@@ -470,16 +493,30 @@ function ruleFindings(
   return findings;
 }
 
-/** A calendar a caller gives: an object with the two functions `windowContains` calls. */
-function isCalendar(value: unknown): value is CivilCalendar {
+/**
+ * The calendar a caller gives, its two functions read once: the copy checked is the copy used
+ * (a getter cannot answer differently later). Anything else, a throwing getter included, is the
+ * caller's mistake.
+ */
+function readCalendar(value: unknown, fail: Fail): CivilCalendar | undefined {
+  if (value === undefined) return undefined;
+  const mustBe = 'options.calendar must be a calendar { toCivilDate, startOfDay }';
+  if (typeof value !== 'object' || value === null) return fail('options.calendar', mustBe);
+  let toCivilDate: unknown;
+  let startOfDay: unknown;
   try {
-    return (
-      typeof value === 'object' &&
-      value !== null &&
-      typeof (value as CivilCalendar).toCivilDate === 'function' &&
-      typeof (value as CivilCalendar).startOfDay === 'function'
-    );
-  } catch {
-    return false;
+    toCivilDate = (value as CivilCalendar).toCivilDate;
+    startOfDay = (value as CivilCalendar).startOfDay;
+  } catch (error) {
+    return fail('options.calendar', unreadableMessage('options.calendar', error));
   }
+  if (typeof toCivilDate !== 'function' || typeof startOfDay !== 'function') {
+    return fail('options.calendar', mustBe);
+  }
+  const civil = toCivilDate as CivilCalendar['toCivilDate'];
+  const start = startOfDay as CivilCalendar['startOfDay'];
+  return Object.freeze({
+    toCivilDate: (instant: string, zone: string) => civil.call(value, instant, zone),
+    startOfDay: (day: string, zone: string) => start.call(value, day, zone),
+  });
 }

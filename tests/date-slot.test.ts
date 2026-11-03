@@ -36,13 +36,23 @@ const base = {
 };
 
 describe('a Date is an object with the slot and the prototype of a Date', () => {
-  it('a real Date, a subclass and a Date of another realm are Dates', () => {
+  it('a Date of this realm is a Date', () => {
+    const date = new Date(5);
+    expect(dateTimeOf(date)).toBe(5);
+    expect(hasDateSlot(date)).toBe(true);
+    expect(isPlainObject(date)).toBe(false);
+    expect(canonicalize({ at: date })).toBe('{"at":"1970-01-01T00:00:00.005Z"}');
+  });
+
+  it('a subclass and a Date of another realm are not: the prototype is compared in one step', () => {
     class Sub extends Date {}
-    for (const date of [new Date(5), new Sub(5), runInNewContext('new Date(5)') as Date]) {
-      expect(dateTimeOf(date)).toBe(5);
+    for (const date of [new Sub(5), runInNewContext('new Date(5)') as Date]) {
       expect(hasDateSlot(date)).toBe(true);
+      expect(dateTimeOf(date)).toBeUndefined();
       expect(isPlainObject(date)).toBe(false);
-      expect(canonicalize({ at: date })).toBe('{"at":"1970-01-01T00:00:00.005Z"}');
+      const error = specError(() => canonicalize({ at: date }));
+      expect(error.path).toBe('at');
+      expect(error.message).toContain('a Date with a foreign prototype');
     }
   });
 

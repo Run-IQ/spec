@@ -10,7 +10,8 @@ export type SpecErrorCode =
   | 'INVALID_INPUT'
   | 'INVALID_REFERENTIAL'
   | 'INVALID_DISCLOSURE'
-  | 'INVALID_ATTESTATION';
+  | 'INVALID_ATTESTATION'
+  | 'INVALID_OPTIONS';
 
 /**
  * Brand set on every `SpecError`. `Symbol.for` gives the same symbol to every copy of this
@@ -56,6 +57,26 @@ export class SpecError extends Error {
       value !== null &&
       (value as Record<symbol, unknown>)[BRAND] === true
     );
+  }
+}
+
+/**
+ * Thrown by `verifyProof` for a mistake of the CALLER in its options, never for the proof: an
+ * unknown or unreadable option, a calendar that is not one or that throws, `trustedKeys` that
+ * are not keys (a malformed one included), a `rules` list that is malformed, holds a malformed
+ * rule or lists a rule twice. Its `code` is `INVALID_OPTIONS`; `option` and `path` name the
+ * option (`options.rules[2]`, `options.trustedKeys.k1`). A correct proof is never called
+ * `invalid` for it.
+ */
+export class VerifyOptionsError extends SpecError {
+  /** The option at fault: `options`, `options.calendar`, `options.rules[2]`, ... */
+  readonly option: string;
+
+  constructor(option: string, message: string) {
+    super('INVALID_OPTIONS', message, option);
+    this.name = 'VerifyOptionsError';
+    this.option = option;
+    OWN_ERRORS.add(this);
   }
 }
 

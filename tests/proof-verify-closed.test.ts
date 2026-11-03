@@ -11,7 +11,7 @@ import {
   signProof,
   verifyProof,
 } from '../src/index.js';
-import { fixedCalendar } from './helpers.js';
+import { fixedCalendar, optionError } from './helpers.js';
 import { withRuntimeTzdata } from './notices.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import type { RuleDefinitionInput } from '../src/index.js';
@@ -414,23 +414,25 @@ describe('I11: what the definitions decide without execution', () => {
       ).toBe('invalid');
     });
 
-    it('a calendar that fails is a named failure of the check, never a notice', () => {
+    it("a calendar that fails is the caller's mistake: it throws, naming the option", () => {
       const broken = {
         toCivilDate: () => {
           throw new Error('no tzdata');
         },
         startOfDay: () => '2025-01-01T00:00:00.000Z',
       };
-      const out = at('2025-01-01T00:30:00.000Z', { calendar: broken });
-      expect(out.status).toBe('invalid');
-      expect(out.issues).toHaveLength(1);
-      expect(out.issues[0]).toMatch(/^window check failed: .*no tzdata.* \(r1@1\)$/);
+      const error = optionError(() => at('2025-01-01T00:30:00.000Z', { calendar: broken }));
+      expect(error.code).toBe('INVALID_OPTIONS');
+      expect(error.option).toBe('options.calendar');
+      expect(error.message).toBe('options.calendar is not usable: no tzdata');
     });
 
     it('a calendar that is not one is refused', () => {
-      expect(at('2025-01-01T00:30:00.000Z', { calendar: 'Europe/Paris' })).toEqual({
-        status: 'invalid',
-        issues: ['options.calendar must be a calendar { toCivilDate, startOfDay }'],
+      expect(
+        optionError(() => at('2025-01-01T00:30:00.000Z', { calendar: 'Europe/Paris' })),
+      ).toMatchObject({
+        option: 'options.calendar',
+        message: 'options.calendar must be a calendar { toCivilDate, startOfDay }',
       });
     });
   });
@@ -474,35 +476,38 @@ describe('I11: what the definitions decide without execution', () => {
   });
 });
 
-describe('M1: a malformed trusted key is invalid', () => {
+describe("M1 (round 4): a malformed trusted key is the caller's mistake: it throws", () => {
   it.each([
     ['too short', 'zz'],
     ['not hex', 'g'.repeat(64)],
     ['not a curve point', 'f'.repeat(64)],
     ['a small-order point', `01${'0'.repeat(62)}`],
   ])('%s', (_name, key) => {
-    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': key } })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.executor-1 is malformed'],
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: { 'executor-1': key } })),
+    ).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'options.trustedKeys.executor-1',
+      message: 'options.trustedKeys.executor-1 is malformed',
     });
   });
 
-  it('every key is read: a broken key of another id is a configuration error too', () => {
+  it('every key is read: a broken key of another id throws too, the first one named', () => {
     expect(
-      verifyProof(signed(), { trustedKeys: { ...TRUSTED, other: 'zz' }, rules: RULES }),
-    ).toEqual({ status: 'invalid', issues: ['trustedKeys.other is malformed'] });
-    expect(verifyProof(signed(), { trustedKeys: { other: 'zz', alsoOther: 'q' } })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.other is malformed', 'trustedKeys.alsoOther is malformed'],
-    });
+      optionError(() =>
+        verifyProof(signed(), { trustedKeys: { ...TRUSTED, other: 'zz' }, rules: RULES }),
+      ),
+    ).toMatchObject({ option: 'options.trustedKeys.other' });
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: { other: 'zz', alsoOther: 'q' } })),
+    ).toMatchObject({ option: 'options.trustedKeys.other' });
   });
 
   it('a key id that is not plain text is cited safely', () => {
     const proof = signProof(sealProof(unsalted(unsigned())), RFC_SECRET, 'a"b');
-    expect(verifyProof(proof, { trustedKeys: { 'a"b': 'zz' } })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.a\\"b is malformed'],
-    });
+    expect(optionError(() => verifyProof(proof, { trustedKeys: { 'a"b': 'zz' } })).message).toBe(
+      'options.trustedKeys.a\\"b is malformed',
+    );
   });
 });
 

@@ -27,9 +27,9 @@ import type { ProofView } from '../src/proof/types.js';
 import { LIFTS } from '../src/proof/lifts.js';
 import { MAX_PROOF_TIME_ZONES } from '../src/proof/verify.js';
 import { dateTimeOf, hasDateSlot, isPlainObject, notADateMessage } from '../src/values.js';
-import { specError } from './helpers.js';
+import { optionError, specError } from './helpers.js';
 import { NOT_REPLAYED, withRuntimeTzdata } from './notices.js';
-import { RFC_PUBLIC, RFC_SECRET, ruleA, unsalted, unsigned } from './proof-cases.js';
+import { RFC_PUBLIC, RFC_SECRET, ruleA, ruleB, unsalted, unsigned } from './proof-cases.js';
 
 const TRUSTED = { 'executor-1': RFC_PUBLIC };
 
@@ -158,7 +158,7 @@ describe('W1: the exact offset is used only under the database of the proof', ()
     content.evaluatedAt = '2020-06-01T00:00:00.000Z';
     const rule = vancouver({ effectiveFrom: '2025-01-01' });
     const proof = signProof(sealProof(unsalted(content)), RFC_SECRET, 'executor-1');
-    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: [rule, ruleA] }).status).toBe(
+    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: [rule, ruleB] }).status).toBe(
       'invalid',
     );
   });
@@ -262,11 +262,13 @@ describe('W3: a Date is a slot under the prototype of a Date', () => {
     expect(error.message).toContain('a Date with a foreign prototype');
   });
 
-  it('a Date whose prototype chain reaches Date.prototype stays a Date', () => {
+  it('a subclass is refused as foreign: Date.prototype itself is the only Date prototype', () => {
     class Sub extends Date {}
     class SubSub extends Sub {}
-    expect(dateTimeOf(new SubSub(7))).toBe(7);
-    expect(notADateMessage(new SubSub(7))).toBeUndefined();
+    expect(dateTimeOf(new SubSub(7))).toBeUndefined();
+    expect(notADateMessage(new SubSub(7))).toBe('a Date with a foreign prototype');
+    expect(dateTimeOf(new Date(7))).toBe(7);
+    expect(notADateMessage(new Date(7))).toBeUndefined();
     expect(notADateMessage({})).toBeUndefined();
     expect(notADateMessage('x')).toBeUndefined();
   });
@@ -345,7 +347,9 @@ describe('W6: a runtime that cannot read offsets says so, in a notice', () => {
   });
 
   it('a zone whose offset cannot be read while others can: a notice, not "unknown"', () => {
-    fakeFormatter((zone) => (zone === 'UTC' ? 'GMT+00:00' : 'UTC-06:00'));
+    fakeFormatter((zone) =>
+      zone === 'UTC' || zone === 'America/New_York' ? 'GMT+00:00' : 'UTC-06:00',
+    );
     const out = run([{ ...paris, effectiveFrom: '2025-01-01' }], near, '2025c', '2025c');
     expect(out.invalid).toEqual([]);
     expect(out.unchecked).toEqual([
@@ -418,9 +422,10 @@ describe('W7: the guards that had no test', () => {
         },
       },
     );
-    const error = specError(() => verifyProof(unsigned() as never, hostile as never));
+    const error = optionError(() => verifyProof(unsigned() as never, hostile as never));
     expect(error).toMatchObject({
-      code: 'INVALID_PROOF',
+      code: 'INVALID_OPTIONS',
+      option: 'options',
       message: 'options could not be read: nope',
     });
     expect(NOT_REPLAYED).toBeDefined();

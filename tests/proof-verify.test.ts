@@ -19,7 +19,7 @@ import {
   unsaltedSalt,
   unsigned,
 } from './proof-cases.js';
-import { handSealed, specError } from './helpers.js';
+import { handSealed, optionError, specError } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { ProofView } from '../src/proof/types.js';
 import { NOT_REPLAYED } from './notices.js';
@@ -201,9 +201,11 @@ describe('verifyProof: invalid, with a readable issue', () => {
     ['not a curve point', 'f'.repeat(64)],
     ['a small-order point (the identity)', `01${'0'.repeat(62)}`],
   ])('a trusted key of the right length that is %s', (_name, key) => {
-    expect(verifyProof(signed(), { trustedKeys: { 'executor-1': key } })).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys.executor-1 is malformed'],
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: { 'executor-1': key } })),
+    ).toMatchObject({
+      option: 'options.trustedKeys.executor-1',
+      message: 'options.trustedKeys.executor-1 is malformed',
     });
   });
 
@@ -231,23 +233,23 @@ describe('verifyProof: invalid, with a readable issue', () => {
   });
 
   it('a rule given twice', () => {
-    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [...RULES, ruleA] })).toEqual({
-      status: 'invalid',
-      issues: ['duplicate rule: r1@1'],
+    expect(
+      optionError(() => verifyProof(signed(), { trustedKeys: TRUSTED, rules: [...RULES, ruleA] })),
+    ).toMatchObject({
+      option: 'options.rules[2]',
+      message: 'options.rules[2] repeats the rule r1@1',
     });
   });
 
   it('a given rule spec refuses', () => {
     const broken = { ...ruleA, effectiveFrom: 'yesterday' };
-    expect(verifyProof(signed(), { trustedKeys: TRUSTED, rules: [broken, ruleB] })).toEqual({
-      status: 'invalid',
-      issues: [
-        'rule invalid: rules[0]: effectiveFrom must be a Date, a civil date YYYY-MM-DD or an ' +
-          'instant YYYY-MM-DDTHH:MM:SS[.sss] with Z or ±HH:MM, in the years 0000 to 9999; ' +
-          'got "yesterday"',
-        'rule missing: r1@1',
-      ],
-    });
+    const error = optionError(() =>
+      verifyProof(signed(), { trustedKeys: TRUSTED, rules: [broken, ruleB] }),
+    );
+    expect(error.option).toBe('options.rules[0]');
+    expect(error.message).toContain('options.rules[0] is not a valid rule: ');
+    expect(error.message).toContain('effectiveFrom must be a Date');
+    expect(error.message).toContain('got "yesterday"');
   });
 
   it('rules of packs: each given rule matched by its qualified id (D-37)', () => {
@@ -292,17 +294,15 @@ describe('verifyProof: invalid, with a readable issue', () => {
     // R1@1 of social given as a rule of vat: the vat one twice, the social one missing.
     const vatR1 = definitions.find((rule) => rule.ruleSet === 'vat' && rule.id === 'R1')!;
     const moved = definitions.map((rule) => (rule.ruleSet === 'social' ? { ...vatR1 } : rule));
-    expect(verifyProof(proof, { rules: moved })).toEqual({
-      status: 'invalid',
-      issues: ['unsigned', 'duplicate rule: vat:R1@1', 'rule missing: social:R1@1'],
+    expect(optionError(() => verifyProof(proof, { rules: moved }))).toMatchObject({
+      message: expect.stringContaining('repeats the rule vat:R1@1'),
     });
     // A local rule r1 is not the rule R1 of a pack, nor `local:r1` another rule.
     const local = definitions.map((rule) =>
       rule.id === 'R2' && rule.version === 2 ? ruleA : rule,
     );
-    expect(verifyProof(proof, { rules: local })).toEqual({
-      status: 'invalid',
-      issues: ['unsigned', 'duplicate rule: r1@1', 'rule missing: vat:R2@2'],
+    expect(optionError(() => verifyProof(proof, { rules: local }))).toMatchObject({
+      message: expect.stringContaining('repeats the rule r1@1'),
     });
   });
 
@@ -337,17 +337,23 @@ describe('verifyProof: invalid, with a readable issue', () => {
 
   it('malformed options', () => {
     const bad = { trustedKeys: 'key', rules: 'r1' } as unknown as Parameters<typeof verifyProof>[1];
-    expect(verifyProof(signed(), bad)).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys must be an object of hex public keys', 'rules must be an array'],
+    expect(optionError(() => verifyProof(signed(), bad))).toMatchObject({
+      option: 'options.trustedKeys',
+      message: 'options.trustedKeys must be an object of hex public keys',
+    });
+    expect(
+      optionError(() => verifyProof(signed(), { rules: 'r1' } as unknown as typeof bad)),
+    ).toMatchObject({
+      option: 'options.rules',
+      message: 'options.rules must be an array',
     });
   });
 
   it('options that are not an object', () => {
     const bad = 'trusted' as unknown as Parameters<typeof verifyProof>[1];
-    expect(verifyProof(signed(), bad)).toEqual({
-      status: 'invalid',
-      issues: ['options must be an object { trustedKeys?, rules?, calendar? }', 'untrusted key'],
+    expect(optionError(() => verifyProof(signed(), bad))).toMatchObject({
+      option: 'options',
+      message: 'options must be an object { trustedKeys?, rules?, calendar?, maxProofTimeZones? }',
     });
   });
 
@@ -368,20 +374,21 @@ describe('verifyProof: invalid, with a readable issue', () => {
         return throwing('keys');
       },
     };
-    const thrown: [unknown, string][] = [
-      [opaque, 'options could not be read: opt'],
-      [getter, 'options.rules could not be read: getter'],
-      [keys, 'options.trustedKeys could not be read: keys'],
+    const thrown: [unknown, string, string][] = [
+      [opaque, 'options', 'options could not be read: opt'],
+      [getter, 'options.rules', 'options.rules could not be read: getter'],
+      [keys, 'options.trustedKeys', 'options.trustedKeys could not be read: keys'],
     ];
-    for (const [options, message] of thrown) {
+    for (const [options, option, message] of thrown) {
       // Hostile options, outside the declared type on purpose.
-      const error = specError(() => verifyProof(signed(), options as Options));
-      expect(error).toMatchObject({ code: 'INVALID_PROOF', message });
+      const error = optionError(() => verifyProof(signed(), options as Options));
+      expect(error).toMatchObject({ code: 'INVALID_OPTIONS', option, message });
     }
-    // The rules themselves, read while they are compared with the proof, are a verdict.
-    expect(verifyProof(signed(), { rules } as Options)).toEqual({
-      status: 'invalid',
-      issues: ['untrusted key', 'options.rules could not be read: arr'],
+    // The rules themselves are the caller's too: read once, up front, a throw.
+    expect(optionError(() => verifyProof(signed(), { rules } as Options))).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'options.rules',
+      message: 'options.rules could not be read: arr',
     });
   });
 

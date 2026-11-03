@@ -1,5 +1,5 @@
 import { DEFAULT_OUTPUT } from '../decision/output.js';
-import { citeName, reasonOf } from '../errors.js';
+import { citeName, isOwnError, reasonOf, VerifyOptionsError } from '../errors.js';
 import type { RuleDefinition } from '../rule/definition.js';
 import { LOCAL_RULE_SET, qualifiedFrom } from '../rule/ruleSet.js';
 import { windowContains } from '../rule/window.js';
@@ -10,6 +10,7 @@ import {
   intlCalendar,
   isKnownZone,
   RuntimeCannotReadOffsets,
+  RuntimeHasNoZoneData,
   runtimeTzdata,
 } from './intl-calendar.js';
 import { instanceKey } from './output-values.js';
@@ -124,7 +125,8 @@ function decidedByBounds(ref: string, from: string, until: string | null): boole
  * instants. Without one, `UTC` and fixed offsets are exact; for an IANA zone each bound decides
  * on its own where the instant lies outside the band its zone could put it in
  * (`position`); inside a band the offset of the zone at that instant is read from the runtime
- * (`Intl`), and only a zone the runtime does not know leaves the window undecided.
+ * (`Intl`), and a window stays undecided when the runtime cannot say (a zone it does not know,
+ * no database, an offset it cannot read) or its database is not the proof's.
  */
 function windowHolds(
   proof: ProofView,
@@ -138,69 +140,123 @@ function windowHolds(
   const zone = zoneOf(proof, definition);
   const effective = definition.timeZone ?? zone;
   const at = proof.evaluatedAt;
-  if (calendar !== undefined) return decided(windowContains(definition, at, zone, calendar));
+  if (calendar !== undefined) return decided(withCallerCalendar(definition, at, zone, calendar));
   if (FIXED_ZONE.test(effective)) {
     return decided(windowContains(definition, at, zone, fixedOffsetCalendar('verifyProof')));
   }
   const byBounds = decidedByBounds(at, definition.effectiveFrom, definition.effectiveUntil);
   if (byBounds !== undefined) return byBounds;
+  // Whatever the runtime cannot do (no database, an offset it cannot read, a formatter that
+  // throws) is a notice naming what could not be checked, never a fault of the proof.
+  let unreadable: string | undefined;
+  const watched = (call: () => string): string => {
+    try {
+      return call();
+    } catch (error) {
+      unreadable = error instanceof RuntimeHasNoZoneData ? NO_ZONE_DATA : CANNOT_READ_OFFSETS;
+      throw error;
+    }
+  };
   try {
     if (!isKnownZone(effective)) return `zone ${citeName(effective)} unknown to this verifier`;
     // The exact offset comes from the time zone database of this runtime: it decides only when
     // that database is the one the proof was made with. A bound far from the instant never
-    // reaches here, and needs no database.
-    const recorded = proof.versions.components.find((entry) => entry.name === 'tzdata')?.version;
+    // reaches here, and needs no database. Only the release the engine recorded counts: the
+    // proof holds one (`consistency`), and a plugin or a model cannot name the database.
+    const recorded = proof.versions.components.find(
+      (entry) => entry.name === 'tzdata' && entry.declaredBy === 'engine',
+    )?.version;
     if (recorded === undefined) return 'no tzdata in the proof';
     if (tzdata === undefined) return 'this runtime does not name its tzdata';
     if (recorded !== tzdata)
       return `tzdata ${citeName(recorded)} of the proof, ${citeName(tzdata)} here`;
-    // `windowContains` wraps what a calendar throws: note here that the runtime could not read.
-    let unreadable = false;
-    const watched = (call: () => string): string => {
-      try {
-        return call();
-      } catch (error) {
-        if (error instanceof RuntimeCannotReadOffsets) unreadable = true;
-        throw error;
-      }
-    };
     const exact: CivilCalendar = {
       toCivilDate: (instant, name) => watched(() => intlCalendar.toCivilDate(instant, name)),
       startOfDay: (day, name) => watched(() => intlCalendar.startOfDay(day, name)),
     };
-    try {
-      return decided(windowContains(definition, at, zone, exact));
-    } catch (error) {
-      if (unreadable) return CANNOT_READ_OFFSETS;
-      throw error;
-    }
+    return decided(windowContains(definition, at, zone, exact));
   } catch (error) {
-    // A limit of the runtime is a notice, never a fault of the proof.
+    if (unreadable !== undefined) return unreadable;
+    if (error instanceof RuntimeHasNoZoneData) return NO_ZONE_DATA;
     if (error instanceof RuntimeCannotReadOffsets) return CANNOT_READ_OFFSETS;
     throw error;
   }
 }
 
+/**
+ * The window against the calendar the caller gave (`options.calendar`). The calendar is the
+ * caller's: a calendar that throws, or answers with something that is not a date, is a mistake
+ * of the caller (`VerifyOptionsError`), never a verdict on the proof.
+ */
+function withCallerCalendar(
+  definition: RuleDefinition,
+  at: string,
+  zone: string,
+  calendar: CivilCalendar,
+): boolean | 'unknown' {
+  let faulted: unknown;
+  let threw = false;
+  const guarded = (call: () => string): string => {
+    try {
+      return call();
+    } catch (error) {
+      threw = true;
+      faulted = error;
+      throw error;
+    }
+  };
+  const watched: CivilCalendar = {
+    toCivilDate: (instant, name) => guarded(() => calendar.toCivilDate(instant, name)),
+    startOfDay: (day, name) => guarded(() => calendar.startOfDay(day, name)),
+  };
+  try {
+    return windowContains(definition, at, zone, watched);
+  } catch (error) {
+    // `windowContains` names what the calendar answered `calendar.<method> ...`.
+    const answered =
+      isOwnError(error) && /^calendar\.(toCivilDate|startOfDay) /.test(error.message);
+    if (threw || answered) {
+      throw new VerifyOptionsError(
+        'options.calendar',
+        `options.calendar is not usable: ${reasonOf(threw ? faulted : error)}`,
+      );
+    }
+    throw error;
+  }
+}
+
 const CANNOT_READ_OFFSETS = 'this runtime cannot read time zone offsets';
+const NO_ZONE_DATA = 'this runtime has no time zone data';
+
+/**
+ * Every kind of cause of an undecided window: a notice is made for a kind, whatever the number
+ * of rules, so the notices of a verdict are as many as these at most.
+ */
+export const WINDOW_KINDS = [
+  'effectiveOn is not the decision date',
+  'no evaluatedAt',
+  'zone unknown to this verifier',
+  "tzdata of the proof differs from this runtime's",
+  'no tzdata in the proof',
+  'this runtime does not name its tzdata',
+  'the day holds the bound of the window',
+  CANNOT_READ_OFFSETS,
+  NO_ZONE_DATA,
+] as const;
 
 /**
  * The kind of a cause of an undecided window, and what tells its causes apart (a zone, two
  * releases): the pointer or the zone is not part of the kind.
  */
 function windowKind(why: string): { kind: string; detail?: string } {
-  if (why.startsWith('effectiveOn is ')) return { kind: 'effectiveOn is not the decision date' };
+  if (why.startsWith('effectiveOn is ')) return { kind: WINDOW_KINDS[0] };
   if (why.startsWith('zone ')) {
     return {
-      kind: 'zone unknown to this verifier',
+      kind: WINDOW_KINDS[2],
       detail: why.slice(5, -' unknown to this verifier'.length),
     };
   }
-  if (why.startsWith('tzdata ')) {
-    return { kind: "tzdata of the proof differs from this runtime's", detail: why.slice(7) };
-  }
-  if (why === 'no tzdata in the proof' || why === 'this runtime does not name its tzdata') {
-    return { kind: why };
-  }
+  if (why.startsWith('tzdata ')) return { kind: WINDOW_KINDS[3], detail: why.slice(7) };
   return { kind: why };
 }
 
@@ -225,11 +281,14 @@ function decided(held: boolean | 'unknown'): boolean | string {
  * `evaluatedAt` is `meta.dates.effective`, the reference date of a rule without `effectiveOn`:
  * the window is compared with it only for such a rule. A window that cannot be decided (another
  * reference date, no `evaluatedAt`, a day within reach of a bound whose time zone is not known,
- * a day cut by an instant bound) is named in a notice, the rules grouped by cause (`window not
+ * a day cut by an instant bound, a release of the time zone database that is not the proof's or
+ * that the proof or the runtime does not name, a runtime that cannot read offsets or has no time
+ * zone data: `WINDOW_KINDS`) is named in a notice, the rules grouped by cause (`window not
  * checked: id@version (<why>)`, or the number of rules and the first ones); a reason this check
- * does not decide, unknown ones included, once per reason (`reason not checked: <reason>`). An
- * unexpected failure of a check (a calendar that throws) is a contradiction, never a notice:
- * `window check failed: <message>`.
+ * does not decide, unknown ones included, once per reason (`reason not checked: <reason>`). A
+ * calendar the caller gave that throws is the caller's mistake (`VerifyOptionsError`); another
+ * unexpected failure of a check is a contradiction, never a notice: `window check failed:
+ * <message>`.
  */
 export function definitionFindings(
   proof: ProofView,
@@ -247,6 +306,8 @@ export function definitionFindings(
       try {
         held = windowHolds(proof, definition, calendar, runtime.tzdata);
       } catch (error) {
+        // A mistake of the caller in the options is not a finding about the proof.
+        if (error instanceof VerifyOptionsError) throw error;
         report.invalid(`window check failed: ${reasonOf(error)} (${citeName(key)})`);
         held = 'the check failed';
       }

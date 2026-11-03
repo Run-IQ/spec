@@ -44,6 +44,7 @@ import {
   fixedCalendar,
   HUMAN_ASSERTION,
   loose,
+  optionError,
   proofInput,
   specError,
   withCounts,
@@ -307,10 +308,10 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   [
     'verifyProof rules option',
     (list) =>
-      verifyProof(sealProof(unsalted(PROOF)), { rules: list as RuleDefinitionInput[] }).issues.at(
-        -1,
-      ),
-    'rules',
+      optionError(() =>
+        verifyProof(sealProof(unsalted(PROOF)), { rules: list as RuleDefinitionInput[] }),
+      ).message,
+    'options.rules',
   ],
   [
     'formatPointer',

@@ -18,7 +18,7 @@ import { boundWithFixed } from '../src/issues.js';
 import { definitionFindings } from '../src/proof/definition-checks.js';
 import { intlCalendar } from '../src/proof/intl-calendar.js';
 import type { ProofView } from '../src/proof/types.js';
-import { handSealed } from './helpers.js';
+import { handSealed, optionError } from './helpers.js';
 import { NOT_REPLAYED, withRuntimeTzdata } from './notices.js';
 import { specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, ruleA, ruleB, signed, unsalted, unsigned } from './proof-cases.js';
@@ -213,21 +213,6 @@ describe('U2: the notices of a verdict are fixed in number', () => {
     expect(out.issues[22]).toBe(NOT_REPLAYED);
   });
 
-  it('more than 100 problems and a redacted entry: the redaction notices survive, the cut is counted', () => {
-    const SEED = new Uint8Array(32).fill(5);
-    const salted = sealProof({ ...unsalted(unsigned()), inputSalted: true } as UnsaltedProof, SEED);
-    const redacted = redactProof(signProof(salted, RFC_SECRET, 'executor-1'), (section, i) => {
-      return section === 'applied' && i === 0;
-    });
-    const junk = Array.from({ length: 300 }, () => 1) as never;
-    const out = verifyProof(redacted, { trustedKeys: TRUSTED, rules: junk });
-    expect(out.status).toBe('invalid');
-    expect(out.issues).toHaveLength(100);
-    expect(out.issues).toContain('redacted entries: 1');
-    expect(out.issues.some((m) => m.startsWith('check lifted: '))).toBe(true);
-    expect(out.issues.at(-1)).toMatch(/^further problems not listed \(limit 100\): \d+ left out$/);
-  });
-
   it('nothing is "left out" when nothing was', () => {
     const out = verifyProof(signed(), { trustedKeys: TRUSTED, rules: [ruleA, ruleB] });
     expect(out.issues.some((m) => m.includes('left out'))).toBe(false);
@@ -298,8 +283,9 @@ describe('U8: an option that is not an option throws, and is named', () => {
   const run = (options: object) => () => verifyProof(signed(), options);
 
   it('a typo of calendar', () => {
-    const error = specError(run({ trustedKeys: TRUSTED, calender: {} }));
-    expect(error.code).toBe('INVALID_PROOF');
+    const error = optionError(run({ trustedKeys: TRUSTED, calender: {} }));
+    expect(error.code).toBe('INVALID_OPTIONS');
+    expect(error.option).toBe('options.calender');
     expect(error.message).toBe('options.calender is not an option (did you mean calendar?)');
   });
 

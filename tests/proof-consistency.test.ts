@@ -306,10 +306,34 @@ describe('orders and identities (D-16, pre-flight I4)', () => {
     const twice = { ...versions, components: [components[0], components[0]] };
     expect(problems({ ...baseContent(), versions: twice })).toEqual(['component repeated at 1']);
     // An absent digest sorts before any digest.
-    const tz = { name: 'tzdata', version: '2026c', declaredBy: 'engine' };
+    const tz = { name: 'zone-db', version: '2026c', declaredBy: 'engine' };
     const withDigest = { ...tz, digest: 'a'.repeat(64) };
     const ordered = { ...versions, components: [tz, withDigest] };
     expect(problems({ ...baseContent(), versions: ordered })).toEqual([]);
+  });
+
+  it('one release of tzdata recorded by the engine: two make the proof ambiguous (Y5)', () => {
+    const versions = baseContent().versions as Content;
+    const tz = (version: string, declaredBy: string) => ({ name: 'tzdata', version, declaredBy });
+    const components = (...list: object[]) => ({ ...versions, components: list });
+    expect(problems({ ...baseContent(), versions: components(tz('2025c', 'engine')) })).toEqual([]);
+    expect(
+      problems({
+        ...baseContent(),
+        versions: components(tz('2025c', 'engine'), tz('2026c', 'engine')),
+      }),
+    ).toEqual(['tzdata recorded 2 times by the engine: one release is allowed']);
+    // A plugin or a model naming a release is another component, not the engine's.
+    expect(
+      problems({
+        ...baseContent(),
+        versions: components(
+          tz('2025c', 'engine'),
+          tz('2025c', 'model:m'),
+          tz('2026c', 'plugin:p'),
+        ),
+      }),
+    ).toEqual([]);
   });
 
   it('affected sorted by (rule, subject), unique', () => {

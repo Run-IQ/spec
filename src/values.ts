@@ -155,15 +155,19 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
  */
 
 /**
- * The time value of a real `Date` from any realm (`NaN` for an invalid Date), or `undefined`
- * when `value` is not a Date. `Date.prototype.getTime` checks the internal date slot (it reads
- * nothing else), so a fake with `Symbol.toStringTag = 'Date'` is refused; so is a Date under a
- * plain prototype (`hasDateSlot`).
+ * The time value of a `Date` (`NaN` for an invalid Date), or `undefined` when `value` is not
+ * one. A value is a `Date` only if both hold: it has the internal date slot
+ * (`Date.prototype.getTime` reads it and nothing else, so a fake with `Symbol.toStringTag =
+ * 'Date'` has none), and its prototype IS the `Date.prototype` of this realm, compared in one
+ * step with no walk up the chain (a hostile chain costs one read). Anything else that carries
+ * the slot (a subclass, a Date of another realm, a Date under `Object.prototype`) is not a
+ * `Date` here and is refused with its pointer (`notADateMessage`): the caller converts it to a
+ * string first. A class named `Date` has no slot, so it is no Date at all.
  */
 export function dateTimeOf(value: unknown): number | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   // Throws for a revoked Proxy, which `readReferenceDate` reports as unreadable.
-  const real = hasDatePrototype(value);
+  const real = Object.getPrototypeOf(value) === Date.prototype;
   const time = dateSlotOf(value);
   // The slot under another prototype is not a Date here: see `hasDateSlot`.
   return real ? time : undefined;
@@ -182,34 +186,15 @@ function dateSlotOf(value: unknown): number | undefined {
 }
 
 /**
- * Whether the prototype chain of `value` reaches the `Date.prototype` of some realm: an object
- * whose own `constructor` is a function named `Date` with this very object as `prototype`.
- */
-function hasDatePrototype(value: object): boolean {
-  let proto: unknown = Object.getPrototypeOf(value);
-  while (proto !== null && typeof proto === 'object') {
-    const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
-    if (
-      typeof ctor === 'function' &&
-      ctor.name === 'Date' &&
-      (ctor as { prototype?: unknown }).prototype === proto
-    ) {
-      return true;
-    }
-    proto = Object.getPrototypeOf(proto);
-  }
-  return false;
-}
-
-/**
  * The refusal of a value that holds the internal slot of a Date without being a `Date`:
  * `a Date with a plain prototype` (`Object.prototype`, `null`) or `a Date with a foreign
- * prototype` (any other that is not a Date's). `undefined` for a real Date and for a value with
+ * prototype` (any other that is not `Date.prototype`: a subclass, a Date of another realm).
+ * `undefined` for a real Date and for a value with
  * no slot. One text everywhere a value is read: canonical form, rules, inputs, windows.
  */
 export function notADateMessage(value: unknown): string | undefined {
   if (typeof value !== 'object' || value === null || !hasDateSlot(value)) return undefined;
-  if (hasDatePrototype(value)) return undefined;
+  if (Object.getPrototypeOf(value) === Date.prototype) return undefined;
   return hasPlainPrototype(value)
     ? 'a Date with a plain prototype'
     : 'a Date with a foreign prototype';
@@ -217,8 +202,8 @@ export function notADateMessage(value: unknown): string | undefined {
 
 /**
  * Whether `value` holds the internal slot of a Date, whatever its prototype. An object is a
- * `Date` only if it has that slot AND the prototype of a Date (a subclass or a Date of another
- * realm included); one with the slot under any other prototype
+ * `Date` only if it has that slot AND `Date.prototype` of this realm as its prototype (a
+ * subclass or a Date of another realm is not one); one with the slot under any other prototype
  * (`Object.setPrototypeOf(new Date(0), Object.prototype)`, `Map.prototype`, ...) is neither a
  * `Date` nor a plain object: it is refused, with its pointer, wherever a value is read
  * (`notADateMessage`). One with no slot is plain, whatever its `Symbol.toStringTag` says.

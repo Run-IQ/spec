@@ -15,7 +15,7 @@ import {
 import type { DecisionProof, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
 import { input, RFC_SECRET, ruleA, sealed, signed, TRUSTED, unsigned } from './proof-cases.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-shape-cases.js';
-import { nested, specError, tooDeepIssue } from './helpers.js';
+import { nested, optionError, specError, tooDeepIssue } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 
@@ -177,17 +177,17 @@ describe('verifyProof: hostile input', () => {
       specError(() => computeRuleChecksum(rule as unknown as RuleDefinitionInput)).message,
     ).toBe('rule definition could not be read: unreadable value');
     expect(
-      verifyProof(signed(), {
-        trustedKeys: TRUSTED,
-        rules: [rule as unknown as RuleDefinitionInput],
-      }),
-    ).toEqual({
-      status: 'invalid',
-      issues: [
-        'rule invalid: rules[0]: rule definition could not be read: unreadable value',
-        'rule missing: r1@1',
-        'rule missing: r2@2',
-      ],
+      optionError(() =>
+        verifyProof(signed(), {
+          trustedKeys: TRUSTED,
+          rules: [rule as unknown as RuleDefinitionInput],
+        }),
+      ),
+    ).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'options.rules[0]',
+      message:
+        'options.rules[0] is not a valid rule: rule definition could not be read: unreadable value',
     });
   });
 });

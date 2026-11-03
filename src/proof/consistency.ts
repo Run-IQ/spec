@@ -477,6 +477,14 @@ function innerOrderProblems(p: ProofView): string[] {
       (i) => `component repeated at ${i}`,
     ),
   );
+  // One release of the time zone database, recorded by the engine: with two, the proof does not
+  // say which one decided its windows.
+  const releases = components.filter(
+    (entry) => entry.name === 'tzdata' && entry.declaredBy === 'engine',
+  );
+  if (releases.length > 1) {
+    issues.push(`tzdata recorded ${releases.length} times by the engine: one release is allowed`);
+  }
   p.strata.forEach((names, i) => {
     append(
       issues,

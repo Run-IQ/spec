@@ -11,6 +11,12 @@ import type { CivilCalendar } from '../time/civil.js';
 /** The verifier cannot read the offset of a zone: a limit of the runtime, not a fault of a proof. */
 export class RuntimeCannotReadOffsets extends Error {}
 
+/**
+ * The runtime knows `UTC` and fixed offsets only (the minimum ECMA-402 asks for): it has no time
+ * zone database. Not a fault of a zone, nor of a proof.
+ */
+export class RuntimeHasNoZoneData extends RuntimeCannotReadOffsets {}
+
 /** The bounds of the two caches: an object, so that a test can lower them. */
 export const intlCacheLimits = { max: 512 };
 
@@ -65,29 +71,53 @@ function formatter(zone: string): Intl.DateTimeFormat {
   return shared;
 }
 
-/** Whether the runtime can read offsets at all: time zones and `longOffset`. */
-export function runtimeReadsOffsets(): boolean {
-  try {
-    const part = makeFormatter('UTC')
-      .formatToParts(new Date(0))
-      .find((entry) => entry.type === 'timeZoneName');
-    return part !== undefined && parseOffset(part.value) !== undefined;
-  } catch {
-    return false;
-  }
+/** Whether `makeFormatter(zone)` reads a valid `longOffset` text at the epoch. */
+function readsOffsetOf(zone: string): boolean {
+  const part = makeFormatter(zone)
+    .formatToParts(new Date(0))
+    .find((entry) => entry.type === 'timeZoneName');
+  return part !== undefined && parseOffset(part.value) !== undefined;
 }
 
 /**
- * Whether the runtime knows the time zone `zone`. A runtime that cannot read offsets at all
- * throws `RuntimeCannotReadOffsets`: that is not a fault of the zone.
+ * Throws what the runtime cannot do: `RuntimeCannotReadOffsets` without time zones and the
+ * `longOffset` form at all, `RuntimeHasNoZoneData` when it knows `UTC` only. Any other throw of
+ * the runtime while it is asked is the same limit.
+ */
+function requireZoneSupport(): void {
+  let utc: boolean;
+  try {
+    utc = readsOffsetOf('UTC');
+  } catch {
+    utc = false;
+  }
+  if (!utc) throw new RuntimeCannotReadOffsets('no time zone support');
+  let named: boolean;
+  try {
+    named = readsOffsetOf(PROBE_ZONE);
+  } catch {
+    named = false;
+  }
+  if (!named) throw new RuntimeHasNoZoneData('no time zone data');
+}
+
+/** A zone every time zone database has, to tell a runtime with a database from one without. */
+const PROBE_ZONE = 'America/New_York';
+
+/**
+ * Whether the runtime knows the time zone `zone`. A runtime that cannot read offsets at all, or
+ * has no database, throws (`RuntimeCannotReadOffsets`, `RuntimeHasNoZoneData`): that is not a
+ * fault of the zone. A zone the runtime refuses with a `RangeError` is unknown; any other throw
+ * of the runtime is a limit of the runtime.
  */
 export function isKnownZone(zone: string): boolean {
-  if (!runtimeReadsOffsets()) throw new RuntimeCannotReadOffsets('no time zone support');
+  requireZoneSupport();
   try {
     formatter(zone);
     return true;
-  } catch {
-    return false;
+  } catch (error) {
+    if (error instanceof RangeError) return false;
+    throw new RuntimeCannotReadOffsets(`cannot build a formatter for the zone: ${String(error)}`);
   }
 }
 
@@ -96,17 +126,22 @@ export function isKnownZone(zone: string): boolean {
  * not name it. Node.js names it in `process.versions.tz`.
  */
 export function runtimeTzdata(): string | undefined {
-  const release = (globalThis as { process?: { versions?: { tz?: unknown } } }).process?.versions
-    ?.tz;
-  return typeof release === 'string' && release !== '' ? release : undefined;
+  try {
+    const release = (globalThis as { process?: { versions?: { tz?: unknown } } }).process?.versions
+      ?.tz;
+    return typeof release === 'string' && release !== '' ? release : undefined;
+  } catch {
+    // `process.versions` that cannot be read: the release is not known, which the notice says.
+    return undefined;
+  }
 }
 
 /**
  * The offset, in milliseconds, a `longOffset` text names (`GMT`, `GMT+02:00`, `GMT-03:30`,
- * `GMT+14:58:47`, with the true minus sign too), or `undefined` for any other text.
+ * `GMT+14:58:47`, with the true minus sign U+2212 too), or `undefined` for any other text.
  */
 export function parseOffset(text: string): number | undefined {
-  const match = /^GMT(?:([+-−])(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
+  const match = /^GMT(?:([+\-\u2212])(\d{2}):(\d{2})(?::(\d{2}))?)?$/.exec(text);
   if (!match) return undefined;
   const [, sign, hours, minutes, seconds] = match;
   if (sign === undefined) return 0;
