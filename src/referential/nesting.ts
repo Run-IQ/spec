@@ -218,7 +218,7 @@ class Graph {
   private mark(start: string, next: Adjacency, stale: Set<string>): void {
     const queue = [start];
     for (let head = 0; head < queue.length; head++) {
-      const node = queue[head] ?? '';
+      const node = elementOf(queue, head) ?? '';
       this.step();
       if (setHas(stale, node)) continue;
       setAdd(stale, node);
@@ -309,7 +309,7 @@ class Graph {
   private advance(own: Side, other: Side): string | null | undefined {
     for (;;) {
       if (own.pending === undefined) {
-        const node = own.queue[own.head];
+        const node = elementOf(own.queue, own.head);
         if (node === undefined) return null;
         own.head++;
         own.pending = neighbours(own.next, node);
@@ -324,7 +324,7 @@ class Graph {
       this.step();
       const neighbour = result.value;
       if (mapHas(own.from, neighbour)) return undefined;
-      const current = own.queue[own.head - 1] ?? '';
+      const current = elementOf(own.queue, own.head - 1) ?? '';
       mapSet(own.from, neighbour, current);
       if (mapHas(other.from, neighbour)) return neighbour;
       arrayPush(own.queue, neighbour);
