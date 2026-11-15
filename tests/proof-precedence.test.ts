@@ -167,7 +167,8 @@ describe('the contribution order is checked (I2, D-5): one decision, one proof',
       rules,
       steps,
     });
-    expect(problems(traceProof(sum(['r0', 'r1', 'r2'], 10)))).toEqual([]);
+    // The exact sum is 5 in any order: the order is still the one the contributions give.
+    expect(problems(traceProof(sum(['r0', 'r1', 'r2'], 5)))).toEqual([]);
     expect(problems(traceProof(sum(['r0', 'r2', 'r1'], 5)))).toEqual([
       'contributors not in contribution order: value',
     ]);

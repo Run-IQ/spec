@@ -1,7 +1,7 @@
 import { isCanonicalDecimal } from '../decision/decimal.js';
 import { citeName } from '../errors.js';
 import { LOCAL_RULE_SET } from '../rule/ruleSet.js';
-import { roundDecimal, roundNumber } from './arithmetic.js';
+import { roundExact, roundNumber } from './arithmetic.js';
 import { declarationOf, instanceKey } from './output-values.js';
 import { ruleKey as key } from './precedence.js';
 import type { ProofOutput, ProofSection, ProofStep, ProofView } from './types.js';
@@ -161,7 +161,7 @@ export function unroundedProblems(
 }
 
 /** True when the step's `unrounded` rounds to its contribution and differs from it. */
-function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1]): boolean {
+function roundsTo(step: ProofStep, rounding: Parameters<typeof roundExact>[1]): boolean {
   const { unrounded, contribution } = step;
   if (typeof unrounded === 'number' && typeof contribution === 'number') {
     return unrounded !== contribution && roundNumber(unrounded, rounding) === contribution;
@@ -169,7 +169,7 @@ function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1])
   const canonical = (value: unknown): value is string =>
     typeof value === 'string' && isCanonicalDecimal(value);
   if (canonical(unrounded) && canonical(contribution)) {
-    return unrounded !== contribution && roundDecimal(unrounded, rounding) === contribution;
+    return unrounded !== contribution && roundExact(unrounded, rounding) === contribution;
   }
   // Off its declaration: reported by `offDeclarationValues`.
   return true;

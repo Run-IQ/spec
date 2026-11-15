@@ -200,7 +200,7 @@ describe('a number rounded at each contribution: only its sum leaves the step', 
   });
 
   it('a sum is not checked on the step: it is the decimal sum of its contributions', () => {
-    // 0.1 + 0.2 in 20 significant digits is 0.3, as the engine sums numbers.
+    // 0.1 + 0.2 is exactly 0.3, as the engine sums numbers (exact decimals of the shortest writings).
     const sum = proofOf({ type: 'number', combine: 'sum', value: 0.3, rounding }, [0.1, 0.2]);
     expect(inconsistencies(sum)).toEqual([]);
     const binary = proofOf(

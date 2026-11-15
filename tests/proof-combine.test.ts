@@ -139,7 +139,7 @@ describe('each strategy, its value computed from its contributions', () => {
       { output: { type: 'number', combine: 'sum', value: 6 }, contributions: [1, 2, 3] },
     ],
     [
-      'a number sum in Decimal to 20 significant digits: 0.1 + 0.2 is 0.3',
+      'an exact number sum: 0.1 + 0.2 is 0.3',
       { output: { type: 'number', combine: 'sum', value: 0.3 }, contributions: [0.1, 0.2] },
     ],
     [

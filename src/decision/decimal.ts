@@ -4,6 +4,7 @@ import {
   NativeNumber,
   NativeString,
   arrayIsArray,
+  numberIsFinite,
   bigIntToString,
   elementOf,
   regExpExec,
@@ -168,11 +169,74 @@ function decimalPlaces(text: string): number {
 }
 
 /**
- * Internal: the shortest decimal text that reads back as the finite number `n`, without
- * exponent, canonical (`1e-7` gives `"0.0000001"`, `1e21` gives `"1000000000000000000000"`,
- * `-0` gives `"0"`): the decimal a binary number stands for when it is rounded to a step.
+ * The most digits (integer and fraction, without the sign and the point) of an operand or of the
+ * result of the exact decimal functions (`addDecimals`, `subtractDecimals`, `multiplyDecimals`,
+ * `roundDecimal`, `divideDecimals`). Past it a function throws `LIMIT_EXCEEDED`, never a
+ * truncated or approximate answer.
+ */
+export const MAX_DECIMAL_DIGITS = 100_000;
+
+/** Internal: the digits of a canonical decimal, as `MAX_DECIMAL_DIGITS` counts them. */
+export function digitsOfDecimal(text: string): number {
+  const sign = stringStartsWith(text, '-') ? 1 : 0;
+  const point = stringIndexOf(text, '.') < 0 ? 0 : 1;
+  return text.length - sign - point;
+}
+
+/** Internal: `text` as the canonical decimal argument `position` of `fn`, or `INVALID_DECIMAL`. */
+export function requireDecimal(text: unknown, fn: string, position: number): string {
+  if (typeof text !== 'string' || !isCanonicalDecimal(text)) {
+    throw newSpecError(
+      'INVALID_DECIMAL',
+      `argument ${position} of ${fn} is not a canonical decimal: ${describeArgument(text)}`,
+    );
+  }
+  if (digitsOfDecimal(text) > MAX_DECIMAL_DIGITS) {
+    throw newSpecError(
+      'LIMIT_EXCEEDED',
+      `argument ${position} of ${fn} has more than ${MAX_DECIMAL_DIGITS} digits (MAX_DECIMAL_DIGITS)`,
+    );
+  }
+  return text;
+}
+
+/** Internal: `text`, a result of `fn`, checked against `MAX_DECIMAL_DIGITS`. */
+export function boundedResult(text: string, fn: string): string {
+  if (digitsOfDecimal(text) > MAX_DECIMAL_DIGITS) {
+    throw newSpecError(
+      'LIMIT_EXCEEDED',
+      `the result of ${fn} has more than ${MAX_DECIMAL_DIGITS} digits (MAX_DECIMAL_DIGITS)`,
+    );
+  }
+  return text;
+}
+
+/** How an argument is cited in a message: a string quoted and cut, anything else by its type. */
+function describeArgument(value: unknown): string {
+  return typeof value === 'string' ? quoteText(value) : describe(value);
+}
+
+/**
+ * The canonical decimal of the shortest writing of the finite number `n`, without exponent
+ * (`1e-7` gives `"0.0000001"`, `1e21` gives `"1000000000000000000000"`, `-0` gives `"0"`,
+ * `5e-324` gives its 324 places): the decimal a binary number stands for. Throws `SpecError`
+ * (`INVALID_NUMBER`) when `n` is not a finite number (a string, `NaN`, `Infinity` and a `bigint`
+ * are refused, never converted).
  */
 export function numberToDecimal(n: number): string {
+  return decimalOfNumber(n, 'numberToDecimal', 1);
+}
+
+/** Internal: `numberToDecimal` of the argument `position` of `fn`. */
+export function decimalOfNumber(n: unknown, fn: string, position: number): string {
+  if (typeof n !== 'number' || !numberIsFinite(n)) {
+    throw newSpecError(
+      'INVALID_NUMBER',
+      `argument ${position} of ${fn} is not a finite number: ${
+        typeof n === 'number' ? NativeString(n) : describe(n)
+      }`,
+    );
+  }
   const text = NativeString(n);
   const match = regExpExec(/^(-?)([0-9]+)(?:\.([0-9]+))?e([+-][0-9]+)$/, text);
   if (match === null) return toCanonicalDecimal(text);

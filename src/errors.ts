@@ -27,7 +27,11 @@ export type SpecErrorCode =
   | 'INVALID_REFERENTIAL'
   | 'INVALID_DISCLOSURE'
   | 'INVALID_ATTESTATION'
-  | 'INVALID_OPTIONS';
+  | 'INVALID_OPTIONS'
+  | 'INVALID_NUMBER'
+  | 'INVALID_ROUNDING'
+  | 'DIVISION_BY_ZERO'
+  | 'LIMIT_EXCEEDED';
 
 /**
  * Brand set on every `SpecError`. `Symbol.for` gives the same symbol to every copy of this

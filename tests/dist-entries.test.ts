@@ -49,6 +49,9 @@ type Entry = {
   normalizeOutputDeclaration: (d: object) => object;
   contributionMatchesDeclaration: (v: unknown, d: object) => boolean;
   isCanonicalDecimal: (text: string) => boolean;
+  numberToDecimal: (n: number) => string;
+  addDecimals: (a: string, b: string) => string;
+  MAX_DECIMAL_DIGITS: number;
   PROOF_FORMATS: readonly string[];
   ERROR_CAUSES: readonly string[];
   ENGINE_VARIABLES: readonly string[];
@@ -283,6 +286,9 @@ describe('built entries: one SpecError identity', () => {
       expect(entry.isCanonicalDecimal('12.5')).toBe(true);
       expect(entry.isCanonicalDecimal('-0')).toBe(false);
       expect(entry.toCanonicalDecimal('0012.50')).toBe('12.5');
+      expect(entry.numberToDecimal(1e21)).toBe('1000000000000000000000');
+      expect(entry.addDecimals('0.1', '0.2')).toBe('0.3');
+      expect(entry.MAX_DECIMAL_DIGITS).toBe(100_000);
       expect(() => entry.toCanonicalDecimal('1e3')).toThrow(
         expect.objectContaining({ code: 'INVALID_DECIMAL' }),
       );

@@ -9,7 +9,7 @@ const NOT_FOLLOWING = 'output value does not follow from its contributions: valu
 const found = (output: OutputPart, contributions: JsonValue[]): string[] =>
   problems({ ...outputProof(output, contributions) });
 
-describe('a number sum: 20 significant digits, ties away from zero (core floatSum)', () => {
+describe('a number sum is exact: the decimals of the shortest writings, added in order (9M1 R42)', () => {
   const sum = (value: number, contributors?: string[]): OutputPart => ({
     type: 'number',
     combine: 'sum',
@@ -22,16 +22,20 @@ describe('a number sum: 20 significant digits, ties away from zero (core floatSu
     expect(found(sum(0.30000000000000004), [0.1, 0.2])).toEqual([NOT_FOLLOWING]);
   });
 
-  it('a tie of the 21st digit rounds away from zero: 1e20 + 5 - 1e20 is 10', () => {
-    // 1e20 + 5 = 100000000000000000005, 21 digits: half up gives …010, half even …000.
-    expect(found(sum(10), [1e20, 5, -1e20])).toEqual([]);
+  it('1e20 + 5 - 1e20 is exactly 5 (the 20-digit rule said 10)', () => {
+    expect(found(sum(5), [1e20, 5, -1e20])).toEqual([]);
+    expect(found(sum(10), [1e20, 5, -1e20])).toEqual([NOT_FOLLOWING]);
     expect(found(sum(0), [1e20, 5, -1e20])).toEqual([NOT_FOLLOWING]);
-    expect(found(sum(5), [1e20, 5, -1e20])).toEqual([NOT_FOLLOWING]);
   });
 
-  it('a negative tie rounds away from zero too: -1e20 - 5 + 1e20 is -10', () => {
-    expect(found(sum(-10), [-1e20, -5, 1e20])).toEqual([]);
-    expect(found(sum(0), [-1e20, -5, 1e20])).toEqual([NOT_FOLLOWING]);
+  it('-1e20 - 5 + 1e20 is exactly -5', () => {
+    expect(found(sum(-5), [-1e20, -5, 1e20])).toEqual([]);
+    expect(found(sum(-10), [-1e20, -5, 1e20])).toEqual([NOT_FOLLOWING]);
+  });
+
+  it('1e20 + 0.1 - 1e20 is exactly 0.1 (it was 0)', () => {
+    expect(found(sum(0.1), [1e20, 0.1, -1e20])).toEqual([]);
+    expect(found(sum(0), [1e20, 0.1, -1e20])).toEqual([NOT_FOLLOWING]);
   });
 });
 
@@ -39,13 +43,13 @@ describe('the contribution order is normative (D-5): one decision, one proof', (
   // The rules r0, r1… of `outputProof` have the same priority: identity orders them.
   const ORDER = 'contributors not in contribution order: value';
 
-  it('a number sum depends on it: a reordered proof is refused, whatever its value', () => {
-    const output: OutputPart = { type: 'number', combine: 'sum', value: 10 };
+  it('a number sum is exact, so its value does not depend on it, and it has one order all the same', () => {
+    const output: OutputPart = { type: 'number', combine: 'sum', value: 5 };
     expect(found(output, [1e20, 5, -1e20])).toEqual([]);
-    // Summed as r0, r2, r1: 1e20 - 1e20 + 5 is 5, not 10; neither is the proof.
+    // Summed as r0, r2, r1 the exact sum is 5 too: only the order is refused.
     const reordered = { ...output, contributors: ['r0', 'r2', 'r1'] };
-    expect(found(reordered, [1e20, 5, -1e20])).toEqual([ORDER, NOT_FOLLOWING]);
-    expect(found({ ...reordered, value: 5 }, [1e20, 5, -1e20])).toEqual([ORDER]);
+    expect(found(reordered, [1e20, 5, -1e20])).toEqual([ORDER]);
+    expect(found({ ...reordered, value: 10 }, [1e20, 5, -1e20])).toEqual([ORDER, NOT_FOLLOWING]);
   });
 
   it('a union keeps the order of its contributors', () => {

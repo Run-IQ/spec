@@ -120,7 +120,19 @@ export type { OutputRounding, RoundingMode } from './decision/rounding.js';
 export { joinStatus, OUTPUT_STATUSES } from './decision/status.js';
 export type { OutputStatus } from './decision/status.js';
 export { compareOutputValues } from './decision/compare.js';
-export { isCanonicalDecimal, toCanonicalDecimal } from './decision/decimal.js';
+export {
+  isCanonicalDecimal,
+  MAX_DECIMAL_DIGITS,
+  numberToDecimal,
+  toCanonicalDecimal,
+} from './decision/decimal.js';
+export {
+  addDecimals,
+  divideDecimals,
+  multiplyDecimals,
+  roundDecimal,
+  subtractDecimals,
+} from './proof/arithmetic.js';
 export { PROOF_FORMAT, PROOF_SECTIONS } from './proof/types.js';
 export { PROOF_FORMATS } from './proof/formats.js';
 export { ERROR_CAUSES } from './proof/carriers.js';

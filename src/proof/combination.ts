@@ -1,3 +1,4 @@
+import { isOwnError } from '../errors.js';
 import { canonicalSha256Hex } from '../canonical.js';
 import type { JsonValue } from '../canonical.js';
 import { compareCanonicalDecimals, isCanonicalDecimal } from '../decision/decimal.js';
@@ -5,7 +6,7 @@ import { matchesValue } from '../decision/output.js';
 import type { OutputDeclaration } from '../decision/output.js';
 import type { OutputStatus } from '../decision/status.js';
 import { ownCopy } from '../values.js';
-import { roundDecimal, roundNumber, sumDecimals, sumNumbers } from './arithmetic.js';
+import { roundExact, roundNumber, sumDecimals, sumNumbers } from './arithmetic.js';
 import type { Rounding } from './arithmetic.js';
 import { append } from './collect.js';
 import { topOf } from './highest.js';
@@ -144,7 +145,7 @@ function finish(value: JsonValue, declaration: OutputDeclaration): JsonValue | u
     return typeof value === 'number' ? roundNumber(value, exact) : undefined;
   if (declaration.type === 'decimal') {
     return typeof value === 'string' && isCanonicalDecimal(value)
-      ? roundDecimal(value, exact)
+      ? roundExact(value, exact)
       : undefined;
   }
   return value;
@@ -164,7 +165,13 @@ function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): E
         if (numbers.length !== values.length) return unknown;
         const rounding =
           declaration.rounding?.at === 'contribution' ? undefined : declaration.rounding;
-        return { value: sumNumbers(numbers, rounding) };
+        try {
+          return { value: sumNumbers(numbers, rounding) };
+        } catch (error) {
+          // A sum that is not a finite number matches no value: the output does not follow.
+          if (isOwnError(error) && error.code === 'INVALID_NUMBER') return { disagree: true };
+          throw error;
+        }
       }
       const decimals = arrayFilter(
         values,

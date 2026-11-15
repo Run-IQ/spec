@@ -128,6 +128,22 @@ toCanonicalDecimal('1e3');     // throws SpecError INVALID_DECIMAL: no exponent
 isCanonicalDecimal('12.50');   // false
 ```
 
+Exact decimal arithmetic is exported, on canonical decimal strings, and nothing is ever converted through a JS number:
+
+```js
+import { addDecimals, subtractDecimals, multiplyDecimals, divideDecimals, roundDecimal, numberToDecimal, MAX_DECIMAL_DIGITS } from '@run-iq/spec';
+
+addDecimals('0.1', '0.2');                                   // '0.3'
+subtractDecimals('-1.5', '-1.5');                            // '0' (never '-0')
+multiplyDecimals('1.5', '-2');                               // '-3'
+divideDecimals('1', '3', { scale: 2, mode: 'halfUp' });      // '0.33' (the rounding is required)
+divideDecimals('10', '4', { increment: '0.5', mode: 'floor' }); // '2.5'
+roundDecimal('2.5', { scale: 0, mode: 'halfEven' });         // '2'
+numberToDecimal(1e21);                                       // '1000000000000000000000'
+```
+
+Every decimal argument must be a canonical decimal string (`INVALID_DECIMAL`, naming the argument: `argument 2 of addDecimals is not a canonical decimal`); a number argument a finite number (`INVALID_NUMBER`); a rounding is `{ scale, mode }` or `{ increment, mode }` as an output declares it, without `at` (`INVALID_ROUNDING`; `divideDecimals` has no default precision and refuses a missing rounding); a division by `"0"` is `DIVISION_BY_ZERO`. The results are canonical, never `-0`. **Cost and limit:** addition and subtraction are linear in the digits; multiplication and division use exact `BigInt` arithmetic on the scaled integers, so their cost is not linear, and is bounded by `MAX_DECIMAL_DIGITS` (100 000 digits, integer and fraction, without the sign and the point) on every operand and on every result, the unrounded exact product and the integer quotient before the rounding included: past it the call throws `LIMIT_EXCEEDED` naming `MAX_DECIMAL_DIGITS`, never a truncated answer. A division is one exact integer quotient with its remainder and one rounding, so `"1" / "0.00000001"` at scale 2 is `"100000000"`. `roundDecimal` is the rounding the verifier uses, behind a validation. A `number` sum (what `verifyProof` recomputes for a `sum` output of type `number`) is exact: each contribution is read as the decimal of its shortest writing, the decimals are added exactly in contribution order, the output's rounding is applied once, and the result is the nearest `number`, never `-0` (`1e20 + 0.1 - 1e20` is `0.1`); a sum that is not a finite number is `invalid` for that output.
+
 A `number` or `decimal` output (not a `count`) can declare `rounding: { scale or increment, mode, at? }`: `scale` decimal places (0 to 20) or `increment` a step (a canonical decimal string greater than 0 with at most 20 digits before its point and 20 after it: `"0.05"`, `"10"`; on a `decimal` output only, except a power of ten from 1 to 10^-20, which is a scale), `mode` one of `halfUp`, `halfDown`, `halfEven`, `up`, `down`, `ceiling`, `floor`, and `at` either `output` (the combined value, the default) or `contribution` (each contribution, before combining).
 
 A rule reads the outputs computed before it through the reserved variable `$outputs` (`OUTPUTS_VARIABLE`): `$outputs.x` is output `x`. Output names starting with `$` are reserved: a rule `output`, a `shortCircuit` output or a selector `outputs` entry that starts with `$` is refused (`INVALID_RULE`).
@@ -310,7 +326,7 @@ const checksum = sha256Hex(canonicalRulePayload(rule));
 
 ## Errors
 
-A function that fails throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE`, `INVALID_RULE`, `INVALID_PROOF`, `INVALID_KEY`, `INVALID_DECIMAL`, `INVALID_PATH`, `INVALID_INPUT`, `INVALID_REFERENTIAL`, `INVALID_DISCLOSURE`, `INVALID_ATTESTATION` or `INVALID_OPTIONS`. The last is thrown as `VerifyOptionsError` (a `SpecError`, with `.option` naming the argument: `options.rules[2]`, `trustedKeys.k1`, `proofDigest`) by `verifyProof` and `verifyAttestation` for a mistake of the caller in their arguments, before the arguments are used (a calendar that throws is found when the windows are checked); test `error instanceof VerifyOptionsError` (it holds across every entry, ESM or CJS) or `error.code === 'INVALID_OPTIONS'`. Six verifiers never throw for what they are given to verify: `verifyProof`, `verifyFactDisclosure` and `verifyAttestation` return their verdict (a mistake of the caller in the arguments of the first and the last excepted), and `verifyInclusion`, `verifyInputInclusion` and `verifyProofInclusion` return `false` for anything they cannot check (`verifyRuleChecksum` throws for a malformed rule, as said above). `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
+A function that fails throws `SpecError` with a `code`: `NON_SERIALIZABLE` (with the `path` of the value), `INVALID_DATE`, `INVALID_RULE`, `INVALID_PROOF`, `INVALID_KEY`, `INVALID_DECIMAL`, `INVALID_PATH`, `INVALID_INPUT`, `INVALID_REFERENTIAL`, `INVALID_DISCLOSURE`, `INVALID_ATTESTATION`, `INVALID_OPTIONS`, `INVALID_NUMBER` (a number argument that is not a finite number, or a sum that is not), `INVALID_ROUNDING` (a rounding that is not a valid one), `DIVISION_BY_ZERO` or `LIMIT_EXCEEDED` (a decimal past `MAX_DECIMAL_DIGITS`). `INVALID_OPTIONS` is thrown as `VerifyOptionsError` (a `SpecError`, with `.option` naming the argument: `options.rules[2]`, `trustedKeys.k1`, `proofDigest`) by `verifyProof` and `verifyAttestation` for a mistake of the caller in their arguments, before the arguments are used (a calendar that throws is found when the windows are checked); test `error instanceof VerifyOptionsError` (it holds across every entry, ESM or CJS) or `error.code === 'INVALID_OPTIONS'`. Six verifiers never throw for what they are given to verify: `verifyProof`, `verifyFactDisclosure` and `verifyAttestation` return their verdict (a mistake of the caller in the arguments of the first and the last excepted), and `verifyInclusion`, `verifyInputInclusion` and `verifyProofInclusion` return `false` for anything they cannot check (`verifyRuleChecksum` throws for a malformed rule, as said above). `instanceof SpecError` holds across the two entries and across ESM and CommonJS copies.
 
 ## Threat model
 

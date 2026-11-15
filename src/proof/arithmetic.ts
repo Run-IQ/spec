@@ -1,16 +1,33 @@
-import { numberToDecimal, toCanonicalDecimal } from '../decision/decimal.js';
+import {
+  MAX_DECIMAL_DIGITS,
+  MAX_ROUNDING_SCALE,
+  boundedResult,
+  decimalOfNumber,
+  incrementProblem,
+  numberToDecimal,
+  requireDecimal,
+  toCanonicalDecimal,
+} from '../decision/decimal.js';
+import { newSpecError, quoteText } from '../errors.js';
+import { isPlainObject, own } from '../values.js';
 import type { RoundingMode } from '../decision/rounding.js';
 import {
   NativeBigInt,
   NativeFloat64Array,
   NativeNumber,
   NativeString,
+  append,
+  arrayJoin,
   arrayMap,
+  arraySome,
   bigIntToString,
   float64ArrayLength,
   mathFloor,
   mathMax,
   mathMin,
+  numberIsFinite,
+  numberIsSafeInteger,
+  objectKeys,
   stringIndexOf,
   stringPadEnd,
   stringPadStart,
@@ -132,7 +149,7 @@ function compareToHalf(digits: string): -1 | 0 | 1 {
  * zero, `halfEven` toward an even multiple; `up` and `down` round away from and toward zero,
  * `ceiling` and `floor` toward +∞ and −∞).
  */
-export function roundDecimal(value: string, rounding: Rounding): string {
+export function roundExact(value: string, rounding: Rounding): string {
   const step = rounding.increment ?? '1';
   const places =
     rounding.increment === undefined ? (rounding.scale ?? 0) : partsOf(step).fraction.length;
@@ -188,7 +205,7 @@ function awayFromZero(
 
 /** The number `value` rounded in decimal from its shortest writing, never `-0`. */
 export function roundNumber(value: number, rounding: Rounding): number {
-  return NativeNumber(roundDecimal(numberToDecimal(value), rounding));
+  return NativeNumber(roundExact(numberToDecimal(value), rounding));
 }
 
 /** Digits per limb of `sumDecimals`: a limb never exceeds 10^7 times the number of terms. */
@@ -256,60 +273,176 @@ function normalize(limbs: Float64Array): boolean {
   return carry >= 0;
 }
 
-/** A decimal as `coefficient × 10^exponent`. */
-interface Scaled {
-  coefficient: bigint;
-  exponent: number;
-}
-
-/** Significant digits of a `number` sum (`@run-iq/core`'s `floatSum`). */
-const SUM_DIGITS = 20;
-
-function scaledOf(value: number): Scaled {
-  const { negative, integer, fraction } = partsOf(numberToDecimal(value));
-  const digits = NativeBigInt(integer + fraction);
-  return { coefficient: negative ? -digits : digits, exponent: -fraction.length };
-}
-
 /**
- * `a + b`, rounded to 20 significant digits, a tie away from zero: one step of core's
- * `floatSum` (`core/src/engine/decimalArithmetic.ts`: `Float`, decimal.js `precision: 20` and
- * `ROUND_HALF_UP`, which rounds a tie away from zero). `1e20 + 5` is `100000000000000000010`.
- */
-function addRounded(a: Scaled, b: Scaled): Scaled {
-  const exponent = mathMin(a.exponent, b.exponent);
-  const sum =
-    a.coefficient * 10n ** NativeBigInt(a.exponent - exponent) +
-    b.coefficient * 10n ** NativeBigInt(b.exponent - exponent);
-  const magnitude = sum < 0n ? -sum : sum;
-  const drop = bigIntToString(magnitude).length - SUM_DIGITS;
-  if (drop <= 0) return { coefficient: sum, exponent };
-  const divisor = 10n ** NativeBigInt(drop);
-  let kept = magnitude / divisor;
-  if (2n * (magnitude % divisor) >= divisor) kept += 1n;
-  return { coefficient: sum < 0n ? -kept : kept, exponent: exponent + drop };
-}
-
-/** The canonical decimal of a scaled value. */
-function textOf({ coefficient, exponent }: Scaled): string {
-  const negative = coefficient < 0n;
-  const digits = bigIntToString(negative ? -coefficient : coefficient);
-  if (exponent >= 0)
-    return toCanonicalDecimal(`${negative ? '-' : ''}${digits}${stringRepeat('0', exponent)}`);
-  return placed(negative, digits, -exponent);
-}
-
-/**
- * The sum of numbers in order, in decimal to 20 significant digits (`0.1 + 0.2` is `0.3`),
- * rounded by `rounding` if any, then the number closest to it (never `-0`).
+ * The sum of numbers in order, exact: each number is read as the decimal of its shortest writing
+ * (`numberToDecimal`), the decimals are added exactly (`sumDecimals`), the output's rounding, if
+ * any, is applied once to that sum, and the result is the number nearest to it, never `-0`.
+ * `0.1 + 0.2` is `0.3`, `1e20 + 0.1 - 1e20` is `0.1`. Throws `SpecError` (`INVALID_NUMBER`) for
+ * a value that is not a finite number and for a sum that is not (it overflows).
  */
 export function sumNumbers(values: readonly number[], rounding: Rounding | undefined): number {
-  let total: Scaled = { coefficient: 0n, exponent: 0 };
-  for (let idx1039 = 0, list1039 = values; idx1039 < list1039.length; idx1039++) {
-    const value = list1039[idx1039] as (typeof list1039)[number];
-    total = addRounded(total, scaledOf(value));
+  const texts: string[] = [];
+  for (let i = 0; i < values.length; i++) {
+    append(texts, decimalOfNumber(values[i], 'sumNumbers', i + 1));
   }
-  const text = textOf(total);
-  const sum = NativeNumber(rounding === undefined ? text : roundDecimal(text, rounding));
+  const exact = sumDecimals(texts);
+  const sum = NativeNumber(rounding === undefined ? exact : roundExact(exact, rounding));
+  if (!numberIsFinite(sum)) {
+    throw newSpecError('INVALID_NUMBER', 'the sum of the numbers is not a finite number');
+  }
   return sum === 0 ? 0 : sum;
+}
+
+// The exact decimal functions of the public API. Every argument is checked first (a canonical
+// decimal, a valid rounding), every operand and result is bounded by `MAX_DECIMAL_DIGITS`, and
+// nothing is ever rounded but by the rounding the caller gives.
+
+const MODES: readonly RoundingMode[] = [
+  'halfUp',
+  'halfDown',
+  'halfEven',
+  'up',
+  'down',
+  'ceiling',
+  'floor',
+];
+
+/** `rounding` as the argument `position` of `fn`: a valid rounding, read once, or `INVALID_ROUNDING`. */
+function requireRounding(rounding: unknown, fn: string, position: number): Rounding {
+  const fail = (why: string): never => {
+    throw newSpecError(
+      'INVALID_ROUNDING',
+      `argument ${position} of ${fn} is not a rounding: ${why}`,
+    );
+  };
+  if (!isPlainObject(rounding)) {
+    return fail('expected { scale, mode } or { increment, mode }');
+  }
+  const keys = objectKeys(rounding);
+  for (let i = 0; i < keys.length; i++) {
+    const key = keys[i] as string;
+    if (key !== 'scale' && key !== 'increment' && key !== 'mode') {
+      return fail(`unknown field ${quoteText(key)}`);
+    }
+  }
+  const scale: unknown = own(rounding, 'scale');
+  const increment: unknown = own(rounding, 'increment');
+  const mode: unknown = own(rounding, 'mode');
+  if (!arraySome(MODES, (known) => known === mode)) {
+    return fail(`mode must be one of ${arrayJoin(MODES, ', ')}`);
+  }
+  if ((scale === undefined) === (increment === undefined)) {
+    return fail('give exactly one of scale and increment');
+  }
+  if (scale !== undefined) {
+    if (
+      typeof scale !== 'number' ||
+      !numberIsSafeInteger(scale) ||
+      scale < 0 ||
+      scale > MAX_ROUNDING_SCALE
+    ) {
+      return fail(`scale must be an integer from 0 to ${MAX_ROUNDING_SCALE}`);
+    }
+    return { scale, mode: mode as RoundingMode };
+  }
+  const problem = incrementProblem(increment);
+  if (problem !== undefined) return fail(`increment ${problem}`);
+  return { increment: increment as string, mode: mode as RoundingMode };
+}
+
+/** `value` negated, canonical (`"0"` stays `"0"`). */
+function negated(value: string): string {
+  if (value === '0') return value;
+  return stringStartsWith(value, '-') ? stringSlice(value, 1) : `-${value}`;
+}
+
+/** The exact sum of two canonical decimals. */
+export function addDecimals(a: string, b: string): string {
+  requireDecimal(a, 'addDecimals', 1);
+  requireDecimal(b, 'addDecimals', 2);
+  return boundedResult(sumDecimals([a, b]), 'addDecimals');
+}
+
+/** The exact difference of two canonical decimals. */
+export function subtractDecimals(a: string, b: string): string {
+  requireDecimal(a, 'subtractDecimals', 1);
+  requireDecimal(b, 'subtractDecimals', 2);
+  return boundedResult(sumDecimals([a, negated(b)]), 'subtractDecimals');
+}
+
+/** The integer of the digits of a canonical decimal without its point, and its places. */
+function integerOf(value: string): { negative: boolean; digits: bigint; places: number } {
+  const { negative, integer, fraction } = partsOf(value);
+  return { negative, digits: NativeBigInt(integer + fraction), places: fraction.length };
+}
+
+/** The exact product of two canonical decimals. */
+export function multiplyDecimals(a: string, b: string): string {
+  requireDecimal(a, 'multiplyDecimals', 1);
+  requireDecimal(b, 'multiplyDecimals', 2);
+  const left = integerOf(a);
+  const right = integerOf(b);
+  const digits = left.digits * right.digits;
+  const text = placed(
+    left.negative !== right.negative,
+    bigIntToString(digits),
+    left.places + right.places,
+  );
+  return boundedResult(text, 'multiplyDecimals');
+}
+
+/** `value` rounded as `rounding` says: exactly, to `scale` places or to a multiple of `increment`. */
+export function roundDecimal(value: string, rounding: Rounding): string {
+  requireDecimal(value, 'roundDecimal', 1);
+  const valid = requireRounding(rounding, 'roundDecimal', 2);
+  return boundedResult(roundExact(value, valid), 'roundDecimal');
+}
+
+/**
+ * `a / b` rounded once by `rounding` (required: a division never picks a precision itself). The
+ * exact quotient is one integer division of scaled operands, with its remainder: the rounding
+ * decides from the remainder, so no digit beyond the step is computed and nothing is rounded
+ * twice. Throws `DIVISION_BY_ZERO` for a `b` of `"0"`.
+ */
+export function divideDecimals(a: string, b: string, rounding: Rounding): string {
+  requireDecimal(a, 'divideDecimals', 1);
+  requireDecimal(b, 'divideDecimals', 2);
+  const step = requireRounding(rounding, 'divideDecimals', 3);
+  if (b === '0') throw newSpecError('DIVISION_BY_ZERO', 'argument 2 of divideDecimals is zero');
+  const left = integerOf(a);
+  const right = integerOf(b);
+  // The step is unit / 10^k: a / b rounded to a multiple of it is (a / (b * step)) rounded.
+  const unit =
+    step.increment === undefined ? 1n : NativeBigInt(stringReplace(step.increment, '.', ''));
+  const k =
+    step.increment === undefined ? (step.scale ?? 0) : partsOf(step.increment).fraction.length;
+  const numeratorDigits = bigIntToString(left.digits).length + right.places + k;
+  const denominatorDigits = bigIntToString(right.digits * unit).length + left.places;
+  // The quotient has about numeratorDigits - denominatorDigits digits: refuse before computing.
+  if (numeratorDigits - denominatorDigits > MAX_DECIMAL_DIGITS + 1) {
+    throw newSpecError(
+      'LIMIT_EXCEEDED',
+      `the result of divideDecimals has more than ${MAX_DECIMAL_DIGITS} digits (MAX_DECIMAL_DIGITS)`,
+    );
+  }
+  const numerator = left.digits * 10n ** NativeBigInt(right.places + k);
+  const denominator = right.digits * unit * 10n ** NativeBigInt(left.places);
+  const quotient = numerator / denominator;
+  const rest = numerator % denominator;
+  // The integer quotient, before the rounding, is bounded too.
+  if (bigIntToString(quotient).length > MAX_DECIMAL_DIGITS) {
+    throw newSpecError(
+      'LIMIT_EXCEEDED',
+      `the quotient of divideDecimals has more than ${MAX_DECIMAL_DIGITS} digits (MAX_DECIMAL_DIGITS)`,
+    );
+  }
+  const negative = left.negative !== right.negative;
+  let count = quotient;
+  if (rest !== 0n) {
+    const twice = 2n * rest;
+    const half: -1 | 0 | 1 = twice < denominator ? -1 : twice === denominator ? 0 : 1;
+    if (awayFromZero(step.mode, negative, half, quotient % 2n === 1n)) count += 1n;
+  }
+  const text = placed(negative && count !== 0n, bigIntToString(count * unit), k);
+  return boundedResult(text, 'divideDecimals');
 }
