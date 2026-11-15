@@ -32,6 +32,8 @@ import {
   arraySort,
   bare,
   defineValue,
+  elementOf,
+  hasOwnKey,
   mapEntriesArray,
   mapGet,
   mapSet,
@@ -135,7 +137,7 @@ export function normalizeReferential(
 ): Referential {
   const { issues, normal } = check(referential, readLimits(options));
   const tuple36 = issues;
-  const first = tuple36[0];
+  const first = elementOf(tuple36, 0);
   if (first !== undefined || normal === undefined) {
     throw newSpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
   }
@@ -601,7 +603,7 @@ function checkPeriods(periods: PeriodList, path: string, add: Add): Period[] {
   for (let i = 0; i < length; i++) {
     const at = `${path}[${i}]`;
     try {
-      if (!(i in list)) {
+      if (!hasOwnKey(list, i)) {
         add(path, holeMessage(path, i));
         continue;
       }
@@ -710,7 +712,7 @@ function checkMembers(
     const at = `${path}[${i}]`;
     let member: ReferentialMember | undefined;
     try {
-      if (!(i in members)) add(path, holeMessage(path, i));
+      if (!hasOwnKey(members, i)) add(path, holeMessage(path, i));
       else {
         const item = members[i];
         if (item === undefined) add(at, undefinedMessage(at));

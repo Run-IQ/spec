@@ -2,6 +2,7 @@ import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from '../erro
 import {
   NativeNumber,
   arrayIncludes,
+  elementOf,
   functionCall,
   isoOf,
   numberIsNaN,
@@ -93,9 +94,9 @@ export function isInstant(value: unknown): value is Instant {
   const match = regExpExec(CANONICAL_INSTANT, value);
   if (match === null) return false;
   const tuple5000 = match;
-  const year = tuple5000[1] === undefined ? '' : tuple5000[1];
-  const month = tuple5000[2] === undefined ? '' : tuple5000[2];
-  const day = tuple5000[3] === undefined ? '' : tuple5000[3];
+  const year = elementOf(tuple5000, 1) ?? '';
+  const month = elementOf(tuple5000, 2) ?? '';
+  const day = elementOf(tuple5000, 3) ?? '';
   const hour = tuple5000[4];
   const minute = tuple5000[5];
   const second = tuple5000[6];
@@ -148,14 +149,14 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
   const match = regExpExec(DATE_TIME, value);
   if (match === null) invalidDate(field, quoteText(value));
   const tuple5001 = match;
-  const year = tuple5001[1] === undefined ? '' : tuple5001[1];
-  const month = tuple5001[2] === undefined ? '' : tuple5001[2];
-  const day = tuple5001[3] === undefined ? '' : tuple5001[3];
+  const year = elementOf(tuple5001, 1) ?? '';
+  const month = elementOf(tuple5001, 2) ?? '';
+  const day = elementOf(tuple5001, 3) ?? '';
   const hour = tuple5001[4];
   const minute = tuple5001[5];
   const second = tuple5001[6];
   const fraction = tuple5001[7];
-  const zone = tuple5001[8] === undefined ? 'Z' : tuple5001[8];
+  const zone = elementOf(tuple5001, 8) ?? 'Z';
   const offset = zone === 'Z' ? 0 : offsetMinutes(zone);
   if (
     !isRealDay(year, month, day) ||
@@ -263,10 +264,10 @@ function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
   const match = regExpExec(form, value);
   if (match === null) return undefined;
   const tuple5003 = match;
-  const sign = tuple5003[1] === undefined ? '' : tuple5003[1];
-  const digits = tuple5003[2] === undefined ? '' : tuple5003[2];
-  const month = tuple5003[3] === undefined ? '' : tuple5003[3];
-  const day = tuple5003[4] === undefined ? '' : tuple5003[4];
+  const sign = elementOf(tuple5003, 1) ?? '';
+  const digits = elementOf(tuple5003, 2) ?? '';
+  const month = elementOf(tuple5003, 3) ?? '';
+  const day = elementOf(tuple5003, 4) ?? '';
   const hour = tuple5003[5];
   const minute = tuple5003[6];
   const second = tuple5003[7];
@@ -376,7 +377,8 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
     return offset * 60_000;
   };
   return {
-    toCivilDate: (at, zone) => stringSplit(isoOf(parseTime(at) + offsetOf(zone)), 'T')[0] ?? '',
+    toCivilDate: (at, zone) =>
+      elementOf(stringSplit(isoOf(parseTime(at) + offsetOf(zone)), 'T'), 0) ?? '',
     startOfDay: (day, zone) => isoOf(parseTime(`${day}T00:00:00.000Z`) - offsetOf(zone)),
   };
 }

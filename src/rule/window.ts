@@ -12,7 +12,13 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { own, typeName } from '../values.js';
 import type { ForEach } from './forEach.js';
-import { arrayIncludes, arraySlice, stringStartsWith } from '../intrinsics.js';
+import {
+  arrayIncludes,
+  arraySlice,
+  elementOf,
+  hasOwnKey,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * The validity window of a rule, as `windowContains` reads it: the bounds in any form
@@ -206,23 +212,23 @@ export function effectiveOnProblem(value: string): string | undefined {
     return `effectiveOn must be a JSON pointer: ${reasonOf(error)}`;
   }
   const tuple51 = segments;
-  const head = tuple51[0];
+  const head = elementOf(tuple51, 0);
   const rest = arraySlice(tuple51, 1);
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;
   if (arrayIncludes(rest, '-'))
     return "effectiveOn must not hold a '-' segment: '-' is not an index";
   if (head === '$dates') {
-    if (rest.length === 1 && isReservedName(rest[0] ?? '')) {
+    if (rest.length === 1 && isReservedName(elementOf(rest, 0) ?? '')) {
       return reservedDatePointerMessage('effectiveOn');
     }
-    return rest.length === 1 && rest[0] !== ''
+    return rest.length === 1 && elementOf(rest, 0) !== ''
       ? undefined
       : 'effectiveOn must name one date: /$dates/<name>';
   }
   if (head === '$item') {
     return rest.length > 0 ? undefined : 'effectiveOn must name a field of the item: /$item/<path>';
   }
-  return rest.length === 1 && rest[0] === 'from'
+  return rest.length === 1 && elementOf(rest, 0) === 'from'
     ? undefined
     : 'effectiveOn must be /$segment/from to read a segment';
 }
@@ -238,7 +244,7 @@ export function effectiveOnContextProblem(
 ): string | undefined {
   if (stringStartsWith(pointer, '/$item/')) {
     if (forEach === undefined) return 'effectiveOn reads $item without forEach';
-    if ('segments' in forEach) {
+    if (hasOwnKey(forEach, 'segments')) {
       return 'effectiveOn reads $item without forEach.path: a segment has no item';
     }
     return forEach.groupBy === undefined
@@ -246,7 +252,7 @@ export function effectiveOnContextProblem(
       : 'effectiveOn reads $item with forEach.groupBy: a group has no single item';
   }
   if (stringStartsWith(pointer, '/$segment/')) {
-    return forEach !== undefined && 'segments' in forEach
+    return forEach !== undefined && hasOwnKey(forEach, 'segments')
       ? undefined
       : 'effectiveOn reads $segment without segments';
   }

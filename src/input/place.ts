@@ -12,6 +12,7 @@ import {
   arrayJoin,
   arrayReduce,
   arraySlice,
+  elementOf,
   objectHasOwn,
   objectValues,
   regExpTest,
@@ -132,11 +133,11 @@ const FIELD_VALUES: Readonly<Record<string, (value: JsonScalar) => string | unde
  */
 export function leafPlace(segments: readonly string[]): LeafPlace | string {
   const tuple99 = segments;
-  const head = tuple99[0];
-  const part = tuple99[1];
-  const name = tuple99[2];
-  const field = tuple99[3];
-  const sub = tuple99[4];
+  const head = elementOf(tuple99, 0);
+  const part = elementOf(tuple99, 1);
+  const name = elementOf(tuple99, 2);
+  const field = elementOf(tuple99, 3);
+  const sub = elementOf(tuple99, 4);
   if (head === 'data') {
     if (part === undefined) return place(['object'], '/data');
     if (stringStartsWith(part, '$')) return 'a root key of /data starting with "$" is reserved';
@@ -187,10 +188,10 @@ function assertionPlace(
   depth: number,
 ): LeafPlace | string {
   const tuple100 = rest;
-  const key = tuple100[0] === undefined ? '' : tuple100[0];
-  const field = tuple100[1];
-  const sub = tuple100[2];
-  const below = tuple100[3];
+  const key = elementOf(tuple100, 0) ?? '';
+  const field = elementOf(tuple100, 1);
+  const sub = elementOf(tuple100, 2);
+  const below = elementOf(tuple100, 3);
   const problem = assertionKeyProblem(key);
   if (problem !== undefined) return problem;
   if (field === undefined) {

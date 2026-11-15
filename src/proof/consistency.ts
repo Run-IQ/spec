@@ -40,6 +40,8 @@ import {
   arrayMap,
   arrayPush,
   arraySome,
+  elementOf,
+  hasOwnKey,
   mapGet,
   mapHas,
   mapKeysArray,
@@ -144,9 +146,9 @@ export function placeInProof(
   if (found === null) return message;
   const tuple5007 = found;
   const whole = tuple5007[0];
-  const section = tuple5007[1] === undefined ? '' : tuple5007[1];
-  const link = tuple5007[2] === undefined ? '' : tuple5007[2];
-  const index = tuple5007[3] === undefined ? '' : tuple5007[3];
+  const section = elementOf(tuple5007, 1) ?? '';
+  const link = elementOf(tuple5007, 2) ?? '';
+  const index = elementOf(tuple5007, 3) ?? '';
   const place = mapGet(positions, section as ProofSection)?.[NativeNumber(index)];
   if (place === undefined) return message;
   return `${section}${link}${place}${stringSlice(message, whole.length)}`;
@@ -507,9 +509,9 @@ function decidedTwice(
     const entry = list1063[idx1063] as (typeof list1063)[number];
     if (full(issues)) break;
     // The step a short circuit imposed is the effect of an exception, not a decision.
-    if ('model' in entry && setHas(imposed, imposedKey(entry, entry.output))) continue;
+    if (hasOwnKey(entry, 'model') && setHas(imposed, imposedKey(entry, entry.output))) continue;
     const rule = key(entry);
-    const grouped = 'instances' in entry && entry.instances !== undefined;
+    const grouped = hasOwnKey(entry, 'instances') && entry.instances !== undefined;
     let state = mapGet(decided, rule);
     const twice =
       state !== undefined &&

@@ -3,6 +3,7 @@ import { citeName, newSpecError, quoteText } from '../errors.js';
 import { isReservedName } from '../reserved.js';
 import { typeName } from '../values.js';
 import {
+  elementOf,
   regExpTest,
   stringIncludes,
   stringIndexOf,
@@ -157,8 +158,8 @@ export function citedNameProblem(
     return `${citeName(path)} name must hold at most one ":": <rule set>:<name>`;
   }
   const tuple22 = parts;
-  const set = tuple22[0] === undefined ? '' : tuple22[0];
-  const bare = tuple22[1] === undefined ? '' : tuple22[1];
+  const set = elementOf(tuple22, 0) ?? '';
+  const bare = elementOf(tuple22, 1) ?? '';
   if (set === LOCAL_RULE_SET) {
     return `${citeName(path)} name must not be qualified by "local": a local name is written bare`;
   }

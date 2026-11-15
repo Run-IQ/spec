@@ -42,6 +42,7 @@ import {
   arrayPush,
   bare,
   defineValue,
+  elementOf,
   mapGet,
   mapHas,
   numberIsSafeInteger,
@@ -147,7 +148,7 @@ export function readProofInput(value: unknown): {
 export function readValidInput(value: unknown): ProofInput {
   const { issues, snapshot } = readProofInput(value);
   const tuple101 = issues;
-  const first = tuple101[0];
+  const first = elementOf(tuple101, 0);
   if (first !== undefined || snapshot === undefined) {
     throw newSpecError(
       'INVALID_INPUT',

@@ -23,6 +23,7 @@ import {
   bare,
   bytesFromNumbers,
   bytesToArray,
+  elementOf,
   jsonStringify,
   mapGet,
   mapSet,
@@ -247,7 +248,8 @@ export function treeDigest(p: UnsignedProof): string {
 export function proofLeafHashes(p: DecisionProof | UnsignedProof): Uint8Array[] {
   return withValueBudget(() => {
     const { proof, errors } = readProofContent(p);
-    if (!proof) throw newSpecError('INVALID_PROOF', `Cannot hash the proof: ${errors[0]}`);
+    if (!proof)
+      throw newSpecError('INVALID_PROOF', `Cannot hash the proof: ${elementOf(errors, 0)}`);
     const hashes = packedLeafHashes(proof);
     const copies: Uint8Array[] = [];
     for (let i = 0; i < hashes.length; i++) copies[i] = hashes.copyAt(i);
@@ -286,7 +288,10 @@ export function proofLeafHash(leaf: ProofLeaf, format: string): Uint8Array {
     }
     const { leaf: read, errors } = readProofLeaf(leaf);
     if (read === undefined) {
-      throw newSpecError('INVALID_PROOF', `invalid proof leaf: ${errors[0] ?? 'unreadable'}`);
+      throw newSpecError(
+        'INVALID_PROOF',
+        `invalid proof leaf: ${elementOf(errors, 0) ?? 'unreadable'}`,
+      );
     }
     const out = new NativeUint8Array(32);
     if (read.s === 'header') {

@@ -23,6 +23,8 @@ import {
   arrayMap,
   arrayPush,
   dataViewSetUint32,
+  elementOf,
+  hasOwnKey,
   mapGet,
   mapSet,
   mathFloor,
@@ -154,7 +156,7 @@ export class PackedHashes {
    * Afterwards the buffer holds no meaningful hash.
    */
   path(index: number): Uint8Array[] {
-    return this.pathsAndRoot([index]).paths[0] ?? [];
+    return elementOf(this.pathsAndRoot([index]).paths, 0) ?? [];
   }
 
   /**
@@ -394,7 +396,7 @@ function readHashes(list: readonly Uint8Array[]): PackedHashes {
     if (!spendValues(length)) throw newSpecError('INVALID_PROOF', tooLargeMessage(LEAVES));
     const packed = new PackedHashes(length);
     for (let i = 0; i < length; i++) {
-      if (!(i in list)) throw newSpecError('INVALID_PROOF', holeMessage(LEAVES, i));
+      if (!hasOwnKey(list, i)) throw newSpecError('INVALID_PROOF', holeMessage(LEAVES, i));
       const item: unknown = list[i];
       if (item === undefined) {
         throw newSpecError('INVALID_PROOF', undefinedMessage(`${LEAVES}[${i}]`));
@@ -433,7 +435,7 @@ function readPath(path: readonly Uint8Array[], length: number): Uint8Array[] | u
     if (!arrayIsArray(path) || path.length !== length) return undefined;
     const hashes: Uint8Array[] = [];
     for (let i = 0; i < length; i++) {
-      if (!(i in path)) return undefined;
+      if (!hasOwnKey(path, i)) return undefined;
       const hash = hashOf(path[i]);
       if (hash === undefined) return undefined;
       arrayPush(hashes, hash);

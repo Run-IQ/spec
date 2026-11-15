@@ -8,6 +8,7 @@ import {
   arrayAt,
   arrayFilter,
   arrayPush,
+  elementOf,
   mapGet,
   mapSet,
   setAdd,
@@ -61,13 +62,14 @@ export function topOf(
     if (found === undefined || !sameLevel(found, best)) continue;
     setAdd(ids, step.ruleId);
     const last = arrayAt(groups, -1);
-    if (last !== undefined && ruleKey(last[0] ?? step) === ruleKey(step)) arrayPush(last, step);
+    if (last !== undefined && ruleKey(elementOf(last, 0) ?? step) === ruleKey(step))
+      arrayPush(last, step);
     else arrayPush(groups, [step]);
   }
   for (let idx134 = 0, list134 = groups; idx134 < list134.length; idx134++) {
     const group = list134[idx134] as (typeof list134)[number];
     const tuple135 = group;
-    const first = tuple135[0];
+    const first = elementOf(tuple135, 0);
     if (first === undefined) continue;
     if (group.length === 1 && (first.subject === undefined || !competing)) {
       arrayPush(winners, first);
@@ -80,8 +82,9 @@ export function topOf(
     }
     const firsts = arrayFilter(group, (step) => step.rank === 0);
     if (firsts.length > 1) arrayPush(problems, `instances tied at rank 0: ${cited}`);
-    else if (firsts[0] === undefined) arrayPush(problems, `no instance at rank 0: ${cited}`);
-    else arrayPush(winners, firsts[0]);
+    else if (elementOf(firsts, 0) === undefined)
+      arrayPush(problems, `no instance at rank 0: ${cited}`);
+    else arrayPush(winners, elementOf(firsts, 0));
   }
   return { ids, winners: problems.length > 0 ? [] : winners, problems };
 }

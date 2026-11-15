@@ -24,6 +24,7 @@ import {
   arraySlice,
   arraySome,
   arraySort,
+  elementOf,
   mapGet,
   mapHas,
   reflectOwnKeys,
@@ -144,7 +145,7 @@ function assertionDigest(assertion: FactAssertion): string {
     (error) => ({ path: '', message: unreadableMessage('assertion', error) }),
   );
   const tuple97 = issues;
-  const first = tuple97[0];
+  const first = elementOf(tuple97, 0);
   if (first !== undefined || snapshot === undefined) {
     throw newSpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
   }
@@ -172,10 +173,10 @@ export function assertionKeyProblem(key: string): string | undefined {
     return `assertion key ${quoted} must not hold "-": it is not an index`;
   }
   const tuple98 = segments;
-  const head = tuple98[0];
+  const head = elementOf(tuple98, 0);
   const rest = arraySlice(tuple98, 1);
   if (head === undefined || !stringStartsWith(head, '$')) return undefined;
-  const name = rest[0];
+  const name = elementOf(rest, 0);
   // A date or dimension name is never empty and never starts with `$` (ruling 9G round 2).
   const named =
     (head === '$dates' || head === '$dimensions') &&

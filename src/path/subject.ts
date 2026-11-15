@@ -8,6 +8,7 @@ import {
   NativeString,
   arrayEvery,
   arrayMap,
+  elementOf,
   numberIsSafeInteger,
   regExpExec,
   stringSplit,
@@ -102,9 +103,9 @@ function isSubjectSegment(segment: string): boolean {
 /** A `YYYY-MM-DD` text (already matched) that names a real day. */
 function isRealDate(text: string): boolean {
   const tuple2 = arrayMap(stringSplit(text, '-'), NativeNumber);
-  const year = tuple2[0];
-  const month = tuple2[1];
-  const day = tuple2[2];
+  const year = elementOf(tuple2, 0);
+  const month = elementOf(tuple2, 1);
+  const day = elementOf(tuple2, 2);
   if (year === undefined || month === undefined || day === undefined) return false;
   return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
 }

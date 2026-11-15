@@ -58,6 +58,7 @@ import {
   arraySort,
   bare,
   defineValue,
+  elementOf,
   numberIsFinite,
   objectKeys,
   setOf,
@@ -420,7 +421,7 @@ function defineField(target: Record<string, unknown>, key: string, value: unknow
 /** Throws the first issue as `INVALID_RULE`; its message already names the path. */
 function throwFirst(issues: readonly RuleValidationIssue[]): void {
   const tuple62 = issues;
-  const first = tuple62[0];
+  const first = elementOf(tuple62, 0);
   if (first) invalidRule(first.message);
 }
 

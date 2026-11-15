@@ -25,6 +25,8 @@ import {
   arrayPush,
   arraySome,
   arraySort,
+  elementOf,
+  hasOwnKey,
   mapEntriesArray,
   mapGet,
   mapHas,
@@ -307,8 +309,8 @@ function waitingTargets(
   // Pending, excluded before the exceptions, or by another exception (a substitution excludes
   // nothing: the rule it reaches is still decided by its own conditions).
   const waits = (decision: Decision): boolean => {
-    if (!('status' in decision)) return true;
-    if (!('reason' in decision)) return false;
+    if (!hasOwnKey(decision, 'status')) return true;
+    if (!hasOwnKey(decision, 'reason')) return false;
     const { reason } = decision;
     return (
       setHas(BEFORE_EXCEPTIONS, reason) || reason === 'INHIBITED' || reason === 'SHORT_CIRCUITED'
@@ -507,7 +509,7 @@ function recordedExceptions(
       mapSet(signatures, ruleOf, defined);
     }
     const same = setHas(losers, key)
-      ? recorded.length === 1 && arrayIncludes(defined, recorded[0] ?? '')
+      ? recorded.length === 1 && arrayIncludes(defined, elementOf(recorded, 0) ?? '')
       : recorded.length === defined.length && arrayEvery(recorded, (s, i) => s === defined[i]);
     if (same) continue;
     const { ruleId: id, version, subject } = instance;

@@ -1,14 +1,13 @@
+import { own } from '../values.js';
 import { newSpecError } from '../errors.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { LiftedCheck, ProofSection, ProofStep } from './types.js';
 import {
-  NativeArray,
   NativeMap,
   NativeSet,
   NativeString,
   arrayConcat,
   arrayEvery,
-  arrayFill,
   arrayFilter,
   arrayForEach,
   arrayIndexOf,
@@ -17,6 +16,7 @@ import {
   arrayReduce,
   arraySome,
   arraySort,
+  filledArray,
   jsonStringify,
   mapClear,
   mapEntriesArray,
@@ -307,7 +307,7 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
  * could lift would pass. Every verification builds its sections with `hiddenSections`.
  */
 function ledgerOf(hidden: ReadonlySet<ProofSection>): Ledger | undefined {
-  const { ledger } = hidden as HiddenSections;
+  const ledger = own(hidden as HiddenSections, 'ledger');
   if (ledger === undefined && setSize(hidden) > 0) {
     throw newSpecError('INVALID_PROOF', 'internal: hidden sections without a ledger');
   }
@@ -411,7 +411,7 @@ export function isLifted<N extends Need>(
 export function unexplained(hidden: HiddenSections): string[] {
   const ledger = ledgerOf(hidden);
   if (ledger === undefined || ledger.failed) return [];
-  const capacity = arrayFill(new NativeArray<number>(PROOF_SECTIONS.length), 0);
+  const capacity = filledArray<number>(PROOF_SECTIONS.length, 0);
   for (
     let idx1018 = 0, list1018 = mapEntriesArray(ledger.counts);
     idx1018 < list1018.length;
@@ -479,12 +479,12 @@ export function liftedOnSteps(
  */
 export function matched(masks: readonly number[], capacity: readonly number[]): boolean {
   const size = 1 << capacity.length;
-  const need = arrayFill(new NativeArray<number>(size), 0);
+  const need = filledArray<number>(size, 0);
   for (let idx1019 = 0, list1019 = masks; idx1019 < list1019.length; idx1019++) {
     const mask = list1019[idx1019] as (typeof list1019)[number];
     need[mask] = (need[mask] ?? 0) + 1;
   }
-  const room = arrayFill(new NativeArray<number>(size), 0);
+  const room = filledArray<number>(size, 0);
   for (let set = 1; set < size; set++) {
     const low = mathLog2(set & -set);
     room[set] = (room[set & (set - 1)] ?? 0) + (capacity[low] ?? 0);

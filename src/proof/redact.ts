@@ -17,6 +17,7 @@ import {
   arrayPush,
   arraySome,
   bare,
+  elementOf,
   mapSet,
   setAdd,
   setOf,
@@ -110,7 +111,8 @@ export function redactProof(
 ): DecisionProof {
   return withValueBudget(() => {
     const { proof, errors } = readDecisionProof(p);
-    if (!proof) throw newSpecError('INVALID_PROOF', `Cannot redact the proof: ${errors[0]}`);
+    if (!proof)
+      throw newSpecError('INVALID_PROOF', `Cannot redact the proof: ${elementOf(errors, 0)}`);
     if (!proof.inputSalted) {
       throw newSpecError('INVALID_DISCLOSURE', 'unsalted proof cannot be redacted');
     }

@@ -34,6 +34,7 @@ import {
   arraySome,
   arraySort,
   bare,
+  elementOf,
   mapEntriesArray,
   mapGet,
   mapHas,
@@ -305,7 +306,7 @@ function factReasons(
 ): string[] {
   const reasons: string[] = [];
   const tuple206 = fact.leaves;
-  const first = tuple206[0];
+  const first = elementOf(tuple206, 0);
   const last = fact.leaves[fact.leaves.length - 1];
   if (first === undefined || last === undefined) return reasons;
   if (arraySome(fact.leaves, (leaf, k) => leaf.index !== first.index + k)) {

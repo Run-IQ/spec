@@ -1,5 +1,4 @@
 import {
-  bare,
   NativeDate,
   NativeError,
   NativeIntlDateTimeFormat,
@@ -8,8 +7,10 @@ import {
   NativeRangeError,
   NativeString,
   arrayFind,
+  bare,
   dateTimeFormatFormatToParts,
   dateTimeFormatResolvedOptions,
+  elementOf,
   functionHasInstance,
   isoOf,
   loadTimeTzdata,
@@ -195,7 +196,7 @@ function offsetAt(zone: string, ms: number): number {
 }
 
 function civilDateAt(zone: string, ms: number): string {
-  return stringSplit(isoOf(ms + offsetAt(zone, ms)), 'T')[0] ?? '';
+  return elementOf(stringSplit(isoOf(ms + offsetAt(zone, ms)), 'T'), 0) ?? '';
 }
 
 /**

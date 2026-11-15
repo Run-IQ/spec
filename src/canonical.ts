@@ -11,6 +11,7 @@ import {
   bare,
   defineValue,
   functionHasInstance,
+  hasOwnKey,
   isoOf,
   numberIsFinite,
   numberIsNaN,
@@ -435,7 +436,7 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
   const element = (frame: Frame, i: number): unknown => {
     const list = frame.node as unknown[];
     const at = (): string => pathOf(frame, i);
-    const present = guarded ? read(at, () => i in list) : i in list;
+    const present = guarded ? read(at, () => hasOwnKey(list, i)) : hasOwnKey(list, i);
     if (!present) {
       throw newSpecError('NON_SERIALIZABLE', holeMessage(frame.path || '(root)', i), frame.path);
     }

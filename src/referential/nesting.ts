@@ -12,6 +12,7 @@ import {
   arraySort,
   arrayUnshift,
   bare,
+  elementOf,
   mapDelete,
   mapGet,
   mapHas,
@@ -161,7 +162,7 @@ function cycleMessage(cycle: readonly string[], date: CivilDate): string {
   });
   const rotated = arrayConcat(arraySlice(cycle, start), arraySlice(cycle, 0, start));
   const when = date === ALWAYS ? 'from the beginning' : `from ${date}`;
-  return `cycle ${citeName(arrayJoin(arrayConcat(rotated, [rotated[0] ?? '']), ' > '))} ${when}`;
+  return `cycle ${citeName(arrayJoin(arrayConcat(rotated, [elementOf(rotated, 0) ?? '']), ' > '))} ${when}`;
 }
 
 /** Adjacency of one direction: node -> neighbour -> number of active memberships. */

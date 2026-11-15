@@ -15,7 +15,7 @@
 // which the engine runs through well-known symbols.
 
 const { bind, call } = Function.prototype;
-/** `uncurryThis(Array.prototype.push)(list, item)` is `list.push(item)`, with no live lookup. */
+/** `uncurryThis(proto.method)(list, item)` is `list.method(item)`, with no live lookup. */
 const uncurryThis = bind.bind(call) as unknown as (fn: unknown) => unknown;
 /** `bindThis(fn, thisArg)`: `fn` with its `this` fixed, built from the captured `bind`. */
 const bindThis = uncurryThis(bind) as unknown as (fn: unknown, thisArg: unknown) => unknown;
@@ -201,6 +201,28 @@ export function defineValue(
 export const objectGetOwnPropertyDescriptor: typeof Object.getOwnPropertyDescriptor =
   Object.getOwnPropertyDescriptor;
 export const objectHasOwn: typeof Object.hasOwn = Object.hasOwn;
+
+/** The members of the union `T` that declare `K` (as `in` narrows), else `T` with `K` added. */
+type Narrowed<T, K extends PropertyKey> = [Declaring<T, K>] extends [never]
+  ? T & Record<K, unknown>
+  : Declaring<T, K>;
+type Declaring<T, K extends PropertyKey> = T extends unknown
+  ? K extends keyof T
+    ? T
+    : never
+  : never;
+
+/**
+ * `key in value` for an own property only: `in` also finds what `Object.prototype` or
+ * `Array.prototype` holds (an inherited field, an index that makes a hole look present). Narrows
+ * like `in` does.
+ */
+export function hasOwnKey<T extends object, K extends PropertyKey>(
+  value: T,
+  key: K,
+): value is Narrowed<T, K> {
+  return objectHasOwn(value, key);
+}
 export const objectIs: typeof Object.is = Object.is;
 export const objectKeys: typeof Object.keys = Object.keys;
 export const objectValues: typeof Object.values = Object.values;
@@ -315,9 +337,6 @@ export const arrayMap: <T, U>(
   thisArg?: any,
 ) => U[] = uncurryThis(Array.prototype.map) as never;
 export const arrayPop: <T>(self: T[]) => T | undefined = uncurryThis(Array.prototype.pop) as never;
-export const arrayPush: <T>(self: T[], ...items: T[]) => number = uncurryThis(
-  Array.prototype.push,
-) as never;
 export const arrayReduce: {
   <T>(
     self: T[],
@@ -582,7 +601,6 @@ export const CAPTURED: readonly (readonly [object, string])[] = [
   [Array.prototype, 'join'],
   [Array.prototype, 'map'],
   [Array.prototype, 'pop'],
-  [Array.prototype, 'push'],
   [Array.prototype, 'reduce'],
   [Array.prototype, 'slice'],
   [Array.prototype, 'some'],
@@ -657,7 +675,7 @@ function drain<T>(
 ): T[] {
   const out: T[] = [];
   for (let result = step(iterator); result.done !== true; result = step(iterator)) {
-    out[out.length] = result.value as T;
+    defineValue(out, out.length, result.value as T, true);
   }
   return out;
 }
@@ -678,10 +696,26 @@ export function mapEntriesArray<K, V>(map: ReadonlyMap<K, V>): [K, V][] {
 export function setValuesArray<T>(set: ReadonlySet<T>): T[] {
   return drain<T>(setValues(set), setIteratorNext);
 }
+/**
+ * `list[index]` for an own element only: reading past the end (the first of an empty list) must
+ * not reach what `Array.prototype` holds at that index.
+ */
+export function elementOf<T extends readonly unknown[]>(
+  list: T,
+  index: number,
+): T[number] | undefined {
+  return objectHasOwn(list, index) ? (list[index] as T[number]) : undefined;
+}
+/** `Array(length).fill(value)` by definition of each element (no assignment, no hole). */
+export function filledArray<T>(length: number, value: T): T[] {
+  const out: T[] = [];
+  for (let i = 0; i < length; i++) defineValue(out, i, value, true);
+  return out;
+}
 /** The bytes of `bytes` as an array of numbers. */
 export function bytesToArray(bytes: Uint8Array): number[] {
   const out: number[] = [];
-  for (let i = 0; i < bytes.length; i++) out[i] = bytes[i] as number;
+  for (let i = 0; i < bytes.length; i++) defineValue(out, i, bytes[i] as number, true);
   return out;
 }
 /** The lists put end to end in one new array (no `concat`, no spread). */
@@ -691,13 +725,23 @@ export function arrayConcat<L extends readonly (readonly unknown[])[]>(
   const out: L[number][number][] = [];
   for (let l = 0; l < lists.length; l++) {
     const list = lists[l] as readonly unknown[];
-    for (let i = 0; i < list.length; i++) out[out.length] = list[i] as L[number][number];
+    for (let i = 0; i < list.length; i++) {
+      defineValue(out, out.length, list[i] as L[number][number], true);
+    }
   }
   return out;
 }
-/** `self.push(...items)` without a spread; returns the new length. */
+/**
+ * `self.push(...items)`, by definition of each element: `push` assigns, and an assignment to the
+ * next index reaches a setter that `Array.prototype` holds. Returns the new length.
+ */
+export function arrayPush<T>(self: T[], ...items: T[]): number {
+  for (let i = 0; i < items.length; i++) defineValue(self, self.length, items[i] as T, true);
+  return self.length;
+}
+/** `self.push(...items)` for an array of items (no spread of arguments). */
 export function arrayPushAll<T>(self: T[], items: readonly T[]): number {
-  for (let i = 0; i < items.length; i++) self[self.length] = items[i] as T;
+  for (let i = 0; i < items.length; i++) defineValue(self, self.length, items[i] as T, true);
   return self.length;
 }
 /** `new Set(items)` without the iteration protocol. */

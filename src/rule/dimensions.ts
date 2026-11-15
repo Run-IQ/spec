@@ -17,6 +17,7 @@ import {
   arrayIsArray,
   arraySort,
   bare,
+  elementOf,
   objectKeys,
   setOf,
   setValuesArray,
@@ -232,7 +233,7 @@ function normalForm(
   match: 'any' | 'all',
 ): DimensionSpec {
   const tuple4 = anyOf;
-  const single = tuple4[0];
+  const single = elementOf(tuple4, 0);
   if (ref === undefined && anyOf.length === 1 && except.length === 0 && match === 'any') {
     if (single !== undefined) return single;
   }
@@ -251,7 +252,7 @@ export function normalizeDimensionSpec(spec: unknown, path = 'dimension'): Dimen
   const problems = new IssueList();
   const normal = readDimensionSpec(spec, path, (at, message) => problems.add(at, message));
   const tuple5 = problems.messages();
-  const first = tuple5[0];
+  const first = elementOf(tuple5, 0);
   if (first !== undefined || normal === undefined) {
     throw newSpecError('INVALID_RULE', first ?? `${citeName(path)} must be ${SPEC_SHAPE}`);
   }

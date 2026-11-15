@@ -35,6 +35,8 @@ import {
   arrayPush,
   arrayPushAll,
   arraySome,
+  elementOf,
+  hasOwnKey,
   mapGet,
   mapHas,
   mapKeysArray,
@@ -172,7 +174,7 @@ function verify(a: unknown, proofDigest: string, keys: Map<string, Uint8Array>):
     const message = `attestation kind not supported: ${citeName(read.kind)}`;
     arrayPush(findings, { message, level: 'invalid' });
   }
-  if (!('proofDigest' in read.subject)) {
+  if (!hasOwnKey(read.subject, 'proofDigest')) {
     arrayPush(findings, { message: 'attestation not about this proof', level: 'invalid' });
   } else if (read.subject.proofDigest !== proofDigest) {
     arrayPush(findings, { message: 'attestation for another proof', level: 'invalid' });
@@ -235,7 +237,7 @@ function readAttestation(value: unknown, reader: Reader): Attestation | string |
   const kind = field('kind');
   if (has('kind')) checkText(kind, '/kind', add);
   const subject = has('subject') ? readSubject(field('subject'), reader) : undefined;
-  if (kind === 'cosignature' && subject !== undefined && !('proofDigest' in subject)) {
+  if (kind === 'cosignature' && subject !== undefined && !hasOwnKey(subject, 'proofDigest')) {
     add('/subject', 'cosignature needs subject.proofDigest');
   }
   if (has('keyId')) checkText(field('keyId'), '/keyId', add);
@@ -303,7 +305,7 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
   // same copy of it, instead of reading it a second time. It is marked under a member it holds
   // (read or failed to read); an object with no known member is not marked.
   const tuple1093 = arrayConcat(mapKeysArray(fields.values), setValuesArray(fields.failed));
-  const member = tuple1093[0];
+  const member = elementOf(tuple1093, 0);
   if (member !== undefined) {
     markRead(reader, value, member, subject === undefined ? undefined : { ...subject });
   }

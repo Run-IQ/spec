@@ -18,6 +18,7 @@ import {
   arrayPush,
   arraySlice,
   arraySort,
+  elementOf,
   mapGet,
   mapSet,
   objectHasOwn,
@@ -218,7 +219,7 @@ export function readCollectionPath(value: unknown, at: string, fail: Add): numbe
 /** What is wrong with the decoded segments of a `forEach.path`, or `undefined`. */
 function pathProblem(segments: readonly string[]): string | undefined {
   const tuple10 = segments;
-  const first = tuple10[0];
+  const first = elementOf(tuple10, 0);
   if (first === undefined) return 'must name a collection, not the whole input';
   if (first === '*') return 'must start with a collection name, not "*"';
   if (isReservedName(first)) {
@@ -268,7 +269,7 @@ function readKey(
     return undefined;
   }
   const tuple11 = names;
-  const first = tuple11[0] === undefined ? '' : tuple11[0];
+  const first = elementOf(tuple11, 0) ?? '';
   return arrayEvery(names, (name) => name === first) ? first : names;
 }
 
@@ -404,8 +405,8 @@ function readNamedDate(value: JsonValue | undefined, at: string, fail: Add): str
   const segments = pointerSegments(value, at, fail);
   if (segments === undefined) return undefined;
   const tuple16 = segments;
-  const head = tuple16[0];
-  const name = tuple16[1];
+  const head = elementOf(tuple16, 0);
+  const name = elementOf(tuple16, 1);
   const rest = arraySlice(tuple16, 2);
   if (head === '$dates' && name !== undefined && isReservedName(name) && !rest.length) {
     fail(at, reservedDatePointerMessage(at));
@@ -430,7 +431,7 @@ function readFacts(value: JsonValue | undefined, at: string, fail: Add): string[
     const segments = pointerSegments(item, here, fail);
     if (segments === undefined || typeof item !== 'string') return;
     const tuple17 = segments;
-    const first = tuple17[0];
+    const first = elementOf(tuple17, 0);
     const problem =
       first === undefined
         ? 'must name a fact, not the whole input'

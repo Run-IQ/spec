@@ -11,6 +11,7 @@ import {
   arrayPush,
   bare,
   bytesFromNumbers,
+  elementOf,
   regExpTest,
   stringCharAt,
   stringIndexOf,
@@ -48,7 +49,7 @@ export function createSigningKeyPair(): { privateKey: string; publicKey: string 
  */
 export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string): DecisionProof {
   const { proof, errors } = readDecisionProof(p, true);
-  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${errors[0]}`);
+  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${elementOf(errors, 0)}`);
   if (contentDigest(proof) !== proof.digest) {
     throw newSpecError(
       'INVALID_PROOF',
@@ -58,7 +59,7 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
   const { view, redactions } = proofView(proof);
   const context = contextOf(view, redactions.hidden);
   const tuple211 = inconsistencies(view, context, redactions.positions);
-  const inconsistency = tuple211[0];
+  const inconsistency = elementOf(tuple211, 0);
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
   }

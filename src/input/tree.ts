@@ -32,6 +32,7 @@ import {
   arrayPush,
   bytesFromNumbers,
   bytesToArray,
+  elementOf,
   mapGet,
   mapHas,
   mathAbs,
@@ -323,7 +324,7 @@ function readLeaf(value: unknown): ReadLeaf {
     (error) => ({ path: '', message: unreadableMessage('input leaf', error) }),
   );
   const tuple104 = issues;
-  const first = tuple104[0];
+  const first = elementOf(tuple104, 0);
   if (first !== undefined || read === undefined) {
     throw newSpecError(
       'INVALID_INPUT',
@@ -389,8 +390,8 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
     if (has(key)) add(`/${key}`, `/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
-  const salt = tuple105[0];
-  const valueSalt = tuple105[1];
+  const salt = elementOf(tuple105, 0);
+  const valueSalt = elementOf(tuple105, 1);
   if (content === undefined || salt === undefined || valueSalt === undefined) return undefined;
   if (reader.issues.length > 0) return undefined;
   return { content, salt, valueSalt };
@@ -423,7 +424,7 @@ function readLeafPointer(
     return undefined;
   }
   const tuple106 = segments;
-  const head = tuple106[0];
+  const head = elementOf(tuple106, 0);
   if (head !== 'data' && head !== 'meta') {
     add('/pointer', invalid);
     return undefined;

@@ -23,6 +23,7 @@ import { MAX_JSON_VALUES, ordinary, ownCopy, spendValues, withValueBudget } from
 import {
   arrayMap,
   bare,
+  elementOf,
   mapGet,
   mapHas,
   objectOfEntries,
@@ -120,7 +121,7 @@ const REQUEST_KEYS: readonly string[] = ['input', 'options'];
 /** `value` when `issues` is empty; otherwise throws `INVALID_INPUT` naming the first issue. */
 function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined, what: string): T {
   const tuple188 = issues;
-  const first = tuple188[0];
+  const first = elementOf(tuple188, 0);
   if (first !== undefined || value === undefined) {
     throw newSpecError('INVALID_INPUT', `${what}: ${first?.message ?? 'unreadable'}`, first?.path);
   }
@@ -163,7 +164,7 @@ export function sealProof(p: UnsaltedProof, seed: Uint8Array = UNSALTED_SEED): D
 function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
   const bytes = readSeed(seed);
   const { proof, errors } = readUnsaltedProof(p);
-  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
+  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${elementOf(errors, 0)}`);
   if (proof.inputSalted === uint8ArrayEvery(bytes, (byte) => byte === 0)) {
     throw newSpecError(
       'INVALID_PROOF',
@@ -178,7 +179,7 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
     );
   }
   const tuple189 = inconsistencies(salted);
-  const inconsistency = tuple189[0];
+  const inconsistency = elementOf(tuple189, 0);
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
@@ -205,10 +206,12 @@ function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number
   const salted = bare({ ...proof }) as unknown as Record<string, unknown>;
   for (let idx190 = 0, list190 = PROOF_SECTIONS; idx190 < list190.length; idx190++) {
     const section = list190[idx190] as (typeof list190)[number];
-    salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) => ({
-      ...entry,
-      salt: bytesToHex(uint8ArraySubarray(salter(`${section}:${i}`), 0, SALT_BYTES)),
-    }));
+    salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) =>
+      bare({
+        ...entry,
+        salt: bytesToHex(uint8ArraySubarray(salter(`${section}:${i}`), 0, SALT_BYTES)),
+      }),
+    );
   }
   return salted as unknown as ProofView;
 }

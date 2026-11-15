@@ -7,6 +7,7 @@ import {
   arrayIsArray,
   arrayMap,
   arraySlice,
+  elementOf,
   objectHasOwn,
   regExpTest,
   stringReplace,
@@ -136,7 +137,7 @@ const INPUT_VARIABLES: Readonly<Record<string, string>> = {
 export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undefined {
   const segments = parseReadPointer(pointer);
   const tuple1 = segments;
-  const head = tuple1[0];
+  const head = elementOf(tuple1, 0);
   const rest = arraySlice(tuple1, 1);
   if (head === undefined) return undefined;
   if (!stringStartsWith(head, '$')) return formatPointer(arrayConcat(['data'], segments));

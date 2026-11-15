@@ -8,6 +8,7 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  own,
   ownCopy,
   readList,
   spendValues,
@@ -174,30 +175,33 @@ function definitionIssues(
     const key = list52[idx52] as (typeof list52)[number];
     errors.add(citeName(key), unknownRuleFieldMessage(key));
   }
-  checkNonEmptyString(value.id, 'id', errors);
-  if (typeof value.id === 'string' && stringIncludes(value.id, ':')) {
+  const idValue = own(value, 'id');
+  checkNonEmptyString(idValue, 'id', errors);
+  if (typeof idValue === 'string' && stringIncludes(idValue, ':')) {
     errors.add('id', 'id must not contain ":"');
   }
-  const ruleSetValue = given(value.ruleSet, 'ruleSet', errors);
+  const ruleSetValue = given(own(value, 'ruleSet'), 'ruleSet', errors);
   let ruleSet: string | undefined = LOCAL_RULE_SET;
   if (ruleSetValue !== undefined) {
     ruleSet = isRuleSetId(ruleSetValue) ? ruleSetValue : undefined;
     if (ruleSet === undefined) errors.add('ruleSet', ruleSetIdMessage('ruleSet', ruleSetValue));
   }
-  if (!isRuleVersion(value.version)) errors.add('version', 'version must be a positive integer');
-  checkNonEmptyString(value.model, 'model', errors);
-  if (value.params === undefined) errors.add('params', 'params is required');
-  else checkJson(value.params, 'params', errors);
-  if (typeof value.priority !== 'number' || !numberIsFinite(value.priority)) {
+  if (!isRuleVersion(own(value, 'version')))
+    errors.add('version', 'version must be a positive integer');
+  checkNonEmptyString(own(value, 'model'), 'model', errors);
+  if (own(value, 'params') === undefined) errors.add('params', 'params is required');
+  else checkJson(own(value, 'params'), 'params', errors);
+  const priority = own(value, 'priority');
+  if (typeof priority !== 'number' || !numberIsFinite(priority)) {
     errors.add('priority', 'priority must be a finite number');
   }
 
-  const from = checkDate(value.effectiveFrom, 'effectiveFrom', errors);
-  const untilValue = value.effectiveUntil;
+  const from = checkDate(own(value, 'effectiveFrom'), 'effectiveFrom', errors);
+  const untilValue = own(value, 'effectiveUntil');
   if (untilValue === null && !stored) {
     errors.add('effectiveUntil', nullFieldMessage('effectiveUntil'));
   }
-  const checksum = value.checksum;
+  const checksum = own(value, 'checksum');
   if (checksum === null) {
     errors.add('checksum', nullFieldMessage('checksum'));
   } else if (checksum !== undefined && typeof checksum !== 'string') {
@@ -208,19 +212,19 @@ function definitionIssues(
     const problem = windowShapeProblem(from, until);
     if (problem !== undefined) errors.add('effectiveUntil', problem);
   }
-  const timeZone = given(value.timeZone, 'timeZone', errors);
+  const timeZone = given(own(value, 'timeZone'), 'timeZone', errors);
   if (timeZone !== undefined && !isTimeZone(timeZone)) {
     errors.add('timeZone', timeZoneMessage(timeZone));
   }
-  const effectiveOn = given(value.effectiveOn, 'effectiveOn', errors);
+  const effectiveOn = given(own(value, 'effectiveOn'), 'effectiveOn', errors);
   const pointer = effectiveOn === undefined ? undefined : checkEffectiveOn(effectiveOn, errors);
 
-  const condition = given(value.condition, 'condition', errors);
+  const condition = given(own(value, 'condition'), 'condition', errors);
   if (condition !== undefined) checkCondition(condition, errors);
   let output: unknown;
   for (let idx53 = 0, list53 = OPTIONAL_STRINGS; idx53 < list53.length; idx53++) {
     const field = list53[idx53] as (typeof list53)[number];
-    const text = given(value[field], field, errors);
+    const text = given(own(value, field), field, errors);
     if (text !== undefined) checkNonEmptyString(text, field, errors);
     if (field === 'output') output = text;
   }
@@ -228,14 +232,14 @@ function definitionIssues(
     const problem = citedNameProblem(output, 'output', 'output');
     if (problem !== undefined) errors.add('output', problem);
   }
-  const dimensions = given(value.dimensions, 'dimensions', errors);
+  const dimensions = given(own(value, 'dimensions'), 'dimensions', errors);
   if (dimensions !== undefined) checkDimensions(dimensions, errors);
-  const tags = given(value.tags, 'tags', errors);
+  const tags = given(own(value, 'tags'), 'tags', errors);
   if (tags !== undefined) checkTags(tags, errors);
-  const exceptions = given(value.exceptions, 'exceptions', errors);
+  const exceptions = given(own(value, 'exceptions'), 'exceptions', errors);
   if (exceptions !== undefined) checkExceptions(exceptions, ruleSet, errors);
   const modelIssues = exceptionModelIssues({
-    model: value.model,
+    model: own(value, 'model'),
     output: normalizedOutput(output, ruleSet),
     exceptions,
   });
@@ -245,14 +249,14 @@ function definitionIssues(
   }
 
   // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
-  const forEachValue = given(value.forEach, 'forEach', errors);
+  const forEachValue = given(own(value, 'forEach'), 'forEach', errors);
   const forEach = forEachValue === undefined ? null : checkForEach(forEachValue, errors);
   if (pointer !== undefined && forEach !== undefined) {
     const problem = effectiveOnContextProblem(pointer, forEach ?? undefined);
     if (problem !== undefined) errors.add('effectiveOn', problem);
   }
 
-  const extensions = given(value.extensions, 'extensions', errors);
+  const extensions = given(own(value, 'extensions'), 'extensions', errors);
   if (extensions !== undefined) checkExtensions(extensions, errors);
 
   return result(errors);

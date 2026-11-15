@@ -34,6 +34,14 @@ function claiming(length: number): Uint8Array[] {
       }
       return Reflect.has(target, key);
     },
+    // Spec asks whether an element is its own (a hole is not): the same count as `has`.
+    getOwnPropertyDescriptor(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) {
+        elementReads += 1;
+        return { value: hash, writable: true, enumerable: true, configurable: true };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
+    },
   });
 }
 

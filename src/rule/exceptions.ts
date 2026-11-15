@@ -37,6 +37,7 @@ import {
   arraySome,
   arraySort,
   bare,
+  elementOf,
   objectEntries,
   objectHasOwn,
   objectKeys,
@@ -558,7 +559,7 @@ function readSelector(
   if (ruleSets !== undefined && ruleSets.length > 0) {
     const sorted = arraySort(arrayConcat(setValuesArray(setOf(ruleSets))));
     // Listing only the carrier's rule set is the default: one meaning, one spelling.
-    if (!(sorted.length === 1 && sorted[0] === carrier)) selector.ruleSets = sorted;
+    if (!(sorted.length === 1 && elementOf(sorted, 0) === carrier)) selector.ruleSets = sorted;
   }
 
   if (valid && !constrains(selector)) {

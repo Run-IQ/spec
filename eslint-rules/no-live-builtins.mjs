@@ -59,6 +59,10 @@ export default {
           live: '`{{owner}}.{{member}}` is read from the live built-in: use the captured one from `intrinsics.ts`.',
           destructured:
             '`{{owner}}.{{member}}` is destructured from the live built-in: use the captured one from `intrinsics.ts`.',
+          elementRead:
+            'A literal index reads an element that may be absent, and an absent one is read from `Array.prototype`: use `elementOf` from `intrinsics.ts` (a tuple of known length is fine).',
+          inOperator:
+            '`in` also finds inherited properties (and makes an array hole look present): use `hasOwnKey` from `intrinsics.ts`.',
           instanceOf:
             '`instanceof` against a built-in reads its live `Symbol.hasInstance`: use `functionHasInstance` from `intrinsics.ts`.',
           iteration:
@@ -99,6 +103,19 @@ export default {
 
         return {
           MemberExpression(node) {
+            if (
+              node.computed &&
+              node.property.type === 'Literal' &&
+              typeof node.property.value === 'number' &&
+              !(node.parent.type === 'AssignmentExpression' && node.parent.left === node)
+            ) {
+              const objectType = checker.getTypeAtLocation(
+                services.esTreeNodeToTSNodeMap.get(node.object),
+              );
+              if (checker.isArrayType(objectType) && !checker.isTupleType(objectType)) {
+                context.report({ node, messageId: 'elementRead' });
+              }
+            }
             if (node.computed && node.property.type !== 'Literal') return;
             const tsNode = services.esTreeNodeToTSNodeMap.get(node);
             const name = tsNode.name ?? tsNode.argumentExpression;
@@ -120,6 +137,10 @@ export default {
           BinaryExpression(node) {
             if (node.operator === 'instanceof' && isBuiltinConstructor(node.right)) {
               context.report({ node, messageId: 'instanceOf' });
+            }
+            // `#field in object` is a brand check, not a property lookup.
+            if (node.operator === 'in' && node.left.type !== 'PrivateIdentifier') {
+              context.report({ node, messageId: 'inOperator' });
             }
           },
           ForOfStatement(node) {

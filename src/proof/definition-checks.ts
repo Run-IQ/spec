@@ -10,6 +10,7 @@ import {
   arrayPush,
   arrayPushAll,
   arraySlice,
+  elementOf,
   isoOf,
   mapEntriesArray,
   mapGet,
@@ -442,7 +443,7 @@ export function definitionFindings(
     const { causes, details, keys } = tuple1087[1];
     if (keys.length === 1) {
       report.unchecked(
-        `window not checked: ${citeName(keys[0]!)} (${arrayConcat(setValuesArray(causes))[0]})`,
+        `window not checked: ${citeName(elementOf(keys, 0)!)} (${elementOf(arrayConcat(setValuesArray(causes)), 0)})`,
       );
       continue;
     }

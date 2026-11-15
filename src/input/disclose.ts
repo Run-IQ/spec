@@ -29,6 +29,7 @@ import {
   arrayPop,
   arrayPush,
   arraySort,
+  elementOf,
   mapGet,
   mapOf,
   setOf,
@@ -258,7 +259,7 @@ function buildDisclosure(
     const { leaves, before, after } = found[i] ?? { leaves: [] };
     const cited = citeName(request.pointer);
     const tuple195 = leaves;
-    const first = tuple195[0];
+    const first = elementOf(tuple195, 0);
     if (!request.present) {
       if (first !== undefined) {
         throw newSpecError('INVALID_DISCLOSURE', `pointer is present: ${cited}`);

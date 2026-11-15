@@ -28,6 +28,7 @@ import {
   arraySome,
   bare,
   defineValue,
+  hasOwnKey,
   mapEntriesArray,
   mapGet,
   mapSet,
@@ -232,7 +233,7 @@ export function mapOf(
       count++;
       const at = `${path}.${name}`;
       const problem =
-        name === '' ? `${citeName(path)} has an empty name` : options.name?.(name, at);
+        name === '' ? `${citeName(path)} has an empty name` : own(options, 'name')?.(name, at);
       if (problem !== undefined) add(name === '' ? path : at, problem);
       // Plain assignment would turn a `__proto__` key into a prototype change.
       else defineMember(copy, name, item(entry, at, add));
@@ -293,7 +294,7 @@ export function checkObject(
   }
   let shape = given;
   const gated = own(shape, 'gate')?.(members, path);
-  if (gated !== undefined && 'message' in gated) {
+  if (gated !== undefined && hasOwnKey(gated, 'message')) {
     add(gated.path, gated.message);
     return undefined;
   }

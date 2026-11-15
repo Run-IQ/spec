@@ -54,6 +54,7 @@ const MUST_FAIL: readonly (readonly [string, string])[] = [
   ['host-method', 'local/no-live-builtins:live'],
   ['destructured-method', 'local/no-live-builtins:destructured'],
   ['instanceof', 'local/no-live-builtins:instanceOf'],
+  ['in-operator', 'local/no-live-builtins:inOperator'],
   ['for-of', 'local/no-live-builtins:iteration'],
   ['array-spread', 'local/no-live-builtins:iteration'],
   ['call-spread', 'local/no-live-builtins:iteration'],

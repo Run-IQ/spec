@@ -5,6 +5,7 @@ import {
   NativeString,
   arrayIsArray,
   bigIntToString,
+  elementOf,
   regExpExec,
   regExpTest,
   stringCharCodeAt,
@@ -55,9 +56,9 @@ export function toCanonicalDecimal(text: string): string {
     );
   }
   const tuple5005 = parts;
-  const sign = tuple5005[1] === undefined ? '' : tuple5005[1];
-  const digits = tuple5005[2] === undefined ? '' : tuple5005[2];
-  const fraction = tuple5005[3] === undefined ? '' : tuple5005[3];
+  const sign = elementOf(tuple5005, 1) ?? '';
+  const digits = elementOf(tuple5005, 2) ?? '';
+  const fraction = elementOf(tuple5005, 3) ?? '';
   const integer = stringReplace(digits, /^0+(?=[0-9])/, '');
   let end = fraction.length;
   while (end > 0 && stringCharCodeAt(fraction, end - 1) === ZERO) end--;
@@ -112,7 +113,7 @@ export function incrementProblem(value: unknown): string | undefined {
     return `must have at most ${MAX_ROUNDING_SCALE} decimal places`;
   }
   const tuple6 = stringSplit(canonical, '.');
-  const integer = tuple6[0] === undefined ? '' : tuple6[0];
+  const integer = elementOf(tuple6, 0) ?? '';
   if (integer.length > MAX_INCREMENT_DIGITS) {
     return `must have at most ${MAX_INCREMENT_DIGITS} digits before the point`;
   }
@@ -147,11 +148,11 @@ export function compareCanonicalDecimals(a: string, b: string): -1 | 0 | 1 {
 /** -1, 0 or 1 comparing two canonical decimals without sign. */
 function compareMagnitudes(a: string, b: string): -1 | 0 | 1 {
   const tuple7 = stringSplit(a, '.');
-  const aInteger = tuple7[0] === undefined ? '' : tuple7[0];
-  const aFraction = tuple7[1] === undefined ? '' : tuple7[1];
+  const aInteger = elementOf(tuple7, 0) ?? '';
+  const aFraction = elementOf(tuple7, 1) ?? '';
   const tuple8 = stringSplit(b, '.');
-  const bInteger = tuple8[0] === undefined ? '' : tuple8[0];
-  const bFraction = tuple8[1] === undefined ? '' : tuple8[1];
+  const bInteger = elementOf(tuple8, 0) ?? '';
+  const bFraction = elementOf(tuple8, 1) ?? '';
   // Without leading zeros, the longer integer part is the greater.
   if (aInteger.length !== bInteger.length) return aInteger.length < bInteger.length ? -1 : 1;
   if (aInteger !== bInteger) return aInteger < bInteger ? -1 : 1;
@@ -176,10 +177,10 @@ export function numberToDecimal(n: number): string {
   const match = regExpExec(/^(-?)([0-9]+)(?:\.([0-9]+))?e([+-][0-9]+)$/, text);
   if (match === null) return toCanonicalDecimal(text);
   const tuple5006 = match;
-  const sign = tuple5006[1] === undefined ? '' : tuple5006[1];
-  const integer = tuple5006[2] === undefined ? '' : tuple5006[2];
-  const fraction = tuple5006[3] === undefined ? '' : tuple5006[3];
-  const exponent = tuple5006[4] === undefined ? '0' : tuple5006[4];
+  const sign = elementOf(tuple5006, 1) ?? '';
+  const integer = elementOf(tuple5006, 2) ?? '';
+  const fraction = elementOf(tuple5006, 3) ?? '';
+  const exponent = elementOf(tuple5006, 4) ?? '0';
   const digits = integer + fraction;
   const point = integer.length + NativeNumber(exponent);
   const plain =

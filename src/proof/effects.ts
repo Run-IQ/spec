@@ -26,6 +26,7 @@ import {
   arrayPop,
   arrayPush,
   arraySort,
+  hasOwnKey,
   mapGet,
   mapHas,
   mapOf,
@@ -203,11 +204,11 @@ type Decision = ProofStep | ProofSkip | ProofPending;
  * nor one another kind produced.
  */
 function groupOf(decision: Decision, imposed: ReadonlySet<string>): string[] {
-  if ('model' in decision) {
+  if (hasOwnKey(decision, 'model')) {
     // An applied step: substituted, or (refused below) applied though inhibited.
     return setHas(imposed, imposedKey(decision, decision.output)) ? [] : ['substitute'];
   }
-  if (!('status' in decision)) return ['substitute'];
+  if (!hasOwnKey(decision, 'status')) return ['substitute'];
   if (decision.reason === 'INHIBITED') return ['inhibit'];
   if (decision.reason === 'SHORT_CIRCUITED') {
     return decision.output === undefined ? [] : [`shortCircuit\u0000${decision.output}`];
@@ -327,7 +328,7 @@ export function exceptionProblems(
         reached = true;
         strongest = mathMax(strongest, group.rank);
       }
-      if ('model' in decision && mapHas(node.groups, 'inhibit')) inhibited = true;
+      if (hasOwnKey(decision, 'model') && mapHas(node.groups, 'inhibit')) inhibited = true;
     };
     let node = mapGet(tries, decision.ruleId);
     if (node !== undefined) visit(node);
@@ -346,7 +347,8 @@ export function exceptionProblems(
     if (inhibited) report(push, `inhibited rule applied: ${cited()}`);
     // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
     // short circuit imposed is its carrier's, not a target's.
-    const own = 'model' in decision && setHas(imposed, imposedKey(decision, decision.output));
+    const own =
+      hasOwnKey(decision, 'model') && setHas(imposed, imposedKey(decision, decision.output));
     if (!own && decision.stratum < latest) {
       report(
         (message) => arrayPush(early, message),
@@ -354,7 +356,7 @@ export function exceptionProblems(
       );
     }
     const unexplained =
-      !reached && 'status' in decision && !('model' in decision)
+      !reached && hasOwnKey(decision, 'status') && !hasOwnKey(decision, 'model')
         ? mapGet(UNEXPLAINED, decision.reason)
         : undefined;
     if (unexplained !== undefined) {
@@ -364,7 +366,7 @@ export function exceptionProblems(
       }
     }
     // A pending decision is undetermined: never weaker.
-    if (reached && 'status' in decision && rankOf(decision.status) < strongest) {
+    if (reached && hasOwnKey(decision, 'status') && rankOf(decision.status) < strongest) {
       report(
         (message) => arrayPush(weaker, message),
         `decision weaker than the exception that affected it: ${cited()}`,

@@ -17,6 +17,7 @@ import {
   arrayIsArray,
   arrayMap,
   arrayPush,
+  elementOf,
   mapGet,
   mapHas,
   numberIsSafeInteger,
@@ -384,8 +385,8 @@ function readNeighbourCopy(
       add(`${at}/${key}`, `${at}/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
-  const salt = tuple196[0];
-  const commitment = tuple196[1];
+  const salt = elementOf(tuple196, 0);
+  const commitment = elementOf(tuple196, 1);
   const place = readPlace(fields.values, at, size, reader);
   if (reader.issues.length > 0 || place === undefined || typeof pointer !== 'string') {
     return undefined;

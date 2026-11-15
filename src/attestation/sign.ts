@@ -1,5 +1,5 @@
 import { newSpecError, reasonOf, unreadableMessage } from '../errors.js';
-import { bare, mapGet, mapHas, nowIso, regExpTest } from '../intrinsics.js';
+import { bare, elementOf, mapGet, mapHas, nowIso, regExpTest } from '../intrinsics.js';
 import { checkText, childPointer, expectPlainObject, readFields, runCheck } from '../input/read.js';
 import { keyBytes, signText } from '../proof/sign.js';
 import type { Instant } from '../time/civil.js';
@@ -78,7 +78,7 @@ function readOptions(o: unknown): { role?: string; at?: string } {
     (error) => ({ path: '', message: unreadableMessage('options', error) }),
   );
   const tuple248 = issues;
-  const first = tuple248[0];
+  const first = elementOf(tuple248, 0);
   if (first !== undefined) {
     throw newSpecError('INVALID_ATTESTATION', `Cannot attest: ${first.message}`);
   }

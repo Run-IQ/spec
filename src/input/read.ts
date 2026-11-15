@@ -34,6 +34,7 @@ import {
   arraySort,
   bare,
   defineValue,
+  hasOwnKey,
   jsonStringify,
   mapDelete,
   mapGet,
@@ -512,7 +513,7 @@ export function walkJson(
       const copy = clean && reader.copies !== undefined ? scalarCopy(value) : undefined;
       if (copy !== undefined) copyWork.values += 1;
       settle(leaf, clean ? scalarEncoding(value) : undefined, copy);
-    } else if (!('node' in opened)) {
+    } else if (!hasOwnKey(opened, 'node')) {
       const shared = opened.cut || typeof value !== 'object' || value === null ? undefined : value;
       const encoding =
         shared === undefined || reader.encodings === undefined

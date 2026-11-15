@@ -6,7 +6,7 @@
  */
 import { readdirSync, readFileSync, statSync } from 'node:fs';
 import { describe, expect, it } from 'vitest';
-import { run } from '../corpus.js';
+import { runPure as run } from '../corpus.js';
 
 function sources(dir: string): string[] {
   const out: string[] = [];

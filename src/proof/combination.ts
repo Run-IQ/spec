@@ -31,6 +31,8 @@ import {
   arrayMap,
   arrayPush,
   arraySome,
+  elementOf,
+  hasOwnKey,
   mapGet,
   mapHas,
   mapOf,
@@ -191,7 +193,7 @@ function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): E
     }
     case 'highestPriority': {
       const tuple136 = values;
-      const head = tuple136[0];
+      const head = elementOf(tuple136, 0);
       if (head === undefined) return unknown;
       const key = keyOf(head);
       if (!arrayEvery(values, (value) => keyOf(value) === key)) return { disagree: true };
@@ -395,15 +397,15 @@ function valueProblems(
   const has = target.value !== undefined;
   // A value off its declaration is reported by `offDeclarationValues`, and not compared.
   if (target.value !== undefined && !matchesValue(target.value, declaration)) return issues;
-  if ('value' in expected && !has)
+  if (hasOwnKey(expected, 'value') && !has)
     return arrayConcat(issues, [`settled output has no value: ${cite()}`]);
-  if ('none' in expected && declaration.combine === 'all') {
+  if (hasOwnKey(expected, 'none') && declaration.combine === 'all') {
     return arrayConcat(issues, [`all output without contribution must be undetermined: ${cite()}`]);
   }
   if (
     setHas(SELECTING, declaration.combine) &&
     has &&
-    !('unknown' in expected && top !== undefined)
+    !(hasOwnKey(expected, 'unknown') && top !== undefined)
   ) {
     const from = selectedStep(declaration, fed, carrier);
     const { selected } = target;
@@ -419,9 +421,9 @@ function valueProblems(
 
 /** True when `value` (absent: none) is what the contributions give, or they cannot tell. */
 function followsFrom(expected: Expected, value: JsonValue | undefined): boolean {
-  if ('unknown' in expected) return true;
-  if ('disagree' in expected) return false;
-  if ('none' in expected) return value === undefined;
+  if (hasOwnKey(expected, 'unknown')) return true;
+  if (hasOwnKey(expected, 'disagree')) return false;
+  if (hasOwnKey(expected, 'none')) return value === undefined;
   return value !== undefined && keyOf(value) === keyOf(expected.value);
 }
 
@@ -437,7 +439,8 @@ function selectedStep(
   steps: readonly ProofStep[],
   carrier: ProofStep | undefined,
 ): ProofStep | undefined {
-  if (carrier !== undefined || declaration.combine === 'highestPriority') return steps[0];
+  if (carrier !== undefined || declaration.combine === 'highestPriority')
+    return elementOf(steps, 0);
   const index = extremeIndex(
     declaration,
     arrayMap(steps, (step) => step.contribution),

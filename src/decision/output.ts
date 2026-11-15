@@ -14,6 +14,7 @@ import type { OutputStatus } from './status.js';
 import {
   arrayIncludes,
   arrayIsArray,
+  elementOf,
   numberIsFinite,
   numberIsSafeInteger,
   objectFreeze,
@@ -249,7 +250,7 @@ export function emptyOutput(declaration: OutputDeclaration): {
 export function validDeclaration(declaration: unknown): OutputDeclaration {
   const { issues, normal } = readDeclaration(declaration, 'output');
   const tuple21 = issues;
-  const first = tuple21[0];
+  const first = elementOf(tuple21, 0);
   if (first !== undefined || normal === undefined) {
     const message = first?.message ?? 'unreadable';
     throw newSpecError('INVALID_RULE', `invalid output declaration: ${message}`, first?.path);

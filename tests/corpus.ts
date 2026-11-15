@@ -6,14 +6,19 @@ import {
   canonicalize,
   computeRuleChecksum,
   createAttestation,
+  findOverlappingVersions,
   isEffectiveAt,
+  normalizeOutputDeclaration,
   normalizeRuleDefinition,
   sealProof,
   signProof,
   toReferenceDate,
   validateProofInput,
+  validateRuleDefinition,
+  valueMatchesOutputType,
   verifyAttestation,
   verifyProof,
+  windowContains,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import { defineValue } from '../src/intrinsics.js';
@@ -98,9 +103,85 @@ export const CORPUS: [string, Call][] = [
   ],
 ];
 
+/**
+ * The calls that reach the signature and hash dependencies (`@noble/*`), which read the live
+ * built-ins: a process that patches them is the attacker of phase 3's sandbox (README, "Threat
+ * model"), and no test of spec's own code can rest on them.
+ */
+const NOBLE = new Set([
+  'verifyProof authentic',
+  'verifyProof untrusted key',
+  'verifyProof Paris, rules',
+  'verifyAttestation authentic',
+  'verifyAttestation untrusted',
+  'verifyAttestation other proof',
+  'createAttestation at',
+]);
+
+const unsignedProof = unsalted(unsigned());
+const parisUnsigned = sealProof(unsalted(withParis()));
+
+function withParis() {
+  const content = withRuntimeTzdata(unsigned());
+  content.evaluatedAt = '2024-12-31T22:30:00.000Z';
+  content.rules = content.rules.map((r) =>
+    r.id === 'r1' ? { ...r, checksum: computeRuleChecksum(paris) } : r,
+  );
+  return content;
+}
+
+const UTC_CALENDAR = {
+  toCivilDate: (at: string) => at.slice(0, 10),
+  startOfDay: (day: string) => `${day}T00:00:00.000Z`,
+} as never;
+
+/** The corpus of spec's own code: what does not reach a dependency, and more of the API. */
+export const PURE_CORPUS: [string, Call][] = [
+  ...CORPUS.filter((entry) => !NOBLE.has(entry[0])),
+  [
+    'verifyProof unsigned, rules',
+    () => verifyProof(sealProof(unsignedProof), { rules: [ruleA, ruleB] }),
+  ],
+  ['verifyProof Paris unsigned', () => verifyProof(parisUnsigned, { rules: [paris, ruleB] })],
+  [
+    'verifyProof unsigned, calendar option',
+    () => verifyProof(sealProof(unsignedProof), { maxProofTimeZones: 1 }),
+  ],
+  ['validateRuleDefinition', () => validateRuleDefinition({ ...ruleA, model: 1 } as never)],
+  [
+    'normalizeOutputDeclaration',
+    () => normalizeOutputDeclaration({ type: 'enum', combine: 'max', values: ['a', 'b'] }),
+  ],
+  [
+    'valueMatchesOutputType',
+    () => valueMatchesOutputType('a', { type: 'enum', combine: 'max', values: ['a'] }),
+  ],
+  [
+    'windowContains',
+    () =>
+      windowContains(
+        { effectiveFrom: '2025-01-01', effectiveUntil: '2026-01-01' },
+        '2025-06-01',
+        'UTC',
+        undefined as never,
+      ),
+  ],
+  [
+    'findOverlappingVersions',
+    () =>
+      findOverlappingVersions(
+        [
+          { id: 'a', version: 1, effectiveFrom: '2025-01-01', effectiveUntil: '2026-01-01' },
+          { id: 'a', version: 2, effectiveFrom: '2025-06-01' },
+        ] as never,
+        'UTC',
+        UTC_CALENDAR,
+      ),
+  ],
+];
+
 const CALLS: Call[] = CORPUS.map((entry) => entry[1]);
-const NAMES: string[] = CORPUS.map((entry) => entry[0]);
-export const corpusNames = (): string[] => NAMES;
+const PURE_CALLS: Call[] = PURE_CORPUS.map((entry) => entry[1]);
 const hasOwn = Object.prototype.hasOwnProperty;
 
 /**
@@ -108,13 +189,13 @@ const hasOwn = Object.prototype.hasOwnProperty;
  * option and message). The harness reads only own properties and writes by definition, so that
  * a polluted prototype can change spec's results and never its own.
  */
-export function run(): string[] {
+export function run(calls: Call[] = CALLS): string[] {
   clearIntlCaches();
   const results: string[] = [];
-  for (let i = 0; i < CALLS.length; i++) {
+  for (let i = 0; i < calls.length; i++) {
     let text: string;
     try {
-      text = stringify((CALLS[i] as Call)());
+      text = stringify((calls[i] as Call)());
     } catch (error) {
       const own = (key: string): unknown =>
         hasOwn.call(error, key) ? (error as Record<string, unknown>)[key] : undefined;
@@ -124,3 +205,6 @@ export function run(): string[] {
   }
   return results;
 }
+
+/** `run` over `PURE_CORPUS`. */
+export const runPure = (): string[] => run(PURE_CALLS);

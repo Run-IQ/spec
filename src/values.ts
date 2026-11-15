@@ -10,6 +10,7 @@ import {
   defineValue,
   functionCall,
   getPrototypeOf,
+  hasOwnKey,
   mapGet,
   mapSet,
   numberIsSafeInteger,
@@ -184,7 +185,7 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
   if (!spendValues(length)) return { path, message: tooLargeMessage(path) };
   const items: unknown[] = [];
   for (let i = 0; i < length; i++) {
-    if (!(i in list)) return { path, message: holeMessage(path, i) };
+    if (!hasOwnKey(list, i)) return { path, message: holeMessage(path, i) };
     const item: unknown = list[i];
     if (item === undefined) {
       return { path: `${path}[${i}]`, message: undefinedMessage(`${path}[${i}]`) };
@@ -426,6 +427,6 @@ export function ordinary<T>(value: T): T {
 
 function indexKeys(list: readonly unknown[]): string[] {
   const keys: string[] = [];
-  for (let i = 0; i < list.length; i++) keys[i] = NativeString(i);
+  for (let i = 0; i < list.length; i++) defineValue(keys, i, NativeString(i), true);
   return keys;
 }

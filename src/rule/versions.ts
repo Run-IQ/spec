@@ -24,6 +24,7 @@ import {
   arrayPush,
   arraySlice,
   arraySort,
+  hasOwnKey,
   jsonStringify,
   mapDelete,
   mapEntriesArray,
@@ -390,13 +391,13 @@ function readRule(
   >;
   try {
     fields = {
-      id: 'id' in item ? item.id : undefined,
-      version: 'version' in item ? item.version : undefined,
-      ruleSet: 'ruleSet' in item ? item.ruleSet : undefined,
-      effectiveOn: 'effectiveOn' in item ? item.effectiveOn : undefined,
-      from: 'effectiveFrom' in item ? item.effectiveFrom : undefined,
-      until: 'effectiveUntil' in item ? item.effectiveUntil : undefined,
-      timeZone: 'timeZone' in item ? item.timeZone : undefined,
+      id: hasOwnKey(item, 'id') ? item.id : undefined,
+      version: hasOwnKey(item, 'version') ? item.version : undefined,
+      ruleSet: hasOwnKey(item, 'ruleSet') ? item.ruleSet : undefined,
+      effectiveOn: hasOwnKey(item, 'effectiveOn') ? item.effectiveOn : undefined,
+      from: hasOwnKey(item, 'effectiveFrom') ? item.effectiveFrom : undefined,
+      until: hasOwnKey(item, 'effectiveUntil') ? item.effectiveUntil : undefined,
+      timeZone: hasOwnKey(item, 'timeZone') ? item.timeZone : undefined,
     };
   } catch (error) {
     throw newSpecError('INVALID_RULE', unreadableMessage(`rules[${index}]`, error));
