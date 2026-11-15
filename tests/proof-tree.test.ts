@@ -14,6 +14,7 @@ import type { DecisionProof, ProofLeaf, UnsaltedProof } from '../src/index.js';
 import { fromHex, hex, nodeHmac, nodeSha256, referenceRoot } from './hashing.js';
 import { nested, specError, treeDigestOf } from './helpers.js';
 import { unsalted, unsigned } from './proof-cases.js';
+import { UNCHECKED } from './notices.js';
 
 const SEED = fromHex('f9b972f50267915261e884526c8553bdf4a353eb2e4e9e78ee65716aeceaacfb');
 const T = 'run-iq.proof/1\u0000';
@@ -78,7 +79,10 @@ describe('sealProof(p, seed): salted entries, a tree digest (D-14, D-16)', () =>
       1 + PROOF_SECTIONS.reduce((n, s) => n + (sealed[s] as unknown[]).length, 0),
     );
     expect(sealed.digest).toBe(referenceDigest(leaves));
-    expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
   });
 
   it('is deterministic; sealedAt changes the digest', () => {

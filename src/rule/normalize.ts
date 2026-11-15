@@ -7,6 +7,8 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  ordinary,
+  own,
   ownCopy,
   readList,
   spendValues,
@@ -14,7 +16,7 @@ import {
   withValueBudget,
 } from '../values.js';
 import { requireTimeZone } from '../time/civil.js';
-import { isRuleVersion, RESERVED_RULE_FIELDS } from './definition.js';
+import { isRuleVersion } from './definition.js';
 import {
   isUnnamable,
   readDimensionSpec,
@@ -33,7 +35,14 @@ import {
   ruleSetIdMessage,
   shortestFrom,
 } from './ruleSet.js';
-import { dimensionKeyMessage, extensionKeyMessage } from './validate.js';
+import {
+  CHECKSUM_NOT_STRING,
+  EXTENSIONS_NOT_OBJECT,
+  nullFieldMessage,
+  unknownRuleFieldMessage,
+  unknownRuleKeys,
+} from './fields.js';
+import { dimensionKeyMessage } from './validate.js';
 import { boundIssueText, IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import {
@@ -42,8 +51,20 @@ import {
   readEffectiveOn,
   readRuleWindow,
 } from './window.js';
-
-const RESERVED = new Set(RESERVED_RULE_FIELDS);
+import {
+  arrayConcat,
+  arrayForEach,
+  arrayIsArray,
+  arraySort,
+  bare,
+  defineValue,
+  elementOf,
+  numberIsFinite,
+  objectKeys,
+  setOf,
+  setValuesArray,
+  stringIncludes,
+} from '../intrinsics.js';
 
 /**
  * Builds the canonical definition of a rule, so that the same data always gives the same
@@ -67,15 +88,18 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  *   `ruleSets` are sorted and deduplicated, its dimension specs in normal form, its empty
  *   fields dropped, and `ruleSets` listing only the rule's own rule set dropped; an empty list
  *   is dropped, as absent;
- * - `checksum` is removed, and so is every top-level optional or extension field that is
- *   `null` or `undefined` (see `RuleDefinition`); a member whose value is `undefined` in an
- *   object the format defines (`condition`, a dimension spec, an exception, a selector,
- *   `forEach`) is absent, known or not;
+ * - `checksum` is removed, and so is every top-level optional field that is `undefined`; a
+ *   member whose value is `undefined` in an object the format defines (`condition`, a dimension
+ *   spec, an exception, a selector, `forEach`) is absent, known or not. `null` is refused in an
+ *   optional field (`<field> is null: omit the field instead`) and in `dimensions`
+ *   (`dimensions.<name> is null: ...`), `effectiveUntil` and `checksum` included (see `RuleDefinition`);
+ * - a top-level key that is not a reserved field is refused (`unknown rule field: <key>`, with
+ *   `(did you mean <field>?)` for a misspelling); what a plugin adds goes under `extensions`,
+ *   a plain object whose values are free-form JSON, kept as it is and dropped when empty;
  * - nested values become plain JSON (`Date` to ISO string); an `undefined` inside a free-form
  *   value (`params`, `condition.value`, an extension, a `substitute`'s `params`, a
  *   `shortCircuit`'s `value`) or as an array item anywhere is refused (`NON_SERIALIZABLE`,
  *   `<path> is not JSON: undefined`, as `validateRuleDefinition` reports it);
- * - extension fields are kept at the top level.
  *
  * Never mutates `input`; the result shares no reference with it.
  * Throws `SpecError`: `INVALID_RULE` for a missing or mistyped field (`version` must be a
@@ -93,7 +117,7 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * invalid dimension spec (an empty
  * value, an empty `anyOf`, an `except` value repeated in `anyOf`, an `except` without `ref`...:
  * see `DimensionSpec`), for a lone UTF-16 surrogate in a string
- * field, a tag, a dimension key or value or an extension key, `INVALID_DATE`,
+ * field, a tag, a dimension key or value, `INVALID_DATE`,
  * `NON_SERIALIZABLE`. The `INVALID_RULE` message names the path of the field, as the issues of
  * `validateRuleDefinition` do. A field that cannot be read while it is converted to JSON
  * (`params`, `condition.value`, `forEach`, `exceptions`, an extension: a getter or a Proxy trap
@@ -107,8 +131,28 @@ const RESERVED = new Set(RESERVED_RULE_FIELDS);
  * exactly as `validateRuleDefinition` cuts its issues: both give the same first message.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  return ordinary(normalizeForm(input, false));
+}
+
+/** Internal: `normalizeRuleDefinition` without the copy for the caller (no prototype). */
+export function normalizeRuleBare(input: RuleDefinitionInput): RuleDefinition {
+  return normalizeForm(input, false);
+}
+
+/**
+ * Internal: `normalizeRuleDefinition` for a rule read back in its normalized or stored form, as
+ * the functions listed in the README ("Rule definition") read it. The one difference:
+ * `effectiveUntil: null`, the internal encoding of "no end" that a normalized definition holds,
+ * is accepted. What an author writes (`normalizeRuleDefinition`, `validateRuleDefinition`)
+ * refuses it: omit the field. A `null` `checksum` is refused in both forms.
+ */
+export function normalizeStoredRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  return normalizeForm(input, true);
+}
+
+function normalizeForm(input: RuleDefinitionInput, stored: boolean): RuleDefinition {
   try {
-    return withValueBudget(() => normalize(input));
+    return withValueBudget(() => normalize(input, stored));
   } catch (error) {
     // Cut as `validateRuleDefinition` cuts its issues, so both give the same first message.
     if (isOwnError(error)) {
@@ -122,34 +166,54 @@ export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinit
   }
 }
 
-function normalize(input: RuleDefinitionInput): RuleDefinition {
+function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition {
   if (!isPlainObject(input)) invalidRule('a rule definition must be a plain object');
-  if (!spendValues(Object.keys(input).length)) invalidRule(tooLargeMessage('rule definition'));
+  if (!spendValues(objectKeys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
-  const { from, until } = readRuleWindow(input.effectiveFrom, input.effectiveUntil);
+  // The keys alone, before any value: an unknown field is refused whatever it holds.
+  for (let idx1010 = 0, list1010 = unknownRuleKeys(input); idx1010 < list1010.length; idx1010++) {
+    const key = list1010[idx1010] as (typeof list1010)[number];
+    invalidRule(unknownRuleFieldMessage(key));
+  }
+  const untilInput = own(input, 'effectiveUntil');
+  if (!stored) {
+    if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
+  }
+  const checksum = own(input, 'checksum');
+  if (checksum === null || (checksum !== undefined && typeof checksum !== 'string')) {
+    invalidRule(checksum === null ? nullFieldMessage('checksum') : CHECKSUM_NOT_STRING);
+  }
+  const { from, until } = readRuleWindow(own(input, 'effectiveFrom'), untilInput);
 
-  const ruleSet = readRuleSet(input.ruleSet);
-  const out: Record<string, unknown> = {
-    id: requireId(input.id),
-    version: requireVersion(input.version),
-    model: requireString(input.model, 'model'),
-    params: requireParams(input.params),
-    priority: requireNumber(input.priority, 'priority'),
+  const ruleSet = readRuleSet(own(input, 'ruleSet'));
+  const out: Record<string, unknown> = bare({
+    id: requireId(own(input, 'id')),
+    version: requireVersion(own(input, 'version')),
+    model: requireString(own(input, 'model'), 'model'),
+    params: requireParams(own(input, 'params')),
+    priority: requireNumber(own(input, 'priority'), 'priority'),
     effectiveFrom: from,
     effectiveUntil: until,
-    dimensions: normalizeDimensions(input.dimensions),
-    tags: normalizeTags(input.tags),
-  };
+    dimensions: normalizeDimensions(own(input, 'dimensions')),
+    tags: normalizeTags(own(input, 'tags')),
+  });
 
   if (ruleSet !== LOCAL_RULE_SET) out.ruleSet = ruleSet;
-  const timeZone = input.timeZone;
-  if (timeZone != null) out.timeZone = requireTimeZone(timeZone, 'INVALID_RULE');
-  const effectiveOnInput = input.effectiveOn;
-  const effectiveOn = effectiveOnInput == null ? undefined : readEffectiveOn(effectiveOnInput);
-  if (input.condition != null) out.condition = normalizeCondition(input.condition);
-  for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
-    const value = input[field];
-    if (value != null) out[field] = requireString(value, field);
+  const timeZone = given(own(input, 'timeZone'), 'timeZone');
+  if (timeZone !== undefined) out.timeZone = requireTimeZone(timeZone, 'INVALID_RULE');
+  const effectiveOnInput = given(own(input, 'effectiveOn'), 'effectiveOn');
+  const effectiveOn =
+    effectiveOnInput === undefined ? undefined : readEffectiveOn(effectiveOnInput);
+  const condition = given(own(input, 'condition'), 'condition');
+  if (condition !== undefined) out.condition = normalizeCondition(condition);
+  for (
+    let idx57 = 0, list57 = ['output', 'dominanceGroup', 'sourceRef'] as const;
+    idx57 < list57.length;
+    idx57++
+  ) {
+    const field = list57[idx57] as (typeof list57)[number];
+    const value = given(own(input, field), field);
+    if (value !== undefined) out[field] = requireString(value, field);
   }
   if (typeof out.output === 'string') {
     const problem = citedNameProblem(out.output, 'output', 'output');
@@ -159,26 +223,23 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     if (output === DEFAULT_OUTPUT) delete out.output;
     else out.output = output;
   }
-  if (input.exceptions != null) {
-    const json = readJson(input.exceptions, 'exceptions', exceptionFreeForm);
+  const exceptions = given(own(input, 'exceptions'), 'exceptions');
+  if (exceptions !== undefined) {
+    const json = readJson(exceptions, 'exceptions', exceptionFreeForm);
     // The copy's values were counted when they were read from the rule.
     const read = ownCopy(() => readRuleExceptions(json, 'exceptions', ruleSet));
     throwFirst(read.issues.toArray());
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
-  throwFirst(
-    exceptionModelIssues({ model: input.model, output: out.output, exceptions: input.exceptions }),
-  );
-  const forEachInput = input.forEach;
-  const forEach = forEachInput == null ? undefined : readForEachField(forEachInput);
+  throwFirst(exceptionModelIssues({ model: out.model as string, output: out.output, exceptions }));
+  const forEachInput = given(own(input, 'forEach'), 'forEach');
+  const forEach = forEachInput === undefined ? undefined : readForEachField(forEachInput);
   if (forEach !== undefined) out.forEach = forEach;
 
-  for (const key of Object.keys(input)) {
-    if (RESERVED.has(key)) continue;
-    const value = input[key];
-    if (value == null) continue;
-    if (hasLoneSurrogate(key)) invalidRule(extensionKeyMessage(key));
-    defineField(out, key, readJson(value, key));
+  const extensions = given(own(input, 'extensions'), 'extensions');
+  if (extensions !== undefined) {
+    const read = readExtensions(extensions);
+    if (read !== undefined) out.extensions = read;
   }
 
   // Checked on the copy the result keeps (`forEach` is read once), so the result is valid.
@@ -189,7 +250,7 @@ function normalize(input: RuleDefinitionInput): RuleDefinition {
     if (effectiveOn !== DEFAULT_EFFECTIVE_ON) out.effectiveOn = effectiveOn;
   }
 
-  return out as RuleDefinition;
+  return out as unknown as RuleDefinition;
 }
 
 /**
@@ -212,9 +273,34 @@ function readJson(
   }
 }
 
-/** The rule set of the rule: `local` when absent (`null` or `undefined`). */
+/** `value` itself, read once; `undefined` when absent. `null` is refused: omit the field. */
+function given(value: unknown, field: string): unknown {
+  if (value === null) invalidRule(nullFieldMessage(field));
+  return value;
+}
+
+/**
+ * The `extensions` object of the rule (read once, as JSON), or `undefined` when it is empty.
+ * Its keys are free names, reserved ones included; its values are free-form JSON, but a name
+ * whose value is `null` is refused (omit it): deeper, `null` is data.
+ */
+function readExtensions(value: unknown): Record<string, JsonValue> | undefined {
+  if (!isPlainObject(value)) invalidRule(EXTENSIONS_NOT_OBJECT);
+  const json = readJson(value, 'extensions') as Record<string, JsonValue>;
+  const keys = objectKeys(json);
+  // A name with no value is written by omitting it: `null` at the first level is refused, as
+  // at the top level of the rule. Deeper, `null` is data.
+  for (let idx58 = 0, list58 = keys; idx58 < list58.length; idx58++) {
+    const key = list58[idx58] as (typeof list58)[number];
+    if (json[key] === null) invalidRule(nullFieldMessage(`extensions.${key}`));
+  }
+  return keys.length === 0 ? undefined : json;
+}
+
+/** The rule set of the rule: `local` when absent (`undefined`); `null` is refused. */
 function readRuleSet(value: unknown): string {
-  if (value == null) return LOCAL_RULE_SET;
+  if (value === undefined) return LOCAL_RULE_SET;
+  given(value, 'ruleSet');
   if (!isRuleSetId(value)) invalidRule(ruleSetIdMessage('ruleSet', value));
   return value;
 }
@@ -222,7 +308,7 @@ function readRuleSet(value: unknown): string {
 /** A non-empty `id` without `:`, which separates a rule set from a name (D-4). */
 function requireId(value: unknown): string {
   const id = requireString(value, 'id');
-  if (id.includes(':')) invalidRule('id must not contain ":"');
+  if (stringIncludes(id, ':')) invalidRule('id must not contain ":"');
   return id;
 }
 
@@ -247,9 +333,10 @@ function requireParams(value: unknown): unknown {
 
 function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('condition'));
-  for (const key of keys) {
+  for (let idx59 = 0, list59 = keys; idx59 < list59.length; idx59++) {
+    const key = list59[idx59] as (typeof list59)[number];
     // A member whose value is `undefined` is absent, known or not.
     if (key !== 'dsl' && key !== 'value' && value[key] !== undefined) {
       invalidRule(`condition has an unknown key ${quoteText(key)}`);
@@ -262,17 +349,20 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   };
 }
 
-function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
-  if (value == null) return {};
+function normalizeDimensions(input: unknown): Record<string, DimensionSpec> {
+  const value = given(input, 'dimensions');
+  if (value === undefined) return {};
   if (!isPlainObject(value)) invalidRule('dimensions must be an object of dimension specs');
-  const keys = Object.keys(value);
+  const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('dimensions'));
-  const out: Record<string, DimensionSpec> = {};
-  for (const key of keys.sort()) {
+  const out: Record<string, DimensionSpec> = bare({});
+  for (let idx60 = 0, list60 = arraySort(keys); idx60 < list60.length; idx60++) {
+    const key = list60[idx60] as (typeof list60)[number];
     const v = value[key];
     if (isUnnamable(key)) invalidRule(unnamableNameMessage('dimensions', 'dimension', key));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
-    if (v == null) continue; // null or undefined: the dimension is unset
+    if (v === undefined) continue; // the dimension is unset
+    if (v === null) invalidRule(nullFieldMessage(`dimensions.${key}`));
     if (hasLoneSurrogate(key)) invalidRule(dimensionKeyMessage(key));
     const problems = new IssueList();
     const spec = readDimensionSpec(v, `dimensions.${key}`, (path, message) => {
@@ -284,21 +374,23 @@ function normalizeDimensions(value: unknown): Record<string, DimensionSpec> {
   return out;
 }
 
-function normalizeTags(value: unknown): string[] {
-  if (value == null) return [];
-  if (!Array.isArray(value)) invalidRule('tags must be an array of strings');
+function normalizeTags(input: unknown): string[] {
+  const value = given(input, 'tags');
+  if (value === undefined) return [];
+  if (!arrayIsArray(value)) invalidRule('tags must be an array of strings');
   const tags = readList(value, 'tags');
-  if (!Array.isArray(tags)) invalidRule(tags.message);
-  for (const tag of tags) {
+  if (!arrayIsArray(tags)) invalidRule(tags.message);
+  for (let idx61 = 0, list61 = tags; idx61 < list61.length; idx61++) {
+    const tag = list61[idx61] as (typeof list61)[number];
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }
-  tags.forEach((tag, i) => {
+  arrayForEach(tags, (tag, i) => {
     if (tag === '') invalidRule(`tags[${i}] must be a non-empty string`);
     if (typeof tag === 'string' && hasLoneSurrogate(tag)) {
       invalidRule(loneSurrogateMessage(`tags[${i}]`));
     }
   });
-  return [...new Set(tags as string[])].sort();
+  return arraySort(arrayConcat(setValuesArray(setOf(tags as string[]))));
 }
 
 function requireString(value: unknown, field: string): string {
@@ -315,7 +407,7 @@ function requireVersion(value: unknown): number {
 }
 
 function requireNumber(value: unknown, field: string): number {
-  if (typeof value !== 'number' || !Number.isFinite(value)) {
+  if (typeof value !== 'number' || !numberIsFinite(value)) {
     invalidRule(`${citeName(field)} must be a finite number`);
   }
   return value;
@@ -323,17 +415,13 @@ function requireNumber(value: unknown, field: string): number {
 
 /** Plain assignment would turn a `__proto__` key into a prototype change. */
 function defineField(target: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  defineValue(target, key, value, true);
 }
 
 /** Throws the first issue as `INVALID_RULE`; its message already names the path. */
 function throwFirst(issues: readonly RuleValidationIssue[]): void {
-  const [first] = issues;
+  const tuple62 = issues;
+  const first = elementOf(tuple62, 0);
   if (first) invalidRule(first.message);
 }
 

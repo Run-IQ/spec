@@ -31,8 +31,7 @@ function makeInput(): RuleDefinitionInput {
     exceptions: [{ kind: 'inhibit', targets: { ids: ['r0', 'a', 'r0'] } }],
     checksum: 'stale',
     output: undefined,
-    jurisdiction: 'NATIONAL',
-    extra: { b: 1, a: [3, 1, 2] },
+    extensions: { jurisdiction: 'NATIONAL', extra: { b: 1, a: [3, 1, 2] } },
   };
 }
 
@@ -67,7 +66,7 @@ describe('purity (A4)', () => {
     def.tags.push('changed');
     def.dimensions.country = 'changed';
     (def.condition!.value as Record<string, unknown>).x = 1;
-    (def.extra as { a: number[] }).a.push(9);
+    (def.extensions!.extra as { a: number[] }).a.push(9);
     const [exception] = def.exceptions ?? [];
     if (exception?.kind === 'inhibit') exception.targets.ids?.push('changed');
     expect(exception?.kind).toBe('inhibit');

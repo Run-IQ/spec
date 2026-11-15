@@ -33,9 +33,9 @@ describe('Date from another realm (item 4)', () => {
     expect(foreign.date('2025-01-01T00:00:00Z') instanceof Date).toBe(false);
   });
 
-  it('canonicalize writes it as its ISO string', () => {
-    expect(canonicalize({ d: foreign.date('2025-01-01T00:00:00Z') })).toBe(
-      '{"d":"2025-01-01T00:00:00.000Z"}',
+  it('canonicalize refuses it, with its pointer: convert it to a string first', () => {
+    expect(() => canonicalize({ d: foreign.date('2025-01-01T00:00:00Z') })).toThrow(
+      expect.objectContaining({ code: 'NON_SERIALIZABLE', path: 'd' }),
     );
   });
 
@@ -43,20 +43,14 @@ describe('Date from another realm (item 4)', () => {
     expect(() => canonicalize(foreign.date('nope'))).toThrow(nonSerializable);
   });
 
-  it('normalize accepts it for effectiveFrom and effectiveUntil, same checksum', () => {
-    const rule = {
-      ...base,
-      effectiveFrom: foreign.date('2025-01-01T00:00:00Z'),
-      effectiveUntil: foreign.date('2026-01-01T00:00:00Z'),
-    };
-    expect(normalizeRuleDefinition(rule).effectiveFrom).toBe('2025-01-01T00:00:00.000Z');
-    expect(computeRuleChecksum(rule)).toBe(
-      computeRuleChecksum({
-        ...base,
-        effectiveFrom: '2025-01-01T00:00:00Z',
-        effectiveUntil: '2026-01-01T00:00:00Z',
+  it('normalize refuses it for effectiveFrom: the string form has the same checksum', () => {
+    const rule = { ...base, effectiveFrom: foreign.date('2025-01-01T00:00:00Z') };
+    expect(() => normalizeRuleDefinition(rule)).toThrow(
+      expect.objectContaining({
+        message: expect.stringContaining('a Date with a foreign prototype'),
       }),
     );
+    expect(() => computeRuleChecksum(rule)).toThrow();
   });
 
   it('normalize rejects an invalid one with INVALID_DATE', () => {
@@ -65,9 +59,12 @@ describe('Date from another realm (item 4)', () => {
     );
   });
 
-  it('isEffectiveAt accepts it as bound and as at', () => {
+  it('isEffectiveAt refuses it as bound and as at', () => {
     const rule = { effectiveFrom: foreign.date('2025-01-01T00:00:00Z') };
-    expect(isEffectiveAt(rule, foreign.date('2025-01-01T00:00:00Z'))).toBe(true);
+    expect(() => isEffectiveAt(rule as never, '2025-01-01T00:00:00Z' as never)).toThrow();
+    expect(() =>
+      isEffectiveAt({ effectiveFrom: '2025-01-01' }, foreign.date('2025-01-01T00:00:00Z') as never),
+    ).toThrow();
   });
 
   it('a fake Date (Symbol.toStringTag) is not taken for a Date', () => {

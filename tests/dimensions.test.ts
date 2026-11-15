@@ -156,11 +156,13 @@ describe('dimension specs: refused', () => {
     expect(reads).toBe(1);
   });
 
-  it('keeps a null dimension as unset', () => {
-    const rule = { ...base, dimensions: { pays: null, regime: { anyOf: ['A'] } } };
-    expect(normalizeRuleDefinition(rule as unknown as RuleDefinitionInput).dimensions).toEqual({
-      regime: 'A',
-    });
+  it('keeps an undefined dimension as unset, and refuses a null one', () => {
+    const rule = { ...base, dimensions: { pays: undefined, regime: { anyOf: ['A'] } } };
+    expect(normalizeRuleDefinition(rule).dimensions).toEqual({ regime: 'A' });
+    const nulled = { ...base, dimensions: { pays: null, regime: { anyOf: ['A'] } } };
+    expect(() => normalizeRuleDefinition(nulled as unknown as RuleDefinitionInput)).toThrow(
+      'dimensions.pays is null: omit the field instead',
+    );
   });
 });
 

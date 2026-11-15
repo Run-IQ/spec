@@ -7,10 +7,31 @@ import {
 import type { DimensionSpec } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
-import { readList } from '../values.js';
+import { own, readList } from '../values.js';
 import { readLimits } from './limits.js';
 import type { ReferentialLimits } from './limits.js';
 import type { Membership, Referential, ReferentialMember } from './types.js';
+import {
+  NativeMap,
+  NativeString,
+  arrayConcat,
+  arrayFilter,
+  arrayFind,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayMap,
+  arrayPop,
+  arrayPush,
+  arraySlice,
+  arraySome,
+  arraySort,
+  mapGet,
+  mapSet,
+  objectHasOwn,
+  setOf,
+  setValuesArray,
+} from '../intrinsics.js';
 
 /**
  * How a rule's dimension matched the input (D-18): `values` lists the input values that
@@ -78,10 +99,10 @@ export function resolveMembership(
     const problem = dimensionValueProblem(value, 'value');
     if (problem !== undefined) throw newSpecError('INVALID_INPUT', problem);
     const groups = referential.groups;
-    if (typeof group !== 'string' || !Object.hasOwn(groups, group)) {
+    if (typeof group !== 'string' || !objectHasOwn(groups, group)) {
       throw newSpecError(
         'INVALID_REFERENTIAL',
-        `group ${citeName(String(group))} not in referential ${citeName(referential.id)}`,
+        `group ${citeName(NativeString(group))} not in referential ${citeName(referential.id)}`,
       );
     }
     const read = readValue(referential, value, at);
@@ -127,16 +148,19 @@ export function matchDimension(
 
     let judge: (value: string) => Membership;
     if (ref === undefined) {
-      judge = (value) => (anyOf.includes(value) ? { result: true, via: [] } : { result: false });
+      judge = (value) =>
+        arrayIncludes(anyOf, value) ? { result: true, via: [] } : { result: false };
     } else {
-      const referential = referentials.get(ref);
+      const referential = mapGet(referentials, ref);
       if (referential === undefined) {
         throw newSpecError('INVALID_REFERENTIAL', `unknown referential ${citeName(ref)}`);
       }
-      const targets = [...anyOf, ...except].map((t) => readTarget(referential, t));
+      const targets = arrayMap(arrayConcat(anyOf, except), (t) => readTarget(referential, t));
       const resolver = new Resolver(referential, at, maxDepth);
       const of = (value: ReadValue, from: number, to: number): Membership =>
-        anyMember(targets.slice(from, to).map((target) => resolver.target(target, value)));
+        anyMember(
+          arrayMap(arraySlice(targets, from, to), (target) => resolver.target(target, value)),
+        );
       judge = (raw) => {
         const value = readValue(referential, raw, at);
         const inAnyOf = of(value, 0, anyOf.length);
@@ -145,7 +169,7 @@ export function matchDimension(
       };
     }
     return combine(
-      values.map((value) => ({ value, membership: judge(value) })),
+      arrayMap(values, (value) => ({ value, membership: judge(value) })),
       all,
     );
   });
@@ -172,11 +196,11 @@ function readInput(input: unknown): string[] {
   if (typeof input === 'string') return checkInput([input], input);
   let list: unknown[];
   try {
-    if (!Array.isArray(input)) {
+    if (!arrayIsArray(input)) {
       throw newSpecError('INVALID_INPUT', 'input must be a value or an array of values');
     }
     const read = readList(input, 'input');
-    if (!Array.isArray(read)) throw newSpecError('INVALID_INPUT', read.message);
+    if (!arrayIsArray(read)) throw newSpecError('INVALID_INPUT', read.message);
     list = read;
   } catch (error) {
     if (isOwnError(error)) throw error;
@@ -190,14 +214,14 @@ function checkInput(list: readonly unknown[], input: unknown): string[] {
   if (list.length === 0) {
     throw newSpecError('INVALID_INPUT', 'a dimension input must hold at least one value');
   }
-  list.forEach((value, i) => {
+  arrayForEach(list, (value, i) => {
     const problem = dimensionValueProblem(
       value,
       typeof input === 'string' ? 'input' : `input[${i}]`,
     );
     if (problem !== undefined) throw newSpecError('INVALID_INPUT', problem);
   });
-  return [...new Set(list.map(String))].sort();
+  return arraySort(arrayConcat(setValuesArray(setOf(arrayMap(list, NativeString)))));
 }
 
 /**
@@ -220,22 +244,25 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
       return { kind: 'unknown', why: `code system ${citeName(system)} is not ${citeName(own)}` };
     }
   }
-  if (Object.hasOwn(referential.groups, code)) {
+  if (objectHasOwn(referential.groups, code)) {
     throw newSpecError(
       'INVALID_INPUT',
       `input value ${citeName(value)} is a group of ${citeName(referential.id)}`,
     );
   }
-  const codes = referential.codes;
+  const codes = own(referential, 'codes');
   if (codes === undefined) return { kind: 'code', code };
-  if (!Object.hasOwn(codes, code)) {
+  if (!objectHasOwn(codes, code)) {
     return {
       kind: 'unknown',
       why: `code ${citeName(code)} not in referential ${citeName(referential.id)}`,
     };
   }
   const periods = codes[code] ?? [];
-  const valid = periods.some((p) => p.from <= at && (p.until == null || at < p.until));
+  const valid = arraySome(
+    periods,
+    (p) => p.from <= at && (own(p, 'until') == null || at < (own(p, 'until') as string)),
+  );
   return valid
     ? { kind: 'code', code }
     : { kind: 'unknown', why: `code ${citeName(code)} not valid at ${citeName(at)}` };
@@ -246,9 +273,9 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
  * normal, so the value is unqualified: with `ref`, the referential fixes the code system.
  */
 function readTarget(referential: Referential, target: string): Target {
-  if (Object.hasOwn(referential.groups, target)) return { kind: 'group', name: target };
-  const codes = referential.codes;
-  if (codes !== undefined && !Object.hasOwn(codes, target)) {
+  if (objectHasOwn(referential.groups, target)) return { kind: 'group', name: target };
+  const codes = own(referential, 'codes');
+  if (codes !== undefined && !objectHasOwn(codes, target)) {
     throw newSpecError(
       'INVALID_REFERENTIAL',
       `${citeName(target)} is neither a group nor a code of referential ` +
@@ -260,9 +287,9 @@ function readTarget(referential: Referential, target: string): Target {
 
 /** Kleene OR of memberships: the first true (in order), else the first unknown, else false. */
 function anyMember(list: readonly Membership[]): Membership {
-  const yes = list.find((m) => m.result === true);
+  const yes = arrayFind(list, (m) => m.result === true);
   if (yes) return yes;
-  return list.find((m) => m.result === 'unknown') ?? { result: false };
+  return arrayFind(list, (m) => m.result === 'unknown') ?? { result: false };
 }
 
 /** Kleene `a AND NOT b`. */
@@ -277,13 +304,13 @@ function combine(
   judged: readonly { value: string; membership: Membership }[],
   all: boolean,
 ): DimensionMatch {
-  const unknown = judged.find((j) => j.membership.result === 'unknown')?.membership;
+  const unknown = arrayFind(judged, (j) => j.membership.result === 'unknown')?.membership;
   if (all) {
-    const failed = judged.find((j) => j.membership.result === false);
+    const failed = arrayFind(judged, (j) => j.membership.result === false);
     if (failed) {
       return { result: false, why: `input value ${citeName(failed.value)} does not match` };
     }
-  } else if (!judged.some((j) => j.membership.result === true)) {
+  } else if (!arraySome(judged, (j) => j.membership.result === true)) {
     return unknown?.result === 'unknown'
       ? { result: 'unknown', why: unknown.why }
       : { result: false, why: 'no input value matches' };
@@ -291,10 +318,14 @@ function combine(
   if (all && unknown?.result === 'unknown') return { result: 'unknown', why: unknown.why };
   const values: string[] = [];
   const via: string[] = [];
-  for (const { value, membership } of judged) {
+  for (let idx30 = 0, list30 = judged; idx30 < list30.length; idx30++) {
+    const { value, membership } = list30[idx30] as (typeof list30)[number];
     if (membership.result !== true) continue;
-    values.push(value);
-    for (const group of membership.via) if (!via.includes(group)) via.push(group);
+    arrayPush(values, value);
+    for (let idx1004 = 0, list1004 = membership.via; idx1004 < list1004.length; idx1004++) {
+      const group = list1004[idx1004] as (typeof list1004)[number];
+      if (!arrayIncludes(via, group)) arrayPush(via, group);
+    }
   }
   return { result: true, values, via };
 }
@@ -302,7 +333,7 @@ function combine(
 /** Resolves memberships at one date in one referential, each group at most once per value. */
 class Resolver {
   /** For each value, the membership of each group already resolved. */
-  private readonly memo = new Map<string, Map<string, Membership>>();
+  private readonly memo = new NativeMap<string, Map<string, Membership>>();
 
   constructor(
     private readonly referential: Referential,
@@ -322,8 +353,8 @@ class Resolver {
   /** `value` (already read) in `group`. */
   member(group: string, value: ReadValue): Membership {
     if (value.kind === 'unknown') return { result: 'unknown', why: value.why };
-    const memo = this.memo.get(value.code) ?? new Map<string, Membership>();
-    this.memo.set(value.code, memo);
+    const memo = mapGet(this.memo, value.code) ?? new NativeMap<string, Membership>();
+    mapSet(this.memo, value.code, memo);
     return this.inGroup(group, value.code, memo);
   }
 
@@ -342,8 +373,12 @@ class Resolver {
         // `result` answers the nested group `frame.nested[frame.next]`.
         frame.next++;
         if (result.result === true) {
-          result = this.close(frame, { result: true, via: [frame.group, ...result.via] }, memo);
-          stack.pop();
+          result = this.close(
+            frame,
+            { result: true, via: arrayConcat([frame.group], result.via) },
+            memo,
+          );
+          arrayPop(stack);
           continue;
         }
         if (result.result === 'unknown') frame.unknown ??= result;
@@ -351,7 +386,7 @@ class Resolver {
       const name = frame.nested[frame.next];
       if (name === undefined) {
         result = this.close(frame, this.settle(frame, value), memo);
-        stack.pop();
+        arrayPop(stack);
         continue;
       }
       result = this.open(name, value, memo, stack);
@@ -366,24 +401,26 @@ class Resolver {
     memo: Map<string, Membership>,
     stack: Frame[],
   ): Membership | undefined {
-    const known = memo.get(group);
+    const known = mapGet(memo, group);
     if (known !== undefined) return known;
     if (stack.length >= this.maxDepth) {
       throw newSpecError('INVALID_REFERENTIAL', `group nesting deeper than ${this.maxDepth}`);
     }
     const groups = this.referential.groups;
     const entry = groups[group];
-    const active = (entry?.members ?? []).filter((m) => this.isActive(m));
-    if (active.some((m) => m.value === value)) {
+    const active = arrayFilter(entry?.members ?? [], (m) => this.isActive(m));
+    if (arraySome(active, (m) => m.value === value)) {
       const direct: Membership = { result: true, via: [group] };
-      memo.set(group, direct);
+      mapSet(memo, group, direct);
       return direct;
     }
-    const nested = [...new Set(active.map((m) => m.value))]
-      .filter((name) => Object.hasOwn(groups, name))
-      .sort();
+    const nested = arraySort(
+      arrayFilter(arrayConcat(setValuesArray(setOf(arrayMap(active, (m) => m.value)))), (name) =>
+        objectHasOwn(groups, name),
+      ),
+    );
     const exhaustive = entry?.exhaustive === true;
-    stack.push({ group, exhaustive, nested, next: 0, unknown: undefined });
+    arrayPush(stack, { group, exhaustive, nested, next: 0, unknown: undefined });
     return undefined;
   }
 
@@ -400,7 +437,7 @@ class Resolver {
   }
 
   private close(frame: Frame, result: Membership, memo: Map<string, Membership>): Membership {
-    memo.set(frame.group, result);
+    mapSet(memo, frame.group, result);
     return result;
   }
 

@@ -8,6 +8,19 @@ import { firedProblems, pendingCarrierProblems } from './carriers.js';
 import { full } from './collect.js';
 import type { ProofPending, ProofSection, ProofSkip, ProofView } from './types.js';
 import { isLifted, LIFTS, redactedIn } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayForEach,
+  arrayPush,
+  arraySome,
+  mapGet,
+  mapHas,
+  mapSet,
+  setAdd,
+  setHas,
+  setValuesArray,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
 // proof shows them (D-7, R15): they put `conflict` on outputs, not on the winners' steps.
@@ -67,16 +80,17 @@ export interface Ties {
  * fired and the inhibition it discarded. The standings tie short circuits only.
  */
 export function tieInputs(p: ProofView, hidden: ReadonlySet<ProofSection>): Set<ProofSection> {
-  const uncertain = new Set<ProofSection>();
+  const uncertain = new NativeSet<ProofSection>();
   const conflicts =
-    hidden.has('skipped') || p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT');
+    setHas(hidden, 'skipped') || arraySome(p.skipped, (skip) => skip.reason === 'RULE_CONFLICT');
   const records = p.exceptions.length + redactedIn(hidden, 'exceptions');
   if (!conflicts || records < 2) return uncertain;
   const shortCircuits =
-    hidden.has('exceptions') || p.exceptions.some((exception) => exception.kind === 'shortCircuit');
-  if (shortCircuits && hidden.has('rules')) uncertain.add('rules');
-  if (hidden.has('skipped')) uncertain.add('skipped');
-  if (hidden.has('exceptions')) uncertain.add('exceptions');
+    setHas(hidden, 'exceptions') ||
+    arraySome(p.exceptions, (exception) => exception.kind === 'shortCircuit');
+  if (shortCircuits && setHas(hidden, 'rules')) setAdd(uncertain, 'rules');
+  if (setHas(hidden, 'skipped')) setAdd(uncertain, 'skipped');
+  if (setHas(hidden, 'exceptions')) setAdd(uncertain, 'exceptions');
   return uncertain;
 }
 
@@ -89,11 +103,11 @@ interface Node {
   below: boolean;
 }
 
-const newNode = (): Node => ({ children: new Map(), marked: false, below: false });
+const newNode = (): Node => ({ children: new NativeMap(), marked: false, below: false });
 
 /** Marked rule instances, by rule id and subject; the queries are by subject prefix. */
 export class Scope {
-  private readonly roots = new Map<string, Node>();
+  private readonly roots = new NativeMap<string, Node>();
   private created = 0;
 
   /** The nodes this trie holds: what its marks cost in memory. */
@@ -102,20 +116,21 @@ export class Scope {
   }
 
   mark(entry: { ruleId: string; subject?: string }): void {
-    let root = this.roots.get(entry.ruleId);
+    let root = mapGet(this.roots, entry.ruleId);
     if (root === undefined) {
       root = newNode();
       this.created++;
-      this.roots.set(entry.ruleId, root);
+      mapSet(this.roots, entry.ruleId, root);
     }
     let node: Node = root;
     node.below = true;
-    for (const segment of segmentsOf(entry.subject)) {
-      let child = node.children.get(segment);
+    for (let idx109 = 0, list109 = segmentsOf(entry.subject); idx109 < list109.length; idx109++) {
+      const segment = list109[idx109] as (typeof list109)[number];
+      let child = mapGet(node.children, segment);
       if (child === undefined) {
         child = newNode();
         this.created++;
-        node.children.set(segment, child);
+        mapSet(node.children, segment, child);
       }
       child.below = true;
       node = child;
@@ -125,10 +140,11 @@ export class Scope {
 
   /** True when a marked entry is at `entry`'s subject or above it (it covers `entry`). */
   covers(entry: { ruleId: string; subject?: string }): boolean {
-    let node = this.roots.get(entry.ruleId);
+    let node = mapGet(this.roots, entry.ruleId);
     if (node?.marked === true) return true;
-    for (const segment of segmentsOf(entry.subject)) {
-      node = node?.children.get(segment);
+    for (let idx110 = 0, list110 = segmentsOf(entry.subject); idx110 < list110.length; idx110++) {
+      const segment = list110[idx110] as (typeof list110)[number];
+      node = node === undefined ? undefined : mapGet(node.children, segment);
       if (node === undefined) return false;
       if (node.marked) return true;
     }
@@ -137,8 +153,15 @@ export class Scope {
 
   /** True when a marked entry is at `entry`'s subject or below it (`entry` covers it). */
   within(entry: { ruleId: string; subject?: string }): boolean {
-    let node = this.roots.get(entry.ruleId);
-    for (const segment of segmentsOf(entry.subject)) node = node?.children.get(segment);
+    let node = mapGet(this.roots, entry.ruleId);
+    for (
+      let idx1025 = 0, list1025 = segmentsOf(entry.subject);
+      idx1025 < list1025.length;
+      idx1025++
+    ) {
+      const segment = list1025[idx1025] as (typeof list1025)[number];
+      node = node === undefined ? undefined : mapGet(node.children, segment);
+    }
     return node?.below === true;
   }
 }
@@ -158,7 +181,9 @@ interface Claim {
  * (`RULE_CONFLICT` stops one too: a discarded carrier, `tiesOf`).
  */
 export function stopsCarrier(reason: string): boolean {
-  return reason === 'INHIBITED' || reason === 'OUTPUT_MISMATCH' || BEFORE_EXCEPTIONS.has(reason);
+  return (
+    reason === 'INHIBITED' || reason === 'OUTPUT_MISMATCH' || setHas(BEFORE_EXCEPTIONS, reason)
+  );
 }
 
 /**
@@ -172,65 +197,78 @@ export function stopsCarrier(reason: string): boolean {
 export function tiesOf(
   p: ProofView,
   standings: Standings,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): Ties {
-  const excluded = new Map<string, ProofSkip>();
-  for (const skip of p.skipped) excluded.set(instanceKey(skip), skip);
-  const waiting = new Map<string, ProofPending>();
-  for (const entry of p.pending) waiting.set(instanceKey(entry), entry);
-  const discarded = new Set<number>();
-  const losers = new Set<string>();
-  const shortCircuits = new Set<string>();
+  const excluded = new NativeMap<string, ProofSkip>();
+  for (let idx1026 = 0, list1026 = p.skipped; idx1026 < list1026.length; idx1026++) {
+    const skip = list1026[idx1026] as (typeof list1026)[number];
+    mapSet(excluded, instanceKey(skip), skip);
+  }
+  const waiting = new NativeMap<string, ProofPending>();
+  for (let idx1027 = 0, list1027 = p.pending; idx1027 < list1027.length; idx1027++) {
+    const entry = list1027[idx1027] as (typeof list1027)[number];
+    mapSet(waiting, instanceKey(entry), entry);
+  }
+  const discarded = new NativeSet<number>();
+  const losers = new NativeSet<string>();
+  const shortCircuits = new NativeSet<string>();
   const problems: string[] = [];
   const uncertain = tieInputs(p, hidden);
   // A problem of who lost: the ties may be hidden.
   const tieProblem = (message: string): void => {
-    if (!isLifted(hidden, LIFTS.tieRecords, { message, ties: uncertain })) problems.push(message);
+    if (!isLifted(hidden, LIFTS.tieRecords, { message, ties: uncertain }))
+      arrayPush(problems, message);
   };
   firedProblems(p, problems);
   const fired = new Scope();
   const tied = new Scope();
-  const claims = new Map<string, Claim[]>();
+  const claims = new NativeMap<string, Claim[]>();
   const tiedClaim = (output: string, claim: Claim | undefined): boolean =>
     claim !== undefined &&
-    (claims.get(output) ?? []).some(
+    arraySome(
+      mapGet(claims, output) ?? [],
       (other) => other.stratum === claim.stratum && sameLevel(other.standing, claim.standing),
     );
-  p.exceptions.forEach((exception, index) => {
+  arrayForEach(p.exceptions, (exception, index) => {
     const cited = (): string => citeName(instanceKey(exception));
-    const skip = excluded.get(instanceKey(exception));
-    const standing = standings.get(ruleKey(exception));
+    const skip = mapGet(excluded, instanceKey(exception));
+    const standing = mapGet(standings, ruleKey(exception));
     const claim = standing === undefined ? undefined : { stratum: exception.stratum, standing };
     const { output } = exception;
     if (skip !== undefined && stopsCarrier(skip.reason)) {
-      problems.push(`exception of an excluded carrier: ${cited()}`);
-      discarded.add(index);
+      arrayPush(problems, `exception of an excluded carrier: ${cited()}`);
+      setAdd(discarded, index);
       return;
     }
-    const pending = waiting.get(instanceKey(exception));
+    const pending = mapGet(waiting, instanceKey(exception));
     if (pending !== undefined && pending.fired !== true) {
-      problems.push(
+      arrayPush(
+        problems,
         pending.fired === undefined
           ? `pending carrier without fired: ${cited()}`
           : `exception of a pending carrier: ${cited()}`,
       );
-      discarded.add(index);
+      setAdd(discarded, index);
       return;
     }
     const conflicted = skip?.reason === 'RULE_CONFLICT';
-    const r15 = exception.kind === 'inhibit' && exception.affected.some((e) => fired.within(e));
+    const r15 =
+      exception.kind === 'inhibit' && arraySome(exception.affected, (e) => fired.within(e));
     const lost =
       exception.kind === 'shortCircuit' && output !== undefined && tiedClaim(output, claim);
     if (conflicted && (r15 || lost)) {
-      discarded.add(index);
-      losers.add(instanceKey(exception));
+      setAdd(discarded, index);
+      setAdd(losers, instanceKey(exception));
       if (exception.status !== skip.status) {
         tieProblem(`exception status differs from its carrier's decision: ${cited()}`);
       }
       if (r15) {
-        for (const entry of exception.affected) tied.mark(entry);
+        for (let idx1028 = 0, list1028 = exception.affected; idx1028 < list1028.length; idx1028++) {
+          const entry = list1028[idx1028] as (typeof list1028)[number];
+          tied.mark(entry);
+        }
       } else if (output !== undefined) {
-        shortCircuits.add(output);
+        setAdd(shortCircuits, output);
         if (exception.affected.length > 0) {
           tieProblem(`discarded short circuit affected rules: ${cited()}`);
         }
@@ -242,33 +280,38 @@ export function tiesOf(
     // The loser's exclusion `RULE_CONFLICT` may be redacted.
     if (tiedClaim(output, claim)) {
       const message = `short circuits tied without a loser excluded: ${cited()}`;
-      if (!isLifted(hidden, LIFTS.tieLoser, { message, ties: uncertain })) problems.push(message);
+      if (!isLifted(hidden, LIFTS.tieLoser, { message, ties: uncertain }))
+        arrayPush(problems, message);
     }
-    const list = claims.get(output);
-    if (list === undefined) claims.set(output, [claim]);
-    else list.push(claim);
+    const list = mapGet(claims, output);
+    if (list === undefined) mapSet(claims, output, [claim]);
+    else arrayPush(list, claim);
   });
-  const recorded = new Map<string, number>();
-  for (const exception of p.exceptions) {
+  const recorded = new NativeMap<string, number>();
+  for (let idx111 = 0, list111 = p.exceptions; idx111 < list111.length; idx111++) {
+    const exception = list111[idx111] as (typeof list111)[number];
     const key = instanceKey(exception);
-    recorded.set(key, (recorded.get(key) ?? 0) + 1);
+    mapSet(recorded, key, (mapGet(recorded, key) ?? 0) + 1);
   }
   // A tie loser fired nothing: its tie record is its only one (one decision, one proof).
-  for (const key of losers) {
+  for (let idx112 = 0, list112 = setValuesArray(losers); idx112 < list112.length; idx112++) {
+    const key = list112[idx112] as (typeof list112)[number];
     if (full(problems)) break;
-    if ((recorded.get(key) ?? 0) > 1) {
+    if ((mapGet(recorded, key) ?? 0) > 1) {
       tieProblem(`tie loser recorded other exceptions: ${citeName(key)}`);
     }
   }
   // The exceptions of a carrier that fired may be redacted.
-  for (const entry of p.pending) {
+  for (let idx113 = 0, list113 = p.pending; idx113 < list113.length; idx113++) {
+    const entry = list113[idx113] as (typeof list113)[number];
     if (full(problems)) break;
-    if (entry.fired !== true || recorded.has(instanceKey(entry))) continue;
+    if (entry.fired !== true || mapHas(recorded, instanceKey(entry))) continue;
     const message = `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`;
     // A hidden record of that carrier instance.
     const { ruleId: id, version, subject } = entry;
     const rule = subject === undefined ? { id, version } : { id, version, subject };
-    if (!isLifted(hidden, LIFTS.pendingCarrierFired, { message, rule })) problems.push(message);
+    if (!isLifted(hidden, LIFTS.pendingCarrierFired, { message, rule }))
+      arrayPush(problems, message);
   }
   pendingCarrierProblems(p, waiting, problems, (message) =>
     isLifted(hidden, LIFTS.pendingCarrierChain, { message }),
@@ -298,30 +341,33 @@ export function tiesOf(
  */
 export function sourceProblems(
   p: ProofView,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const statuses = [p.applied, p.skipped, p.exceptions, p.outputs, p.items];
   let provisional = false;
   let conflict = false;
-  for (const list of statuses) {
-    for (const entry of list) {
+  for (let idx114 = 0, list114 = statuses; idx114 < list114.length; idx114++) {
+    const list = list114[idx114] as (typeof list114)[number];
+    for (let idx115 = 0, list115 = list; idx115 < list115.length; idx115++) {
+      const entry = list115[idx115] as (typeof list115)[number];
       provisional ||= entry.status === 'provisional';
       conflict ||= entry.status === 'conflict';
     }
   }
-  const asserted = p.factsRead.some(
+  const asserted = arraySome(
+    p.factsRead,
     (fact) =>
       fact.status === 'proposed' || fact.status === 'contested' || fact.method === 'presumed',
   );
   const issues: string[] = [];
   if (provisional && !asserted && p.readsUndeclared.length === 0) {
     const message = 'provisional status without a source in the proof';
-    if (!isLifted(hidden, LIFTS.provisionalSource, { message })) issues.push(message);
+    if (!isLifted(hidden, LIFTS.provisionalSource, { message })) arrayPush(issues, message);
   }
-  const tie = p.skipped.some((skip) => skip.reason === 'RULE_CONFLICT');
+  const tie = arraySome(p.skipped, (skip) => skip.reason === 'RULE_CONFLICT');
   if (conflict && !tie) {
     const message = 'conflict status without a tie in the proof';
-    if (!isLifted(hidden, LIFTS.conflictSource, { message })) issues.push(message);
+    if (!isLifted(hidden, LIFTS.conflictSource, { message })) arrayPush(issues, message);
   }
   return issues;
 }

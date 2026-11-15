@@ -12,6 +12,33 @@ import { Scope, stopsCarrier } from './ties.js';
 import type { ProofPending, ProofSkip, ProofStep, ProofView } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
 import type { RuleIdentity } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayConcat,
+  arrayEvery,
+  arrayFilter,
+  arrayFlatMap,
+  arrayIncludes,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  arraySort,
+  elementOf,
+  hasOwnKey,
+  mapEntriesArray,
+  mapGet,
+  mapHas,
+  mapKeysArray,
+  mapSet,
+  mapValuesArray,
+  objectKeys,
+  setAdd,
+  setHas,
+  setValuesArray,
+  stringCharCodeAt,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the carriers of a proof against the rule definitions `verifyProof`
 // was given (`rules`): which rules each targets (`matchesSelector`, as core resolves targets
@@ -31,7 +58,7 @@ const selected = (definition: RuleDefinition) => ({
 
 /** The `inhibit` and `substitute` selectors of `carrier` (D-21): those that select rules. */
 const selectorsOf = (carrier: RuleDefinition): RuleSelector[] =>
-  (carrier.exceptions ?? []).flatMap((exception) =>
+  arrayFlatMap(carrier.exceptions ?? [], (exception) =>
     exception.kind === 'shortCircuit' ? [] : [exception.targets],
   );
 
@@ -39,7 +66,7 @@ const selectorsOf = (carrier: RuleDefinition): RuleSelector[] =>
 function selects(carrier: RuleDefinition, target: RuleDefinition): boolean {
   const own = carrier.ruleSet ?? LOCAL_RULE_SET;
   const rule = selected(target);
-  return selectorsOf(carrier).some((selector) => matchesSelector(rule, selector, own));
+  return arraySome(selectorsOf(carrier), (selector) => matchesSelector(rule, selector, own));
 }
 
 /**
@@ -48,16 +75,27 @@ function selects(carrier: RuleDefinition, target: RuleDefinition): boolean {
  * so the rules it selects are among those of one lookup per name it lists.
  */
 class Index {
-  private readonly fields = new Map<string, Map<string, string[]>>();
+  private readonly fields = new NativeMap<string, Map<string, string[]>>();
 
-  constructor(definitions: Iterable<[string, RuleDefinition]>) {
-    for (const [key, definition] of definitions) {
+  constructor(definitions: readonly [string, RuleDefinition][]) {
+    for (let at = 0; at < definitions.length; at++) {
+      const entry = definitions[at] as [string, RuleDefinition];
+      const key = entry[0];
+      const definition = entry[1];
       const ruleSet = definition.ruleSet ?? LOCAL_RULE_SET;
       this.add('ids', qualifyName(ruleSet, definition.id), key);
-      for (const tag of definition.tags) this.add('tags', tag, key);
+      for (let idx1080 = 0, list1080 = definition.tags; idx1080 < list1080.length; idx1080++) {
+        const tag = list1080[idx1080] as (typeof list1080)[number];
+        this.add('tags', tag, key);
+      }
       this.add('outputs', qualifiedFrom(ruleSet, definition.output ?? DEFAULT_OUTPUT), key);
       this.add('models', definition.model, key);
-      for (const dimension of Object.keys(definition.dimensions)) {
+      for (
+        let idx212 = 0, list212 = objectKeys(definition.dimensions);
+        idx212 < list212.length;
+        idx212++
+      ) {
+        const dimension = list212[idx212] as (typeof list212)[number];
         this.add('dimensions', dimension, key);
       }
       this.add('ruleSets', ruleSet, key);
@@ -65,20 +103,23 @@ class Index {
   }
 
   private add(field: string, value: string, key: string): void {
-    let byValue = this.fields.get(field);
+    let byValue = mapGet(this.fields, field);
     if (byValue === undefined) {
-      byValue = new Map();
-      this.fields.set(field, byValue);
+      byValue = new NativeMap();
+      mapSet(this.fields, field, byValue);
     }
-    const list = byValue.get(value);
-    if (list === undefined) byValue.set(value, [key]);
-    else if (list[list.length - 1] !== key) list.push(key);
+    const list = mapGet(byValue, value);
+    if (list === undefined) mapSet(byValue, value, [key]);
+    else if (list[list.length - 1] !== key) arrayPush(list, key);
   }
 
   /** The rules having one of `values` in `field`. */
   private lookup(field: string, values: readonly string[]): string[] {
-    const byValue = this.fields.get(field);
-    return values.flatMap((value) => byValue?.get(value) ?? []);
+    const byValue = mapGet(this.fields, field);
+    return arrayFlatMap(
+      values,
+      (value) => (byValue === undefined ? undefined : mapGet(byValue, value)) ?? [],
+    );
   }
 
   /**
@@ -86,17 +127,21 @@ class Index {
    * field (the fewest rules), each to be confirmed by `matchesSelector`.
    */
   candidates(selector: RuleSelector, own: string): string[] {
-    const qualified = (names: readonly string[]) => names.map((name) => qualifiedFrom(own, name));
+    const qualified = (names: readonly string[]) =>
+      arrayMap(names, (name) => qualifiedFrom(own, name));
     const fields: [string, readonly string[] | undefined][] = [
       ['ids', selector.ids && qualified(selector.ids)],
       ['tags', selector.tags],
       ['outputs', selector.outputs && qualified(selector.outputs)],
       ['models', selector.models],
-      ['dimensions', selector.dimensions && Object.keys(selector.dimensions)],
+      ['dimensions', selector.dimensions && objectKeys(selector.dimensions)],
       ['ruleSets', selector.ruleSets?.length ? selector.ruleSets : [own]],
     ];
     let fewest: string[] | undefined;
-    for (const [field, values] of fields) {
+    for (let idx213 = 0, list213 = fields; idx213 < list213.length; idx213++) {
+      const tuple1081 = list213[idx213] as (typeof list213)[number];
+      const field = tuple1081[0];
+      const values = tuple1081[1];
       if (values === undefined || values.length === 0) continue;
       const found = this.lookup(field, values);
       if (fewest === undefined || found.length < fewest.length) fewest = found;
@@ -112,14 +157,14 @@ const signature = (kind: string, output: string | undefined): string =>
 /** The signatures of `definition`'s exceptions, sorted. */
 function definedSignatures(definition: RuleDefinition): string[] {
   const own = definition.ruleSet ?? LOCAL_RULE_SET;
-  return (definition.exceptions ?? [])
-    .map((exception) =>
+  return arraySort(
+    arrayMap(definition.exceptions ?? [], (exception) =>
       signature(
         exception.kind,
         exception.kind === 'shortCircuit' ? qualifiedFrom(own, exception.output) : undefined,
       ),
-    )
-    .sort();
+    ),
+  );
 }
 
 /**
@@ -147,19 +192,20 @@ export function carrierRuleFindings(
   invalid: (message: string) => void,
 ): void {
   // Whether a carrier selects a target derives from the rules alone: once per pair.
-  const selections = new Map<string, boolean>();
-  for (const entry of p.pending) {
+  const selections = new NativeMap<string, boolean>();
+  for (let idx214 = 0, list214 = p.pending; idx214 < list214.length; idx214++) {
+    const entry = list214[idx214] as (typeof list214)[number];
     if (entry.carrier === undefined) continue;
     const carrierKey = ruleKey(entry.carrier);
     const targetKey = ruleKey(entry);
-    const carrier = definitions.get(carrierKey);
-    const target = definitions.get(targetKey);
+    const carrier = mapGet(definitions, carrierKey);
+    const target = mapGet(definitions, targetKey);
     if (carrier === undefined || target === undefined) continue;
     const pair = `${carrierKey}\u0000${targetKey}`;
-    let selected = selections.get(pair);
+    let selected = mapGet(selections, pair);
     if (selected === undefined) {
       selected = selects(carrier, target);
-      selections.set(pair, selected);
+      mapSet(selections, pair, selected);
     }
     if (!selected) invalid(`carrier does not select its target: ${citeName(instanceKey(entry))}`);
   }
@@ -201,7 +247,7 @@ interface Plan {
 function nodesOf(subject: string | undefined): number {
   let nodes = 1;
   if (subject === undefined) return nodes;
-  for (let i = 0; i < subject.length; i++) if (subject.charCodeAt(i) === 0x2f) nodes++;
+  for (let i = 0; i < subject.length; i++) if (stringCharCodeAt(subject, i) === 0x2f) nodes++;
   return nodes;
 }
 
@@ -213,12 +259,18 @@ function selectedBy(
   targets: ReadonlyMap<string, RuleDefinition>,
 ): Set<string> {
   const own = carrier.ruleSet ?? LOCAL_RULE_SET;
-  const chosen = new Set<string>();
-  for (const selector of selectorsOf(carrier)) {
-    for (const target of index.candidates(selector, own)) {
-      const definition = targets.get(target);
-      if (target === key || chosen.has(target) || definition === undefined) continue;
-      if (matchesSelector(selected(definition), selector, own)) chosen.add(target);
+  const chosen = new NativeSet<string>();
+  for (let idx215 = 0, list215 = selectorsOf(carrier); idx215 < list215.length; idx215++) {
+    const selector = list215[idx215] as (typeof list215)[number];
+    for (
+      let idx216 = 0, list216 = index.candidates(selector, own);
+      idx216 < list216.length;
+      idx216++
+    ) {
+      const target = list216[idx216] as (typeof list216)[number];
+      const definition = mapGet(targets, target);
+      if (target === key || setHas(chosen, target) || definition === undefined) continue;
+      if (matchesSelector(selected(definition), selector, own)) setAdd(chosen, target);
     }
   }
   return chosen;
@@ -257,80 +309,98 @@ function waitingTargets(
   // Pending, excluded before the exceptions, or by another exception (a substitution excludes
   // nothing: the rule it reaches is still decided by its own conditions).
   const waits = (decision: Decision): boolean => {
-    if (!('status' in decision)) return true;
-    if (!('reason' in decision)) return false;
+    if (!hasOwnKey(decision, 'status')) return true;
+    if (!hasOwnKey(decision, 'reason')) return false;
     const { reason } = decision;
-    return BEFORE_EXCEPTIONS.has(reason) || reason === 'INHIBITED' || reason === 'SHORT_CIRCUITED';
+    return (
+      setHas(BEFORE_EXCEPTIONS, reason) || reason === 'INHIBITED' || reason === 'SHORT_CIRCUITED'
+    );
   };
   const decisions: Decision[] = [];
-  for (const step of p.applied) {
-    if (!imposed.has(imposedKey(step, step.output))) decisions.push(step);
+  for (let idx217 = 0, list217 = p.applied; idx217 < list217.length; idx217++) {
+    const step = list217[idx217] as (typeof list217)[number];
+    if (!setHas(imposed, imposedKey(step, step.output))) arrayPush(decisions, step);
   }
-  for (const skip of p.skipped) decisions.push(skip);
+  for (let idx1082 = 0, list1082 = p.skipped; idx1082 < list1082.length; idx1082++) {
+    const skip = list1082[idx1082] as (typeof list1082)[number];
+    arrayPush(decisions, skip);
+  }
   const early: Decision[] = [];
-  const targets = new Map<string, RuleDefinition>();
-  for (const decision of decisions) {
+  const targets = new NativeMap<string, RuleDefinition>();
+  for (let idx218 = 0, list218 = decisions; idx218 < list218.length; idx218++) {
+    const decision = list218[idx218] as (typeof list218)[number];
     if (waits(decision)) continue;
     const key = ruleKey(decision);
-    const definition = definitions.get(key);
+    const definition = mapGet(definitions, key);
     if (definition === undefined) continue;
-    early.push(decision);
-    targets.set(key, definition);
+    arrayPush(early, decision);
+    mapSet(targets, key, definition);
   }
   if (early.length === 0) return;
   // The subjects of the instances of the carriers pending without firing, by rule.
   // With the trie nodes they need (`nodesOf`), and the nodes all the subjects of the pending
   // entries and decisions would need: the budget of the merged tries.
-  const carriers = new Map<string, (string | undefined)[]>();
-  const carrierNodes = new Map<string, number>();
+  const carriers = new NativeMap<string, (string | undefined)[]>();
+  const carrierNodes = new NativeMap<string, number>();
   let budget = 0;
-  for (const decision of decisions) budget += nodesOf(decision.subject);
-  for (const entry of p.pending) {
+  for (let idx1083 = 0, list1083 = decisions; idx1083 < list1083.length; idx1083++) {
+    const decision = list1083[idx1083] as (typeof list1083)[number];
+    budget += nodesOf(decision.subject);
+  }
+  for (let idx219 = 0, list219 = p.pending; idx219 < list219.length; idx219++) {
+    const entry = list219[idx219] as (typeof list219)[number];
     const nodes = nodesOf(entry.subject);
     budget += nodes;
     if (entry.fired !== false) continue;
     const key = ruleKey(entry);
-    if (!definitions.has(key)) continue;
-    const subjects = carriers.get(key);
-    if (subjects === undefined) carriers.set(key, [entry.subject]);
-    else subjects.push(entry.subject);
-    carrierNodes.set(key, (carrierNodes.get(key) ?? 0) + nodes);
+    if (!mapHas(definitions, key)) continue;
+    const subjects = mapGet(carriers, key);
+    if (subjects === undefined) mapSet(carriers, key, [entry.subject]);
+    else arrayPush(subjects, entry.subject);
+    mapSet(carrierNodes, key, (mapGet(carrierNodes, key) ?? 0) + nodes);
   }
   // The target rules by the exact set of carrier rules selecting them (`Group`), refined
   // carrier by carrier: one step per carrier rule and target rule it selects.
-  const index = new Index(targets);
-  const groupOf = new Map<string, Group>();
-  const top = new Map<string, Group>();
+  const index = new Index(mapEntriesArray(targets));
+  const groupOf = new NativeMap<string, Group>();
+  const top = new NativeMap<string, Group>();
   let groups = 0;
-  for (const key of carriers.keys()) {
-    const carrier = definitions.get(key);
+  for (let idx220 = 0, list220 = mapKeysArray(carriers); idx220 < list220.length; idx220++) {
+    const key = list220[idx220] as (typeof list220)[number];
+    const carrier = mapGet(definitions, key);
     if (carrier === undefined) continue;
-    for (const target of selectedBy(carrier, key, index, targets)) {
-      const parent = groupOf.get(target);
+    for (
+      let idx221 = 0, list221 = setValuesArray(selectedBy(carrier, key, index, targets));
+      idx221 < list221.length;
+      idx221++
+    ) {
+      const target = list221[idx221] as (typeof list221)[number];
+      const parent = mapGet(groupOf, target);
       const children = parent?.refined ?? top;
-      let group = children.get(key);
+      let group = mapGet(children, key);
       if (group === undefined) {
-        group = { id: String(groups++), carrier: key, parent, refined: new Map() };
-        children.set(key, group);
+        group = { id: NativeString(groups++), carrier: key, parent, refined: new NativeMap() };
+        mapSet(children, key, group);
       }
-      groupOf.set(target, group);
+      mapSet(groupOf, target, group);
     }
   }
   // Per group, its carriers and their instances, and its decisions.
-  const plans = new Map<Group, Plan>();
-  for (const decision of early) {
-    const group = groupOf.get(ruleKey(decision));
+  const plans = new NativeMap<Group, Plan>();
+  for (let idx222 = 0, list222 = early; idx222 < list222.length; idx222++) {
+    const decision = list222[idx222] as (typeof list222)[number];
+    const group = mapGet(groupOf, ruleKey(decision));
     if (group === undefined) continue;
-    let plan = plans.get(group);
+    let plan = mapGet(plans, group);
     if (plan === undefined) {
       const members: string[] = [];
       let nodes = 0;
       for (let link: Group | undefined = group; link !== undefined; link = link.parent) {
-        members.push(link.carrier);
-        nodes += carrierNodes.get(link.carrier) ?? 0;
+        arrayPush(members, link.carrier);
+        nodes += mapGet(carrierNodes, link.carrier) ?? 0;
       }
       plan = { members, nodes, steps: 0, merged: false };
-      plans.set(group, plan);
+      mapSet(plans, group, plan);
     }
     plan.steps += nodesOf(decision.subject);
   }
@@ -340,27 +410,36 @@ function waitingTargets(
   // segments of the proof). Any other group asks the trie of each of its carriers (`own`, the
   // carrier rule as `ruleId`), where each instance is marked once.
   const saving = (plan: Plan): number => plan.steps * plan.members.length - plan.nodes;
-  const bySaving = [...plans].filter(([, plan]) => saving(plan) > 0);
-  bySaving.sort(([, a], [, b]) => saving(b) - saving(a));
+  const bySaving = arrayFilter(mapEntriesArray(plans), (entry) => saving(entry[1]) > 0);
+  arraySort(bySaving, (x, y) => saving(y[1]) - saving(x[1]));
   const own = new Scope();
-  const ownMarked = new Set<string>();
+  const ownMarked = new NativeSet<string>();
   const merged = new Scope();
   const markAll = (scope: Scope, ruleId: string, key: string): void => {
-    for (const subject of carriers.get(key) ?? []) {
+    for (let idx223 = 0, list223 = mapGet(carriers, key) ?? []; idx223 < list223.length; idx223++) {
+      const subject = list223[idx223] as (typeof list223)[number];
       scope.mark(subject === undefined ? { ruleId } : { ruleId, subject });
     }
   };
-  for (const [group, plan] of bySaving) {
+  for (let idx224 = 0, list224 = bySaving; idx224 < list224.length; idx224++) {
+    const tuple1084 = list224[idx224] as (typeof list224)[number];
+    const group = tuple1084[0];
+    const plan = tuple1084[1];
     if (plan.nodes > budget) continue;
     budget -= plan.nodes;
     plan.merged = true;
-    for (const key of plan.members) markAll(merged, group.id, key);
+    for (let idx1085 = 0, list1085 = plan.members; idx1085 < list1085.length; idx1085++) {
+      const key = list1085[idx1085] as (typeof list1085)[number];
+      markAll(merged, group.id, key);
+    }
   }
-  for (const plan of plans.values()) {
+  for (let idx225 = 0, list225 = mapValuesArray(plans); idx225 < list225.length; idx225++) {
+    const plan = list225[idx225] as (typeof list225)[number];
     if (plan.merged) continue;
-    for (const key of plan.members) {
-      if (ownMarked.has(key)) continue;
-      ownMarked.add(key);
+    for (let idx226 = 0, list226 = plan.members; idx226 < list226.length; idx226++) {
+      const key = list226[idx226] as (typeof list226)[number];
+      if (setHas(ownMarked, key)) continue;
+      setAdd(ownMarked, key);
       markAll(own, key, key);
     }
   }
@@ -370,14 +449,15 @@ function waitingTargets(
     const at = subject === undefined ? { ruleId } : { ruleId, subject };
     return scope.covers(at) || scope.within(at);
   };
-  for (const decision of early) {
-    const group = groupOf.get(ruleKey(decision));
-    const plan = group && plans.get(group);
+  for (let idx227 = 0, list227 = early; idx227 < list227.length; idx227++) {
+    const decision = list227[idx227] as (typeof list227)[number];
+    const group = mapGet(groupOf, ruleKey(decision));
+    const plan = group && mapGet(plans, group);
     if (group === undefined || plan === undefined) continue;
     const { subject } = decision;
     const waited = plan.merged
       ? reaches(merged, group.id, subject)
-      : plan.members.some((key) => reaches(own, key, subject));
+      : arraySome(plan.members, (key) => reaches(own, key, subject));
     if (!waited) continue;
     invalid(
       `target decided as if its carrier were not pending: ${citeName(instanceKey(decision))}`,
@@ -398,37 +478,39 @@ function recordedExceptions(
   losers: ReadonlySet<string>,
   invalid: (message: string, carrier: RuleIdentity) => void,
 ): void {
-  const records = new Map<string, string[]>();
-  for (const exception of p.exceptions) {
+  const records = new NativeMap<string, string[]>();
+  for (let idx228 = 0, list228 = p.exceptions; idx228 < list228.length; idx228++) {
+    const exception = list228[idx228] as (typeof list228)[number];
     const key = instanceKey(exception);
-    const list = records.get(key) ?? [];
-    list.push(signature(exception.kind, exception.output));
-    records.set(key, list);
+    const list = mapGet(records, key) ?? [];
+    arrayPush(list, signature(exception.kind, exception.output));
+    mapSet(records, key, list);
   }
-  const fired: { ruleId: string; version: number; subject?: string }[] = [
-    ...p.applied,
-    ...p.pending.filter((entry) => entry.fired === true),
-    ...p.skipped.filter((skip) => !stopsCarrier(skip.reason)),
-  ];
-  const seen = new Set<string>();
-  const signatures = new Map<string, string[]>();
-  for (const instance of fired) {
+  const fired: { ruleId: string; version: number; subject?: string }[] = arrayConcat(
+    p.applied,
+    arrayFilter(p.pending, (entry) => entry.fired === true),
+    arrayFilter(p.skipped, (skip) => !stopsCarrier(skip.reason)),
+  );
+  const seen = new NativeSet<string>();
+  const signatures = new NativeMap<string, string[]>();
+  for (let idx229 = 0, list229 = fired; idx229 < list229.length; idx229++) {
+    const instance = list229[idx229] as (typeof list229)[number];
     const key = instanceKey(instance);
-    if (seen.has(key)) continue;
-    seen.add(key);
+    if (setHas(seen, key)) continue;
+    setAdd(seen, key);
     const ruleOf = ruleKey(instance);
-    const definition = definitions.get(ruleOf);
+    const definition = mapGet(definitions, ruleOf);
     if (definition === undefined) continue;
-    const recorded = (records.get(key) ?? []).sort();
+    const recorded = arraySort(mapGet(records, key) ?? []);
     // A definition's signatures derive from it alone: once per rule.
-    let defined = signatures.get(ruleOf);
+    let defined = mapGet(signatures, ruleOf);
     if (defined === undefined) {
       defined = definedSignatures(definition);
-      signatures.set(ruleOf, defined);
+      mapSet(signatures, ruleOf, defined);
     }
-    const same = losers.has(key)
-      ? recorded.length === 1 && defined.includes(recorded[0] ?? '')
-      : recorded.length === defined.length && recorded.every((s, i) => s === defined[i]);
+    const same = setHas(losers, key)
+      ? recorded.length === 1 && arrayIncludes(defined, elementOf(recorded, 0) ?? '')
+      : recorded.length === defined.length && arrayEvery(recorded, (s, i) => s === defined[i]);
     if (same) continue;
     const { ruleId: id, version, subject } = instance;
     const carrier = subject === undefined ? { id, version } : { id, version, subject };

@@ -19,6 +19,7 @@ import type { UnsaltedProof } from '../src/index.js';
 import { hex, nodeSha256, referenceRoot } from './hashing.js';
 import { specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, unsalted, unsigned } from './proof-cases.js';
+import { UNCHECKED } from './notices.js';
 
 /** The content of the signing tests' proof, written in `format`. */
 const contentIn = (format: string): UnsaltedProof =>
@@ -43,11 +44,14 @@ describe('the format policy (D-6)', () => {
     const proof = sealProof(contentIn(format));
     expect(proof.format).toBe(format);
     expect(validateProof(proof)).toEqual({ errors: [], issues: [] });
-    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(proof)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     const trusted = { 'executor-1': RFC_PUBLIC };
     expect(
       verifyProof(signProof(proof, RFC_SECRET, 'executor-1'), { trustedKeys: trusted }),
-    ).toEqual({ status: 'authentic', issues: [] });
+    ).toEqual({ status: 'authentic', issues: UNCHECKED });
   });
 
   it.each(PROOF_FORMATS)('the domain tag of D-16 is the format of the proof: %s', (format) => {

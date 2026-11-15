@@ -27,9 +27,11 @@ describe('toReferenceDate: forms', () => {
     expect(toReferenceDate(new Date(0))).toBe('1970-01-01T00:00:00.000Z');
   });
 
-  it('accepts a Date from another realm', () => {
+  it('refuses a Date from another realm: convert it to a string first', () => {
     const foreign = runInNewContext('new Date(86400000)') as Date;
-    expect(toReferenceDate(foreign)).toBe('1970-01-02T00:00:00.000Z');
+    expect(specError(() => toReferenceDate(foreign)).message).toContain(
+      'a Date with a foreign prototype',
+    );
   });
 
   it.each([

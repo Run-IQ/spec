@@ -5,6 +5,29 @@ import type { JsonPointer } from '../path/pointer.js';
 import { isReservedName, reservedDatePointerMessage } from '../reserved.js';
 import { typeName } from '../values.js';
 import { isUnnamable, reservedDimensionNameMessage, unnamableNameMessage } from './dimensions.js';
+import {
+  NativeMap,
+  arrayConcat,
+  arrayEvery,
+  arrayFilter,
+  arrayFind,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayJoin,
+  arrayPush,
+  arraySlice,
+  arraySort,
+  elementOf,
+  mapGet,
+  mapSet,
+  objectHasOwn,
+  objectKeys,
+  objectOfEntries,
+  setOf,
+  setValuesArray,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /** The types an order key compares its values as (`OrderKey`). */
 export type OrderKeyType = 'number' | 'decimal' | 'date' | 'dateTime' | 'string';
@@ -106,15 +129,16 @@ export function readForEach(value: JsonValue, add: Add): ForEach | undefined {
     fail('forEach', SHAPE);
     return undefined;
   }
-  const forEach = Object.hasOwn(value, 'segments')
+  const forEach = objectHasOwn(value, 'segments')
     ? readSegmentsForm(value, fail)
     : readCollection(value, fail);
   return valid ? forEach : undefined;
 }
 
 function readCollection(value: JsonObject, fail: Add): Collection | undefined {
-  for (const key of Object.keys(value)) {
-    if (!COLLECTION_KEYS.includes(key)) {
+  for (let idx9 = 0, list9 = objectKeys(value); idx9 < list9.length; idx9++) {
+    const key = list9[idx9] as (typeof list9)[number];
+    if (!arrayIncludes(COLLECTION_KEYS, key)) {
       fail(`forEach.${key}`, `forEach has an unknown key ${quoteText(key)}`);
     }
   }
@@ -151,7 +175,7 @@ function readCollection(value: JsonObject, fail: Add): Collection | undefined {
 
   const out: Collection = { path: value.path, key };
   if (orderBy !== undefined && orderBy.length > 0) out.orderBy = orderBy;
-  if (dimensions !== undefined && Object.keys(dimensions).length > 0) out.dimensions = dimensions;
+  if (dimensions !== undefined && objectKeys(dimensions).length > 0) out.dimensions = dimensions;
   if (recurse !== undefined) out.recurse = recurse;
   if (groupBy !== undefined) out.groupBy = groupBy;
   return out;
@@ -162,8 +186,8 @@ function readCollection(value: JsonObject, fail: Add): Collection | undefined {
  * refused on its own (so it does not meet `groupBy` too, as in the JSON Schema).
  */
 function isNonEmpty(value: JsonValue | undefined): boolean {
-  if (Array.isArray(value)) return value.length > 0;
-  return isJsonObject(value) && Object.keys(value).length > 0;
+  if (arrayIsArray(value)) return value.length > 0;
+  return isJsonObject(value) && objectKeys(value).length > 0;
 }
 
 /** The number of levels of a valid `forEach.path`, or `undefined` after reporting why not. */
@@ -189,18 +213,20 @@ export function readCollectionPath(value: unknown, at: string, fail: Add): numbe
     fail(at, `${citeName(at)} ${problem}`);
     return undefined;
   }
-  return segments.filter((segment) => segment === '*').length + 1;
+  return arrayFilter(segments, (segment) => segment === '*').length + 1;
 }
 
 /** What is wrong with the decoded segments of a `forEach.path`, or `undefined`. */
 function pathProblem(segments: readonly string[]): string | undefined {
-  const [first] = segments;
+  const tuple10 = segments;
+  const first = elementOf(tuple10, 0);
   if (first === undefined) return 'must name a collection, not the whole input';
   if (first === '*') return 'must start with a collection name, not "*"';
   if (isReservedName(first)) {
     return `must point into the input data: ${quoteText(first)} is an engine variable`;
   }
-  for (const [i, segment] of segments.entries()) {
+  for (let i = 0; i < segments.length; i++) {
+    const segment = segments[i] as string;
     if (segment === '-') return NO_DASH;
     if (segment === '*') {
       if (i === segments.length - 1) return 'must end with a collection name, not "*"';
@@ -228,13 +254,13 @@ function readKey(
     fail(at, `${citeName(at)} must not be empty`);
     return undefined;
   }
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     fail(at, `${citeName(at)} must be a member name or a list of member names, one per level`);
     return undefined;
   }
   const names: string[] = [];
-  value.forEach((name, i) => {
-    if (typeof name === 'string' && name !== '') names.push(name);
+  arrayForEach(value, (name, i) => {
+    if (typeof name === 'string' && name !== '') arrayPush(names, name);
     else fail(`${at}[${i}]`, `${citeName(at)}[${i}] must be a non-empty string`);
   });
   if (names.length !== value.length || levels === undefined) return undefined;
@@ -242,38 +268,40 @@ function readKey(
     fail(at, `${citeName(at)} has ${count(names.length, 'name')} for ${count(levels, 'level')}`);
     return undefined;
   }
-  const [first = ''] = names;
-  return names.every((name) => name === first) ? first : names;
+  const tuple11 = names;
+  const first = elementOf(tuple11, 0) ?? '';
+  return arrayEvery(names, (name) => name === first) ? first : names;
 }
 
 function readOrderBy(value: JsonValue, fail: Add): OrderKey[] | undefined {
   const at = 'forEach.orderBy';
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     fail(at, `${citeName(at)} must be a list of order keys { path, type, dir }`);
     return undefined;
   }
   const keys: OrderKey[] = [];
-  const firstAt = new Map<string, number>();
-  value.forEach((item, i) => {
+  const firstAt = new NativeMap<string, number>();
+  arrayForEach(value, (item, i) => {
     const here = `${at}[${i}]`;
     if (!isJsonObject(item)) {
       fail(here, `${citeName(here)} must be an order key { path, type, dir }`);
       return;
     }
-    for (const key of Object.keys(item)) {
-      if (!ORDER_KEYS.includes(key)) {
+    for (let idx12 = 0, list12 = objectKeys(item); idx12 < list12.length; idx12++) {
+      const key = list12[idx12] as (typeof list12)[number];
+      if (!arrayIncludes(ORDER_KEYS, key)) {
         fail(`${here}.${key}`, `${citeName(here)} has an unknown key ${quoteText(key)}`);
       }
     }
     const path = readMember(item.path, `${here}.path`, fail);
-    const type = ORDER_TYPES.find((t) => t === item.type);
+    const type = arrayFind(ORDER_TYPES, (t) => t === item.type);
     if (type === undefined) {
-      fail(`${here}.type`, `${citeName(here)}.type must be one of ${ORDER_TYPES.join(', ')}`);
+      fail(`${here}.type`, `${citeName(here)}.type must be one of ${arrayJoin(ORDER_TYPES, ', ')}`);
     }
     const dir = item.dir === 'asc' || item.dir === 'desc' ? item.dir : undefined;
     if (dir === undefined) fail(`${here}.dir`, `${citeName(here)}.dir must be asc or desc`);
     if (path === undefined) return;
-    const earlier = firstAt.get(path);
+    const earlier = mapGet(firstAt, path);
     if (earlier !== undefined) {
       fail(
         `${here}.path`,
@@ -282,8 +310,8 @@ function readOrderBy(value: JsonValue, fail: Add): OrderKey[] | undefined {
       );
       return;
     }
-    firstAt.set(path, i);
-    if (type !== undefined && dir !== undefined) keys.push({ path, type, dir });
+    mapSet(firstAt, path, i);
+    if (type !== undefined && dir !== undefined) arrayPush(keys, { path, type, dir });
   });
   return keys.length === value.length ? keys : undefined;
 }
@@ -295,8 +323,9 @@ function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer
     return undefined;
   }
   const entries: [string, JsonPointer][] = [];
-  const names = Object.keys(value).sort();
-  for (const name of names) {
+  const names = arraySort(objectKeys(value));
+  for (let idx13 = 0, list13 = names; idx13 < list13.length; idx13++) {
+    const name = list13[idx13] as (typeof list13)[number];
     const here = `${at}.${name}`;
     if (isUnnamable(name)) {
       fail(at, unnamableNameMessage(at, 'dimension', name));
@@ -304,11 +333,11 @@ function readDimensions(value: JsonValue, fail: Add): Record<string, JsonPointer
       fail(here, reservedDimensionNameMessage(here));
     } else {
       const pointer = readMember(value[name], here, fail);
-      if (pointer !== undefined) entries.push([name, pointer]);
+      if (pointer !== undefined) arrayPush(entries, [name, pointer]);
     }
   }
   // `Object.fromEntries` defines own properties: a `__proto__` name stays data.
-  return entries.length === names.length ? Object.fromEntries(entries) : undefined;
+  return entries.length === names.length ? objectOfEntries(entries) : undefined;
 }
 
 /**
@@ -338,7 +367,8 @@ function readSegmentsForm(
   value: JsonObject,
   fail: Add,
 ): { segments: { from: JsonPointer; until: JsonPointer; facts: JsonPointer[] } } | undefined {
-  for (const key of Object.keys(value)) {
+  for (let idx14 = 0, list14 = objectKeys(value); idx14 < list14.length; idx14++) {
+    const key = list14[idx14] as (typeof list14)[number];
     if (key !== 'segments') {
       fail(`forEach.${key}`, `forEach.${citeName(key)} cannot be combined with forEach.segments`);
     }
@@ -349,8 +379,9 @@ function readSegmentsForm(
     fail(at, `${citeName(at)} must be an object { from, until, facts }`);
     return undefined;
   }
-  for (const key of Object.keys(segments)) {
-    if (!SEGMENTS_KEYS.includes(key)) {
+  for (let idx15 = 0, list15 = objectKeys(segments); idx15 < list15.length; idx15++) {
+    const key = list15[idx15] as (typeof list15)[number];
+    if (!arrayIncludes(SEGMENTS_KEYS, key)) {
       fail(`${at}.${key}`, `${citeName(at)} has an unknown key ${quoteText(key)}`);
     }
   }
@@ -373,7 +404,10 @@ function readSegmentsForm(
 function readNamedDate(value: JsonValue | undefined, at: string, fail: Add): string | undefined {
   const segments = pointerSegments(value, at, fail);
   if (segments === undefined) return undefined;
-  const [head, name, ...rest] = segments;
+  const tuple16 = segments;
+  const head = elementOf(tuple16, 0);
+  const name = elementOf(tuple16, 1);
+  const rest = arraySlice(tuple16, 2);
   if (head === '$dates' && name !== undefined && isReservedName(name) && !rest.length) {
     fail(at, reservedDatePointerMessage(at));
     return undefined;
@@ -387,27 +421,28 @@ function readNamedDate(value: JsonValue | undefined, at: string, fail: Add): str
 
 /** The facts of `segments`, sorted by pointer without duplicates, or `undefined`. */
 function readFacts(value: JsonValue | undefined, at: string, fail: Add): string[] | undefined {
-  if (!Array.isArray(value)) {
+  if (!arrayIsArray(value)) {
     fail(at, `${citeName(at)} must be a list of JSON pointers to facts`);
     return undefined;
   }
   const facts: string[] = [];
-  value.forEach((item, i) => {
+  arrayForEach(value, (item, i) => {
     const here = `${at}[${i}]`;
     const segments = pointerSegments(item, here, fail);
     if (segments === undefined || typeof item !== 'string') return;
-    const [first] = segments;
+    const tuple17 = segments;
+    const first = elementOf(tuple17, 0);
     const problem =
       first === undefined
         ? 'must name a fact, not the whole input'
         : isReservedName(first)
           ? `must point into the input data: ${quoteText(first)} is an engine variable`
           : onePointProblem(segments);
-    if (problem === undefined) facts.push(item);
+    if (problem === undefined) arrayPush(facts, item);
     else fail(here, `${citeName(here)} ${problem}`);
   });
   if (facts.length !== value.length) return undefined;
-  return [...new Set(facts)].sort(comparePointers);
+  return arraySort(arrayConcat(setValuesArray(setOf(facts))), comparePointers);
 }
 
 /** The decoded segments of a pointer, or `undefined` after reporting why it is not one. */
@@ -426,12 +461,12 @@ function pointerSegments(value: unknown, at: string, fail: Add): string[] | unde
 
 /** A pointer that names one value has no `*` (a wildcard) and no `-` segment. */
 function onePointProblem(segments: readonly string[]): string | undefined {
-  if (segments.includes('*')) return 'must not hold a "*" segment: it names one value';
-  return segments.includes('-') ? NO_DASH : undefined;
+  if (arrayIncludes(segments, '*')) return 'must not hold a "*" segment: it names one value';
+  return arrayIncludes(segments, '-') ? NO_DASH : undefined;
 }
 
 function subjectSegmentProblem(segments: readonly string[]): string | undefined {
-  const marked = segments.find(marksSubject);
+  const marked = arrayFind(segments, marksSubject);
   return marked === undefined
     ? undefined
     : `segment ${quoteText(marked)} must not start with "@" or "!": these mark subjects`;
@@ -439,7 +474,7 @@ function subjectSegmentProblem(segments: readonly string[]): string | undefined 
 
 /** `@` starts an element segment and `!` a reserved one, in a subject (D-2). */
 function marksSubject(segment: string): boolean {
-  return segment.startsWith('@') || segment.startsWith('!');
+  return stringStartsWith(segment, '@') || stringStartsWith(segment, '!');
 }
 
 function count(n: number, noun: string): string {
@@ -447,5 +482,5 @@ function count(n: number, noun: string): string {
 }
 
 function isJsonObject(value: JsonValue | undefined): value is JsonObject {
-  return typeof value === 'object' && value !== null && !Array.isArray(value);
+  return typeof value === 'object' && value !== null && !arrayIsArray(value);
 }

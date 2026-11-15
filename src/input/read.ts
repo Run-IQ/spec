@@ -6,18 +6,55 @@ import type { RuleValidationIssue } from '../issues.js';
 import { withSha256, writeJsonString } from '../stream.js';
 import type { HashStream } from '../stream.js';
 import {
-  dateTimeOf,
-  hasLoneSurrogate,
-  isPlainObject,
-  holeMessage,
-  loneSurrogateMessage,
   MAX_INPUT_LEAF_TEXT,
   MAX_JSON_DEPTH,
+  dateTimeOf,
+  hasLoneSurrogate,
+  holeMessage,
+  isPlainObject,
+  loneSurrogateMessage,
+  notADateMessage,
+  own,
   spendValues,
   tooLargeMessage,
   undefinedMessage,
   withValueBudget,
 } from '../values.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeString,
+  arrayConcat,
+  arrayForEach,
+  arrayIncludes,
+  arrayIsArray,
+  arrayPop,
+  arrayPush,
+  arraySome,
+  arraySort,
+  bare,
+  defineValue,
+  hasOwnKey,
+  jsonStringify,
+  mapDelete,
+  mapGet,
+  mapHas,
+  mapSet,
+  mathAbs,
+  mathMax,
+  mathMin,
+  numberIsFinite,
+  numberIsSafeInteger,
+  objectIs,
+  objectKeys,
+  reflectGet,
+  reflectHas,
+  setAdd,
+  setHas,
+  stringCharCodeAt,
+  stringReplace,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * Internal to `@run-iq/spec`: reading a proof input once, without recursion and without ever
@@ -80,7 +117,7 @@ export const LEAF_TEXT_CAP = MAX_INPUT_LEAF_TEXT + 1;
 
 /** `a + b`, stopped at `LEAF_TEXT_CAP` (every count it adds is at least 0). */
 export function addText(a: number, b: number): number {
-  return Math.min(a + b, LEAF_TEXT_CAP);
+  return mathMin(a + b, LEAF_TEXT_CAP);
 }
 
 /**
@@ -120,14 +157,14 @@ function createReader(options: ReaderOptions): Reader {
     depthIssues: 0,
     reads: 0,
     maxDepth: MAX_JSON_DEPTH,
-    walked: new Map(),
+    walked: new NativeMap(),
     leafText: 0,
   };
-  return {
+  return bare({
     ...reader,
-    ...(options.encode === true ? { encodings: new Map() } : {}),
-    ...(options.copy === true ? { copies: new Map() } : {}),
-  };
+    ...(own(options, 'encode') === true ? { encodings: new NativeMap() } : {}),
+    ...(own(options, 'copy') === true ? { copies: new NativeMap() } : {}),
+  });
 }
 
 /**
@@ -178,7 +215,7 @@ export function announce(reader: Reader, n: number, path: string): void {
 export function escapedLength(key: string): number {
   let length = key.length;
   for (let i = 0; i < key.length; i++) {
-    const code = key.charCodeAt(i);
+    const code = stringCharCodeAt(key, i);
     if (code === 0x7e || code === 0x2f) length += 1;
   }
   return length;
@@ -186,7 +223,7 @@ export function escapedLength(key: string): number {
 
 /** The pointer of the member `key` of the value at `pointer` (RFC 6901 escapes). */
 export function childPointer(pointer: string, key: string): string {
-  return `${pointer}/${key.replace(/~/g, '~0').replace(/\//g, '~1')}`;
+  return `${pointer}/${stringReplace(stringReplace(key, /~/g, '~0'), /\//g, '~1')}`;
 }
 
 /** The message refusing a key of the object at `path` that holds a lone UTF-16 surrogate. */
@@ -222,7 +259,7 @@ export function expectPlainObject(
  */
 export function ownKeys(value: object, path: string, add: Add): string[] | undefined {
   try {
-    return Object.keys(value);
+    return objectKeys(value);
   } catch (error) {
     add(path, unreadableMessage(path, error));
     return undefined;
@@ -240,7 +277,7 @@ export function readMember(
   add: Add,
 ): { value: unknown } | 'failed' {
   try {
-    const member: unknown = Reflect.get(value, key);
+    const member: unknown = reflectGet(value, key);
     return { value: member };
   } catch (error) {
     add(path, unreadableMessage(path, error));
@@ -262,7 +299,7 @@ export function readElement(
 ): { value: unknown } | 'failed' {
   const path = `${listPath}/${index}`;
   try {
-    if (!Reflect.has(list, index)) {
+    if (!reflectHas(list, index)) {
       add(listPath, holeMessage(listPath, index));
       return 'failed';
     }
@@ -304,21 +341,22 @@ export function readFields(
   reader: Reader,
   options: { add?: Add; join?: (path: string, key: string) => string } = {},
 ): Fields | undefined {
-  const add = options.add ?? reader.add;
-  const join = options.join ?? childPointer;
+  const add = own(options, 'add') ?? reader.add;
+  const join = own(options, 'join') ?? childPointer;
   const keys = ownKeys(value, path, add);
   if (keys === undefined) return undefined;
   announce(reader, keys.length, path);
-  const values = new Map<string, unknown>();
-  const failed = new Set<string>();
-  for (const key of keys) {
+  const values = new NativeMap<string, unknown>();
+  const failed = new NativeSet<string>();
+  for (let idx90 = 0, list90 = keys; idx90 < list90.length; idx90++) {
+    const key = list90[idx90] as (typeof list90)[number];
     const at = hasLoneSurrogate(key) ? path : join(path, key);
     const read = readMember(value, key, at, add);
     if (read !== 'failed' && read.value === undefined) continue;
-    if (!known.includes(key)) {
+    if (!arrayIncludes(known, key)) {
       if (read !== 'failed') add(at, `${citeName(label)} has an unknown key ${quoteText(key)}`);
-    } else if (read === 'failed') failed.add(key);
-    else values.set(key, read.value);
+    } else if (read === 'failed') setAdd(failed, key);
+    else mapSet(values, key, read.value);
   }
   return { values, failed };
 }
@@ -331,8 +369,9 @@ export function requireFields(
   add: Add,
   join: (path: string, key: string) => string = childPointer,
 ): void {
-  for (const key of required) {
-    if (!fields.values.has(key) && !fields.failed.has(key)) {
+  for (let idx91 = 0, list91 = required; idx91 < list91.length; idx91++) {
+    const key = list91[idx91] as (typeof list91)[number];
+    if (!mapHas(fields.values, key) && !setHas(fields.failed, key)) {
       add(join(path, key), `${citeName(join(path, key))} is required`);
     }
   }
@@ -364,8 +403,8 @@ export function markRead(
   key: string,
   copy: { [key: string]: JsonValue } | undefined,
 ): void {
-  reader.walked.set(node, { height: 1, size: 1, leaves: 1, units: 1 + escapedLength(key) });
-  if (copy !== undefined) reader.copies?.set(node, copy);
+  mapSet(reader.walked, node, { height: 1, size: 1, leaves: 1, units: 1 + escapedLength(key) });
+  if (copy !== undefined && reader.copies !== undefined) mapSet(reader.copies, node, copy);
 }
 
 /** One object or list being walked by `walkJson`. */
@@ -456,14 +495,14 @@ export function walkJson(
       rootCount = { leaves: value.leaves, units: value.units };
       return;
     }
-    parent.height = Math.max(parent.height, value.height + 1);
+    parent.height = mathMax(parent.height, value.height + 1);
     parent.size += value.size;
     if (value.cut) parent.cut = true;
     // Each leaf below the member adds the member's segment (`/` and its escaped key).
-    const segment = 1 + escapedLength(String(parent.pending));
+    const segment = 1 + escapedLength(NativeString(parent.pending));
     parent.leaves += value.leaves;
     parent.units = addText(parent.units, addText(value.units, value.leaves * segment));
-    if (keepParts) parent.parts.push([parent.pending, encoding, copy]);
+    if (keepParts) arrayPush(parent.parts, [parent.pending, encoding, copy]);
   };
   const visit = (value: unknown, at: string, depth: number, isRoot: boolean): void => {
     const contentBefore = contentIssues(reader);
@@ -474,18 +513,27 @@ export function walkJson(
       const copy = clean && reader.copies !== undefined ? scalarCopy(value) : undefined;
       if (copy !== undefined) copyWork.values += 1;
       settle(leaf, clean ? scalarEncoding(value) : undefined, copy);
-    } else if (!('node' in opened)) {
+    } else if (!hasOwnKey(opened, 'node')) {
       const shared = opened.cut || typeof value !== 'object' || value === null ? undefined : value;
-      const encoding = shared === undefined ? undefined : reader.encodings?.get(shared);
-      settle(opened, encoding, shared === undefined ? undefined : reader.copies?.get(shared));
-    } else stack.push(opened);
+      const encoding =
+        shared === undefined || reader.encodings === undefined
+          ? undefined
+          : mapGet(reader.encodings, shared);
+      settle(
+        opened,
+        encoding,
+        shared === undefined || reader.copies === undefined
+          ? undefined
+          : mapGet(reader.copies, shared),
+      );
+    } else arrayPush(stack, opened);
   };
   visit(root, path, 0, true);
   while (stack.length > 0) {
     const frame = stack[stack.length - 1];
     if (frame === undefined) break;
     if (frame.index >= frame.length) {
-      stack.pop();
+      arrayPop(stack);
       const clean = !frame.cut && contentIssues(reader) === frame.contentBefore;
       const encoding =
         reader.encodings !== undefined && clean ? containerEncoding(frame) : undefined;
@@ -493,16 +541,17 @@ export function walkJson(
       if (copy !== undefined) copyWork.values += 1;
       // An empty object or list is a leaf, and so is any list (its elements have their own).
       if (frame.length === 0 || frame.keys === undefined) frame.leaves += 1;
-      if (frame.cut || !frame.kept) reader.walked.delete(frame.node);
+      if (frame.cut || !frame.kept) mapDelete(reader.walked, frame.node);
       else {
-        reader.walked.set(frame.node, {
+        mapSet(reader.walked, frame.node, {
           height: frame.height,
           size: frame.size,
           leaves: frame.leaves,
           units: frame.units,
         });
-        reader.encodings?.set(frame.node, encoding);
-        if (copy !== undefined) reader.copies?.set(frame.node, copy);
+        if (reader.encodings !== undefined) mapSet(reader.encodings, frame.node, encoding);
+        if (copy !== undefined && reader.copies !== undefined)
+          mapSet(reader.copies, frame.node, copy);
       }
       settle(frame, encoding, copy);
       continue;
@@ -540,12 +589,12 @@ function scalarEncoding(value: unknown): string | undefined {
   if (value === null) return 'null';
   switch (typeof value) {
     case 'string':
-      if (value.length <= SHORT_TEXT) return JSON.stringify(value);
+      if (value.length <= SHORT_TEXT) return jsonStringify(value);
       return `~${hashOfText((stream) => writeJsonString(stream, value))}`;
     case 'boolean':
-      return JSON.stringify(value);
+      return jsonStringify(value);
     case 'number':
-      return Number.isFinite(value) ? JSON.stringify(value) : undefined;
+      return numberIsFinite(value) ? jsonStringify(value) : undefined;
     default:
       return undefined;
   }
@@ -562,7 +611,7 @@ function hashOfText(write: (stream: HashStream) => void): string {
 /** The copy of a JSON scalar: the value itself (`-0` written `0`, as `canonicalize` writes it). */
 function scalarCopy(value: unknown): JsonValue | undefined {
   if (value === null || typeof value === 'string' || typeof value === 'boolean') return value;
-  if (typeof value === 'number') return Object.is(value, -0) ? 0 : value;
+  if (typeof value === 'number') return objectIs(value, -0) ? 0 : value;
   return undefined;
 }
 
@@ -573,20 +622,18 @@ function scalarCopy(value: unknown): JsonValue | undefined {
 function containerCopy(frame: Frame): JsonValue | undefined {
   if (frame.parts.length !== frame.length) return undefined;
   const copies: JsonValue[] = [];
-  for (const [, , copy] of frame.parts) {
+  for (let idx92 = 0, list92 = frame.parts; idx92 < list92.length; idx92++) {
+    const tuple1022 = list92[idx92] as (typeof list92)[number];
+    const copy = tuple1022[2];
     if (copy === undefined) return undefined;
-    copies.push(copy);
+    arrayPush(copies, copy);
   }
   if (frame.keys === undefined) return copies;
-  const out: { [k: string]: JsonValue } = {};
-  frame.parts.forEach(([key], i) => {
+  const out: { [k: string]: JsonValue } = bare({});
+  arrayForEach(frame.parts, (part, i) => {
+    const key = part[0];
     // Plain assignment would turn a `__proto__` key into a prototype change.
-    Object.defineProperty(out, String(key), {
-      value: copies[i],
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
+    defineValue(out, NativeString(key), copies[i], true);
   });
   return out;
 }
@@ -597,18 +644,22 @@ function containerCopy(frame: Frame): JsonValue | undefined {
  * scalar's JSON text); `undefined` when a member has none (a problem was reported).
  */
 function containerEncoding(frame: Frame): string | undefined {
-  if (frame.parts.some(([, encoding]) => encoding === undefined)) return undefined;
+  if (arraySome(frame.parts, (part) => part[1] === undefined)) return undefined;
   if (frame.parts.length !== frame.length) return undefined;
   const parts =
     frame.keys === undefined
       ? frame.parts
-      : [...frame.parts].sort(([a], [b]) => (String(a) < String(b) ? -1 : 1));
+      : arraySort(arrayConcat(frame.parts), (x, y) =>
+          NativeString(x[0]) < NativeString(y[0]) ? -1 : 1,
+        );
   const hash = hashOfText((stream) => {
     stream.text(frame.keys === undefined ? '[' : '{');
-    parts.forEach(([key, encoding], i) => {
+    arrayForEach(parts, (part, i) => {
+      const key = part[0];
+      const encoding = part[1];
       if (i > 0) stream.text(',');
       if (frame.keys !== undefined) {
-        writeJsonString(stream, String(key));
+        writeJsonString(stream, NativeString(key));
         stream.text(':');
       }
       stream.text(encoding ?? '');
@@ -641,8 +692,8 @@ function openValue(
       if (hasLoneSurrogate(value)) add(path, loneSurrogateMessage(path));
       return undefined;
     case 'number':
-      if (!Number.isFinite(value)) return notJson(String(value));
-      if (Math.abs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${citeName(path)}`);
+      if (!numberIsFinite(value)) return notJson(NativeString(value));
+      if (mathAbs(value) >= 2 ** 53) add(path, `number beyond 2^53 at ${citeName(path)}`);
       return undefined;
     case 'boolean':
       return undefined;
@@ -661,18 +712,19 @@ function openValue(
   if (typeof value !== 'object' || value === null) return undefined;
   const node = value;
   try {
-    if (!Array.isArray(node) && !isPlainObject(node)) {
+    if (!arrayIsArray(node) && !isPlainObject(node)) {
       return notJson(
-        dateTimeOf(node) === undefined
-          ? 'an object that is neither plain nor an array'
-          : 'a Date: write it as a string',
+        notADateMessage(node) ??
+          (dateTimeOf(node) === undefined
+            ? 'an object that is neither plain nor an array'
+            : 'a Date: write it as a string'),
       );
     }
   } catch (error) {
     add(path, unreadableMessage(path, error));
     return undefined;
   }
-  const seen = reader.walked.get(node);
+  const seen = mapGet(reader.walked, node);
   if (seen === 'open') return notJson('a circular reference');
   // A walked object that still fits here is not read again, but its values are counted again:
   // the JSON text holds them once per path. One that does not fit is walked again from here,
@@ -684,11 +736,11 @@ function openValue(
   let keys: string[] | undefined;
   let length: number;
   try {
-    if (Array.isArray(node)) {
+    if (arrayIsArray(node)) {
       const announced: unknown = node.length;
       length = typeof announced === 'number' ? announced : NaN;
     } else {
-      keys = Object.keys(node);
+      keys = objectKeys(node);
       length = keys.length;
     }
   } catch (error) {
@@ -696,7 +748,7 @@ function openValue(
     return undefined;
   }
   // Only a Proxy can announce such a length.
-  if (!Number.isSafeInteger(length) || length < 0) return notJson('a list with an invalid length');
+  if (!numberIsSafeInteger(length) || length < 0) return notJson('a list with an invalid length');
   if (keys !== undefined) keys = checkKeys(keys, path, add, reservedRoot);
   const count = keys === undefined ? length : keys.length;
   announce(reader, count, path);
@@ -704,7 +756,7 @@ function openValue(
     reportTooDeep(path, reader);
     return { height: 1, cut: true, size: count, leaves: 0, units: 0 };
   }
-  reader.walked.set(node, 'open');
+  mapSet(reader.walked, node, 'open');
   return {
     node,
     path,
@@ -732,12 +784,13 @@ function checkKeys(
   reservedRoot: boolean,
 ): string[] {
   const kept: string[] = [];
-  for (const key of keys) {
+  for (let idx93 = 0, list93 = keys; idx93 < list93.length; idx93++) {
+    const key = list93[idx93] as (typeof list93)[number];
     if (hasLoneSurrogate(key)) add(path, surrogateKeyMessage(path, key));
-    else if (reservedRoot && key.startsWith('$')) {
+    else if (reservedRoot && stringStartsWith(key, '$')) {
       const at = childPointer(path, key);
       add(at, `reserved key ${citeName(at)}`);
-    } else kept.push(key);
+    } else arrayPush(kept, key);
   }
   return kept;
 }

@@ -151,10 +151,12 @@ describe('formatPointer', () => {
   });
 
   it('turns a hostile list into INVALID_PATH, never a raw error', () => {
+    // Elements are read as own data properties (`getOwnPropertyDescriptor`): that is the trap
+    // spec runs, and a `get` trap is never consulted (it could answer otherwise each time).
     const hostile = new Proxy(['a'], {
-      get(target, key, receiver) {
+      getOwnPropertyDescriptor(target, key) {
         if (key === '0') throw new Error('trap');
-        return Reflect.get(target, key, receiver) as unknown;
+        return Reflect.getOwnPropertyDescriptor(target, key);
       },
     });
     const error = specError(() => formatPointer(hostile));

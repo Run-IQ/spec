@@ -39,6 +39,7 @@ import { unsaltedSalt } from '../proof-cases.js';
 import { unsalted } from '../proof-cases.js';
 import type { PlainProof } from '../proof-cases.js';
 import type { ProofView } from '../../src/proof/types.js';
+import { NOT_REPLAYED, UNCHECKED } from '../notices.js';
 
 /** A rule with every part the readers walk: free-form values, lists, specs, exceptions. */
 const RICH_RULE: RuleDefinitionInput = {
@@ -57,15 +58,14 @@ const RICH_RULE: RuleDefinitionInput = {
   effectiveFrom: new Date('2025-01-01T00:00:00.000Z'),
   effectiveUntil: '2026-01-01T00:00:00.000Z',
   output: 'vat',
-  dimensions: { country: 'TG', regime: { anyOf: ['normal', 'reel'] }, gone: null },
+  dimensions: { country: 'TG', regime: { anyOf: ['normal', 'reel'] }, gone: undefined },
   tags: ['vat', 'fiscal'],
   exceptions: [
     { kind: 'substitute', targets: { tags: ['vat'] }, params: { rate: 0.1, scope: [1, 2] } },
   ],
   forEach: { path: '/factures', key: 'id' },
   checksum: 'stale',
-  jurisdiction: 'NATIONAL',
-  extra: { owner: { team: 'tax' }, flags: [1, 2] },
+  extensions: { jurisdiction: 'NATIONAL', extra: { owner: { team: 'tax' }, flags: [1, 2] } },
 };
 
 const INPUT: ProofInput = proofInput(
@@ -87,6 +87,8 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
   const declared = Array.isArray(value)
     ? ({ type: 'list', combine: 'union' } as const)
     : ({ type: 'object', combine: 'highestPriority' } as const);
+  // The trace says what the rule says: its model and its output.
+  const name = rule.output ?? 'value';
   const proof: ProofView = {
     format: PROOF_FORMAT,
     requestId: 'req-1',
@@ -96,8 +98,14 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     inputSalted: false,
     timeZone: 'UTC',
     ruleSets: [],
-    versions: { engine: '1', plugins: {}, dsls: {}, models: { FLAT: '1' }, components: [] },
-    strata: [['value']],
+    versions: {
+      engine: '1',
+      plugins: {},
+      dsls: {},
+      models: { [rule.model]: '1' },
+      components: [],
+    },
+    strata: [[name]],
     rules: [
       {
         id: 'r1',
@@ -110,7 +118,7 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
     ],
     outputs: [
       {
-        name: 'value',
+        name,
         ...declared,
         status: 'determined',
         value,
@@ -125,8 +133,8 @@ function unsignedProof(rule: RuleDefinitionInput, value: JsonValue, contribution
       {
         ruleId: 'r1',
         version: 1,
-        model: 'FLAT',
-        output: 'value',
+        model: rule.model,
+        output: name,
         contribution,
         status: 'determined',
         stratum: 0,
@@ -209,8 +217,13 @@ describe('a value is counted once: the spend counter', () => {
       expect(lastValuesSpent()).toBe(countValues(sealed));
     }
     const rules = [rule];
-    expect(verifyProof(sealed, { rules })).toEqual({ status: 'consistent', issues: ['unsigned'] });
-    expect(lastValuesSpent()).toBe(countValues(sealed) + countValues(rules));
+    expect(verifyProof(sealed, { rules })).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', NOT_REPLAYED],
+    });
+    // The rules given are the options: they have a budget of their own, the proof's alone is
+    // counted here.
+    expect(lastValuesSpent()).toBe(countValues(sealed));
     // The signature signing adds, and its three members, are counted with the content.
     const signed = signProof(sealed, keys.privateKey, 'k1');
     expect(lastValuesSpent()).toBe(countValues(sealed) + 4);
@@ -288,7 +301,10 @@ describe(`the boundary of ${MAX_JSON_VALUES} values is the same for every functi
     expect(countValues(sealed)).toBe(MAX_JSON_VALUES);
     expect(validateProof(sealed).issues).toEqual([]);
     expect(sealProof(unsalted(sealed)).digest).toBe(sealed.digest);
-    expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expect(lastValuesSpent()).toBe(MAX_JSON_VALUES);
 
     const value = (sealed as PlainProof).outputs[0]?.value;
@@ -353,15 +369,18 @@ describe(`the boundary of ${MAX_JSON_VALUES} values is the same for every functi
     const unsigned = unsignedProof(rule, distinct(third), distinct(third));
     const sealed = sealProof(unsalted(unsigned));
     expect(countValues(sealed) + countValues([rule])).toBeGreaterThan(9_900_000);
-    expect(verifyProof(sealed)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(sealed)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expect(verifyProof(sealed, { rules: [rule] })).toEqual({
       status: 'consistent',
-      issues: ['unsigned'],
+      issues: ['unsigned', NOT_REPLAYED],
     });
     const signed: DecisionProof = signProof(sealed, keys.privateKey, 'k1');
     expect(verifyProof(signed, { trustedKeys: { k1: keys.publicKey }, rules: [rule] })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: [NOT_REPLAYED],
     });
   }, 120_000);
 });

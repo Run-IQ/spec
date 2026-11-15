@@ -44,6 +44,7 @@ import {
   fixedCalendar,
   HUMAN_ASSERTION,
   loose,
+  optionError,
   proofInput,
   specError,
   withCounts,
@@ -77,6 +78,16 @@ function claiming(length: number, holeAt?: number): unknown[] {
         return Number(key) !== holeAt;
       }
       return Reflect.has(target, key);
+    },
+    // Spec asks whether an element is its own (a hole is not): the same count as `has`.
+    getOwnPropertyDescriptor(target, key) {
+      if (typeof key === 'string' && /^\d+$/.test(key)) {
+        elementReads += 1;
+        return Number(key) === holeAt
+          ? undefined
+          : { value: 'x', writable: true, enumerable: true, configurable: true };
+      }
+      return Reflect.getOwnPropertyDescriptor(target, key);
     },
   });
 }
@@ -181,8 +192,8 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ],
   [
     'validateRuleDefinition extension',
-    (list) => validateRuleDefinition({ ...BASE_RULE, ext: list }).errors[0],
-    'ext',
+    (list) => validateRuleDefinition({ ...BASE_RULE, extensions: { ext: list } }).errors[0],
+    'extensions.ext',
   ],
   [
     'validateProof applied',
@@ -307,10 +318,10 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   [
     'verifyProof rules option',
     (list) =>
-      verifyProof(sealProof(unsalted(PROOF)), { rules: list as RuleDefinitionInput[] }).issues.at(
-        -1,
-      ),
-    'rules',
+      optionError(() =>
+        verifyProof(sealProof(unsalted(PROOF)), { rules: list as RuleDefinitionInput[] }),
+      ).message,
+    'options.rules',
   ],
   [
     'formatPointer',
@@ -383,6 +394,12 @@ const LIST_READERS: [string, (list: unknown) => unknown, string][] = [
   ]),
 ];
 
+/** The message of a list too large for the budget; the options name their own bound (AC5). */
+const tooLarge = (path: string): string =>
+  path === 'options.rules'
+    ? 'options are too large: more than 10000000 values (at options.rules)'
+    : `${path} is too large: more than 10000000 values`;
+
 describe(`at most ${MAX_JSON_VALUES} values per call, a list's length counted first`, () => {
   it('is the shared constant', () => {
     expect(MAX_JSON_VALUES).toBe(10_000_000);
@@ -391,14 +408,14 @@ describe(`at most ${MAX_JSON_VALUES} values per call, a list's length counted fi
   it.each(LIST_READERS)(
     '%s: a sparse array of length 2^32 - 1',
     (_name, read, path) => {
-      expect(read(sparse())).toBe(`${path} is too large: more than 10000000 values`);
+      expect(read(sparse())).toBe(tooLarge(path));
     },
     60_000,
   );
 
   it.each(LIST_READERS)('%s: a Proxy claiming 10^12 elements, none read', (_name, read, path) => {
     elementReads = 0;
-    expect(read(claiming(1e12))).toBe(`${path} is too large: more than 10000000 values`);
+    expect(read(claiming(1e12))).toBe(tooLarge(path));
     expect(elementReads).toBe(0);
   });
 

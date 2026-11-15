@@ -475,7 +475,10 @@ describe('validateOutputDeclaration: unreadable input', () => {
     const rounding = { mode: 'up' };
     throwing(rounding, 'scale', Symbol('scale'));
     expect(validateOutputDeclaration({ type: 'decimal', combine: 'sum', rounding })).toEqual([
-      { path: 'output', message: 'output could not be read: Symbol(scale)' },
+      {
+        path: 'output.rounding.scale',
+        message: 'output.rounding.scale could not be read: Symbol(scale)',
+      },
     ]);
   });
 

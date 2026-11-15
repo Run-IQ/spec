@@ -1,5 +1,21 @@
 import { citeName, isOwnError, newSpecError, quoteText, reasonOf } from '../errors.js';
-import { dateTimeOf, typeName } from '../values.js';
+import {
+  NativeNumber,
+  arrayIncludes,
+  elementOf,
+  functionCall,
+  isoOf,
+  numberIsNaN,
+  parseTime,
+  regExpExec,
+  regExpTest,
+  startOfYear,
+  stringPadEnd,
+  stringSlice,
+  stringSplit,
+  utcTime,
+} from '../intrinsics.js';
+import { dateTimeOf, notADateMessage, typeName } from '../values.js';
 
 /**
  * A civil date: a day of the calendar, `YYYY-MM-DD` (proleptic Gregorian, years 0000 to 9999),
@@ -43,8 +59,8 @@ const OFFSET = /^([+-])(\d{2}):(\d{2})$/;
 const IANA_NAME = /^[A-Z][A-Za-z0-9_+-]*(?:\/[A-Za-z][A-Za-z0-9_+-]*)+$/;
 
 /** Time values of 0000-01-01T00:00:00.000Z and of 9999-12-31T23:59:59.999Z. */
-const MIN_TIME = new Date(0).setUTCFullYear(0, 0, 1);
-const MAX_TIME = new Date(0).setUTCFullYear(9999, 11, 31) + 86_400_000 - 1;
+const MIN_TIME = startOfYear(0, 0, 1);
+const MAX_TIME = startOfYear(9999, 11, 31) + 86_400_000 - 1;
 
 /** Internal: the number of days of `month` (1 to 12) in `year`, proleptic Gregorian calendar. */
 export function daysInMonth(year: number, month: number): number {
@@ -52,19 +68,19 @@ export function daysInMonth(year: number, month: number): number {
     const leap = (year % 4 === 0 && year % 100 !== 0) || year % 400 === 0;
     return leap ? 29 : 28;
   }
-  return [4, 6, 9, 11].includes(month) ? 30 : 31;
+  return arrayIncludes([4, 6, 9, 11], month) ? 30 : 31;
 }
 
 function isRealDay(year: string, month: string, day: string): boolean {
-  const m = Number(month);
-  const d = Number(day);
-  return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(Number(year), m);
+  const m = NativeNumber(month);
+  const d = NativeNumber(day);
+  return m >= 1 && m <= 12 && d >= 1 && d <= daysInMonth(NativeNumber(year), m);
 }
 
 /** True when `value` is a civil date `YYYY-MM-DD` that exists. Never throws. */
 export function isCivilDate(value: unknown): value is CivilDate {
   if (typeof value !== 'string') return false;
-  const match = CIVIL.exec(value);
+  const match = regExpExec(CIVIL, value);
   return match !== null && isRealDay(match[1] ?? '', match[2] ?? '', match[3] ?? '');
 }
 
@@ -75,14 +91,20 @@ export function isCivilDate(value: unknown): value is CivilDate {
  */
 export function isInstant(value: unknown): value is Instant {
   if (typeof value !== 'string') return false;
-  const match = CANONICAL_INSTANT.exec(value);
+  const match = regExpExec(CANONICAL_INSTANT, value);
   if (match === null) return false;
-  const [, year = '', month = '', day = '', hour, minute, second] = match;
+  const tuple5000 = match;
+  const year = elementOf(tuple5000, 1) ?? '';
+  const month = elementOf(tuple5000, 2) ?? '';
+  const day = elementOf(tuple5000, 3) ?? '';
+  const hour = tuple5000[4];
+  const minute = tuple5000[5];
+  const second = tuple5000[6];
   return (
     isRealDay(year, month, day) &&
-    Number(hour) <= 23 &&
-    Number(minute) <= 59 &&
-    Number(second) <= 59
+    NativeNumber(hour) <= 23 &&
+    NativeNumber(minute) <= 59 &&
+    NativeNumber(second) <= 59
   );
 }
 
@@ -113,50 +135,63 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
     invalidDate(field, 'an unreadable value');
   }
   if (time !== undefined) {
-    if (Number.isNaN(time)) invalidDate(field, 'an invalid Date');
+    if (numberIsNaN(time)) invalidDate(field, 'an invalid Date');
     if (time < MIN_TIME || time > MAX_TIME) {
       invalidDate(field, 'a Date outside the years 0000 to 9999');
     }
-    return new Date(time).toISOString();
+    return isoOf(time);
   }
-  if (typeof value !== 'string') invalidDate(field, `a value of type ${typeName(value)}`);
+  if (typeof value !== 'string') {
+    invalidDate(field, notADateMessage(value) ?? `a value of type ${typeName(value)}`);
+  }
   if (isCivilDate(value)) return value;
 
-  const match = DATE_TIME.exec(value);
+  const match = regExpExec(DATE_TIME, value);
   if (match === null) invalidDate(field, quoteText(value));
-  const [, year = '', month = '', day = '', hour, minute, second, fraction, zone = 'Z'] = match;
+  const tuple5001 = match;
+  const year = elementOf(tuple5001, 1) ?? '';
+  const month = elementOf(tuple5001, 2) ?? '';
+  const day = elementOf(tuple5001, 3) ?? '';
+  const hour = tuple5001[4];
+  const minute = tuple5001[5];
+  const second = tuple5001[6];
+  const fraction = tuple5001[7];
+  const zone = elementOf(tuple5001, 8) ?? 'Z';
   const offset = zone === 'Z' ? 0 : offsetMinutes(zone);
   if (
     !isRealDay(year, month, day) ||
-    Number(hour) > 23 ||
-    Number(minute) > 59 ||
-    Number(second) > 59 ||
+    NativeNumber(hour) > 23 ||
+    NativeNumber(minute) > 59 ||
+    NativeNumber(second) > 59 ||
     offset === undefined
   ) {
     invalidDate(field, quoteText(value));
   }
-  const instant = new Date(0);
-  instant.setUTCFullYear(Number(year), Number(month) - 1, Number(day));
-  instant.setUTCHours(
-    Number(hour),
-    Number(minute) - offset,
-    Number(second),
-    Number((fraction ?? '').padEnd(3, '0')),
+  const result = utcTime(
+    NativeNumber(year),
+    NativeNumber(month) - 1,
+    NativeNumber(day),
+    NativeNumber(hour),
+    NativeNumber(minute) - offset,
+    NativeNumber(second),
+    NativeNumber(stringPadEnd(fraction ?? '', 3, '0')),
   );
-  const result = instant.getTime();
   if (result < MIN_TIME || result > MAX_TIME) {
     invalidDate(field, `${quoteText(value)}, outside the years 0000 to 9999 in UTC`);
   }
-  return instant.toISOString();
+  return isoOf(result);
 }
 
 /** Minutes east of UTC of a `±HH:MM` offset (hour at most 23, minute at most 59), else none. */
 function offsetMinutes(offset: string): number | undefined {
-  const match = OFFSET.exec(offset);
+  const match = regExpExec(OFFSET, offset);
   if (match === null) return undefined;
-  const [, sign, hours, minutes] = match;
-  if (Number(hours) > 23 || Number(minutes) > 59) return undefined;
-  return (sign === '-' ? -1 : 1) * (Number(hours) * 60 + Number(minutes));
+  const tuple5002 = match;
+  const sign = tuple5002[1];
+  const hours = tuple5002[2];
+  const minutes = tuple5002[3];
+  if (NativeNumber(hours) > 23 || NativeNumber(minutes) > 59) return undefined;
+  return (sign === '-' ? -1 : 1) * (NativeNumber(hours) * 60 + NativeNumber(minutes));
 }
 
 function invalidDate(field: string, got: string): never {
@@ -177,7 +212,7 @@ function invalidDate(field: string, got: string): never {
  */
 export function isTimeZone(zone: unknown): boolean {
   if (typeof zone !== 'string') return false;
-  return zone === 'UTC' || offsetMinutes(zone) !== undefined || IANA_NAME.test(zone);
+  return zone === 'UTC' || offsetMinutes(zone) !== undefined || regExpTest(IANA_NAME, zone);
 }
 
 /**
@@ -226,15 +261,26 @@ const EXPANDED_INSTANT = /^([+-])(\d{6})-(\d{2})-(\d{2})T(\d{2}):(\d{2}):(\d{2})
  */
 function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
   if (typeof value !== 'string') return undefined;
-  const match = form.exec(value);
+  const match = regExpExec(form, value);
   if (match === null) return undefined;
-  const [, sign = '', digits = '', month = '', day = '', hour, minute, second] = match;
+  const tuple5003 = match;
+  const sign = elementOf(tuple5003, 1) ?? '';
+  const digits = elementOf(tuple5003, 2) ?? '';
+  const month = elementOf(tuple5003, 3) ?? '';
+  const day = elementOf(tuple5003, 4) ?? '';
+  const hour = tuple5003[5];
+  const minute = tuple5003[6];
+  const second = tuple5003[7];
   const year = `${sign}${digits}`;
   if (!isRealDay(year, month, day)) return undefined;
-  if (Number(hour ?? 0) > 23 || Number(minute ?? 0) > 59 || Number(second ?? 0) > 59) {
+  if (
+    NativeNumber(hour ?? 0) > 23 ||
+    NativeNumber(minute ?? 0) > 59 ||
+    NativeNumber(second ?? 0) > 59
+  ) {
     return undefined;
   }
-  const yearNumber = Number(year);
+  const yearNumber = NativeNumber(year);
   return yearNumber < 0 ? BEFORE_ALL : yearNumber > 9999 ? AFTER_ALL : undefined;
 }
 
@@ -283,7 +329,7 @@ export function startOfDayIn(
 /** Internal: the civil date after `day`, or `AFTER_ALL` after 9999-12-31. */
 export function nextCivilDate(day: CivilDate): CivilDate | Beyond {
   if (day === '9999-12-31') return AFTER_ALL;
-  return new Date(Date.parse(`${day}T00:00:00.000Z`) + 86_400_000).toISOString().slice(0, 10);
+  return stringSlice(isoOf(parseTime(`${day}T00:00:00.000Z`) + 86_400_000), 0, 10);
 }
 
 function callCalendar(
@@ -297,7 +343,7 @@ function callCalendar(
     if (typeof call !== 'function') {
       throw newSpecError('INVALID_DATE', `calendar.${method} must be a function`);
     }
-    return (call as (v: string, z: string) => unknown).call(calendar, value, zone);
+    return functionCall(call as (v: string, z: string) => unknown, calendar, value, zone);
   } catch (error) {
     // An error of this package keeps its message, under the calendar's code; a SpecError the
     // calendar built is cited like any other throw.
@@ -332,8 +378,7 @@ export function fixedOffsetCalendar(user: string): CivilCalendar {
   };
   return {
     toCivilDate: (at, zone) =>
-      new Date(Date.parse(at) + offsetOf(zone)).toISOString().split('T')[0] ?? '',
-    startOfDay: (day, zone) =>
-      new Date(Date.parse(`${day}T00:00:00.000Z`) - offsetOf(zone)).toISOString(),
+      elementOf(stringSplit(isoOf(parseTime(at) + offsetOf(zone)), 'T'), 0) ?? '',
+    startOfDay: (day, zone) => isoOf(parseTime(`${day}T00:00:00.000Z`) - offsetOf(zone)),
   };
 }

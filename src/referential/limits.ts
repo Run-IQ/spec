@@ -1,5 +1,6 @@
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
 import { MAX_JSON_VALUES } from '../values.js';
+import { numberIsSafeInteger, objectHasOwn, reflectGet } from '../intrinsics.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -59,9 +60,11 @@ export function readLimits(options: unknown): Limits {
   let maxDepth: unknown;
   let maxSteps: unknown;
   try {
-    maxNodes = Reflect.get(options, 'maxNodes');
-    maxDepth = Reflect.get(options, 'maxDepth');
-    maxSteps = Reflect.get(options, 'maxSteps');
+    // Own properties only: an option the caller leaves out is absent, whatever a polluted
+    // prototype holds.
+    maxNodes = objectHasOwn(options, 'maxNodes') ? reflectGet(options, 'maxNodes') : undefined;
+    maxDepth = objectHasOwn(options, 'maxDepth') ? reflectGet(options, 'maxDepth') : undefined;
+    maxSteps = objectHasOwn(options, 'maxSteps') ? reflectGet(options, 'maxSteps') : undefined;
   } catch (error) {
     throw newSpecError('INVALID_REFERENTIAL', unreadableMessage('options', error));
   }
@@ -84,7 +87,7 @@ export function readLimits(options: unknown): Limits {
 
 function positive(value: unknown, fallback: number, name: string): number {
   if (value === undefined) return fallback;
-  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 1) {
+  if (typeof value !== 'number' || !numberIsSafeInteger(value) || value < 1) {
     throw newSpecError('INVALID_REFERENTIAL', `${citeName(name)} must be a positive integer`);
   }
   return value;

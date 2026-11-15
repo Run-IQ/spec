@@ -29,11 +29,33 @@ import type {
 } from './types.js';
 import { isLifted, LIFTS } from './lifts.js';
 import type { OutputIdentity } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayEvery,
+  arrayFilter,
+  arrayIndexOf,
+  arrayPop,
+  arrayPush,
+  arraySlice,
+  arraySome,
+  mapEntriesArray,
+  mapGet,
+  mapHas,
+  mapSet,
+  mapValuesArray,
+  mathMax,
+  setAdd,
+  setHas,
+  setOf,
+  setSize,
+  setValuesArray,
+} from '../intrinsics.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
-const ORDERED: ReadonlySet<string> = new Set(['number', 'decimal', 'enum', 'date', 'dateTime']);
+const ORDERED: ReadonlySet<string> = setOf(['number', 'decimal', 'enum', 'date', 'dateTime']);
 
-const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
+const rankOf = (status: OutputStatus): number => arrayIndexOf(OUTPUT_STATUSES, status);
 
 /** How messages cite an item: `name at subject`. */
 export function citeItem(output: string, subject: string): string {
@@ -57,7 +79,7 @@ interface Node {
   tie: boolean;
 }
 
-const newNode = (): Node => ({ children: new Map(), skip: -1, tie: false });
+const newNode = (): Node => ({ children: new NativeMap(), skip: -1, tie: false });
 
 /**
  * The feeds of the items of one per output, by subject. A step or a pending rule goes to the
@@ -90,18 +112,18 @@ class ItemTrie {
   /** An exclusion at `subject` (every item without), of status `rank`, `tie` when tied. */
   exclude(subject: string | undefined, rank: number, tie: boolean): void {
     if (subject === undefined) {
-      this.everywhere = Math.max(this.everywhere, rank);
+      this.everywhere = mathMax(this.everywhere, rank);
       this.tiedEverywhere ||= tie;
       return;
     }
     const containing = this.deepest(subject);
     if (containing !== undefined) {
-      containing.candidates = Math.max(containing.candidates, rank);
+      containing.candidates = mathMax(containing.candidates, rank);
       containing.tie ||= tie;
     }
     const node = this.walk(subject, true);
     if (node !== undefined) {
-      node.skip = Math.max(node.skip, rank);
+      node.skip = mathMax(node.skip, rank);
       node.tie ||= tie;
     }
   }
@@ -109,26 +131,37 @@ class ItemTrie {
   /** Passes down the strongest exclusion of each node, and its ties, to the items below it. */
   settle(): void {
     const stack: [Node, number, boolean][] = [[this.root, this.everywhere, this.tiedEverywhere]];
-    for (let next = stack.pop(); next !== undefined; next = stack.pop()) {
-      const [node, above, tiedAbove] = next;
-      const rank = Math.max(above, node.skip);
+    for (let next = arrayPop(stack); next !== undefined; next = arrayPop(stack)) {
+      const tuple148 = next;
+      const node = tuple148[0];
+      const above = tuple148[1];
+      const tiedAbove = tuple148[2];
+      const rank = mathMax(above, node.skip);
       const tie = tiedAbove || node.tie;
       if (node.item !== undefined) {
-        node.item.candidates = Math.max(node.item.candidates, rank);
+        node.item.candidates = mathMax(node.item.candidates, rank);
         node.item.tie ||= tie;
       }
-      for (const child of node.children.values()) stack.push([child, rank, tie]);
+      for (
+        let idx1046 = 0, list1046 = mapValuesArray(node.children);
+        idx1046 < list1046.length;
+        idx1046++
+      ) {
+        const child = list1046[idx1046] as (typeof list1046)[number];
+        arrayPush(stack, [child, rank, tie]);
+      }
     }
   }
 
   private walk(subject: string, create: boolean, visit?: (node: Node) => void): Node | undefined {
     let node = this.root;
-    for (const segment of parsePointer(subject)) {
-      let child = node.children.get(segment);
+    for (let idx149 = 0, list149 = parsePointer(subject); idx149 < list149.length; idx149++) {
+      const segment = list149[idx149] as (typeof list149)[number];
+      let child = mapGet(node.children, segment);
       if (child === undefined) {
         if (!create) return undefined;
         child = newNode();
-        node.children.set(segment, child);
+        mapSet(node.children, segment, child);
       }
       node = child;
       visit?.(node);
@@ -150,19 +183,23 @@ interface Feeds {
 }
 
 function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: Ties): Feeds {
-  const outputs = new Map<string, Feed>();
-  const items = new Map<ProofItem, Feed>();
-  const tries = new Map<string, ItemTrie>();
-  for (const [name, output] of listed) {
-    if (output.per === undefined) outputs.set(name, newFeed());
-    else tries.set(name, new ItemTrie());
+  const outputs = new NativeMap<string, Feed>();
+  const items = new NativeMap<ProofItem, Feed>();
+  const tries = new NativeMap<string, ItemTrie>();
+  for (let idx150 = 0, list150 = mapEntriesArray(listed); idx150 < list150.length; idx150++) {
+    const tuple1047 = list150[idx150] as (typeof list150)[number];
+    const name = tuple1047[0];
+    const output = tuple1047[1];
+    if (output.per === undefined) mapSet(outputs, name, newFeed());
+    else mapSet(tries, name, new ItemTrie());
   }
-  for (const item of p.items) {
-    const trie = tries.get(item.output);
+  for (let idx151 = 0, list151 = p.items; idx151 < list151.length; idx151++) {
+    const item = list151[idx151] as (typeof list151)[number];
+    const trie = mapGet(tries, item.output);
     if (trie === undefined) continue;
     const feed = newFeed();
     // A repeated item is reported by `orderProblems`; only the first is fed.
-    if (trie.add(item.subject, feed)) items.set(item, feed);
+    if (trie.add(item.subject, feed)) mapSet(items, item, feed);
   }
   const strays: Stray[] = [];
   const route = (
@@ -170,47 +207,58 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     output: string,
     what: string,
   ): Feed | undefined => {
-    const direct = outputs.get(output);
+    const direct = mapGet(outputs, output);
     if (direct !== undefined) return direct;
-    const trie = tries.get(output);
+    const trie = mapGet(tries, output);
     if (trie === undefined) return undefined;
     const feed = entry.subject === undefined ? undefined : trie.deepest(entry.subject);
     if (feed === undefined) {
       const message = `${what} feeds no item: ${citeName(instanceKey(entry))}`;
-      const item = elementOf(listed.get(output)?.per, entry.subject);
-      strays.push(item === undefined ? { message } : { message, output: { output, item } });
+      const item = elementOf(mapGet(listed, output)?.per, entry.subject);
+      arrayPush(strays, item === undefined ? { message } : { message, output: { output, item } });
     }
     return feed;
   };
-  for (const step of p.applied) {
+  for (let idx152 = 0, list152 = p.applied; idx152 < list152.length; idx152++) {
+    const step = list152[idx152] as (typeof list152)[number];
     const feed = route(step, step.output, 'step');
     if (feed === undefined) continue;
-    feed.steps.push(step);
+    arrayPush(feed.steps, step);
     feed.tie ||= ties.reaches(step);
   }
-  for (const entry of p.pending) {
+  for (let idx153 = 0, list153 = p.pending; idx153 < list153.length; idx153++) {
+    const entry = list153[idx153] as (typeof list153)[number];
     if (entry.output === undefined) continue;
     const feed = route(entry, entry.output, 'pending rule');
     if (feed === undefined) continue;
-    feed.pending.push(entry.ruleId);
-    feed.waiting.push(entry);
+    arrayPush(feed.pending, entry.ruleId);
+    arrayPush(feed.waiting, entry);
     feed.tie ||= ties.reaches(entry);
   }
-  for (const skip of p.skipped) {
+  for (let idx154 = 0, list154 = p.skipped; idx154 < list154.length; idx154++) {
+    const skip = list154[idx154] as (typeof list154)[number];
     // A per output is fed by instances (D-21): an exclusion without subject is grouped.
-    const perOutput = skip.output !== undefined && tries.has(skip.output);
+    const perOutput = skip.output !== undefined && mapHas(tries, skip.output);
     if (perOutput && skip.subject === undefined && skip.instances === undefined) {
       // Grouped (instances aside): no item, visible or not, would feed it.
-      strays.push({ message: `exclusion feeds no item: ${citeName(instanceKey(skip))}` });
+      arrayPush(strays, { message: `exclusion feeds no item: ${citeName(instanceKey(skip))}` });
     }
     exclude(skip, outputs, tries, ties.reaches(skip));
   }
-  for (const name of ties.shortCircuits) {
-    const direct = outputs.get(name);
+  for (
+    let idx155 = 0, list155 = setValuesArray(ties.shortCircuits);
+    idx155 < list155.length;
+    idx155++
+  ) {
+    const name = list155[idx155] as (typeof list155)[number];
+    const direct = mapGet(outputs, name);
     if (direct !== undefined) direct.tie = true;
-    tries.get(name)?.exclude(undefined, -1, true);
+    mapGet(tries, name)?.exclude(undefined, -1, true);
   }
-  for (const trie of tries.values()) trie.settle();
+  for (let idx1048 = 0, list1048 = mapValuesArray(tries); idx1048 < list1048.length; idx1048++) {
+    const trie = list1048[idx1048] as (typeof list1048)[number];
+    trie.settle();
+  }
   return { outputs, items, strays };
 }
 
@@ -222,12 +270,12 @@ function exclude(
 ): void {
   if (skip.output === undefined) return;
   const rank = rankOf(skip.status);
-  const direct = outputs.get(skip.output);
+  const direct = mapGet(outputs, skip.output);
   if (direct !== undefined) {
-    direct.candidates = Math.max(direct.candidates, rank);
+    direct.candidates = mathMax(direct.candidates, rank);
     direct.tie ||= tie;
   }
-  tries.get(skip.output)?.exclude(skip.subject, rank, tie);
+  mapGet(tries, skip.output)?.exclude(skip.subject, rank, tie);
 }
 
 /** What an output and an item share: a status, a value, bounds, a selection. */
@@ -243,14 +291,14 @@ function entryProblems(entry: Entry, cite: () => string, output: ProofOutput): s
   const issues: string[] = [];
   const undetermined = entry.status === 'undetermined';
   if (undetermined && entry.value !== undefined) {
-    issues.push(`undetermined output has a value: ${cite()}`);
+    arrayPush(issues, `undetermined output has a value: ${cite()}`);
   }
   const { bounds } = entry;
   if (bounds !== undefined) append(issues, boundsProblems(bounds, undetermined, cite, output));
   if (entry.selected !== undefined) {
-    if (undetermined) issues.push(`selected on an undetermined output: ${cite()}`);
-    else if (!SELECTING.has(output.combine)) {
-      issues.push(`selected on a ${output.combine} output: ${cite()}`);
+    if (undetermined) arrayPush(issues, `selected on an undetermined output: ${cite()}`);
+    else if (!setHas(SELECTING, output.combine)) {
+      arrayPush(issues, `selected on a ${output.combine} output: ${cite()}`);
     }
   }
   return issues;
@@ -265,7 +313,7 @@ function boundsProblems(
   if (!undetermined) return [`bounds on a settled output: ${cite()}`];
   const { min, max } = bounds;
   if (min === undefined && max === undefined) return [`bounds without min or max: ${cite()}`];
-  if (!ORDERED.has(output.type)) return [`bounds on an unordered output: ${cite()}`];
+  if (!setHas(ORDERED, output.type)) return [`bounds on an unordered output: ${cite()}`];
   const compare = comparator(declarationOf(output));
   if (min !== undefined && max !== undefined && compare(min, max) === 1) {
     return [`bounds min above max: ${cite()}`];
@@ -297,8 +345,11 @@ export function outputProblems(
   context: Context,
 ): string[] {
   const issues: string[] = [];
-  const nonPer = new Set<string>();
-  for (const [name, output] of listed) {
+  const nonPer = new NativeSet<string>();
+  for (let idx156 = 0, list156 = mapEntriesArray(listed); idx156 < list156.length; idx156++) {
+    const tuple1049 = list156[idx156] as (typeof list156)[number];
+    const name = tuple1049[0];
+    const output = tuple1049[1];
     const cited = (): string => citeName(name);
     if (output.per === undefined) {
       append(issues, entryProblems(output, cited, output));
@@ -306,19 +357,20 @@ export function outputProblems(
     }
     const { value, bounds, selected, contributors, pending } = output;
     if (value !== undefined || bounds !== undefined || selected !== undefined) {
-      issues.push(`per output carries a value: ${cited()}`);
+      arrayPush(issues, `per output carries a value: ${cited()}`);
     }
     if (contributors.length > 0 || pending.length > 0) {
-      issues.push(`per output carries contributors: ${cited()}`);
+      arrayPush(issues, `per output carries contributors: ${cited()}`);
     }
   }
-  for (const item of p.items) {
-    const output = listed.get(item.output);
+  for (let idx157 = 0, list157 = p.items; idx157 < list157.length; idx157++) {
+    const item = list157[idx157] as (typeof list157)[number];
+    const output = mapGet(listed, item.output);
     if (output === undefined) continue;
     if (output.per === undefined) {
-      if (!nonPer.has(item.output))
-        issues.push(`item of a non-per output: ${citeName(item.output)}`);
-      nonPer.add(item.output);
+      if (!setHas(nonPer, item.output))
+        arrayPush(issues, `item of a non-per output: ${citeName(item.output)}`);
+      setAdd(nonPer, item.output);
       continue;
     }
     append(
@@ -326,19 +378,21 @@ export function outputProblems(
       entryProblems(item, () => citeItem(item.output, item.subject), output),
     );
     if (!inCollection(output.per, item.subject)) {
-      issues.push(`item outside its per collection: ${citeItem(item.output, item.subject)}`);
+      arrayPush(issues, `item outside its per collection: ${citeItem(item.output, item.subject)}`);
     }
   }
   const { hidden } = context;
   const feeds = feedsOf(p, listed, context.ties);
   // The item a stray step or pending rule feeds may be redacted.
-  for (const { message, output } of feeds.strays) {
+  for (let idx158 = 0, list158 = feeds.strays; idx158 < list158.length; idx158++) {
+    const { message, output } = list158[idx158] as (typeof list158)[number];
     if (output === undefined || !isLifted(hidden, LIFTS.itemsOfCollection, { message, output })) {
-      issues.push(message);
+      arrayPush(issues, message);
     }
   }
   const targets = targetsOf(p, listed, feeds);
-  for (const { target, feed, pending } of targets) {
+  for (let idx159 = 0, list159 = targets; idx159 < list159.length; idx159++) {
+    const { target, feed, pending } = list159[idx159] as (typeof list159)[number];
     append(issues, combinationProblems(target, context));
     // A pending rule of the target may be redacted: its own pending rules are then a superset.
     if (!samePending(pending, feed.pending)) {
@@ -352,10 +406,10 @@ export function outputProblems(
           }),
         )
       ) {
-        issues.push(message);
+        arrayPush(issues, message);
       }
     } else if (!pendingInOrder(pending, feed, context.standings)) {
-      issues.push(`pending not in contribution order: ${target.cite()}`);
+      arrayPush(issues, `pending not in contribution order: ${target.cite()}`);
     }
     append(issues, completenessProblems(target, feed, context.standings, hidden));
     append(issues, rankProblems(target, hidden));
@@ -379,7 +433,7 @@ function elementOf(per: string | undefined, subject: string | undefined): string
   const depth = parsePointer(per).length + 1;
   const segments = parsePointer(subject);
   if (segments.length < depth) return undefined;
-  const element = formatPointer(segments.slice(0, depth));
+  const element = formatPointer(arraySlice(segments, 0, depth));
   return inCollection(per, element) ? element : undefined;
 }
 
@@ -393,10 +447,13 @@ function pendingHidden(
   fed: readonly string[],
   hidden: (id: string) => boolean,
 ): boolean {
-  const listed = new Set(named);
-  if (listed.size !== named.length || fed.some((id) => !listed.has(id))) return false;
-  const found = new Set(fed);
-  return named.filter((id) => !found.has(id)).every(hidden);
+  const listed = setOf(named);
+  if (setSize(listed) !== named.length || arraySome(fed, (id) => !setHas(listed, id))) return false;
+  const found = setOf(fed);
+  return arrayEvery(
+    arrayFilter(named, (id) => !setHas(found, id)),
+    hidden,
+  );
 }
 
 interface Fed {
@@ -407,18 +464,22 @@ interface Fed {
 
 /** The outputs without `per` and the items, as targets of combination, with their feeds. */
 function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds: Feeds): Fed[] {
-  const itemsOf = new Map<string, ProofItem[]>();
-  for (const item of p.items) {
-    const list = itemsOf.get(item.output);
-    if (list === undefined) itemsOf.set(item.output, [item]);
-    else list.push(item);
+  const itemsOf = new NativeMap<string, ProofItem[]>();
+  for (let idx160 = 0, list160 = p.items; idx160 < list160.length; idx160++) {
+    const item = list160[idx160] as (typeof list160)[number];
+    const list = mapGet(itemsOf, item.output);
+    if (list === undefined) mapSet(itemsOf, item.output, [item]);
+    else arrayPush(list, item);
   }
   const fed: Fed[] = [];
-  for (const [name, output] of listed) {
+  for (let idx161 = 0, list161 = mapEntriesArray(listed); idx161 < list161.length; idx161++) {
+    const tuple1050 = list161[idx161] as (typeof list161)[number];
+    const name = tuple1050[0];
+    const output = tuple1050[1];
     const declaration = declarationOf(output);
-    const direct = feeds.outputs.get(name);
+    const direct = mapGet(feeds.outputs, name);
     if (direct !== undefined) {
-      fed.push({
+      arrayPush(fed, {
         target: {
           ...output,
           cite: () => citeName(name),
@@ -432,8 +493,9 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
       });
       continue;
     }
-    for (const item of itemsOf.get(name) ?? []) {
-      const feed = feeds.items.get(item);
+    for (let idx162 = 0, list162 = mapGet(itemsOf, name) ?? []; idx162 < list162.length; idx162++) {
+      const item = list162[idx162] as (typeof list162)[number];
+      const feed = mapGet(feeds.items, item);
       if (feed === undefined) continue;
       const target: Target = {
         ...item,
@@ -443,7 +505,7 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
         whole: false,
         place: { output: name, item: item.subject },
       };
-      fed.push({ target, feed, pending: item.pending });
+      arrayPush(fed, { target, feed, pending: item.pending });
     }
   }
   return fed;
@@ -458,22 +520,31 @@ function statusProblems(
 ): string[] {
   const { hidden } = context;
   const issues: string[] = [];
-  const strongest = new Map<string, number>();
-  for (const item of p.items) {
-    if (!feeds.items.has(item)) continue;
-    strongest.set(item.output, Math.max(strongest.get(item.output) ?? 0, rankOf(item.status)));
+  const strongest = new NativeMap<string, number>();
+  for (let idx163 = 0, list163 = p.items; idx163 < list163.length; idx163++) {
+    const item = list163[idx163] as (typeof list163)[number];
+    if (!mapHas(feeds.items, item)) continue;
+    mapSet(
+      strongest,
+      item.output,
+      mathMax(mapGet(strongest, item.output) ?? 0, rankOf(item.status)),
+    );
   }
   // A redacted item may be the strongest.
-  for (const [name, output] of listed) {
+  for (let idx164 = 0, list164 = mapEntriesArray(listed); idx164 < list164.length; idx164++) {
+    const tuple1051 = list164[idx164] as (typeof list164)[number];
+    const name = tuple1051[0];
+    const output = tuple1051[1];
     if (output.per === undefined) continue;
-    const differs = rankOf(output.status) !== (strongest.get(name) ?? 0);
+    const differs = rankOf(output.status) !== (mapGet(strongest, name) ?? 0);
     const message = `per output status differs from its items: ${citeName(name)}`;
     const item = { output: name };
     if (differs && !isLifted(hidden, LIFTS.perOutputItems, { message, output: item })) {
-      issues.push(message);
+      arrayPush(issues, message);
     }
   }
-  for (const { target, feed } of targets) {
+  for (let idx165 = 0, list165 = targets; idx165 < list165.length; idx165++) {
+    const { target, feed } = list165[idx165] as (typeof list165)[number];
     append(issues, causeProblems(target, feed, hidden, context.ties.uncertain));
   }
   return issues;

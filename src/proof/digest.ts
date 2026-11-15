@@ -19,7 +19,17 @@ import { inconsistencies } from './consistency.js';
 import { readUnsaltedProof } from './validate.js';
 import { treeDigest } from './tree.js';
 import { inputSalter, readSeed, UNSALTED_SEED } from '../input/seed.js';
-import { MAX_JSON_VALUES, ownCopy, spendValues, withValueBudget } from '../values.js';
+import { MAX_JSON_VALUES, ordinary, ownCopy, spendValues, withValueBudget } from '../values.js';
+import {
+  arrayMap,
+  bare,
+  elementOf,
+  mapGet,
+  mapHas,
+  objectOfEntries,
+  uint8ArrayEvery,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 /**
  * The digest a proof keeps in place of its input (D-15), lowercase hex:
@@ -82,8 +92,8 @@ function readRequest(value: unknown): { input: unknown; options: unknown } {
       const fields = readFields(value, '', 'request', REQUEST_KEYS, reader);
       if (fields === undefined) return;
       requireFields(fields, '', REQUEST_KEYS, add);
-      if (fields.values.has('input') && fields.values.has('options')) {
-        read = { input: fields.values.get('input'), options: fields.values.get('options') };
+      if (mapHas(fields.values, 'input') && mapHas(fields.values, 'options')) {
+        read = { input: mapGet(fields.values, 'input'), options: mapGet(fields.values, 'options') };
       }
     },
     (error) => ({ path: '', message: unreadableMessage('request', error) }),
@@ -110,7 +120,8 @@ const REQUEST_KEYS: readonly string[] = ['input', 'options'];
 
 /** `value` when `issues` is empty; otherwise throws `INVALID_INPUT` naming the first issue. */
 function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined, what: string): T {
-  const [first] = issues;
+  const tuple188 = issues;
+  const first = elementOf(tuple188, 0);
   if (first !== undefined || value === undefined) {
     throw newSpecError('INVALID_INPUT', `${what}: ${first?.message ?? 'unreadable'}`, first?.path);
   }
@@ -153,8 +164,8 @@ export function sealProof(p: UnsaltedProof, seed: Uint8Array = UNSALTED_SEED): D
 function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
   const bytes = readSeed(seed);
   const { proof, errors } = readUnsaltedProof(p);
-  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${errors[0]}`);
-  if (proof.inputSalted === bytes.every((byte) => byte === 0)) {
+  if (!proof) throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${elementOf(errors, 0)}`);
+  if (proof.inputSalted === uint8ArrayEvery(bytes, (byte) => byte === 0)) {
     throw newSpecError(
       'INVALID_PROOF',
       'Cannot seal the proof: inputSalted does not match the seed',
@@ -167,15 +178,16 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
       `Cannot seal the proof: the salts of its ${salted} entries would take it past ${MAX_JSON_VALUES} values`,
     );
   }
-  const [inconsistency] = inconsistencies(salted);
+  const tuple189 = inconsistencies(salted);
+  const inconsistency = elementOf(tuple189, 0);
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
-  const counts = Object.fromEntries(
-    PROOF_SECTIONS.map((section) => [section, salted[section].length]),
+  const counts = objectOfEntries(
+    arrayMap(PROOF_SECTIONS, (section) => [section, salted[section].length]),
   ) as ProofCounts;
   const content = { ...salted, counts };
-  return { ...content, digest: treeDigest(content) };
+  return ordinary({ ...content, digest: treeDigest(content) });
 }
 
 /**
@@ -185,15 +197,21 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
  */
 function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number {
   let entries = 0;
-  for (const section of PROOF_SECTIONS) entries += proof[section].length;
+  for (let idx1072 = 0, list1072 = PROOF_SECTIONS; idx1072 < list1072.length; idx1072++) {
+    const section = list1072[idx1072] as (typeof list1072)[number];
+    entries += proof[section].length;
+  }
   if (!spendValues(entries)) return entries;
   const salter = inputSalter(seed, 'proof:');
-  const salted = { ...proof } as unknown as Record<string, unknown>;
-  for (const section of PROOF_SECTIONS) {
-    salted[section] = proof[section].map((entry: object, i) => ({
-      ...entry,
-      salt: bytesToHex(salter(`${section}:${i}`).subarray(0, SALT_BYTES)),
-    }));
+  const salted = bare({ ...proof }) as unknown as Record<string, unknown>;
+  for (let idx190 = 0, list190 = PROOF_SECTIONS; idx190 < list190.length; idx190++) {
+    const section = list190[idx190] as (typeof list190)[number];
+    salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) =>
+      bare({
+        ...entry,
+        salt: bytesToHex(uint8ArraySubarray(salter(`${section}:${i}`), 0, SALT_BYTES)),
+      }),
+    );
   }
   return salted as unknown as ProofView;
 }

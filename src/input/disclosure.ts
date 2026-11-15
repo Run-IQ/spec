@@ -1,6 +1,7 @@
 import type { JsonValue } from '../canonical.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { InputLeaf } from './tree.js';
+import { arrayEvery } from '../intrinsics.js';
 
 /**
  * Selective disclosure of the facts of a decision input, and proofs of absence (D-14, D-15):
@@ -119,7 +120,7 @@ export interface FactDisclosureVerification {
 
 /** Internal: true when `a` is `b` or one of its ancestors: a prefix of its segments. */
 export function isWithin(a: readonly string[], b: readonly string[]): boolean {
-  return a.length <= b.length && a.every((segment, i) => segment === b[i]);
+  return a.length <= b.length && arrayEvery(a, (segment, i) => segment === b[i]);
 }
 
 /** Internal: true when `a` is a strict ancestor of `b`: a proper prefix of its segments. */

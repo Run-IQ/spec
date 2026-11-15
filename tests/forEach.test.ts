@@ -9,6 +9,7 @@ import {
 import type { ForEach, OrderKey, RuleDefinitionInput } from '../src/index.js';
 import { ACCEPTED_FOR_EACH, REFUSED_FOR_EACH, VALIDATOR_ONLY_FOR_EACH } from './forEach-cases.js';
 import { BASE_RULE, expectRuleRefused, specError } from './helpers.js';
+import { normalizeStoredRuleDefinition } from '../src/rule/normalize.js';
 
 const rule = (forEach: unknown): RuleDefinitionInput => ({ ...BASE_RULE, forEach });
 
@@ -171,9 +172,15 @@ describe('forEach: normalization', () => {
     });
   });
 
-  it('treats a null forEach as absent', () => {
-    expect(normalizeRuleDefinition(rule(null))).not.toHaveProperty('forEach');
-    expect(computeRuleChecksum(rule(null))).toBe(computeRuleChecksum(BASE_RULE));
+  it('treats an undefined forEach as absent', () => {
+    expect(normalizeRuleDefinition(rule(undefined))).not.toHaveProperty('forEach');
+    expect(computeRuleChecksum(rule(undefined))).toBe(computeRuleChecksum(BASE_RULE));
+  });
+
+  it('refuses a null forEach: the field must be omitted', () => {
+    expect(validateRuleDefinition(rule(null)).errors).toEqual([
+      'forEach is null: omit the field instead',
+    ]);
   });
 
   it('never mutates the input and shares no reference with it', () => {
@@ -192,7 +199,7 @@ describe('forEach: normalization', () => {
   it('is idempotent', () => {
     for (const [, forEach] of ACCEPTED_FOR_EACH) {
       const once = normalizeRuleDefinition(rule(forEach));
-      expect(normalizeRuleDefinition(once)).toEqual(once);
+      expect(normalizeStoredRuleDefinition(once)).toEqual(once);
     }
   });
 

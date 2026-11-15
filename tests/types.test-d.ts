@@ -122,8 +122,10 @@ describe('RuleDefinition types (A5)', () => {
     expectTypeOf<ExecutableRule>().toMatchTypeOf<Parameters<typeof matchesSelector>[0]>();
   });
 
-  it('exposes extensions as unknown', () => {
-    expectTypeOf(def['jurisdiction']).toEqualTypeOf<unknown>();
+  it('exposes extensions as JSON values under `extensions`, and no index signature', () => {
+    expectTypeOf(def.extensions).toEqualTypeOf<Record<string, JsonValue> | undefined>();
+    // @ts-expect-error an unknown top-level field is not a property of a definition
+    void def.jurisdiction;
   });
 
   it('the base interface has no index signature, so Omit keeps the named fields', () => {

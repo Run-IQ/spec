@@ -2,6 +2,7 @@ import type { JsonValue } from '../canonical.js';
 import type { JsonPointer } from '../path/pointer.js';
 import type { Subject } from '../path/subject.js';
 import type { CivilDate, Instant } from '../time/civil.js';
+import { objectFreeze } from '../intrinsics.js';
 
 /**
  * How a fact was established:
@@ -99,7 +100,7 @@ export interface ProofInput {
 }
 
 /** Internal: the assertion methods, in the order messages list them. */
-export const ASSERTION_METHODS: readonly AssertionMethod[] = Object.freeze([
+export const ASSERTION_METHODS: readonly AssertionMethod[] = objectFreeze([
   'human',
   'ai',
   'document',
@@ -112,7 +113,7 @@ export const ASSERTION_METHODS: readonly AssertionMethod[] = Object.freeze([
 ]);
 
 /** Internal: the assertion statuses, in the order messages list them. */
-export const ASSERTION_STATUSES: readonly AssertionStatus[] = Object.freeze([
+export const ASSERTION_STATUSES: readonly AssertionStatus[] = objectFreeze([
   'proposed',
   'validated',
   'contested',

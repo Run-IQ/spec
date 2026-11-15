@@ -58,29 +58,10 @@ const VALID: [string, unknown][] = [
       dominanceGroup: 'VAT',
       exceptions: [{ kind: 'inhibit', targets: { ids: ['r0'] } }],
       sourceRef: 'CGI art. 1',
-      jurisdiction: 'NATIONAL',
-      meta: { nested: [1, 'a', null] },
+      extensions: { jurisdiction: 'NATIONAL', meta: { nested: [1, 'a', null] } },
     },
   ],
-  [
-    'null as absent for every optional field and an extension',
-    {
-      ...base,
-      condition: null,
-      effectiveUntil: null,
-      output: null,
-      dimensions: null,
-      tags: null,
-      dominanceGroup: null,
-      exceptions: null,
-      sourceRef: null,
-      timeZone: null,
-      effectiveOn: null,
-      checksum: null,
-      jurisdiction: null,
-    },
-  ],
-  ['a null dimension value (unset)', { ...base, dimensions: { a: 'TG', b: null } }],
+  ['an empty extensions object', { ...base, extensions: {} }],
   [
     'structured dimensions',
     {
@@ -140,6 +121,28 @@ const VALID: [string, unknown][] = [
 ];
 
 const INVALID: [string, unknown][] = [
+  ...[
+    'condition',
+    'output',
+    'dimensions',
+    'tags',
+    'dominanceGroup',
+    'exceptions',
+    'sourceRef',
+    'timeZone',
+    'effectiveOn',
+    'ruleSet',
+    'forEach',
+    'extensions',
+  ].map((field): [string, unknown] => [`a null ${field}`, { ...base, [field]: null }]),
+  ['a null effectiveUntil (omit it for no end)', { ...base, effectiveUntil: null }],
+  ['a null checksum', { ...base, checksum: null }],
+  ['a null dimension value', { ...base, dimensions: { a: 'TG', b: null } }],
+  ['an unknown top-level field', { ...base, jurisdiction: 'NATIONAL' }],
+  ['a misspelled top-level field', { ...base, dominancegroup: 'g' }],
+  ['an unknown field with a null value', { ...base, jurisdiction: null }],
+  ['extensions that is a list', { ...base, extensions: [] }],
+  ['extensions that is a string', { ...base, extensions: 'x' }],
   ['a missing id', without('id')],
   ['a missing params', without('params')],
   ['a missing effectiveFrom', without('effectiveFrom')],
@@ -296,7 +299,6 @@ describe('exceptions: validator, JSON schema and normalize agree', () => {
       },
     ],
     ['a rule of the exception model', carrier],
-    ['a rule of the exception model with a null output', { ...carrier, output: null }],
     ["the exception model with output 'value', the default", { ...carrier, output: 'value' }],
     [
       'the exception model of a pack with its own default output',
@@ -595,7 +597,6 @@ describe('rule sets and qualified names: validator, JSON schema and normalize ag
   const accepted: [string, unknown][] = [
     ['a pack rule', { ...base, ruleSet: 'rgpd' }],
     ['an explicit local rule', { ...base, ruleSet: 'local' }],
-    ['a null rule set', { ...base, ruleSet: null }],
     ['a qualified output', { ...base, output: 'rgpd:profilage' }],
     ['a rule set with "-"', { ...base, ruleSet: 'p-v2', output: 'p-v2:x' }],
     [

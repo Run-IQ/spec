@@ -6,11 +6,20 @@ import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
-import { hasLoneSurrogate, ownCopy, withValueBudget } from '../values.js';
+import { hasLoneSurrogate, ordinary, ownCopy, withValueBudget } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 import { readDeclaration } from './read-declaration.js';
 import type { OutputRounding } from './rounding.js';
 import type { OutputStatus } from './status.js';
+import {
+  arrayIncludes,
+  arrayIsArray,
+  elementOf,
+  numberIsFinite,
+  numberIsSafeInteger,
+  objectFreeze,
+  stringStartsWith,
+} from '../intrinsics.js';
 
 /**
  * What an output holds. An `enum` output holds one of the strings its declaration lists, ranked
@@ -99,7 +108,7 @@ export function reservedOutputNameMessage(path: string): string {
 export { COMBINE_STRATEGIES, OUTPUT_TYPES } from './read-declaration.js';
 
 /** The declaration of an output nobody declares: a number, summed. Frozen. */
-export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = Object.freeze({
+export const DEFAULT_OUTPUT_DECLARATION: Readonly<OutputDeclaration> = objectFreeze({
   type: 'number',
   combine: 'sum',
 });
@@ -150,7 +159,7 @@ export function validateOutputDeclaration(
  * problem's path as `path`) for a declaration `validateOutputDeclaration` refuses.
  */
 export function normalizeOutputDeclaration(declaration: OutputDeclaration): OutputDeclaration {
-  return withValueBudget(() => validDeclaration(declaration));
+  return ordinary(withValueBudget(() => validDeclaration(declaration)));
 }
 
 /**
@@ -240,7 +249,8 @@ export function emptyOutput(declaration: OutputDeclaration): {
  */
 export function validDeclaration(declaration: unknown): OutputDeclaration {
   const { issues, normal } = readDeclaration(declaration, 'output');
-  const [first] = issues;
+  const tuple21 = issues;
+  const first = elementOf(tuple21, 0);
   if (first !== undefined || normal === undefined) {
     const message = first?.message ?? 'unreadable';
     throw newSpecError('INVALID_RULE', `invalid output declaration: ${message}`, first?.path);
@@ -252,11 +262,11 @@ export function validDeclaration(declaration: unknown): OutputDeclaration {
 export function matchesValue(value: unknown, declaration: OutputDeclaration): boolean {
   const { type, combine, values = [], sign, dimension } = declaration;
   if (combine === 'count') {
-    return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0;
+    return typeof value === 'number' && numberIsSafeInteger(value) && value >= 0;
   }
   switch (type) {
     case 'number':
-      return typeof value === 'number' && Number.isFinite(value) && numberHasSign(value, sign);
+      return typeof value === 'number' && numberIsFinite(value) && numberHasSign(value, sign);
     case 'decimal':
       return typeof value === 'string' && isCanonicalDecimal(value) && decimalHasSign(value, sign);
     case 'boolean':
@@ -264,7 +274,7 @@ export function matchesValue(value: unknown, declaration: OutputDeclaration): bo
     case 'string':
       return typeof value === 'string' && isOutputText(value, dimension);
     case 'enum':
-      return typeof value === 'string' && values.includes(value);
+      return typeof value === 'string' && arrayIncludes(values, value);
     case 'list':
       return isArray(value);
     case 'object':
@@ -294,14 +304,14 @@ function numberHasSign(value: number, sign: OutputDeclaration['sign']): boolean 
 
 /** True when the canonical decimal `value` respects `sign` (`"0"` respects both). */
 function decimalHasSign(value: string, sign: OutputDeclaration['sign']): boolean {
-  if (sign === 'nonNegative') return !value.startsWith('-');
-  return sign === 'nonPositive' ? value === '0' || value.startsWith('-') : true;
+  if (sign === 'nonNegative') return !stringStartsWith(value, '-');
+  return sign === 'nonPositive' ? value === '0' || stringStartsWith(value, '-') : true;
 }
 
 /** `Array.isArray`, false when it throws (a revoked Proxy is no JSON value). */
 function isArray(value: unknown): boolean {
   try {
-    return Array.isArray(value);
+    return arrayIsArray(value);
   } catch {
     return false;
   }

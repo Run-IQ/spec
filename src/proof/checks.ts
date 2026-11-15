@@ -12,10 +12,34 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  own,
   readList,
   spendValues,
   tooLargeMessage,
 } from '../values.js';
+import {
+  NativeMap,
+  NativeSet,
+  NativeWeakMap,
+  arrayIncludes,
+  arrayIsArray,
+  arrayJoin,
+  arrayMap,
+  arraySome,
+  bare,
+  defineValue,
+  hasOwnKey,
+  mapEntriesArray,
+  mapGet,
+  mapSet,
+  objectEntries,
+  objectHasOwn,
+  objectKeys,
+  regExpTest,
+  setHas,
+  weakMapGet,
+  weakMapSet,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the combinators the proof validator is written with. Each check
 // reads its value once, reports every problem through `add`, and returns a plain copy.
@@ -74,7 +98,7 @@ export function stringCheck(what: string, more?: (text: string, path: string) =>
 export const nonEmptyString = stringCheck('a non-empty string');
 
 export const sha256 = scalarCheck((value, path, add) => {
-  if (typeof value !== 'string' || !SHA256_HEX.test(value)) {
+  if (typeof value !== 'string' || !regExpTest(SHA256_HEX, value)) {
     add(path, `${citeName(path)} must be a lowercase sha256 hex string`);
   }
 });
@@ -91,8 +115,8 @@ export function constant(expected: string): Check {
 
 export function oneOf(allowed: readonly string[]): Check {
   return scalarCheck((value, path, add) => {
-    if (!allowed.some((item) => item === value)) {
-      add(path, `${citeName(path)} must be one of ${allowed.join(', ')}`);
+    if (!arraySome(allowed, (item) => item === value)) {
+      add(path, `${citeName(path)} must be one of ${arrayJoin(allowed, ', ')}`);
     }
   });
 }
@@ -119,7 +143,8 @@ export const json: Check = (value, path, add) => {
  */
 export const document: Check = (value, path, add) => {
   try {
-    return toJsonDocument(value, path, () => false);
+    // Guarded: a getter or a trap that throws is named with the pointer of the value read.
+    return toJsonDocument(value, path, () => false, true);
   } catch (error) {
     if (!isOwnError(error)) throw error;
     add(specErrorPath(error) ?? path, describeError(error));
@@ -130,19 +155,19 @@ export const document: Check = (value, path, add) => {
 /** A list of items; with `nonEmpty`, an empty list is refused with that reason. */
 export function listOf(item: Check, nonEmpty?: string): Check {
   return (value, path, add) => {
-    if (!Array.isArray(value)) {
+    if (!arrayIsArray(value)) {
       add(path, `${citeName(path)} must be a list`);
       return undefined;
     }
     const items = readList(value, path);
-    if (!Array.isArray(items)) {
+    if (!arrayIsArray(items)) {
       add(items.path, items.message);
       return undefined;
     }
     if (nonEmpty !== undefined && items.length === 0) {
       add(path, `${citeName(path)} must not be empty: ${nonEmpty}`);
     }
-    return items.map((v, i) => item(v, `${path}[${i}]`, add));
+    return arrayMap(items, (v, i) => item(v, `${path}[${i}]`, add));
   };
 }
 
@@ -155,12 +180,31 @@ function readMembers(
   path: string,
   add: Add,
 ): Map<string, unknown> | undefined {
-  const keys = Object.keys(value);
+  let keys: string[];
+  try {
+    keys = objectKeys(value);
+  } catch (error) {
+    // A trap that throws is named with the pointer of the object being read.
+    add(path, unreadableMessage(path || 'proof', error));
+    return undefined;
+  }
   if (!spendValues(keys.length)) {
     add(path, tooLargeMessage(path || 'proof'));
     return undefined;
   }
-  return new Map(keys.map((key) => [key, value[key]]));
+  const members = new NativeMap<string, unknown>();
+  for (let idx178 = 0, list178 = keys; idx178 < list178.length; idx178++) {
+    const key = list178[idx178] as (typeof list178)[number];
+    try {
+      mapSet(members, key, value[key]);
+    } catch (error) {
+      // A getter that throws is named with its own pointer.
+      const at = path ? `${path}.${key}` : key;
+      add(at, unreadableMessage(at, error));
+      return undefined;
+    }
+  }
+  return members;
 }
 
 /**
@@ -179,19 +223,22 @@ export function mapOf(
     }
     const members = readMembers(value, path, add);
     if (members === undefined) return undefined;
-    const copy: Record<string, unknown> = {};
+    const copy: Record<string, unknown> = bare({});
     let count = 0;
-    for (const [name, entry] of members) {
+    for (let idx179 = 0, list179 = mapEntriesArray(members); idx179 < list179.length; idx179++) {
+      const tuple1065 = list179[idx179] as (typeof list179)[number];
+      const name = tuple1065[0];
+      const entry = tuple1065[1];
       if (entry === undefined) continue;
       count++;
       const at = `${path}.${name}`;
       const problem =
-        name === '' ? `${citeName(path)} has an empty name` : options.name?.(name, at);
+        name === '' ? `${citeName(path)} has an empty name` : own(options, 'name')?.(name, at);
       if (problem !== undefined) add(name === '' ? path : at, problem);
       // Plain assignment would turn a `__proto__` key into a prototype change.
       else defineMember(copy, name, item(entry, at, add));
     }
-    if (count === 0 && options.nonEmpty !== undefined) {
+    if (count === 0 && own(options, 'nonEmpty') !== undefined) {
       add(path, `${citeName(path)} must not be empty: ${options.nonEmpty}`);
     }
     return copy;
@@ -199,28 +246,23 @@ export function mapOf(
 }
 
 function defineMember(target: Record<string, unknown>, key: string, value: unknown): void {
-  Object.defineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  defineValue(target, key, value, true);
 }
 
 /** The fields of each shape in order, listed once: a proof checks thousands of objects. */
-const FIELDS = new WeakMap<Shape, readonly (readonly [string, Check])[]>();
+const FIELDS = new NativeWeakMap<Shape, readonly (readonly [string, Check])[]>();
 
 function fieldsOf(shape: Shape): readonly (readonly [string, Check])[] {
-  let fields = FIELDS.get(shape);
+  let fields = weakMapGet(FIELDS, shape);
   if (fields === undefined) {
-    fields = Object.entries(shape.fields);
-    FIELDS.set(shape, fields);
+    fields = objectEntries(shape.fields);
+    weakMapSet(FIELDS, shape, fields);
   }
   return fields;
 }
 
 export function objectOf(shape: Shape): Check {
-  return (value, path, add) => checkObject(value, path, shape, add, new Set())?.copy;
+  return (value, path, add) => checkObject(value, path, shape, add, new NativeSet())?.copy;
 }
 
 /**
@@ -251,29 +293,36 @@ export function checkObject(
     return undefined;
   }
   let shape = given;
-  const gated = shape.gate?.(members, path);
-  if (gated !== undefined && 'message' in gated) {
+  const gated = own(shape, 'gate')?.(members, path);
+  if (gated !== undefined && hasOwnKey(gated, 'message')) {
     add(gated.path, gated.message);
     return undefined;
   }
   if (gated !== undefined) shape = gated;
   const at = (key: string): string => (path ? `${path}.${key}` : key);
-  for (const [key, member] of members) {
+  for (let idx180 = 0, list180 = mapEntriesArray(members); idx180 < list180.length; idx180++) {
+    const tuple1066 = list180[idx180] as (typeof list180)[number];
+    const key = tuple1066[0];
+    const member = tuple1066[1];
     // A member whose value is `undefined` is absent, known or not.
-    if (member === undefined || ignored.has(key) || Object.hasOwn(shape.fields, key)) continue;
+    if (member === undefined || setHas(ignored, key) || objectHasOwn(shape.fields, key)) continue;
     add(at(key), `${citeName(path || 'proof')} has an unknown key ${quoteText(key)}`);
   }
-  const copy: Record<string, unknown> = {};
+  const copy: Record<string, unknown> = bare({});
   let failed = false;
   const fieldAdd: Add = (where, message) => {
     failed = true;
     add(where, message);
   };
-  for (const [key, check] of fieldsOf(shape)) {
-    const field = members.get(key);
+  for (let idx181 = 0, list181 = fieldsOf(shape); idx181 < list181.length; idx181++) {
+    const tuple1067 = list181[idx181] as (typeof list181)[number];
+    const key = tuple1067[0];
+    const check = tuple1067[1];
+    const field = mapGet(members, key);
     if (field !== undefined) copy[key] = check(field, at(key), fieldAdd);
-    else if (!shape.optional?.includes(key)) fieldAdd(at(key), `${citeName(at(key))} is required`);
+    else if (!(shape.optional !== undefined && arrayIncludes(shape.optional, key)))
+      fieldAdd(at(key), `${citeName(at(key))} is required`);
   }
-  if (!failed) shape.refine?.(copy, path, add);
+  if (!failed) own(shape, 'refine')?.(copy, path, add);
   return { members, copy };
 }

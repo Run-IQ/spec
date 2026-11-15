@@ -6,7 +6,7 @@ import type { RuleDefinitionInput } from '../src/index.js';
 function without(obj: object, key: string): RuleDefinitionInput {
   const copy: Record<string, unknown> = { ...obj };
   delete copy[key];
-  return copy as RuleDefinitionInput;
+  return copy as unknown as RuleDefinitionInput;
 }
 
 /** A rule with nested objects everywhere, so key order can be shuffled at every depth. */
@@ -41,9 +41,14 @@ const rich: RuleDefinitionInput = {
     },
   ],
   sourceRef: 'CGI art. 12',
-  jurisdiction: 'NATIONAL',
-  extra: { owner: { team: 'tax', contact: { email: 'a@b.c', phone: null } }, flags: [1, 2] },
+  extensions: {
+    jurisdiction: 'NATIONAL',
+    extra: { owner: { team: 'tax', contact: { email: 'a@b.c', phone: null } }, flags: [1, 2] },
+  },
 };
+
+/** The extensions of `rich`, to change one of them. */
+const richExtensions = rich.extensions as Record<string, unknown>;
 
 /** Rebuilds a value with every object's keys in reverse order, at every depth. */
 function reverseKeys(value: unknown): unknown {
@@ -156,9 +161,12 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
       expect(
         fp({
           ...rich,
-          extra: {
-            flags: [1, 2],
-            owner: { contact: { phone: null, email: 'a@b.c' }, team: 'tax' },
+          extensions: {
+            extra: {
+              flags: [1, 2],
+              owner: { contact: { phone: null, email: 'a@b.c' }, team: 'tax' },
+            },
+            jurisdiction: 'NATIONAL',
           },
         }),
       ).toBe(fp(rich));
@@ -276,7 +284,7 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
       'exceptions',
       'sourceRef',
       'checksum',
-      'jurisdiction',
+      'extensions',
     ])('%s: undefined', (key) => {
       const withUndefined = { ...minimal, [key]: undefined } as RuleDefinitionInput;
       expect(fp(withUndefined)).toBe(fp(minimal));
@@ -305,7 +313,6 @@ describe('computeRuleFingerprint: same data, same fingerprint', () => {
         effectiveUntil: undefined,
         tags: ['vat', 'fiscal', 'vat'],
         checksum: 'stale',
-        ghost: undefined,
       },
       7,
     ) as RuleDefinitionInput;
@@ -341,21 +348,33 @@ describe('computeRuleFingerprint: different content, different fingerprint', () 
   });
 
   it('an extension value changes', () => {
-    expect(fp({ ...rich, jurisdiction: 'REGIONAL' })).not.toBe(ref);
+    expect(fp({ ...rich, extensions: { ...richExtensions, jurisdiction: 'REGIONAL' } })).not.toBe(
+      ref,
+    );
   });
 
   it('a nested extension value changes', () => {
     expect(
       fp({
         ...rich,
-        extra: { owner: { team: 'ops', contact: { email: 'a@b.c', phone: null } }, flags: [1, 2] },
+        extensions: {
+          ...richExtensions,
+          extra: {
+            owner: { team: 'ops', contact: { email: 'a@b.c', phone: null } },
+            flags: [1, 2],
+          },
+        },
       }),
     ).not.toBe(ref);
   });
 
   it('an extension is added or removed', () => {
-    expect(fp({ ...rich, schemaVersion: 2 })).not.toBe(ref);
-    expect(fp(without(rich, 'jurisdiction'))).not.toBe(ref);
+    expect(fp({ ...rich, extensions: { ...richExtensions, schemaVersion: 2 } })).not.toBe(ref);
+    const kept = Object.fromEntries(
+      Object.entries(richExtensions).filter(([key]) => key !== 'jurisdiction'),
+    );
+    expect(fp({ ...rich, extensions: kept })).not.toBe(ref);
+    expect(fp(without(rich, 'extensions'))).not.toBe(ref);
   });
 
   it('the condition value changes', () => {
@@ -382,7 +401,15 @@ describe('computeRuleFingerprint: different content, different fingerprint', () 
   });
 
   it('array order inside an extension changes', () => {
-    expect(fp({ ...rich, extra: { ...(rich.extra as object), flags: [2, 1] } })).not.toBe(ref);
+    expect(
+      fp({
+        ...rich,
+        extensions: {
+          ...richExtensions,
+          extra: { ...(richExtensions.extra as object), flags: [2, 1] },
+        },
+      }),
+    ).not.toBe(ref);
   });
 
   it.each([

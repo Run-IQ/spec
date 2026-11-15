@@ -1,13 +1,29 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { newSpecError, reasonOf } from '../errors.js';
 import { sizedDigest } from '../merkle.js';
-import { typeName, withValueBudget } from '../values.js';
+import { ordinary, typeName, withValueBudget } from '../values.js';
 import { hiddenSections } from './lifts.js';
 import type { HiddenSections } from './lifts.js';
 import { isRedacted, packedLeafHashes } from './tree.js';
 import { PROOF_SECTIONS } from './types.js';
 import type { DecisionProof, ProofSection, ProofView, UnsignedProof } from './types.js';
 import { readDecisionProof } from './validate.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayConcat,
+  arrayForEach,
+  arrayMap,
+  arrayPush,
+  arraySome,
+  bare,
+  elementOf,
+  mapSet,
+  setAdd,
+  setOf,
+  setValuesArray,
+  uint8ArraySubarray,
+} from '../intrinsics.js';
 
 /** Internal: where a proof's redacted entries are, as its checks need to know it. */
 export interface Redactions {
@@ -27,9 +43,9 @@ export interface Redactions {
 /** Internal: no redacted entry. */
 export const NO_REDACTION: Redactions = {
   count: 0,
-  hidden: new Set(),
-  bySection: new Map(),
-  positions: new Map(),
+  hidden: new NativeSet(),
+  bySection: new NativeMap(),
+  positions: new NativeMap(),
 };
 
 /**
@@ -38,26 +54,27 @@ export const NO_REDACTION: Redactions = {
  * shared, not copied), and where the redacted ones were.
  */
 export function proofView(p: UnsignedProof): { view: ProofView; redactions: Redactions } {
-  const view = { ...p } as unknown as Record<string, unknown>;
-  const hidden = new Set<ProofSection>();
-  const bySection = new Map<ProofSection, number>();
-  const positions = new Map<ProofSection, number[]>();
+  const view = bare({ ...p }) as unknown as Record<string, unknown>;
+  const hidden = new NativeSet<ProofSection>();
+  const bySection = new NativeMap<ProofSection, number>();
+  const positions = new NativeMap<ProofSection, number[]>();
   let count = 0;
-  for (const section of PROOF_SECTIONS) {
+  for (let idx191 = 0, list191 = PROOF_SECTIONS; idx191 < list191.length; idx191++) {
+    const section = list191[idx191] as (typeof list191)[number];
     const list: readonly object[] = p[section];
-    if (!list.some(isRedacted)) continue;
+    if (!arraySome(list, isRedacted)) continue;
     const left: object[] = [];
     const places: number[] = [];
-    list.forEach((entry, i) => {
+    arrayForEach(list, (entry, i) => {
       if (isRedacted(entry)) return;
-      left.push(entry);
-      places.push(i);
+      arrayPush(left, entry);
+      arrayPush(places, i);
     });
     const redacted = list.length - left.length;
     count += redacted;
-    hidden.add(section);
-    bySection.set(section, redacted);
-    positions.set(section, places);
+    setAdd(hidden, section);
+    mapSet(bySection, section, redacted);
+    mapSet(positions, section, places);
     view[section] = left;
   }
   return {
@@ -94,7 +111,8 @@ export function redactProof(
 ): DecisionProof {
   return withValueBudget(() => {
     const { proof, errors } = readDecisionProof(p);
-    if (!proof) throw newSpecError('INVALID_PROOF', `Cannot redact the proof: ${errors[0]}`);
+    if (!proof)
+      throw newSpecError('INVALID_PROOF', `Cannot redact the proof: ${elementOf(errors, 0)}`);
     if (!proof.inputSalted) {
       throw newSpecError('INVALID_DISCLOSURE', 'unsalted proof cannot be redacted');
     }
@@ -113,19 +131,35 @@ export function redactProof(
     }
     const chosen: [ProofSection, number, string][] = [];
     let leaf = 1;
-    for (const section of PROOF_SECTIONS) {
-      proof[section].forEach((entry, i) => {
+    for (let idx192 = 0, list192 = PROOF_SECTIONS; idx192 < list192.length; idx192++) {
+      const section = list192[idx192] as (typeof list192)[number];
+      arrayForEach(proof[section] as readonly object[], (entry, i) => {
         const at = leaf++;
         if (isRedacted(entry) || !askHide(hide, section, i)) return;
-        chosen.push([section, i, bytesToHex(leaves.subarray(at * 32, (at + 1) * 32))]);
+        arrayPush(chosen, [
+          section,
+          i,
+          bytesToHex(uint8ArraySubarray(leaves, at * 32, (at + 1) * 32)),
+        ]);
       });
     }
-    const copy = { ...proof } as unknown as Record<ProofSection, object[]>;
-    for (const section of new Set(chosen.map(([section]) => section))) {
-      copy[section] = [...copy[section]];
+    const copy = bare({ ...proof }) as unknown as Record<ProofSection, object[]>;
+    for (
+      let idx1073 = 0, list1073 = setValuesArray(setOf(arrayMap(chosen, (entry) => entry[0])));
+      idx1073 < list1073.length;
+      idx1073++
+    ) {
+      const section = list1073[idx1073] as (typeof list1073)[number];
+      copy[section] = arrayConcat(copy[section]);
     }
-    for (const [section, i, redacted] of chosen) copy[section][i] = { redacted };
-    return copy as unknown as DecisionProof;
+    for (let idx1074 = 0, list1074 = chosen; idx1074 < list1074.length; idx1074++) {
+      const tuple2001 = list1074[idx1074] as (typeof list1074)[number];
+      const section = tuple2001[0];
+      const i = tuple2001[1];
+      const redacted = tuple2001[2];
+      copy[section][i] = { redacted };
+    }
+    return ordinary(copy) as unknown as DecisionProof;
   });
 }
 

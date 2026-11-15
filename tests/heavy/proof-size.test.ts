@@ -6,6 +6,7 @@ import { outputProof, wideProof } from '../proof-builders.js';
 import { unsaltedSalt } from '../proof-cases.js';
 import { unsalted } from '../proof-cases.js';
 import type { ProofView } from '../../src/proof/types.js';
+import { UNCHECKED } from '../notices.js';
 
 // Lists as long as a proof can hold are read in loops: never spread into the arguments of a
 // call (a RangeError, reported as "too deeply nested"), and problems stop at the issue cap.
@@ -137,30 +138,41 @@ describe('proofs as large as the format allows', () => {
     );
     const result = verifyProof({ ...withCounts(proof), digest: '0'.repeat(64) });
     expect(result.status).toBe('invalid');
-    expect(result.issues.length).toBe(101);
+    expect(result.issues.length).toBe(100);
     expect(result.issues.slice(0, 3)).toEqual([
       'digest mismatch',
       'factsRead not sorted at 1',
       'factsRead not sorted at 2',
     ]);
-    expect(result.issues.at(-1)).toBe('further problems not listed (limit 100)');
+    expect(result.issues.at(-1)).toMatch(
+      /^further problems not listed \(limit 100\): \d+ left out$/,
+    );
   }, 600_000);
 
   it('200 000 affected rules: sealed and verified, in linear work', () => {
     const proof = sealProof(unsalted(inhibited(200_000)));
-    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(proof)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expectLinear(inhibited, 100_000);
   }, 600_000);
 
   it('250 000 contributors: sealed and verified, in linear work', () => {
     const proof = sealProof(unsalted(summed(250_000)));
-    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(proof)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expectLinear(summed, 125_000);
   }, 600_000);
 
   it('a chain of 100 000 pending carriers: sealed and verified, in linear work', () => {
     const proof = sealProof(unsalted(carriers(100_000)));
-    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(proof)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expectLinear(carriers, 50_000);
   }, 600_000);
 
@@ -176,7 +188,10 @@ describe('proofs as large as the format allows', () => {
     };
     const proof = sealProof(unsalted(steps(40_000)));
     expect(proof.applied.length).toBe(80_000);
-    expect(verifyProof(proof)).toEqual({ status: 'consistent', issues: ['unsigned'] });
+    expect(verifyProof(proof)).toEqual({
+      status: 'consistent',
+      issues: ['unsigned', ...UNCHECKED],
+    });
     expectLinear(steps, 20_000);
   }, 600_000);
 });

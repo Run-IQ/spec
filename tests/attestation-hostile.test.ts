@@ -4,7 +4,7 @@ import type { Attestation, ProofVerification } from '../src/index.js';
 import { attestationMessage } from '../src/attestation/verify.js';
 import { signAttestationBody } from '../src/attestation/sign.js';
 import { lastValuesSpent } from '../src/values.js';
-import { counted, jsonCopy, nested, revokedProxy, specError } from './helpers.js';
+import { counted, jsonCopy, nested, optionError, revokedProxy, specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, signed } from './proof-cases.js';
 
 const DIGEST = signed().digest;
@@ -168,24 +168,34 @@ describe('verifyAttestation never throws: a hostile value is a named invalid', (
     const unknown = { ...COSIGNATURE, kind: 'notary' };
     unknown.signature = signAttestationBody({ ...unknown, signature: undefined }, RFC_SECRET);
     expect(verify(unknown)).toEqual({
-      status: 'consistent',
+      status: 'invalid',
       issues: ['attestation kind not supported: notary'],
     });
   });
 
   it('hostile arguments: the trusted keys and the digest expected', () => {
-    expect(verify(COSIGNATURE, throwingProxy({}))).toEqual(
-      invalid(['trustedKeys could not be read: boom']),
-    );
+    expect(optionError(() => verify(COSIGNATURE, throwingProxy({})))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys could not be read: boom',
+    });
     const keys = {};
     throwAt(keys, 'reviewer');
-    expect(verify(COSIGNATURE, keys)).toEqual(invalid(['trustedKeys could not be read: boom']));
-    expect(verifyAttestation(COSIGNATURE, throwingProxy({}) as unknown as string, TRUSTED)).toEqual(
-      invalid(['the expected proof digest must be 64 lowercase hex characters']),
-    );
-    expect(verify(COSIGNATURE, [])).toEqual(
-      invalid(['trustedKeys must be an object of hex public keys']),
-    );
+    expect(optionError(() => verify(COSIGNATURE, keys))).toMatchObject({
+      option: 'trustedKeys.reviewer',
+      message: 'trustedKeys.reviewer could not be read: boom',
+    });
+    expect(
+      optionError(() =>
+        verifyAttestation(COSIGNATURE, throwingProxy({}) as unknown as string, TRUSTED),
+      ),
+    ).toMatchObject({
+      option: 'proofDigest',
+      message: 'the expected proof digest must be 64 lowercase hex characters',
+    });
+    expect(optionError(() => verify(COSIGNATURE, []))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
+    });
   });
 
   it('huge texts: a 10,000,000-character role and key id are named, never thrown', () => {
@@ -310,8 +320,8 @@ describe('hostile claims: a named invalid, never a throw, read once', () => {
     const a = withClaims({ a: 1, inner: { b: 2 }, list: [1, 2] }, true);
     a.claims = counted({ a: 1, inner: counted({ b: 2 }, counter), list: [1, 2] }, counter);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     // a, inner, list, then b: four member reads, each once.
     expect(counter.reads).toBe(4);
@@ -338,8 +348,8 @@ describe('an object shared by the subject and the claims is read once', () => {
     const once = { ...a, subject: { keyId: 'k1' }, claims: { s: { keyId: 'k1' } } };
     a.signature = signAttestationBody({ ...once, signature: undefined }, RFC_SECRET);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     expect(reads).toBe(1);
   });
@@ -411,8 +421,8 @@ describe('a shared subject is read once at any depth of the claims', () => {
     };
     a.signature = signAttestationBody(once, RFC_SECRET);
     expect(verify(a)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
     expect(reads()).toBe(1);
   });
@@ -480,7 +490,7 @@ describe('read once, at a bounded cost (counted)', () => {
     expect(lastValuesSpent()).toBe(8);
   });
 
-  it('each trusted key is read once, only the one named', () => {
+  it('each trusted key is read once, every one of them (a broken anchor is never ignored)', () => {
     const keys = { reviewer: RFC_PUBLIC, other: RFC_PUBLIC };
     const reads = new Map<PropertyKey, number>();
     const proxy = new Proxy(keys, {
@@ -490,7 +500,7 @@ describe('read once, at a bounded cost (counted)', () => {
       },
     });
     expect(verify(COSIGNATURE, proxy).status).toBe('authentic');
-    expect(Object.fromEntries(reads)).toEqual({ reviewer: 1 });
+    expect(Object.fromEntries(reads)).toEqual({ reviewer: 1, other: 1 });
   });
 
   it('the message signed is the canonical text of the six members: linear in their size', () => {

@@ -7,6 +7,7 @@ import type { JsonPointer } from '../path/pointer.js';
 import type { Subject } from '../path/subject.js';
 import type { RuleException } from '../rule/exceptions.js';
 import type { CivilDate, Instant } from '../time/civil.js';
+import { objectFreeze } from '../intrinsics.js';
 
 /** The format a decision proof declares in `format`. */
 export const PROOF_FORMAT = 'run-iq.proof/1';
@@ -36,7 +37,7 @@ export type ProofSection =
   | 'readsUndeclared';
 
 /** The sections of a proof in their order (D-16), the order of their leaves. Frozen. */
-export const PROOF_SECTIONS: readonly ProofSection[] = Object.freeze([
+export const PROOF_SECTIONS: readonly ProofSection[] = objectFreeze([
   'rules',
   'outputs',
   'items',
@@ -305,7 +306,12 @@ export interface Redacted {
 export interface ProofHeader {
   format: typeof PROOF_FORMAT;
   requestId: string;
-  /** The reference date of the evaluation, or `null` when it had none. */
+  /**
+   * The reference date of the evaluation, or `null` when it had none: `meta.dates.effective`,
+   * the date a rule without `effectiveOn` has its window compared with. `verifyProof` given
+   * `rules` relies on it (an applied rule outside its window at `evaluatedAt` is `invalid`), so
+   * an engine seals no other date here.
+   */
   evaluatedAt: CivilDate | Instant | null;
   sealedAt: Instant;
   /** `computeInputDigest(input, seed)`: lowercase sha256 hex. */

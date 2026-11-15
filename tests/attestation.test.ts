@@ -12,7 +12,7 @@ import {
 import type { Attestation, ProofVerification } from '../src/index.js';
 import * as canonicalEntry from '../src/canonical-entry.js';
 import { signAttestationBody } from '../src/attestation/sign.js';
-import { jsonCopy, specError } from './helpers.js';
+import { jsonCopy, optionError, specError } from './helpers.js';
 import { RFC_PUBLIC, RFC_SECRET, signed } from './proof-cases.js';
 import vector from './vectors/attestation-v1.json';
 import proofVector from './vectors/proof-v1.json';
@@ -189,26 +189,30 @@ describe('verifyAttestation: what it proves about which proof', () => {
     });
   });
 
-  it('a key not listed: consistent; a listed key that is malformed: consistent', () => {
+  it('a key not listed: consistent; a listed key that is malformed: invalid', () => {
     expect(verify(COSIGNATURE, DIGEST, {})).toEqual({
       status: 'consistent',
       issues: ['untrusted key'],
     });
-    expect(verifyAttestation(COSIGNATURE, DIGEST, undefined as never)).toEqual({
-      status: 'consistent',
-      issues: ['untrusted key'],
+    // The trusted keys are required for an attestation: `undefined` is not "no key" (AC6).
+    expect(
+      optionError(() => verifyAttestation(COSIGNATURE, DIGEST, undefined as never)),
+    ).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys is required: an object of hex public keys ({} trusts none)',
     });
-    expect(verify(COSIGNATURE, DIGEST, { reviewer: 'zz' })).toEqual({
-      status: 'consistent',
-      issues: ['trusted key malformed'],
+    // A trusted key that is malformed is a configuration error, not a missing key.
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, { reviewer: 'zz' }))).toMatchObject({
+      option: 'trustedKeys.reviewer',
+      message: 'trustedKeys.reviewer is malformed',
     });
     // A key of Object.prototype is not listed; an object of another prototype is refused.
     const toString = signedBody(bodyWith({ keyId: 'toString' }));
     expect(verify(toString, DIGEST, {}).issues).toEqual(['untrusted key']);
     const inherited = Object.create({ reviewer: RFC_PUBLIC }) as Record<string, string>;
-    expect(verify(COSIGNATURE, DIGEST, inherited)).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys must be an object of hex public keys'],
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, inherited))).toMatchObject({
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
     });
   });
 
@@ -242,40 +246,53 @@ describe('verifyAttestation: what it proves about which proof', () => {
   });
 
   it('checks its arguments: the digest expected and the trusted keys', () => {
-    for (const digest of [`${DIGEST}0`, `x${DIGEST}`]) {
-      expect(verify(COSIGNATURE, digest).issues).toEqual([
-        'the expected proof digest must be 64 lowercase hex characters',
-      ]);
+    // A mistake of the caller in the arguments throws, never a verdict on the attestation.
+    for (const digest of [`${DIGEST}0`, `x${DIGEST}`, 'ABC']) {
+      expect(optionError(() => verify(COSIGNATURE, digest))).toMatchObject({
+        code: 'INVALID_OPTIONS',
+        option: 'proofDigest',
+        message: 'the expected proof digest must be 64 lowercase hex characters',
+      });
     }
     expect(verify({ ...COSIGNATURE, subject: { proofDigest: `${DIGEST}0` } }).issues).toEqual([
       '/subject/proofDigest must be 64 lowercase hex characters',
     ]);
-    expect(verify(COSIGNATURE, 'ABC')).toEqual({
-      status: 'invalid',
-      issues: ['the expected proof digest must be 64 lowercase hex characters'],
-    });
-    expect(verify(COSIGNATURE, DIGEST, 'keys')).toEqual({
-      status: 'invalid',
-      issues: ['trustedKeys must be an object of hex public keys'],
+    expect(optionError(() => verify(COSIGNATURE, DIGEST, 'keys'))).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'trustedKeys',
+      message: 'trustedKeys must be an object of hex public keys',
     });
   });
 });
 
-describe('the kind is open (D-6, D-29): only cosignature is verified now', () => {
-  for (const kind of ['timestamp', 'revocation']) {
-    it(`${kind} over a key: consistent, the kind named`, () => {
+describe('the kind is open (D-6) but only cosignature is verified: any other is invalid (D-29)', () => {
+  for (const kind of ['timestamp', 'revocation', 'cosignature-v2']) {
+    it(`${kind} over a key: invalid, the kind named, and not about this proof`, () => {
       const a = signedBody(bodyWith({ kind, subject: { keyId: 'executor-1' } }));
       expect(verify(a)).toEqual({
-        status: 'consistent',
-        issues: [`attestation kind not supported: ${kind}`],
+        status: 'invalid',
+        issues: [`attestation kind not supported: ${kind}`, 'attestation not about this proof'],
       });
     });
   }
 
-  it('an unsupported kind over a proof is still compared with the proof expected', () => {
+  it('a revocation of the signer key is never a weak yes for the proof', () => {
+    const a = signedBody(bodyWith({ kind: 'revocation', subject: { keyId: 'reviewer' } }));
+    expect(verify(a).status).toBe('invalid');
+    expect(verify(a, OTHER_DIGEST).status).toBe('invalid');
+  });
+
+  it('a cosignature of a key is invalid by its shape, a keyId subject of another kind by its subject', () => {
+    expect(verify(signedBody(bodyWith({ subject: { keyId: 'k' } })))).toEqual({
+      status: 'invalid',
+      issues: ['cosignature needs subject.proofDigest'],
+    });
+  });
+
+  it('an unsupported kind over a proof is invalid, and still compared with the proof expected', () => {
     const a = signedBody(bodyWith({ kind: 'timestamp' }));
     expect(verify(a)).toEqual({
-      status: 'consistent',
+      status: 'invalid',
       issues: ['attestation kind not supported: timestamp'],
     });
     expect(verify(a, OTHER_DIGEST)).toEqual({
@@ -310,7 +327,10 @@ describe('the kind is open (D-6, D-29): only cosignature is verified now', () =>
   it('cites a long kind in at most 256 characters', () => {
     const kind = `k${'x'.repeat(10_000)}`;
     const a = signedBody(bodyWith({ kind, subject: { keyId: 'executor-1' } }));
-    expect(verify(a).issues).toEqual([`attestation kind not supported: k${'x'.repeat(255)}…`]);
+    expect(verify(a).issues).toEqual([
+      `attestation kind not supported: k${'x'.repeat(255)}…`,
+      'attestation not about this proof',
+    ]);
   });
 });
 
@@ -320,10 +340,10 @@ describe('claims: the one signed member reserved for later kinds (ruling 9K2-8)'
     bodyWith({ kind: 'timestamp', subject: { keyId: 'executor-1' }, claims: CLAIMS }),
   );
 
-  it('an unsupported kind with claims: consistent, the kind named', () => {
+  it('an unsupported kind with claims: invalid, the kind named', () => {
     expect(verify(timestamp)).toEqual({
-      status: 'consistent',
-      issues: ['attestation kind not supported: timestamp'],
+      status: 'invalid',
+      issues: ['attestation kind not supported: timestamp', 'attestation not about this proof'],
     });
   });
 
@@ -338,12 +358,20 @@ describe('claims: the one signed member reserved for later kinds (ruling 9K2-8)'
     const changed = { ...timestamp, claims: { ...CLAIMS, serial: 8 } };
     expect(verify(changed)).toEqual({
       status: 'invalid',
-      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+      issues: [
+        'attestation kind not supported: timestamp',
+        'attestation not about this proof',
+        'signature invalid',
+      ],
     });
     const dropped = { ...timestamp, claims: undefined };
     expect(verify(dropped)).toEqual({
       status: 'invalid',
-      issues: ['attestation kind not supported: timestamp', 'signature invalid'],
+      issues: [
+        'attestation kind not supported: timestamp',
+        'attestation not about this proof',
+        'signature invalid',
+      ],
     });
   });
 
@@ -532,20 +560,9 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
   const ACCEPTED: [string, unknown][] = [
     ['the cosignature', COSIGNATURE],
     ['without role', signedBody(bodyWith({ role: undefined }))],
-    ['a timestamp over a proof', signedBody(bodyWith({ kind: 'timestamp' }))],
-    [
-      'a revocation over a key',
-      signedBody(bodyWith({ kind: 'revocation', subject: { keyId: 'k' } })),
-    ],
-    ['any kind text', signedBody(bodyWith({ kind: 'Some kind', subject: { keyId: 'k' } }))],
     ['a leap day', signedBody(bodyWith({ at: '2028-02-29T23:59:59.999Z' }))],
     ['year 0000, a leap year', signedBody(bodyWith({ at: '0000-02-29T00:00:00.000Z' }))],
     ['a role of any text', signedBody(bodyWith({ role: 'réviseur 🧾' }))],
-    [
-      'a timestamp with claims',
-      signedBody(bodyWith({ kind: 'timestamp', claims: { token: 'MIIB', n: [1, { a: null }] } })),
-    ],
-    ['empty claims on a revocation', signedBody(bodyWith({ kind: 'revocation', claims: {} }))],
   ];
 
   /** Refused by both. */
@@ -593,6 +610,23 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
 
   /** Refused by the verifier alone: what JSON Schema cannot express. */
   const VERIFIER_ONLY: [string, unknown][] = [
+    ['a timestamp over a proof (kind not supported)', signedBody(bodyWith({ kind: 'timestamp' }))],
+    [
+      'a revocation over a key (kind not supported, not about a proof)',
+      signedBody(bodyWith({ kind: 'revocation', subject: { keyId: 'k' } })),
+    ],
+    [
+      'any kind text (kind not supported)',
+      signedBody(bodyWith({ kind: 'Some kind', subject: { keyId: 'k' } })),
+    ],
+    [
+      'a timestamp with claims (kind not supported)',
+      signedBody(bodyWith({ kind: 'timestamp', claims: { token: 'MIIB', n: [1, { a: null }] } })),
+    ],
+    [
+      'empty claims on a revocation (kind not supported)',
+      signedBody(bodyWith({ kind: 'revocation', claims: {} })),
+    ],
     ['a lone surrogate in kind', { ...COSIGNATURE, kind: 'x\ud800', subject: { keyId: 'k' } }],
     ['a lone surrogate in keyId', { ...COSIGNATURE, keyId: '\udc00' }],
     ['a lone surrogate in role', { ...COSIGNATURE, role: 'a\ud800' }],
@@ -622,6 +656,8 @@ describe('the JSON schema accepts and refuses the same attestations', () => {
   it('the schema documents the verifier-only checks', () => {
     expect(schema.description).toMatch(/lone UTF-16 surrogate/);
     expect(schema.description).toMatch(/signature/);
+    expect(schema.description).toMatch(/refuses it as invalid/);
+    expect(schema.description).toMatch(/never about a proof/);
   });
 
   it('the package exports the schema', () => {

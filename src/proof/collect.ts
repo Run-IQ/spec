@@ -1,4 +1,5 @@
 import { MAX_ISSUES } from '../issues.js';
+import { arrayPush } from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: how the consistency checks of a proof gather their problems. A
 // list can hold as many entries as the proof (10 000 000 values): never spread it into the
@@ -12,14 +13,14 @@ export const ISSUE_CAP = MAX_ISSUES + 1;
 export const full = (issues: readonly string[]): boolean => issues.length >= ISSUE_CAP;
 
 /** Appends the problems of `source` to `issues`, one by one, up to `ISSUE_CAP`. */
-export function append(issues: string[], source: Iterable<string>): void {
-  for (const issue of source) {
+export function append(issues: string[], source: readonly string[]): void {
+  for (let i = 0; i < source.length; i++) {
     if (full(issues)) return;
-    issues.push(issue);
+    arrayPush(issues, source[i] as string);
   }
 }
 
 /** Appends `source` to `target` one by one (any length): never through call arguments. */
-export function extend<T>(target: T[], source: Iterable<T>): void {
-  for (const item of source) target.push(item);
+export function extend<T>(target: T[], source: readonly T[]): void {
+  for (let i = 0; i < source.length; i++) arrayPush(target, source[i] as T);
 }

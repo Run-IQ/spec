@@ -17,12 +17,32 @@ import type {
 } from './types.js';
 import { isLifted, liftedOnSteps, LIFTS } from './lifts.js';
 import type { Problem, RuleIdentity } from './lifts.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayConcat,
+  arrayForEach,
+  arrayIndexOf,
+  arrayPop,
+  arrayPush,
+  arraySort,
+  hasOwnKey,
+  mapGet,
+  mapHas,
+  mapOf,
+  mapSet,
+  mapValuesArray,
+  mathMax,
+  setAdd,
+  setHas,
+  setOf,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
 // that produced some of them (D-7, D-8, D-21, R15-R18). Linear: each list is indexed once, and
 // each subject walked once in a trie.
 
-const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status);
+const rankOf = (status: OutputStatus): number => arrayIndexOf(OUTPUT_STATUSES, status);
 
 /**
  * Internal: each listed rule that no entry decides (D-8: every rule ends applied, excluded or
@@ -32,23 +52,32 @@ const rankOf = (status: OutputStatus): number => OUTPUT_STATUSES.indexOf(status)
  */
 export function undecidedRules(
   p: ProofView,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
-  const decided = new Set<string>();
-  for (const list of [p.applied, p.skipped, p.pending, p.exceptions]) {
-    for (const entry of list) decided.add(ruleKey(entry));
+  const decided = new NativeSet<string>();
+  for (
+    let idx116 = 0, list116 = [p.applied, p.skipped, p.pending, p.exceptions];
+    idx116 < list116.length;
+    idx116++
+  ) {
+    const list = list116[idx116] as (typeof list116)[number];
+    for (let idx1029 = 0, list1029 = list; idx1029 < list1029.length; idx1029++) {
+      const entry = list1029[idx1029] as (typeof list1029)[number];
+      setAdd(decided, ruleKey(entry));
+    }
   }
   const issues: string[] = [];
-  for (const rule of p.rules) {
+  for (let idx117 = 0, list117 = p.rules; idx117 < list117.length; idx117++) {
+    const rule = list117[idx117] as (typeof list117)[number];
     if (full(issues)) break;
     const id = qualifyName(rule.ruleSet, rule.id);
     const key = `${id}@${rule.version}`;
-    if (decided.has(key)) continue;
+    if (setHas(decided, key)) continue;
     // A hidden decision of that rule.
     const message = `rule not decided: ${citeName(key)}`;
     const identity = { id, version: rule.version };
     if (!isLifted(hidden, LIFTS.everyRuleDecided, { message, rule: identity })) {
-      issues.push(message);
+      arrayPush(issues, message);
     }
   }
   return issues;
@@ -67,7 +96,7 @@ export function undecidedRules(
 export function decisionProblems(
   p: ProofView,
   imposed: ReadonlySet<string>,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   return liftedOnSteps(hidden, (steps) => decisionsOf(p, imposed, steps), p.applied);
 }
@@ -79,27 +108,35 @@ function decisionsOf(
   steps: readonly ProofStep[],
 ): string[] {
   const issues: string[] = [];
-  const outputs = new Map<string, string>();
-  const reported = new Set<string>();
+  const outputs = new NativeMap<string, string>();
+  const reported = new NativeSet<string>();
   const feeds = (entry: { ruleId: string; version: number }, output: string | undefined) => {
     if (output === undefined || full(issues)) return;
     const key = ruleKey(entry);
-    const known = outputs.get(key);
-    if (known === undefined) outputs.set(key, output);
-    else if (known !== output && !reported.has(key)) {
-      reported.add(key);
-      issues.push(`rule feeds two outputs: ${citeName(key)}`);
+    const known = mapGet(outputs, key);
+    if (known === undefined) mapSet(outputs, key, output);
+    else if (known !== output && !setHas(reported, key)) {
+      setAdd(reported, key);
+      arrayPush(issues, `rule feeds two outputs: ${citeName(key)}`);
     }
   };
-  for (const step of steps) {
-    if (!imposed.has(imposedKey(step, step.output))) feeds(step, step.output);
+  for (let idx118 = 0, list118 = steps; idx118 < list118.length; idx118++) {
+    const step = list118[idx118] as (typeof list118)[number];
+    if (!setHas(imposed, imposedKey(step, step.output))) feeds(step, step.output);
   }
-  for (const skip of p.skipped) feeds(skip, skip.output);
-  for (const entry of p.pending) feeds(entry, entry.output);
-  for (const skip of p.skipped) {
+  for (let idx1030 = 0, list1030 = p.skipped; idx1030 < list1030.length; idx1030++) {
+    const skip = list1030[idx1030] as (typeof list1030)[number];
+    feeds(skip, skip.output);
+  }
+  for (let idx1031 = 0, list1031 = p.pending; idx1031 < list1031.length; idx1031++) {
+    const entry = list1031[idx1031] as (typeof list1031)[number];
+    feeds(entry, entry.output);
+  }
+  for (let idx119 = 0, list119 = p.skipped; idx119 < list119.length; idx119++) {
+    const skip = list119[idx119] as (typeof list119)[number];
     if (full(issues)) break;
     if (skip.reason === 'RULE_CONFLICT' && skip.status !== 'conflict') {
-      issues.push(`tie loser not in conflict: ${citeName(instanceKey(skip))}`);
+      arrayPush(issues, `tie loser not in conflict: ${citeName(instanceKey(skip))}`);
     }
   }
   return issues;
@@ -113,7 +150,7 @@ function decisionsOf(
  * is decided by the rule's own evaluation after the exceptions (D-8: a plugin may still give
  * `INVALID_PARAMS`, `OUTPUT_MISMATCH`, …).
  */
-export const BEFORE_EXCEPTIONS: ReadonlySet<string> = new Set([
+export const BEFORE_EXCEPTIONS: ReadonlySet<string> = setOf([
   'INACTIVE_DATE',
   'TAG_MISMATCH',
   'DIMENSION_MISMATCH',
@@ -132,7 +169,7 @@ const VERB: Readonly<Record<ProofException['kind'], string>> = {
 };
 
 /** The exclusions only an exception explains, and the problem of one that none reached. */
-const UNEXPLAINED: ReadonlyMap<string, string> = new Map([
+const UNEXPLAINED: ReadonlyMap<string, string> = mapOf([
   ['INHIBITED', 'inhibited without an exception'],
   ['SHORT_CIRCUITED', 'short-circuited without an exception'],
 ]);
@@ -155,7 +192,7 @@ interface Node {
   latest: number;
 }
 
-const newNode = (): Node => ({ children: new Map(), groups: new Map(), latest: -1 });
+const newNode = (): Node => ({ children: new NativeMap(), groups: new NativeMap(), latest: -1 });
 
 type Decision = ProofStep | ProofSkip | ProofPending;
 
@@ -167,16 +204,16 @@ type Decision = ProofStep | ProofSkip | ProofPending;
  * nor one another kind produced.
  */
 function groupOf(decision: Decision, imposed: ReadonlySet<string>): string[] {
-  if ('model' in decision) {
+  if (hasOwnKey(decision, 'model')) {
     // An applied step: substituted, or (refused below) applied though inhibited.
-    return imposed.has(imposedKey(decision, decision.output)) ? [] : ['substitute'];
+    return setHas(imposed, imposedKey(decision, decision.output)) ? [] : ['substitute'];
   }
-  if (!('status' in decision)) return ['substitute'];
+  if (!hasOwnKey(decision, 'status')) return ['substitute'];
   if (decision.reason === 'INHIBITED') return ['inhibit'];
   if (decision.reason === 'SHORT_CIRCUITED') {
     return decision.output === undefined ? [] : [`shortCircuit\u0000${decision.output}`];
   }
-  return BEFORE_EXCEPTIONS.has(decision.reason) ? [] : ['substitute'];
+  return setHas(BEFORE_EXCEPTIONS, decision.reason) ? [] : ['substitute'];
 }
 
 /**
@@ -214,18 +251,21 @@ export function exceptionProblems(
   p: ProofView,
   imposed: ReadonlySet<string>,
   ties: Ties,
-  hidden: ReadonlySet<ProofSection> = new Set(),
+  hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const issues: string[] = [];
   const push = (issue: string): void => {
-    if (!full(issues)) issues.push(issue);
+    if (!full(issues)) arrayPush(issues, issue);
   };
   const { uncertain } = ties;
   // Unless what fired may be hidden: report `message` then.
   const report = (add: (message: string) => void, message: string): void => {
     if (!isLifted(hidden, LIFTS.firedExceptions, { message, ties: uncertain })) add(message);
   };
-  for (const problem of ties.problems) push(problem);
+  for (let idx1032 = 0, list1032 = ties.problems; idx1032 < list1032.length; idx1032++) {
+    const problem = list1032[idx1032] as (typeof list1032)[number];
+    push(problem);
+  }
   carrierProblems(p, imposed, ties, {
     status: (message, rule) => {
       if (!isLifted(hidden, LIFTS.carrierStatus, { message, rule })) push(message);
@@ -234,36 +274,44 @@ export function exceptionProblems(
       if (!isLifted(hidden, LIFTS.shortCircuitCarrier, problem)) push(problem.message);
     },
   });
-  const tries = new Map<string, Node>();
-  p.exceptions.forEach((exception, index) => {
-    if (ties.discarded.has(index)) return;
+  const tries = new NativeMap<string, Node>();
+  arrayForEach(p.exceptions, (exception, index) => {
+    if (setHas(ties.discarded, index)) return;
     const kind =
       exception.kind === 'shortCircuit'
         ? `shortCircuit\u0000${exception.output ?? ''}`
         : exception.kind;
-    for (const affected of exception.affected) {
-      let node: Node = tries.get(affected.ruleId) ?? newNode();
-      tries.set(affected.ruleId, node);
-      for (const segment of affected.subject === undefined ? [] : parsePointer(affected.subject)) {
-        let child: Node | undefined = node.children.get(segment);
+    for (let idx120 = 0, list120 = exception.affected; idx120 < list120.length; idx120++) {
+      const affected = list120[idx120] as (typeof list120)[number];
+      let node: Node = mapGet(tries, affected.ruleId) ?? newNode();
+      mapSet(tries, affected.ruleId, node);
+      for (
+        let idx121 = 0,
+          list121 = affected.subject === undefined ? [] : parsePointer(affected.subject);
+        idx121 < list121.length;
+        idx121++
+      ) {
+        const segment = list121[idx121] as (typeof list121)[number];
+        let child: Node | undefined = mapGet(node.children, segment);
         if (child === undefined) {
           child = newNode();
-          node.children.set(segment, child);
+          mapSet(node.children, segment, child);
         }
         node = child;
       }
-      const group = node.groups.get(kind) ?? { rank: -1, produced: false, entries: [] };
-      group.rank = Math.max(group.rank, rankOf(exception.status));
-      group.entries.push([index, affected]);
-      node.groups.set(kind, group);
-      node.latest = Math.max(node.latest, exception.stratum);
+      const group = mapGet(node.groups, kind) ?? { rank: -1, produced: false, entries: [] };
+      group.rank = mathMax(group.rank, rankOf(exception.status));
+      arrayPush(group.entries, [index, affected]);
+      mapSet(node.groups, kind, group);
+      node.latest = mathMax(node.latest, exception.stratum);
     }
   });
   const weaker: string[] = [];
   const uncovered: string[] = [];
   const early: string[] = [];
-  const decisions: Decision[] = [...p.applied, ...p.skipped, ...p.pending];
-  for (const decision of decisions) {
+  const decisions: Decision[] = arrayConcat(p.applied, p.skipped, p.pending);
+  for (let idx122 = 0, list122 = decisions; idx122 < list122.length; idx122++) {
+    const decision = list122[idx122] as (typeof list122)[number];
     if (full(issues)) break;
     const kinds = groupOf(decision, imposed);
     let strongest = -1;
@@ -271,20 +319,27 @@ export function exceptionProblems(
     let inhibited = false;
     let latest = -1;
     const visit = (node: Node): void => {
-      latest = Math.max(latest, node.latest);
-      for (const kind of kinds) {
-        const group = node.groups.get(kind);
+      latest = mathMax(latest, node.latest);
+      for (let idx123 = 0, list123 = kinds; idx123 < list123.length; idx123++) {
+        const kind = list123[idx123] as (typeof list123)[number];
+        const group = mapGet(node.groups, kind);
         if (group === undefined) continue;
         group.produced = true;
         reached = true;
-        strongest = Math.max(strongest, group.rank);
+        strongest = mathMax(strongest, group.rank);
       }
-      if ('model' in decision && node.groups.has('inhibit')) inhibited = true;
+      if (hasOwnKey(decision, 'model') && mapHas(node.groups, 'inhibit')) inhibited = true;
     };
-    let node = tries.get(decision.ruleId);
+    let node = mapGet(tries, decision.ruleId);
     if (node !== undefined) visit(node);
-    for (const segment of decision.subject === undefined ? [] : parsePointer(decision.subject)) {
-      node = node?.children.get(segment);
+    for (
+      let idx124 = 0,
+        list124 = decision.subject === undefined ? [] : parsePointer(decision.subject);
+      idx124 < list124.length;
+      idx124++
+    ) {
+      const segment = list124[idx124] as (typeof list124)[number];
+      node = node === undefined ? undefined : mapGet(node.children, segment);
       if (node === undefined) break;
       visit(node);
     }
@@ -292,56 +347,82 @@ export function exceptionProblems(
     if (inhibited) report(push, `inhibited rule applied: ${cited()}`);
     // A carrier runs before its targets or with them (core `carrierAfterTarget`). The step a
     // short circuit imposed is its carrier's, not a target's.
-    const own = 'model' in decision && imposed.has(imposedKey(decision, decision.output));
+    const own =
+      hasOwnKey(decision, 'model') && setHas(imposed, imposedKey(decision, decision.output));
     if (!own && decision.stratum < latest) {
       report(
-        (message) => early.push(message),
+        (message) => arrayPush(early, message),
         `decision before the exception that affected it: ${cited()}`,
       );
     }
     const unexplained =
-      !reached && 'status' in decision && !('model' in decision)
-        ? UNEXPLAINED.get(decision.reason)
+      !reached && hasOwnKey(decision, 'status') && !hasOwnKey(decision, 'model')
+        ? mapGet(UNEXPLAINED, decision.reason)
         : undefined;
     if (unexplained !== undefined) {
       const message = `${unexplained}: ${cited()}`;
       if (!isLifted(hidden, LIFTS.exclusionException, { message, ties: uncertain })) {
-        uncovered.push(message);
+        arrayPush(uncovered, message);
       }
     }
     // A pending decision is undetermined: never weaker.
-    if (reached && 'status' in decision && rankOf(decision.status) < strongest) {
+    if (reached && hasOwnKey(decision, 'status') && rankOf(decision.status) < strongest) {
       report(
-        (message) => weaker.push(message),
+        (message) => arrayPush(weaker, message),
         `decision weaker than the exception that affected it: ${cited()}`,
       );
     }
   }
   const unproduced: [number, string][] = [];
-  const stack = [...tries.values()];
-  for (let node = stack.pop(); node !== undefined; node = stack.pop()) {
-    for (const child of node.children.values()) stack.push(child);
-    for (const group of node.groups.values()) {
+  const stack = arrayConcat(mapValuesArray(tries));
+  for (let node = arrayPop(stack); node !== undefined; node = arrayPop(stack)) {
+    for (
+      let idx1033 = 0, list1033 = mapValuesArray(node.children);
+      idx1033 < list1033.length;
+      idx1033++
+    ) {
+      const child = list1033[idx1033] as (typeof list1033)[number];
+      arrayPush(stack, child);
+    }
+    for (let idx125 = 0, list125 = mapValuesArray(node.groups); idx125 < list125.length; idx125++) {
+      const group = list125[idx125] as (typeof list125)[number];
       if (group.produced) continue;
-      for (const [index, affected] of group.entries) {
+      for (let idx126 = 0, list126 = group.entries; idx126 < list126.length; idx126++) {
+        const tuple1034 = list126[idx126] as (typeof list126)[number];
+        const index = tuple1034[0];
+        const affected = tuple1034[1];
         const exception = p.exceptions[index];
         if (exception === undefined) continue;
         const at = affected.subject === undefined ? '' : ` at ${affected.subject}`;
         const by = citeName(instanceKey(exception));
         const rule = citeName(affected.ruleId + at);
-        unproduced.push([index, `affected rule not ${VERB[exception.kind]} by ${by}: ${rule}`]);
+        arrayPush(unproduced, [
+          index,
+          `affected rule not ${VERB[exception.kind]} by ${by}: ${rule}`,
+        ]);
       }
     }
   }
   // In the order of the exceptions, then of their affected entries.
-  unproduced.sort((a, b) => a[0] - b[0]);
+  arraySort(unproduced, (a, b) => a[0] - b[0]);
   // The decision an exception produced may be redacted.
-  for (const [, message] of unproduced) {
+  for (let idx127 = 0, list127 = unproduced; idx127 < list127.length; idx127++) {
+    const tuple1035 = list127[idx127] as (typeof list127)[number];
+    const message = tuple1035[1];
     if (!isLifted(hidden, LIFTS.affectedFound, { message, ties: uncertain })) push(message);
   }
-  for (const message of uncovered) push(message);
-  for (const message of weaker) push(message);
-  for (const message of early) push(message);
+  for (let idx1036 = 0, list1036 = uncovered; idx1036 < list1036.length; idx1036++) {
+    const message = list1036[idx1036] as (typeof list1036)[number];
+    push(message);
+  }
+  for (let idx1037 = 0, list1037 = weaker; idx1037 < list1037.length; idx1037++) {
+    const message = list1037[idx1037] as (typeof list1037)[number];
+    push(message);
+  }
+  for (let idx1038 = 0, list1038 = early; idx1038 < list1038.length; idx1038++) {
+    const message = list1038[idx1038] as (typeof list1038)[number];
+    push(message);
+  }
   return issues;
 }
 
@@ -364,27 +445,29 @@ function carrierProblems(
   ties: Ties,
   found: CarrierFound,
 ): void {
-  const steps = new Map<string, ProofStep>();
-  for (const step of p.applied) {
-    if (!imposed.has(imposedKey(step, step.output))) steps.set(instanceKey(step), step);
+  const steps = new NativeMap<string, ProofStep>();
+  for (let idx128 = 0, list128 = p.applied; idx128 < list128.length; idx128++) {
+    const step = list128[idx128] as (typeof list128)[number];
+    if (!setHas(imposed, imposedKey(step, step.output))) mapSet(steps, instanceKey(step), step);
   }
-  const won = new Set<string>();
-  for (const step of p.applied) {
-    if (imposed.has(imposedKey(step, step.output))) {
-      steps.set(imposedKey(step, step.output), step);
-      won.add(step.output);
+  const won = new NativeSet<string>();
+  for (let idx129 = 0, list129 = p.applied; idx129 < list129.length; idx129++) {
+    const step = list129[idx129] as (typeof list129)[number];
+    if (setHas(imposed, imposedKey(step, step.output))) {
+      mapSet(steps, imposedKey(step, step.output), step);
+      setAdd(won, step.output);
     }
   }
-  p.exceptions.forEach((exception, index) => {
-    if (ties.discarded.has(index)) return;
+  arrayForEach(p.exceptions, (exception, index) => {
+    if (setHas(ties.discarded, index)) return;
     const cited = citeName(instanceKey(exception));
     const { output } = exception;
     const { ruleId: id, version, subject } = exception;
     const rule: RuleIdentity = subject === undefined ? { id, version } : { id, version, subject };
     const carrier =
       exception.kind === 'shortCircuit' && output !== undefined
-        ? steps.get(imposedKey(exception, output))
-        : steps.get(instanceKey(exception));
+        ? mapGet(steps, imposedKey(exception, output))
+        : mapGet(steps, instanceKey(exception));
     if (carrier !== undefined && carrier.status !== exception.status) {
       found.status(`exception status differs from its carrier's decision: ${cited}`, rule);
     }
@@ -393,7 +476,7 @@ function carrierProblems(
     }
     // A carrier whose claim on the output another won affected nothing (R18).
     const unaffected = exception.affected.length === 0;
-    if (unaffected && won.has(output)) return;
+    if (unaffected && setHas(won, output)) return;
     found.missing({
       message: `short circuit without its carrier applied: ${cited}`,
       rule,

@@ -7,6 +7,7 @@ import type { Entry } from './proof-builders.js';
 import { ruleA } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { withoutDefinitionChecks, withoutUnchecked } from './notices.js';
 
 /** An output of a later stratum, with nothing in it. */
 const LATER: Entry = {
@@ -210,7 +211,7 @@ describe('which carriers fired: core ExceptionResult, R18, D-8', () => {
 
   it('seals fired: the digest tells true from false', () => {
     const sealed = handSealed(traceProof(holder('UNDETERMINED', 'missing /a', false)));
-    expect(verifyProof(sealed).issues).toEqual(['unsigned']);
+    expect(withoutUnchecked(verifyProof(sealed).issues)).toEqual(['unsigned']);
     const flipped = traceProof(holder('UNDETERMINED', 'missing /a', true));
     expect(verifyProof({ ...sealed, pending: flipped.pending }).issues).toEqual([
       'digest mismatch',
@@ -377,9 +378,10 @@ describe('PENDING_CARRIER: a chain of pending carriers down to one that did not 
 });
 
 describe('given the rules, fired is on the pending entries of carriers only', () => {
-  const plain = (id: string): RuleDefinitionInput => ({ ...ruleA, id });
+  const plain = (id: string): RuleDefinitionInput => ({ ...ruleA, model: 'M', id });
   const definition: RuleDefinitionInput = {
     ...ruleA,
+    model: 'M',
     id: 'X',
     exceptions: [{ kind: 'inhibit', targets: { ids: ['T'] } }],
   };
@@ -407,9 +409,13 @@ describe('given the rules, fired is on the pending entries of carriers only', ()
 
   it('accepts it on a carrier, refuses it on another rule or its absence on a carrier', () => {
     const honest = [plain('T'), definition];
-    expect(verifyProof(sealed(honest, false), { rules: honest }).issues).toEqual(['unsigned']);
+    expect(
+      withoutDefinitionChecks(verifyProof(sealed(honest, false), { rules: honest }).issues),
+    ).toEqual(['unsigned']);
     const none = [plain('T'), plain('X')];
-    expect(verifyProof(sealed(none, false), { rules: none }).issues).toEqual([
+    expect(
+      withoutDefinitionChecks(verifyProof(sealed(none, false), { rules: none }).issues),
+    ).toEqual([
       'unsigned',
       'fired on a rule without exceptions: X@1',
       // X carries no exception: it selects nothing.

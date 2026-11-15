@@ -1,4 +1,30 @@
 import { citeName } from './errors.js';
+import {
+  NativeMap,
+  NativeString,
+  NativeUint8Array,
+  arrayIsArray,
+  arrayPop,
+  arrayPush,
+  bare,
+  datePrototype,
+  defineValue,
+  functionCall,
+  getPrototypeOf,
+  mapGet,
+  mapSet,
+  numberIsSafeInteger,
+  objectGetOwnPropertyDescriptor,
+  objectHasOwn,
+  objectKeys,
+  objectPrototype,
+  regExpTest,
+  slotTime,
+  symbolToStringTag,
+  uint8ArrayLength,
+  uint8ArrayPrototype,
+  uint8ArraySet,
+} from './intrinsics.js';
 
 /**
  * The deepest a free-form JSON value carried by the format may nest: rule `params`,
@@ -39,8 +65,19 @@ export const MAX_JSON_VALUES = 10_000_000;
  */
 export const MAX_INPUT_LEAF_TEXT = 2 ** 28;
 
+/**
+ * The most values the options of one call may hold (`verifyProof`'s `rules` with their `params`,
+ * its `trustedKeys`; `verifyAttestation`'s `trustedKeys`). The proof has a budget of its own.
+ * An object, so that a test can lower it.
+ */
+export const optionsLimits = { nodes: 10_000_000 };
+/** The default of `optionsLimits.nodes`: past it, the call throws `VerifyOptionsError`. */
+export const MAX_VERIFY_OPTIONS_NODES = 10_000_000;
+
 /** The values the current call may still read; `undefined` outside `withValueBudget`. */
 let budget: { remaining: number } | undefined;
+/** Whether a `spendValues` of the current budget was refused: the budget ran out. */
+let exhausted = false;
 /** How many `ownCopy` calls are running: while one is, nothing is spent. */
 let ownCopies = 0;
 /** The values the last outermost `withValueBudget` call spent (`lastValuesSpent`). */
@@ -51,16 +88,17 @@ let lastSpent = 0;
  * makes (a nested call, as `verifyProof` normalizing a rule, shares the budget of the outer one).
  * Calls are synchronous, so the budget is the current call's alone.
  */
-export function withValueBudget<T>(read: () => T): T {
+export function withValueBudget<T>(read: () => T, limit: number = MAX_JSON_VALUES): T {
   // Nested, it shares the budget; inside `ownCopy` nothing is spent, so no budget is needed.
   if (budget !== undefined || ownCopies > 0) return read();
-  const current = { remaining: MAX_JSON_VALUES };
+  const current = { remaining: limit };
   budget = current;
+  exhausted = false;
   try {
     return read();
   } finally {
     budget = undefined;
-    lastSpent = MAX_JSON_VALUES - current.remaining;
+    lastSpent = limit - current.remaining;
   }
 }
 
@@ -92,17 +130,47 @@ export function lastValuesSpent(): number {
  * of at most `MAX_JSON_VALUES` values is allowed. Inside `ownCopy`, nothing is spent.
  */
 export function spendValues(count: number): boolean {
-  if (!Number.isSafeInteger(count) || count < 0) return false;
+  if (!numberIsSafeInteger(count) || count < 0) return false;
   if (ownCopies > 0) return true;
   const left = budget === undefined ? MAX_JSON_VALUES : budget.remaining;
-  if (count > left) return false;
+  if (count > left) {
+    exhausted = true;
+    return false;
+  }
   if (budget !== undefined) budget.remaining = left - count;
   return true;
+}
+
+/** Internal: whether the current (or last) budget ran out: a read was refused for its size. */
+export function budgetExhausted(): boolean {
+  return exhausted;
 }
 
 /** Internal: the problem of a value whose reading would pass `MAX_JSON_VALUES`. */
 export function tooLargeMessage(path: string): string {
   return `${citeName(path)} is too large: more than ${MAX_JSON_VALUES} values`;
+}
+
+/** What `ownElement` answers for an element the array does not have (a hole). */
+export const HOLE: object = bare({});
+/** What `ownElement` answers for an element that is an accessor (a getter or a setter). */
+export const ACCESSOR: object = bare({});
+
+/**
+ * Element `index` of `list`, read once as its own data property: `HOLE` when the array has no such
+ * element of its own (never what `Array.prototype` holds at that index), `ACCESSOR` when it is a
+ * getter or a setter (JSON holds values, and a getter could answer otherwise the next time).
+ */
+export function ownElement(list: readonly unknown[], index: number): unknown {
+  const descriptor = objectGetOwnPropertyDescriptor(list, index);
+  if (descriptor === undefined) return HOLE;
+  if (objectHasOwn(descriptor, 'get') || objectHasOwn(descriptor, 'set')) return ACCESSOR;
+  return descriptor.value;
+}
+
+/** Internal: the problem of an array with an accessor at `index` (JSON holds plain values). */
+export function accessorMessage(path: string, index: number): string {
+  return `${citeName(path)} has an accessor at index ${index}: arrays must hold plain values`;
 }
 
 /** Internal: the problem of an array with no element at `index` (a hole is not JSON). */
@@ -133,18 +201,19 @@ export interface ListProblem {
  */
 export function readList(list: readonly unknown[], path: string): unknown[] | ListProblem {
   const length: unknown = list.length;
-  if (typeof length !== 'number' || !Number.isSafeInteger(length) || length < 0) {
+  if (typeof length !== 'number' || !numberIsSafeInteger(length) || length < 0) {
     return { path, message: `${citeName(path)} has an invalid length` };
   }
   if (!spendValues(length)) return { path, message: tooLargeMessage(path) };
   const items: unknown[] = [];
   for (let i = 0; i < length; i++) {
-    if (!(i in list)) return { path, message: holeMessage(path, i) };
-    const item: unknown = list[i];
+    const item = ownElement(list, i);
+    if (item === HOLE) return { path, message: holeMessage(path, i) };
+    if (item === ACCESSOR) return { path, message: accessorMessage(path, i) };
     if (item === undefined) {
       return { path: `${path}[${i}]`, message: undefinedMessage(`${path}[${i}]`) };
     }
-    items.push(item);
+    arrayPush(items, item);
   }
   return items;
 }
@@ -155,17 +224,61 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
  */
 
 /**
- * The time value of a real `Date` from any realm (`NaN` for an invalid Date), or `undefined`
- * when `value` is not a Date. `Object.prototype.toString` pre-filters; `Date.prototype.getTime`
- * then checks the internal date slot, so a fake with `Symbol.toStringTag = 'Date'` is refused.
+ * The time value of a `Date` (`NaN` for an invalid Date), or `undefined` when `value` is not
+ * one. A value is a `Date` only if both hold: it has the internal date slot
+ * (`Date.prototype.getTime` reads it and nothing else, so a fake with `Symbol.toStringTag =
+ * 'Date'` has none), and its prototype IS the `Date.prototype` of this realm, compared in one
+ * step with no walk up the chain (a hostile chain costs one read). Anything else that carries
+ * the slot (a subclass, a Date of another realm, a Date under `Object.prototype`) is not a
+ * `Date` here and is refused with its pointer (`notADateMessage`): the caller converts it to a
+ * string first. A class named `Date` has no slot, so it is no Date at all.
  */
 export function dateTimeOf(value: unknown): number | undefined {
-  if (Object.prototype.toString.call(value) !== '[object Date]') return undefined;
+  if (typeof value !== 'object' || value === null) return undefined;
+  // Throws for a revoked Proxy, which `readReferenceDate` reports as unreadable.
+  const real = getPrototypeOf(value) === datePrototype;
+  const time = dateSlotOf(value);
+  // The slot under another prototype is not a Date here: see `hasDateSlot`.
+  return real ? time : undefined;
+}
+
+/** The time value held by the internal date slot of `value`, or `undefined` when it has none. */
+function dateSlotOf(value: unknown): number | undefined {
+  // No `Object.prototype.toString` here: it reads `Symbol.toStringTag`, which a Proxy or an
+  // accessor would see. `getTime` reads the internal slot and nothing else, and throws without it.
+  if (typeof value !== 'object' || value === null) return undefined;
   try {
-    return Date.prototype.getTime.call(value);
+    return slotTime(value);
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The refusal of a value that holds the internal slot of a Date without being a `Date`:
+ * `a Date with a plain prototype` (`Object.prototype`, `null`) or `a Date with a foreign
+ * prototype` (any other that is not `Date.prototype`: a subclass, a Date of another realm).
+ * `undefined` for a real Date and for a value with
+ * no slot. One text everywhere a value is read: canonical form, rules, inputs, windows.
+ */
+export function notADateMessage(value: unknown): string | undefined {
+  if (typeof value !== 'object' || value === null || !hasDateSlot(value)) return undefined;
+  if (getPrototypeOf(value) === datePrototype) return undefined;
+  return hasPlainPrototype(value)
+    ? 'a Date with a plain prototype'
+    : 'a Date with a foreign prototype';
+}
+
+/**
+ * Whether `value` holds the internal slot of a Date, whatever its prototype. An object is a
+ * `Date` only if it has that slot AND `Date.prototype` of this realm as its prototype (a
+ * subclass or a Date of another realm is not one); one with the slot under any other prototype
+ * (`Object.setPrototypeOf(new Date(0), Object.prototype)`, `Map.prototype`, ...) is neither a
+ * `Date` nor a plain object: it is refused, with its pointer, wherever a value is read
+ * (`notADateMessage`). One with no slot is plain, whatever its `Symbol.toStringTag` says.
+ */
+export function hasDateSlot(value: unknown): boolean {
+  return dateSlotOf(value) !== undefined;
 }
 
 /**
@@ -174,16 +287,21 @@ export function dateTimeOf(value: unknown): number | undefined {
  * inherited properties would be invisible to the canonical form.
  */
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
-  if (value === null || typeof value !== 'object' || Array.isArray(value)) return false;
-  const proto: unknown = Object.getPrototypeOf(value);
-  return proto === null || proto === Object.prototype || isForeignObjectPrototype(proto);
+  if (value === null || typeof value !== 'object' || arrayIsArray(value)) return false;
+  return hasPlainPrototype(value) && !hasDateSlot(value);
+}
+
+/** True when the prototype of `value` is `null` or some realm's `Object.prototype`. */
+function hasPlainPrototype(value: object): boolean {
+  const proto: unknown = getPrototypeOf(value);
+  return proto === null || proto === objectPrototype || isForeignObjectPrototype(proto);
 }
 
 /** True for `Object.prototype` of another realm. */
 function isForeignObjectPrototype(proto: unknown): boolean {
   if (proto === null || typeof proto !== 'object') return false;
-  if (Object.getPrototypeOf(proto) !== null || Object.keys(proto).length > 0) return false;
-  const ctor: unknown = Object.getOwnPropertyDescriptor(proto, 'constructor')?.value;
+  if (getPrototypeOf(proto) !== null || objectKeys(proto).length > 0) return false;
+  const ctor: unknown = objectGetOwnPropertyDescriptor(proto, 'constructor')?.value;
   return (
     typeof ctor === 'function' &&
     ctor.name === 'Object' &&
@@ -202,7 +320,7 @@ const LONE_SURROGATE = /[\uD800-\uDBFF](?![\uDC00-\uDFFF])|(?<![\uD800-\uDBFF])[
  * (RFC 7493) and JCS (RFC 8785) refuse it.
  */
 export function hasLoneSurrogate(text: string): boolean {
-  return LONE_SURROGATE.test(text);
+  return regExpTest(LONE_SURROGATE, text);
 }
 
 /**
@@ -221,7 +339,7 @@ export function loneSurrogateMessage(subject: string): string {
 export function typeName(value: unknown): string {
   if (value === null) return 'null';
   try {
-    if (Array.isArray(value)) return 'array';
+    if (arrayIsArray(value)) return 'array';
   } catch {
     return 'unreadable value';
   }
@@ -229,12 +347,12 @@ export function typeName(value: unknown): string {
 }
 
 /** `%TypedArray%.prototype`: its getters read a typed array's internal slots, never caller code. */
-const TYPED_ARRAY_PROTOTYPE: object = Object.getPrototypeOf(Uint8Array.prototype) as object;
-const TYPED_ARRAY_TAG = Object.getOwnPropertyDescriptor(
+const TYPED_ARRAY_PROTOTYPE: object = getPrototypeOf(uint8ArrayPrototype) as object;
+const TYPED_ARRAY_TAG = objectGetOwnPropertyDescriptor(
   TYPED_ARRAY_PROTOTYPE,
-  Symbol.toStringTag,
+  symbolToStringTag,
 )?.get;
-const TYPED_ARRAY_LENGTH = Object.getOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
+const TYPED_ARRAY_LENGTH = objectGetOwnPropertyDescriptor(TYPED_ARRAY_PROTOTYPE, 'length')?.get;
 
 /**
  * Internal: copies the bytes of `value` into `target` and returns true when `value` is a real
@@ -245,10 +363,10 @@ export function copyBytesInto(value: unknown, target: Uint8Array): boolean {
   if (typeof value !== 'object' || value === null) return false;
   if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return false;
   try {
-    if (TYPED_ARRAY_TAG.call(value) !== 'Uint8Array') return false;
-    if (TYPED_ARRAY_LENGTH.call(value) !== target.length) return false;
+    if (functionCall(TYPED_ARRAY_TAG, value) !== 'Uint8Array') return false;
+    if (functionCall(TYPED_ARRAY_LENGTH, value) !== uint8ArrayLength(target)) return false;
     // The tag above proves `value` holds the internal slots of a Uint8Array.
-    target.set(value as Uint8Array);
+    uint8ArraySet(target, value as Uint8Array);
     return true;
   } catch {
     return false;
@@ -266,15 +384,72 @@ export function bytesOf(value: unknown): Uint8Array | undefined {
   if (typeof value !== 'object' || value === null) return undefined;
   if (TYPED_ARRAY_TAG === undefined || TYPED_ARRAY_LENGTH === undefined) return undefined;
   try {
-    const tag: unknown = TYPED_ARRAY_TAG.call(value);
+    const tag: unknown = functionCall(TYPED_ARRAY_TAG, value);
     if (tag !== 'Uint8Array') return undefined;
-    const length: unknown = TYPED_ARRAY_LENGTH.call(value);
+    const length: unknown = functionCall(TYPED_ARRAY_LENGTH, value);
     if (typeof length !== 'number') return undefined;
-    const copy = new Uint8Array(length);
+    const copy = new NativeUint8Array(length);
     // The tag above proves `value` holds the internal slots of a Uint8Array.
-    copy.set(value as Uint8Array);
+    uint8ArraySet(copy, value as Uint8Array);
     return copy;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The own value of `record[key]`, or `undefined` when `record` has no such own property: a field
+ * of a caller's object (or of a parsed one) is never read through its prototype chain, so an
+ * absent optional field stays absent whatever `Object.prototype` holds.
+ */
+export function own<T extends object, K extends keyof T>(record: T, key: K): T[K] {
+  return objectHasOwn(record, key) ? record[key] : (undefined as T[K]);
+}
+
+/**
+ * A deep copy of `value` (plain JSON data) whose objects and arrays have the ordinary
+ * prototypes, for what spec hands back to a caller: inside, spec reads objects without a
+ * prototype, but a caller expects `result.hasOwnProperty(...)` and the like to work. Values that
+ * are not plain objects or arrays (a `Uint8Array`, a function) are kept as they are. Iterative,
+ * so depth costs no stack.
+ */
+export function ordinary<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value;
+  const fresh = (source: object): object => (arrayIsArray(source) ? [] : {});
+  const copies = new NativeMap<object, object>();
+  const root = fresh(value);
+  const pending: [object, object][] = [[value, root]];
+  mapSet(copies, value, root);
+  while (pending.length > 0) {
+    const next = arrayPop(pending) as [object, object];
+    const source = next[0];
+    const target = next[1];
+    const keys = arrayIsArray(source) ? indexKeys(source) : objectKeys(source);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i] as string;
+      const child = (source as Record<string, unknown>)[key];
+      let out: unknown = child;
+      if (
+        typeof child === 'object' &&
+        child !== null &&
+        (arrayIsArray(child) || isPlainObject(child))
+      ) {
+        let copy = mapGet(copies, child);
+        if (copy === undefined) {
+          copy = fresh(child);
+          mapSet(copies, child, copy);
+          arrayPush(pending, [child, copy]);
+        }
+        out = copy;
+      }
+      defineValue(target, key, out, true);
+    }
+  }
+  return root as T;
+}
+
+function indexKeys(list: readonly unknown[]): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < list.length; i++) defineValue(keys, i, NativeString(i), true);
+  return keys;
 }

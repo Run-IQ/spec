@@ -15,7 +15,7 @@ import {
 import type { DecisionProof, RuleDefinitionInput, UnsignedProof } from '../src/index.js';
 import { input, RFC_SECRET, ruleA, sealed, signed, TRUSTED, unsigned } from './proof-cases.js';
 import { REFUSED_PROOFS, VALID_PROOFS, VALIDATOR_ONLY_PROOFS } from './proof-shape-cases.js';
-import { nested, specError, tooDeepIssue } from './helpers.js';
+import { nested, optionError, specError, tooDeepIssue } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 
@@ -113,19 +113,23 @@ describe('verifyProof: hostile input', () => {
     [
       'a getter throwing a null-prototype object',
       throwing(() => Object.create(null)),
-      'unreadable value',
+      'digest could not be read: unreadable value',
     ],
-    ['a getter throwing a number', throwing(() => 7), '7'],
+    ['a getter throwing a number', throwing(() => 7), 'digest could not be read: 7'],
     [
       'a getter throwing an Error whose message throws',
       throwing(errorWithThrowingMessage),
-      'unreadable value',
+      'digest could not be read: unreadable value',
     ],
-    ['a Proxy whose getPrototypeOf throws', prototypeTrap, 'unreadable value'],
-  ])('%s: invalid, without throwing', (_name, value, reason) => {
+    [
+      'a Proxy whose getPrototypeOf throws',
+      prototypeTrap,
+      'proof could not be read: unreadable value',
+    ],
+  ])('%s: invalid, without throwing, the pointer named', (_name, value, message) => {
     expect(verifyProof(value, { trustedKeys: TRUSTED })).toEqual({
       status: 'invalid',
-      issues: [`proof could not be read: ${reason}`],
+      issues: [message],
     });
   });
 
@@ -173,18 +177,21 @@ describe('verifyProof: hostile input', () => {
       },
     });
     // Read as computeRuleChecksum reads a rule: both refuse it with the same reason.
-    expect(specError(() => computeRuleChecksum(rule as RuleDefinitionInput)).message).toBe(
-      'rule definition could not be read: unreadable value',
-    );
     expect(
-      verifyProof(signed(), { trustedKeys: TRUSTED, rules: [rule as RuleDefinitionInput] }),
-    ).toEqual({
-      status: 'invalid',
-      issues: [
-        'rule invalid: rules[0]: rule definition could not be read: unreadable value',
-        'rule missing: r1@1',
-        'rule missing: r2@2',
-      ],
+      specError(() => computeRuleChecksum(rule as unknown as RuleDefinitionInput)).message,
+    ).toBe('rule definition could not be read: unreadable value');
+    expect(
+      optionError(() =>
+        verifyProof(signed(), {
+          trustedKeys: TRUSTED,
+          rules: [rule as unknown as RuleDefinitionInput],
+        }),
+      ),
+    ).toMatchObject({
+      code: 'INVALID_OPTIONS',
+      option: 'options.rules[0]',
+      message:
+        'options.rules[0] is not a valid rule: rule definition could not be read: unreadable value',
     });
   });
 });
@@ -262,7 +269,8 @@ describe('validateProof', () => {
             throw new Error('boom');
           },
         }),
-      'proof could not be read: boom',
+      'requestId could not be read: boom',
+      'requestId',
     ],
     [
       'inside rounding',
@@ -275,20 +283,24 @@ describe('validateProof', () => {
           },
         });
       },
-      'proof could not be read: Symbol(scale)',
+      'Value at "outputs[0].rounding.scale" cannot be serialized to canonical JSON: a value that could not be read: Symbol(scale)',
+      'outputs[0].rounding.scale',
     ],
-  ])('reports a throwing getter %s, and seal and sign refuse it', (_name, poison, message) => {
-    const proof = sealed();
-    poison(proof);
-    expect(validateProof(proof)).toEqual({ errors: [message], issues: [{ path: '', message }] });
-    const sealError = specError(() => sealProof(unsalted(proof)));
-    expect(sealError.code).toBe('INVALID_PROOF');
-    expect(sealError.message).toBe(`Cannot seal the proof: ${message}`);
-    const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
-    expect(signError.code).toBe('INVALID_PROOF');
-    expect(signError.message).toBe(`Cannot sign the proof: ${message}`);
-    expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [message] });
-  });
+  ])(
+    'reports a throwing getter %s, and seal and sign refuse it',
+    (_name, poison, message, path) => {
+      const proof = sealed();
+      poison(proof);
+      expect(validateProof(proof)).toEqual({ errors: [message], issues: [{ path, message }] });
+      const sealError = specError(() => sealProof(unsalted(proof)));
+      expect(sealError.code).toBe('INVALID_PROOF');
+      expect(sealError.message).toBe(`Cannot seal the proof: ${message}`);
+      const signError = specError(() => signProof(proof, RFC_SECRET, 'executor-1'));
+      expect(signError.code).toBe('INVALID_PROOF');
+      expect(signError.message).toBe(`Cannot sign the proof: ${message}`);
+      expect(verifyProof(proof)).toEqual({ status: 'invalid', issues: [message] });
+    },
+  );
 
   it('refuses a proof of the format before Task 9J: outputs as an object, no salts', () => {
     // A JSON copy of a sealed proof, as an older producer stored it.

@@ -23,6 +23,7 @@ import type { Content, Entry } from './proof-builders.js';
 import { RFC_SECRET, ruleA, ruleB, sealed, TRUSTED, unsalted, unsigned } from './proof-cases.js';
 import { traceProof } from './proof-trace.js';
 import type { Trace } from './proof-trace.js';
+import { NOT_REPLAYED, UNCHECKED, withoutUnchecked } from './notices.js';
 
 const SEED = fromHex('f9b972f50267915261e884526c8553bdf4a353eb2e4e9e78ee65716aeceaacfb');
 
@@ -44,7 +45,7 @@ function found(p: DecisionProof, options?: object): { invalid: boolean; issues: 
   const result = verifyProof(p, options);
   return {
     invalid: result.status === 'invalid',
-    issues: result.issues.filter((issue) => issue !== 'unsigned'),
+    issues: withoutUnchecked(result.issues).filter((issue) => issue !== 'unsigned'),
   };
 }
 
@@ -72,6 +73,7 @@ describe('redactProof: an entry becomes the hash of its leaf, the digest stays (
         'check lifted: cited outputs listed (outputs redacted)',
         'check lifted: stratum outputs listed (outputs redacted)',
         'check lifted: every listed rule decided (applied redacted)',
+        ...UNCHECKED,
       ],
       redacted: 2,
       lifted: [
@@ -84,7 +86,7 @@ describe('redactProof: an entry becomes the hash of its leaf, the digest stays (
     expect(proof.applied[0]).not.toHaveProperty('redacted');
     expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: UNCHECKED,
     });
   });
 
@@ -136,7 +138,7 @@ describe('redactProof: an entry becomes the hash of its leaf, the digest stays (
     expect(forged.digest).toBe(proof.digest);
     expect(verifyProof(forged, { trustedKeys: TRUSTED })).toEqual({
       status: 'consistent-redacted',
-      issues: ['redacted entries: 1', 'redacted entries in an unsalted proof'],
+      issues: ['redacted entries: 1', 'redacted entries in an unsalted proof', ...UNCHECKED],
       redacted: 1,
       lifted: [],
     });
@@ -171,7 +173,7 @@ describe('what a redaction hides (pre-flight C5)', () => {
 
   it('hides the step, the rule, the undeclared reads and the missing fact of a rule', () => {
     const proof = salty(art9());
-    expect(verifyProof(proof).issues).toEqual(['unsigned']);
+    expect(withoutUnchecked(verifyProof(proof).issues)).toEqual(['unsigned']);
     const text = JSON.stringify(proof);
     expect(text).toContain('R-art9-sante');
     expect(text).toContain('/sante/invalidite');
@@ -197,6 +199,7 @@ describe('what a redaction hides (pre-flight C5)', () => {
         'unsigned',
         'check lifted: output status no stronger than its causes (applied redacted)',
         'check lifted: provisional status has a source (readsUndeclared redacted)',
+        ...UNCHECKED,
       ],
       redacted: 4,
       lifted: [
@@ -243,7 +246,7 @@ describe('checks on the entries left', () => {
     const proof = signed(salty(traceProof(sum('provisional'))));
     expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: UNCHECKED,
     });
     const redacted = hiding(proof, ['applied', 0], ['applied', 1]);
     const lifted = [
@@ -256,6 +259,7 @@ describe('checks on the entries left', () => {
       issues: [
         'redacted entries: 2',
         ...lifted.map(({ check }) => `check lifted: ${check} (applied redacted)`),
+        ...UNCHECKED,
       ],
       redacted: 2,
       lifted,
@@ -267,7 +271,11 @@ describe('checks on the entries left', () => {
     const redacted = hiding(proof, ['rules', 1]);
     expect(verifyProof(redacted, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic-redacted',
-      issues: ['redacted entries: 1', 'check lifted: cited rules listed (rules redacted)'],
+      issues: [
+        'redacted entries: 1',
+        'check lifted: cited rules listed (rules redacted)',
+        ...UNCHECKED,
+      ],
       redacted: 1,
       lifted: [{ check: 'cited rules listed', redacted: ['rules'] }],
     });
@@ -304,13 +312,13 @@ describe('checks on the entries left', () => {
     const proof = signed(salty(content));
     expect(verifyProof(proof, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: UNCHECKED,
     });
     const redacted = hiding(proof, ['items', 0]);
     expect(redacted.items[1]).toMatchObject({ output: 'value', subject: '/e/@2' });
     expect(verifyProof(redacted, { trustedKeys: TRUSTED })).toEqual({
       status: 'authentic-redacted',
-      issues: ['redacted entries: 1'],
+      issues: ['redacted entries: 1', ...UNCHECKED],
       redacted: 1,
       lifted: [],
     });
@@ -334,6 +342,7 @@ describe('a status source may be redacted (carry of 9J)', () => {
       issues: [
         'redacted entries: 1',
         'check lifted: provisional status has a source (factsRead redacted)',
+        ...UNCHECKED,
       ],
       redacted: 1,
       lifted: [{ check: 'provisional status has a source', redacted: ['factsRead'] }],
@@ -470,7 +479,7 @@ describe('verifyProof(p, { rules }) on a redacted proof', () => {
     const proof = signed(salty(unsigned()));
     expect(computeRuleChecksum(ruleA)).toBe((proof.rules[0] as { checksum: string }).checksum);
     const options = { trustedKeys: TRUSTED, rules: [ruleA, ruleB] };
-    expect(verifyProof(proof, options)).toEqual({ status: 'authentic', issues: [] });
+    expect(verifyProof(proof, options)).toEqual({ status: 'authentic', issues: [NOT_REPLAYED] });
     const redacted = hiding(proof, ['rules', 1]);
     expect(verifyProof(redacted, options)).toEqual({
       status: 'consistent-redacted',
@@ -479,6 +488,7 @@ describe('verifyProof(p, { rules }) on a redacted proof', () => {
         'rules check incomplete: 1 redacted rule',
         'check lifted: cited rules listed (rules redacted)',
         'check lifted: rules given against the proof (rules redacted)',
+        NOT_REPLAYED,
       ],
       redacted: 1,
       lifted: [

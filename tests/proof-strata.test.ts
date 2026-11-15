@@ -1,12 +1,27 @@
 import { describe, expect, it } from 'vitest';
-import { sealProof, signProof, verifyProof } from '../src/index.js';
-import { RFC_PUBLIC, RFC_SECRET, RULES, TRUSTED, unsaltedSalt, unsigned } from './proof-cases.js';
+import { computeRuleChecksum, sealProof, signProof, verifyProof } from '../src/index.js';
+import {
+  RFC_PUBLIC,
+  RFC_SECRET,
+  ruleA,
+  ruleB,
+  TRUSTED,
+  unsaltedSalt,
+  unsigned,
+} from './proof-cases.js';
 import { handSealed, specError } from './helpers.js';
 import { unsalted } from './proof-cases.js';
 import type { PlainProof } from './proof-cases.js';
 import type { ProofView } from '../src/proof/types.js';
+import { NOT_REPLAYED, UNCHECKED } from './notices.js';
 
 const salt = unsaltedSalt('rules', 0);
+
+/** The definitions of `staged`: r1 feeds `risk`, r2 feeds `fine`. */
+const STAGED_RULES = [
+  { ...ruleA, output: 'risk' },
+  { ...ruleB, output: 'fine' },
+];
 
 /** r1 feeds `risk` in stratum 0; r2 reads it and feeds `fine` in stratum 1. */
 function staged(): ProofView {
@@ -14,6 +29,10 @@ function staged(): ProofView {
   const [step] = content.applied;
   return {
     ...content,
+    rules: content.rules.map((rule, i) => ({
+      ...rule,
+      checksum: computeRuleChecksum(STAGED_RULES[i]!),
+    })),
     strata: [['risk'], ['fine']],
     outputs: [
       {
@@ -61,9 +80,9 @@ describe('strata, decimals and rounding in a proof', () => {
     const proof = signProof(sealProof(unsalted(staged())), RFC_SECRET, 'executor-1');
     expect(proof.strata).toEqual([['risk'], ['fine']]);
     expect(proof.applied[1]).toMatchObject({ stratum: 1, unrounded: '100.125' });
-    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: RULES })).toEqual({
+    expect(verifyProof(proof, { trustedKeys: TRUSTED, rules: STAGED_RULES })).toEqual({
       status: 'authentic',
-      issues: [],
+      issues: [NOT_REPLAYED],
     });
   });
 
@@ -72,7 +91,7 @@ describe('strata, decimals and rounding in a proof', () => {
     content.applied[1]!.stratum = 2;
     expect(verifyProof(sealProof(unsalted(content)))).toEqual({
       status: 'consistent',
-      issues: ['unsigned'],
+      issues: ['unsigned', ...UNCHECKED],
     });
   });
 
@@ -216,7 +235,7 @@ describe('strata, decimals and rounding in a proof', () => {
       applied: [],
       skipped: [],
     };
-    expect(verifyProof(sealProof(unsalted(empty))).issues).toEqual(['unsigned']);
+    expect(verifyProof(sealProof(unsalted(empty))).issues).toEqual(['unsigned', ...UNCHECKED]);
     expect(verifyProof(handSealed({ ...unsigned(), strata: [] })).issues).toEqual([
       'output not in strata: value',
       'stratum out of range: r1@1',
@@ -267,7 +286,7 @@ describe('strata, decimals and rounding in a proof', () => {
     const content = staged();
     content.outputs[1]!.value = 150.5;
     content.applied[0]!.contribution = 150.5;
-    expect(verifyProof(sealProof(unsalted(content))).issues).toEqual(['unsigned']);
+    expect(verifyProof(sealProof(unsalted(content))).issues).toEqual(['unsigned', ...UNCHECKED]);
     content.applied[0]!.unrounded = '150.50';
     expect(verifyProof(handSealed(content)).issues).toEqual([
       'contribution does not match its output declaration: risk',

@@ -55,9 +55,58 @@ Decisions of 2 November 2026 that apply to spec. Items marked "from <task>" are 
 - From 9K5: the verifier says what it did not check, and never returns `authentic` or `consistent` for a skipped check without a notice.
 - From 9K5: an attestation that is unsupported, or a revocation, is `invalid`; so is a `{ keyId }` subject verified against a proof digest. D-29 is revised to this.
 - From 9K5: unknown rule fields are refused, and extensions go under `extensions`.
-- From 9K5: `null` in a rule is refused.
+- From 9K5: `null` in a rule is refused where an author writes it (every optional field, `effectiveUntil` and `checksum` included, and inside `dimensions`): `<field> is null: omit the field instead`. "No end" is written by omitting `effectiveUntil`. The normalized and stored form keeps `effectiveUntil: null` as its internal encoding of "no end", so no checksum changes; the functions that read that form accept that one `null` (the list is in the README, "Rule definition"). `checksum: null` is refused in both forms (ruling of 2 November, on M8 and the audit of 9K5).
 - Tags absent means no tag filter (D-38). A given list is complete unless the caller declares otherwise.
+- A commit with another author is never pushed. If one is made by mistake, stop and report it before pushing (decision on commit `47efeaa`, 2 November; it applies to every repo).
+- Plugins and attackers (owner, 2 November 2026): a plugin attack is handled, never left open. In one JavaScript realm plugin code cannot be isolated from other plugin code, so the engine never runs unverified code in its process. Phase 3 delivers: fail-closed loading (a plugin runs in-process only if its manifest is signed by a trusted key and the hash of its code matches; the default trust list holds the Run-IQ key only; every other plugin runs in a sandbox; an unsigned, altered or unknown plugin is refused with its reason), a real sandbox (out of process or in a separate isolate, no network, no disk, bounded time and memory, only JSON crossing it), captured intrinsics in `core`, a proof that names every plugin that ran (name, version, code hash, signing key, execution mode), and a supply chain that is locked, audited, published with provenance and signed.
+- Pause (owner, 3 November 2026, all lanes): finish the work in progress, then stop. Lane A finishes 9L (core#5) to audit OK and merge, then the small core follow-up to spec#4 (`job-core-followup-9k5`), then takes no new job. Lane B finishes 9K5 (spec#4) to audit OK and merges it when the machine session says so (after 9L, per the merge order), then takes no new job. After that each lane keeps its watch armed and waits for a `Machine session` comment to resume, and starts nothing else.
+- Loop resumed (owner, 15 November 2026, all lanes): the pauses of 3 November are lifted and audits resume. ChatGPT/Codex joins as lane C (repo `dsl-jsonlogic`, Task 12, standalone). The order after 9L and 9K5 still holds: merge 9L, merge spec#4, lane A's core follow-up, then the machine session posts the next jobs. A session that restarted rereads its repo's `CLAUDE.md` and its PR first.
+- Task method (owner, 15 November 2026, all lanes): every next task is run spec first. Before each task the machine session posts a normative spec, `docs/cloud/spec-<task>.md`, modelled on `spec-plugin-boundary.md`: each requirement is numbered and carries its `Test:` and `Mutation:`; the lane codes against it and the audit checks it row by row. A gap or a contradiction in a spec is raised for a ruling, never settled silently. Each task is split into sub-PRs of about 800 lines of diff or less, each green and audited on its own; the job names the split. Rigour is unchanged: zero findings left, RED first, a mutation for each safety rule, and a Fail-closed section. Lanes stay busy and never share a repo: a free lane gets the next unblocked job.
+- Stalled work (owner, 15 November 2026, all lanes): a piece of work that stalls is taken over by the machine session. It applies after two audit rounds with no gain in the score, or when the same family of findings comes back. The machine session codes that piece itself and announces it on issue #1, names the files the lane must not touch in the meantime, and the lane keeps the rest of the task. Its code is reviewed by an independent review, like any PR. For 9L (core): if round 17 does not close the inbound copier (AK1, AK2, AK5 and AK6), the machine session takes over the copier and its generated inventory.
+- Pause (owner, 15 November 2026, all lanes): the loop is paused for a few hours, possibly one or two days. Each lane finishes its step, commits and pushes it to its `cloud/*` branch, merges nothing without an explicit audit OK, posts `Cloud session (lane X): paused at <branch> <sha>` with one line on what is done and one on what comes next, then stops: no new step, no polling. The machine session posts `Machine session: DECISION (all lanes) resume`; a lane then rereads its PR and #1 from its `paused` comment on.
 
 ## 5. Rule for future decisions
 
 Every owner decision the machine session posts on issue #1 starts with `Machine session: DECISION`. Add it to the "Owner decisions" section of this file, in the affected repository, in your next pull request. The audit checks that it is there. A decision that applies to both repositories goes in both.
+
+## 6. Lessons from the audits (all lanes)
+
+Each lesson comes from real findings of the audits. Check your PR against every lesson **before** posting "ready for audit" or "fixes pushed". The machine session adds new lessons as they appear.
+
+### Boundaries and inputs
+
+1. **One entry point per boundary.** Everything that comes from outside (caller, plugin, DSL, storage adapter, callback) goes through one copier before any other code reads it. The inventory of entry points is generated by a test that enumerates the exports, never written by hand. (9L rounds 15 and 16.)
+2. **Own data properties only.** Never read an inherited property, never run a getter or a Proxy trap after the copy, and never trust a caller's `length`. (9L, 9K5 AF3, Task 12 L4.)
+3. **Never call `then`, `toString`, `valueOf` or `Symbol.toPrimitive` on a foreign value.** Refuse a thenable without calling it. Describe values through captured built-ins. (9L AK2 and AK9, 9K5.)
+4. **No `instanceof` to classify a foreign object.** Recognise your own objects by identity (a WeakSet filled after the object is complete and frozen). (9L AJ1 and AK10.)
+5. **Built-ins are captured at load** (`intrinsics.ts`) and checked by a lint rule with a test of its own. (9K5 AC1 and AF1.)
+
+### Values and semantics
+
+6. **No coercion, ever.** Each operator has a domain, and anything outside it is a named error. `null - 1`, `'12px' + 0` and truthiness are guesses. (Task 12 M1, M7.)
+7. **One semantics for one question.** If two functions answer the same question (known vs bounded value, `evaluate` vs `evaluateTruth`), they share one implementation, and a test checks that they agree on a table. (Task 12 L1, L5.)
+8. **Absent is not a value.** A missing fact is never replaced by a default, `null`, `0`, `""` or an empty list unless the rule says so explicitly. A pending value is not an absent one. (Task 12 L2, L3; 9L.)
+9. **Decimals are compared and summed exactly,** through spec. Never write a second decimal implementation. (Task 12 L1, M1.)
+10. **Equality is structural** on canonical JSON, never by reference. (Task 12 M3.)
+
+### Errors
+
+11. **Nothing raw reaches the caller.** Every error is an exported engine class, deep-frozen, with bounded text (clipped, with a declared total). That holds for exported helpers and error constructors too. (9L AG1, AH1, AJ4, AK3, AK4.)
+12. **A failure is never dropped.** Keep every failure, in order, as bounded text. (9L AG4.)
+13. **A callback is synchronous** unless the spec says otherwise. Any async return is a named error, and it can never crash the process (test the exit code). (9L AI2, AK2.)
+14. **Every option is checked:** unknown keys at any depth, wrong types, and fractions where integers are expected are refused, never rounded or coerced. (9L AH6, AI4.)
+
+### Limits
+
+15. **Every work budget is declared and tested**: size, depth, steps, text length. That includes shared subtrees, which make work grow exponentially. (Task 12 L6; 9L B-limits.)
+
+### Process
+
+16. **Claims are evidence.** Every sentence in the PR body (mutants caught, "no trap", "single entry point") must be backed by a test or by a replayed probe. A claim that a probe contradicts counts as a finding. (9L round 16, Task 12 round 2.)
+17. **Replay every earlier probe** of the audit reports against your head before posting fixes, and paste the result.
+18. **Rulings are not optional.** A ruled item cannot be left aside by the author's choice. Ask for a new ruling if it seems wrong. (9L MC2, MC4 and DOC10.)
+19. **Fix the class, not the instance.** When a finding comes back in a new place, find every place of that kind and fix them all, with a test that enumerates them.
+
+### Attacker line
+
+20. **Draw the attacker line before coding.** "Data only" (proofs, rules, JSON, prototype pollution by plain values) must hold. "Code in the same realm" (setters, Proxies, patched built-ins) is answered by isolation (phase 3: a separate process, realm or sandbox), not by in-process tricks.

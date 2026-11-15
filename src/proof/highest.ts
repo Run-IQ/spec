@@ -2,6 +2,17 @@ import { citeName } from '../errors.js';
 import { outranks, ruleKey, sameLevel } from './precedence.js';
 import type { Standing, Standings } from './precedence.js';
 import type { ProofStep } from './types.js';
+import {
+  NativeMap,
+  NativeSet,
+  arrayAt,
+  arrayFilter,
+  arrayPush,
+  elementOf,
+  mapGet,
+  mapSet,
+  setAdd,
+} from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: who wins a `highestPriority` output (D-21, D-23, D-27).
 
@@ -31,43 +42,49 @@ export function topOf(
   cite: () => string,
 ): Top | undefined {
   let best: Standing | undefined;
-  const standing = new Map<ProofStep, Standing>();
-  for (const step of steps) {
-    const found = standings.get(ruleKey(step));
+  const standing = new NativeMap<ProofStep, Standing>();
+  for (let idx132 = 0, list132 = steps; idx132 < list132.length; idx132++) {
+    const step = list132[idx132] as (typeof list132)[number];
+    const found = mapGet(standings, ruleKey(step));
     if (found === undefined) return undefined;
-    standing.set(step, found);
+    mapSet(standing, step, found);
     if (best === undefined || outranks(found, best)) best = found;
   }
-  const ids = new Set<string>();
+  const ids = new NativeSet<string>();
   const winners: ProofStep[] = [];
   const problems: string[] = [];
   if (best === undefined) return { ids, winners, problems };
   // In the order of `applied`, the steps of one level are in identity order, by rule.
   const groups: ProofStep[][] = [];
-  for (const step of steps) {
-    const found = standing.get(step);
+  for (let idx133 = 0, list133 = steps; idx133 < list133.length; idx133++) {
+    const step = list133[idx133] as (typeof list133)[number];
+    const found = mapGet(standing, step);
     if (found === undefined || !sameLevel(found, best)) continue;
-    ids.add(step.ruleId);
-    const last = groups.at(-1);
-    if (last !== undefined && ruleKey(last[0] ?? step) === ruleKey(step)) last.push(step);
-    else groups.push([step]);
+    setAdd(ids, step.ruleId);
+    const last = arrayAt(groups, -1);
+    if (last !== undefined && ruleKey(elementOf(last, 0) ?? step) === ruleKey(step))
+      arrayPush(last, step);
+    else arrayPush(groups, [step]);
   }
-  for (const group of groups) {
-    const [first] = group;
+  for (let idx134 = 0, list134 = groups; idx134 < list134.length; idx134++) {
+    const group = list134[idx134] as (typeof list134)[number];
+    const tuple135 = group;
+    const first = elementOf(tuple135, 0);
     if (first === undefined) continue;
     if (group.length === 1 && (first.subject === undefined || !competing)) {
-      winners.push(first);
+      arrayPush(winners, first);
       continue;
     }
     const cited = citeName(ruleKey(first));
     if (!competing) {
-      problems.push(`instances of one rule compete for an item: ${cited}: ${cite()}`);
+      arrayPush(problems, `instances of one rule compete for an item: ${cited}: ${cite()}`);
       continue;
     }
-    const firsts = group.filter((step) => step.rank === 0);
-    if (firsts.length > 1) problems.push(`instances tied at rank 0: ${cited}`);
-    else if (firsts[0] === undefined) problems.push(`no instance at rank 0: ${cited}`);
-    else winners.push(firsts[0]);
+    const firsts = arrayFilter(group, (step) => step.rank === 0);
+    if (firsts.length > 1) arrayPush(problems, `instances tied at rank 0: ${cited}`);
+    else if (elementOf(firsts, 0) === undefined)
+      arrayPush(problems, `no instance at rank 0: ${cited}`);
+    else arrayPush(winners, elementOf(firsts, 0));
   }
   return { ids, winners: problems.length > 0 ? [] : winners, problems };
 }
