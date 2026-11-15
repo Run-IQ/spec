@@ -109,6 +109,27 @@ describe('AF1: the host built-ins spec reads are captured', () => {
     expect(results).toEqual(baseline);
   });
 
+  it('an Error whose Symbol.hasInstance lies still has its message cited', () => {
+    const calendar = {
+      toCivilDate: () => {
+        throw new Error('boom');
+      },
+      startOfDay: () => '2025-01-01T00:00:00.000Z',
+    };
+    const proof = sealProof(unsalted(withParisContent()));
+    const call = (): string => {
+      try {
+        return JSON.stringify(verifyProof(proof, { rules: [paris, ruleB], calendar }));
+      } catch (error) {
+        return (error as Error).message;
+      }
+    };
+    const clean = call();
+    expect(clean).toContain('boom');
+    const lied = patched(Error, Symbol.hasInstance, { value: () => false, writable: true }, call);
+    expect(lied).toBe(clean);
+  });
+
   it('an Error whose Symbol.hasInstance lies changes nothing', () => {
     const results = patched(
       Error,
@@ -336,4 +357,12 @@ describe('AF2: the signature and hash dependencies read live built-ins (the know
   });
 });
 
-void [paris, parisUnsigned, run, ruleB, withRuntimeTzdata];
+function withParisContent() {
+  const content = withRuntimeTzdata(unsigned());
+  content.evaluatedAt = '2024-12-31T22:30:00.000Z';
+  content.rules = content.rules.map((r) =>
+    r.id === 'r1' ? { ...r, checksum: computeRuleChecksum(paris) } : r,
+  );
+  return content;
+}
+void [parisUnsigned, run];
