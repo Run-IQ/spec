@@ -835,8 +835,9 @@ function readMember(
   const end = isCivilDate(until) ? until : undefined;
   if (checkSpan(start ?? ALWAYS, end ?? null, path, add) === undefined) return undefined;
   const normal: ReferentialMember = { value: member };
-  if (start !== undefined) normal.from = start;
-  if (end !== undefined) normal.until = end;
-  if (typeof fields.sourceRef === 'string') normal.sourceRef = fields.sourceRef;
+  if (start !== undefined) defineValue(normal, 'from', start, true);
+  if (end !== undefined) defineValue(normal, 'until', end, true);
+  if (typeof fields.sourceRef === 'string')
+    defineValue(normal, 'sourceRef', fields.sourceRef, true);
   return normal;
 }

@@ -59,6 +59,14 @@ const VALUES: [string, unknown][] = [
   ['array', []],
 ];
 
+// What a buggy merge or a frozen prototype leaves: a plain data value, writable or read-only (the
+// attacker of the round-8 ruling has data only: no setter, no Proxy, no patched built-in).
+const KINDS: [string, unknown, boolean][] = [
+  ...VALUES.map(([kind, value]): [string, unknown, boolean] => [kind, value, true]),
+  ['read-only string', '1970-01-01', false],
+  ['read-only object', {}, false],
+];
+
 const baseline = run();
 const define = Object.defineProperty;
 const remove = Reflect.deleteProperty;
@@ -74,11 +82,11 @@ describe('Object.prototype polluted', () => {
   it('changes no result of the corpus, whatever name and value', () => {
     const changed: string[] = [];
     for (const name of NAMES) {
-      for (const [kind, value] of VALUES) {
+      for (const [kind, value, writable] of KINDS) {
         define(
           Object.prototype,
           name,
-          bareDescriptor({ value, configurable: true, writable: true, enumerable: false }),
+          bareDescriptor({ value, configurable: true, writable, enumerable: false }),
         );
         let got: string[];
         try {
@@ -128,4 +136,39 @@ describe('Array.prototype polluted', () => {
     }
     expect(changed).toEqual([]);
   }, 300_000);
+});
+
+describe('read-only data on the prototypes (a frozen or merged-into prototype)', () => {
+  const holders: [string, object, string[]][] = [
+    ['Object.prototype index', Object.prototype, ['0', '1', '2', '3']],
+    ['Array.prototype index', Array.prototype, ['0', '1', '2', '3']],
+    ['Set.prototype', Set.prototype, ['ledger']],
+    ['Map.prototype', Map.prototype, ['ledger']],
+    ['Error.prototype', Error.prototype, ['name', 'code', 'path', 'option', 'cause']],
+  ];
+  it.each(holders)(
+    '%s changes no result, writable or not',
+    (_label, holder, keys) => {
+      const changed: string[] = [];
+      for (const key of keys) {
+        for (const writable of [true, false]) {
+          const original = Object.getOwnPropertyDescriptor(holder, key);
+          define(holder, key, bareDescriptor({ value: 'x', configurable: true, writable }));
+          let got: string[];
+          try {
+            got = run();
+          } finally {
+            if (original === undefined) remove(holder, key);
+            else define(holder, key, original);
+          }
+          for (let i = 0; i < baseline.length; i++) {
+            if (got[i] !== baseline[i])
+              changed.push(`${key} writable=${writable} call#${i}: ${got[i]?.slice(0, 100)}`);
+          }
+        }
+      }
+      expect(changed).toEqual([]);
+    },
+    300_000,
+  );
 });

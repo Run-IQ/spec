@@ -349,11 +349,22 @@ describe('AF2: the signature and hash dependencies read live built-ins (the know
     expect(status).toBe('invalid');
   });
 
-  it('the honest verdict of both forgeries, unpatched, is invalid', () => {
+  it('the honest verdict of the swapped-key forgery, unpatched, is invalid', () => {
     const proof = signProof(sealed(), attacker.privateKey, 'executor-1');
-    expect(verifyProof(proof, { trustedKeys: { 'executor-1': RFC_PUBLIC } }).status).toBe(
-      'invalid',
-    );
+    const verdict = verifyProof(proof, { trustedKeys: { 'executor-1': RFC_PUBLIC } });
+    expect(verdict.status).toBe('invalid');
+    expect(verdict.issues).toContain('signature invalid');
+  });
+
+  it('the honest verdict of the resealed-digest forgery, unpatched, is invalid', () => {
+    const original = signProof(sealed(), RFC_SECRET, 'executor-1');
+    const forgedContent = { ...unsalted(unsigned()), requestId: 'forged-request' };
+    const resealed = sealProof(forgedContent as never);
+    const forged = { ...resealed, signature: original.signature };
+    expect(forged.digest).not.toBe(original.digest);
+    const verdict = verifyProof(forged as never, { trustedKeys: { 'executor-1': RFC_PUBLIC } });
+    expect(verdict.status).toBe('invalid');
+    expect(verdict.issues).toContain('signature invalid');
   });
 });
 

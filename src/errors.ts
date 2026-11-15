@@ -59,7 +59,7 @@ export class SpecError extends NativeError {
 
   constructor(code: SpecErrorCode, message: string, path?: string) {
     super(message);
-    this.name = 'SpecError';
+    defineValue(this, 'name', 'SpecError', true);
     this.code = code;
     if (path !== undefined) this.path = path;
     defineValue(this, BRAND, true, false);
@@ -90,7 +90,7 @@ export class VerifyOptionsError extends SpecError {
 
   constructor(option: string, message: string) {
     super('INVALID_OPTIONS', message, option);
-    this.name = 'VerifyOptionsError';
+    defineValue(this, 'name', 'VerifyOptionsError', true);
     this.option = option;
     defineValue(this, OPTIONS_BRAND, true, false);
   }

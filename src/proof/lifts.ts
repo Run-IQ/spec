@@ -16,6 +16,7 @@ import {
   arrayReduce,
   arraySome,
   arraySort,
+  defineValue,
   filledArray,
   jsonStringify,
   mapClear,
@@ -25,7 +26,6 @@ import {
   mapSet,
   mathLog2,
   mathMax,
-  objectAssign,
   objectValues,
   setAdd,
   setHas,
@@ -298,7 +298,9 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
     pairs: [],
     failed: false,
   };
-  return objectAssign(setOf(mapKeysArray(counts)), { ledger });
+  const hidden = setOf(mapKeysArray(counts));
+  defineValue(hidden, 'ledger', ledger, true);
+  return hidden as HiddenSections;
 }
 
 /**

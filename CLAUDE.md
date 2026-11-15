@@ -105,3 +105,6 @@ Each lesson comes from real findings of the audits. Check your PR against every 
 17. **Replay every earlier probe** of the audit reports against your head before posting fixes, and paste the result.
 18. **Rulings are not optional.** A ruled item cannot be left aside by the author's choice. Ask for a new ruling if it seems wrong. (9L MC2, MC4 and DOC10.)
 19. **Fix the class, not the instance.** When a finding comes back in a new place, find every place of that kind and fix them all, with a test that enumerates them.
+
+### Attacker line
+20. **Draw the attacker line before coding.** "Data only" (proofs, rules, JSON, prototype pollution by plain values) must hold. "Code in the same realm" (setters, Proxies, patched built-ins) is answered by isolation (phase 3: a separate process, realm or sandbox), not by in-process tricks.

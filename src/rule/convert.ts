@@ -1,7 +1,7 @@
 import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import { NativeDate, NativeString, jsonParseBare } from '../intrinsics.js';
+import { NativeDate, NativeString, defineValue, jsonParseBare } from '../intrinsics.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
@@ -121,7 +121,7 @@ function executableOf(definition: RuleDefinition, checksum: string): ExecutableR
   rule.effectiveFrom = boundOf(definition.effectiveFrom);
   rule.effectiveUntil =
     definition.effectiveUntil === null ? null : boundOf(definition.effectiveUntil);
-  rule.checksum = checksum;
+  defineValue(rule, 'checksum', checksum, true);
   return rule as unknown as ExecutableRule;
 }
 

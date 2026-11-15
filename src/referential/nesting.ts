@@ -10,7 +10,6 @@ import {
   arrayPush,
   arraySlice,
   arraySort,
-  arrayUnshift,
   bare,
   elementOf,
   mapDelete,
@@ -353,10 +352,13 @@ function side(next: Adjacency, start: string): Side {
  * then the backward path from `meet` to `group`.
  */
 function closeCycle(group: string, forward: Side, backward: Side, meet: string): string[] {
-  const down: string[] = [];
+  // `meet` back to `member`, then reversed by hand (`unshift` assigns: a prototype could catch it).
+  const reached: string[] = [];
   for (let at: string | null | undefined = meet; at != null; at = mapGet(forward.from, at)) {
-    arrayUnshift(down, at);
+    arrayPush(reached, at);
   }
+  const down: string[] = [];
+  for (let i = reached.length - 1; i >= 0; i--) arrayPush(down, reached[i] as string);
   const up: string[] = [];
   for (let at = mapGet(backward.from, meet); at != null; at = mapGet(backward.from, at))
     arrayPush(up, at);

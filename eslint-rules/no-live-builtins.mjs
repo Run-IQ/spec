@@ -61,6 +61,8 @@ export default {
             '`{{owner}}.{{member}}` is destructured from the live built-in: use the captured one from `intrinsics.ts`.',
           elementRead:
             'A literal index reads an element that may be absent, and an absent one is read from `Array.prototype`: use `elementOf` from `intrinsics.ts` (a tuple of known length is fine).',
+          forIn:
+            '`for ... in` enumerates the keys of the prototype chain, which a polluted prototype adds to: use `objectKeys` and an indexed loop.',
           inOperator:
             '`in` also finds inherited properties (and makes an array hole look present): use `hasOwnKey` from `intrinsics.ts`.',
           instanceOf:
@@ -142,6 +144,9 @@ export default {
             if (node.operator === 'in' && node.left.type !== 'PrivateIdentifier') {
               context.report({ node, messageId: 'inOperator' });
             }
+          },
+          ForInStatement(node) {
+            context.report({ node, messageId: 'forIn' });
           },
           ForOfStatement(node) {
             context.report({ node, messageId: 'iteration', data: { what: 'for ... of' } });

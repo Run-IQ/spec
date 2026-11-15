@@ -9,10 +9,11 @@
 // - Constructors are held as `Native<Name>`; a getter (`Map.prototype.size`) is held uncurried.
 //
 // Nothing outside this file may use a built-in directly: `eslint-rules/no-live-builtins.mjs` fails
-// the lint on any prototype method, static, getter or global of the language in `src/`. What is
-// out of scope is stated in the README, "Threat model": a process whose built-ins were patched
-// before this module loaded, and the iteration protocol (`for ... of`, spread, destructuring),
-// which the engine runs through well-known symbols.
+// the lint on any prototype method, static, getter or global of the language in `src/`, and on
+// the iteration protocol. This is defence in depth against code that runs in the process after
+// load; the attacker spec must hold against is the one with data only (README, "Threat model").
+// Out of scope: a process whose built-ins were patched before this module loaded, and code in
+// the same realm that plants setters, Proxies or prototype swaps after load (phase 3: isolation).
 
 const { bind, call } = Function.prototype;
 /** `uncurryThis(proto.method)(list, item)` is `list.method(item)`, with no live lookup. */

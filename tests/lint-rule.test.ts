@@ -57,6 +57,7 @@ const MUST_FAIL: readonly (readonly [string, string])[] = [
   ['in-operator', 'local/no-live-builtins:inOperator'],
   ['literal-index', 'local/no-live-builtins:elementRead'],
   ['for-of', 'local/no-live-builtins:iteration'],
+  ['for-in', 'local/no-live-builtins:forIn'],
   ['array-spread', 'local/no-live-builtins:iteration'],
   ['call-spread', 'local/no-live-builtins:iteration'],
   ['array-destructuring', 'local/no-live-builtins:iteration'],

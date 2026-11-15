@@ -6,7 +6,15 @@ import {
   canonicalize,
   computeRuleChecksum,
   createAttestation,
+  computeReferentialDigest,
+  computeRuleFingerprint,
   findOverlappingVersions,
+  fromStoredRecord,
+  canonicalRulePayload,
+  normalizeReferential,
+  resolveMembership,
+  toExecutableRule,
+  validateReferential,
   isEffectiveAt,
   normalizeOutputDeclaration,
   normalizeRuleDefinition,
@@ -21,6 +29,8 @@ import {
   windowContains,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { createHash } from 'node:crypto';
+import { ueReferential } from './helpers.js';
 import { defineValue } from '../src/intrinsics.js';
 import { clearIntlCaches } from '../src/proof/intl-calendar.js';
 import { withRuntimeTzdata } from './notices.js';
@@ -165,6 +175,41 @@ export const PURE_CORPUS: [string, Call][] = [
         'UTC',
         undefined as never,
       ),
+  ],
+  ['toExecutableRule', () => toExecutableRule(ruleA)],
+  [
+    'fromStoredRecord',
+    () => {
+      const payload = canonicalRulePayload(ruleA);
+      return fromStoredRecord({
+        id: ruleA.id,
+        version: ruleA.version,
+        checksum: createHash('sha256').update(payload, 'utf8').digest('hex'),
+        payload,
+      });
+    },
+  ],
+  ['computeRuleFingerprint', () => computeRuleFingerprint(ruleA)],
+  ['normalizeReferential', () => normalizeReferential(ueReferential())],
+  ['computeReferentialDigest', () => computeReferentialDigest(ueReferential())],
+  [
+    'validateReferential cycle',
+    () =>
+      validateReferential({
+        format: 'run-iq.referential/1',
+        id: 'cycle',
+        version: '1',
+        dimension: 'd',
+        groups: {
+          A: { exhaustive: true, members: [{ value: 'B', from: '2020-01-01' }] },
+          B: { exhaustive: true, members: [{ value: 'C' }] },
+          C: { exhaustive: true, members: [{ value: 'A' }] },
+        },
+      }),
+  ],
+  [
+    'resolveMembership',
+    () => resolveMembership(normalizeReferential(ueReferential()), 'UE', 'GB', '2019-06-01'),
   ],
   [
     'findOverlappingVersions',
