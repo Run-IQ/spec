@@ -6,11 +6,11 @@ import {
   arrayIsArray,
   arrayPop,
   arrayPush,
+  bare,
   datePrototype,
   defineValue,
   functionCall,
   getPrototypeOf,
-  hasOwnKey,
   mapGet,
   mapSet,
   numberIsSafeInteger,
@@ -151,6 +151,28 @@ export function tooLargeMessage(path: string): string {
   return `${citeName(path)} is too large: more than ${MAX_JSON_VALUES} values`;
 }
 
+/** What `ownElement` answers for an element the array does not have (a hole). */
+export const HOLE: object = bare({});
+/** What `ownElement` answers for an element that is an accessor (a getter or a setter). */
+export const ACCESSOR: object = bare({});
+
+/**
+ * Element `index` of `list`, read once as its own data property: `HOLE` when the array has no such
+ * element of its own (never what `Array.prototype` holds at that index), `ACCESSOR` when it is a
+ * getter or a setter (JSON holds values, and a getter could answer otherwise the next time).
+ */
+export function ownElement(list: readonly unknown[], index: number): unknown {
+  const descriptor = objectGetOwnPropertyDescriptor(list, index);
+  if (descriptor === undefined) return HOLE;
+  if (objectHasOwn(descriptor, 'get') || objectHasOwn(descriptor, 'set')) return ACCESSOR;
+  return descriptor.value;
+}
+
+/** Internal: the problem of an array with an accessor at `index` (JSON holds plain values). */
+export function accessorMessage(path: string, index: number): string {
+  return `${citeName(path)} has an accessor at index ${index}: arrays must hold plain values`;
+}
+
 /** Internal: the problem of an array with no element at `index` (a hole is not JSON). */
 export function holeMessage(path: string, index: number): string {
   return `${citeName(path)} has a hole at index ${index}: arrays must be dense`;
@@ -185,8 +207,9 @@ export function readList(list: readonly unknown[], path: string): unknown[] | Li
   if (!spendValues(length)) return { path, message: tooLargeMessage(path) };
   const items: unknown[] = [];
   for (let i = 0; i < length; i++) {
-    if (!hasOwnKey(list, i)) return { path, message: holeMessage(path, i) };
-    const item: unknown = list[i];
+    const item = ownElement(list, i);
+    if (item === HOLE) return { path, message: holeMessage(path, i) };
+    if (item === ACCESSOR) return { path, message: accessorMessage(path, i) };
     if (item === undefined) {
       return { path: `${path}[${i}]`, message: undefinedMessage(`${path}[${i}]`) };
     }

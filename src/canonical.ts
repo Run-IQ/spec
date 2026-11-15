@@ -11,7 +11,6 @@ import {
   bare,
   defineValue,
   functionHasInstance,
-  hasOwnKey,
   isoOf,
   numberIsFinite,
   numberIsNaN,
@@ -30,6 +29,10 @@ import {
   notADateMessage,
   hasLoneSurrogate,
   holeMessage,
+  accessorMessage,
+  ACCESSOR,
+  HOLE,
+  ownElement,
   isPlainObject,
   MAX_JSON_DEPTH,
   ownCopy,
@@ -436,11 +439,17 @@ function write<T>(root: unknown, rootPath: string, options: WriteOptions, sink: 
   const element = (frame: Frame, i: number): unknown => {
     const list = frame.node as unknown[];
     const at = (): string => pathOf(frame, i);
-    const present = guarded ? read(at, () => hasOwnKey(list, i)) : hasOwnKey(list, i);
-    if (!present) {
+    const item = guarded ? read(at, () => ownElement(list, i)) : ownElement(list, i);
+    if (item === HOLE) {
       throw newSpecError('NON_SERIALIZABLE', holeMessage(frame.path || '(root)', i), frame.path);
     }
-    const item = guarded ? read(at, () => list[i]) : list[i];
+    if (item === ACCESSOR) {
+      throw newSpecError(
+        'NON_SERIALIZABLE',
+        accessorMessage(frame.path || '(root)', i),
+        frame.path,
+      );
+    }
     if (item === undefined) throw newSpecError('NON_SERIALIZABLE', undefinedMessage(at()), at());
     return item;
   };

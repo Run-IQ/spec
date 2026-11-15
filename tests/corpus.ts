@@ -119,7 +119,7 @@ const NOBLE = new Set([
 ]);
 
 const unsignedProof = unsalted(unsigned());
-const parisUnsigned = sealProof(unsalted(withParis()));
+export const parisUnsigned = sealProof(unsalted(withParis()));
 
 function withParis() {
   const content = withRuntimeTzdata(unsigned());
@@ -130,7 +130,7 @@ function withParis() {
   return content;
 }
 
-const UTC_CALENDAR = {
+export const UTC_CALENDAR = {
   toCivilDate: (at: string) => at.slice(0, 10),
   startOfDay: (day: string) => `${day}T00:00:00.000Z`,
 } as never;
