@@ -15,7 +15,9 @@ import {
   NativeDataView,
   NativeMap,
   NativeString,
+  NativeTextEncoder,
   NativeUint8Array,
+  arrayConcat,
   arrayForEach,
   arrayIsArray,
   arrayMap,
@@ -26,9 +28,9 @@ import {
   mathFloor,
   mathMax,
   numberIsSafeInteger,
+  textEncoderEncode,
   uint8ArrayBuffer,
   uint8ArrayEvery,
-  uint8ArrayFrom,
   uint8ArrayLength,
   uint8ArrayOf,
   uint8ArraySet,
@@ -60,12 +62,19 @@ const LEAVES = 'leaf hashes';
  * instead of building one per call (a digest of 500 000 leaves hashes about 1.5 million times).
  */
 export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) => void {
+  const run = hasherOver();
+  return (out, ...parts) => run(out, parts);
+}
+
+/** The hasher of `createHasherInto`, taking the parts as one array (no spread of arguments). */
+function hasherOver(): (out: Uint8Array, parts: readonly Uint8Array[]) => void {
   const fresh = sha256.create();
   const work = sha256.create();
-  return (out, ...parts) => {
+  return (out, parts) => {
     fresh._cloneInto(work);
     hashWork.calls += 1;
-    for (const part of parts) {
+    for (let idx94 = 0, list94 = parts; idx94 < list94.length; idx94++) {
+      const part = list94[idx94] as (typeof list94)[number];
       hashWork.bytes += uint8ArrayLength(part);
       work.update(part);
     }
@@ -75,10 +84,10 @@ export function createHasherInto(): (out: Uint8Array, ...parts: Uint8Array[]) =>
 
 /** Internal: as `createHasherInto`, each digest in a fresh array. */
 export function createHasher(): (...parts: Uint8Array[]) => Uint8Array {
-  const hashInto = createHasherInto();
+  const hashOver = hasherOver();
   return (...parts) => {
     const out = new NativeUint8Array(HASH_BYTES);
-    hashInto(out, ...parts);
+    hashOver(out, parts);
     return out;
   };
 }
@@ -167,7 +176,7 @@ export class PackedHashes {
     node[0] = 1;
     const at = (i: number): Uint8Array =>
       uint8ArraySubarray(this.bytes, i * HASH_BYTES, (i + 1) * HASH_BYTES);
-    const positions = [...indices];
+    const positions = arrayConcat(indices);
     let width = this.count;
     while (width > 1) {
       arrayForEach(positions, (position, k) => {
@@ -220,7 +229,10 @@ export function sizedDigest(tag: string, size: number, root: Uint8Array): Uint8A
 function digestPrefix(tag: string): Uint8Array {
   let prefix = mapGet(DIGEST_PREFIXES, tag);
   if (prefix === undefined) {
-    prefix = uint8ArrayFrom([2, ...new TextEncoder().encode(tag), 0]);
+    const encoded = textEncoderEncode(new NativeTextEncoder(), tag);
+    prefix = new NativeUint8Array(uint8ArrayLength(encoded) + 2);
+    prefix[0] = 2;
+    uint8ArraySet(prefix, encoded, 1);
     mapSet(DIGEST_PREFIXES, tag, prefix);
   }
   return prefix;

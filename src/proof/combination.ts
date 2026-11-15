@@ -22,6 +22,7 @@ import {
   NativeMap,
   NativeSet,
   NativeString,
+  arrayConcat,
   arrayEvery,
   arrayFilter,
   arrayFind,
@@ -32,11 +33,13 @@ import {
   arraySome,
   mapGet,
   mapHas,
+  mapOf,
   mapSet,
-  mapValues,
+  mapValuesArray,
   mathSign,
   setAdd,
   setHas,
+  setOf,
   setSize,
   stringStartsWith,
 } from '../intrinsics.js';
@@ -76,7 +79,7 @@ export interface Context {
 const NO_FIRST = 'no instance at rank 0: ';
 
 /** The strategies whose value is one contribution, named by `selected` (D-27). */
-export const SELECTING: ReadonlySet<string> = new NativeSet(['max', 'min', 'highestPriority']);
+export const SELECTING: ReadonlySet<string> = setOf(['max', 'min', 'highestPriority']);
 
 /**
  * What the contributions give: a value, no value, no value they can give (the contributors of a
@@ -102,7 +105,7 @@ export function comparator(
           ? compareCanonicalDecimals(a, b)
           : undefined;
     case 'enum': {
-      const rank = new NativeMap(arrayMap(values, (value, i) => [value, i]));
+      const rank = mapOf(arrayMap(values, (value, i) => [value, i]));
       return (a, b) => {
         const x = typeof a === 'string' ? mapGet(rank, a) : undefined;
         const y = typeof b === 'string' ? mapGet(rank, b) : undefined;
@@ -187,7 +190,8 @@ function combine(declaration: OutputDeclaration, steps: readonly ProofStep[]): E
       return index === undefined ? unknown : settle(finish(values[index] ?? null, declaration));
     }
     case 'highestPriority': {
-      const [head] = values;
+      const tuple136 = values;
+      const head = tuple136[0];
       if (head === undefined) return unknown;
       const key = keyOf(head);
       if (!arrayEvery(values, (value) => keyOf(value) === key)) return { disagree: true };
@@ -220,9 +224,11 @@ function emptyValue(declaration: OutputDeclaration): Expected {
 function unionOf(values: readonly JsonValue[]): Expected {
   const seen = new NativeSet<string>();
   const items: JsonValue[] = [];
-  for (const value of values) {
+  for (let idx137 = 0, list137 = values; idx137 < list137.length; idx137++) {
+    const value = list137[idx137] as (typeof list137)[number];
     if (!arrayIsArray(value)) return { unknown: true };
-    for (const item of value) {
+    for (let idx138 = 0, list138 = value; idx138 < list138.length; idx138++) {
+      const item = list138[idx138] as (typeof list138)[number];
       const key = keyOf(item);
       if (setHas(seen, key)) continue;
       setAdd(seen, key);
@@ -255,10 +261,16 @@ function extremeIndex(
  */
 function inContributionOrder(target: Target): ProofStep[] {
   const buckets = new NativeMap<string, ProofStep[]>();
-  for (const id of target.contributors) if (!mapHas(buckets, id)) mapSet(buckets, id, []);
+  for (let idx1040 = 0, list1040 = target.contributors; idx1040 < list1040.length; idx1040++) {
+    const id = list1040[idx1040] as (typeof list1040)[number];
+    if (!mapHas(buckets, id)) mapSet(buckets, id, []);
+  }
   const unnamed: ProofStep[] = [];
-  for (const step of target.steps) arrayPush(mapGet(buckets, step.ruleId) ?? unnamed, step);
-  return [...arrayFlat([...mapValues(buckets)]), ...unnamed];
+  for (let idx1041 = 0, list1041 = target.steps; idx1041 < list1041.length; idx1041++) {
+    const step = list1041[idx1041] as (typeof list1041)[number];
+    arrayPush(mapGet(buckets, step.ruleId) ?? unnamed, step);
+  }
+  return arrayConcat(arrayFlat(arrayConcat(mapValuesArray(buckets))), unnamed);
 }
 
 /**
@@ -267,13 +279,13 @@ function inContributionOrder(target: Target): ProofStep[] {
  */
 function contributorsMatch(target: Target, top: Top | undefined): boolean {
   const { contributors, steps, declaration } = target;
-  const named = new NativeSet(contributors);
+  const named = setOf(contributors);
   if (setSize(named) !== contributors.length) return false;
   if (top !== undefined)
     return (
       setSize(named) === setSize(top.ids) && arrayEvery(contributors, (id) => setHas(top.ids, id))
     );
-  const fed = new NativeSet(arrayMap(steps, (step) => step.ruleId));
+  const fed = setOf(arrayMap(steps, (step) => step.ruleId));
   if (!arrayEvery(contributors, (id) => setHas(fed, id))) return false;
   if (declaration.combine !== 'highestPriority') return setSize(named) === setSize(fed);
   return (setSize(named) === 0) === (setSize(fed) === 0);
@@ -282,7 +294,8 @@ function contributorsMatch(target: Target, top: Top | undefined): boolean {
 /** The standing of each contributor of `target`: that of the first step of its rule. */
 function contributorStanding(target: Target, standings: Standings) {
   const first = new NativeMap<string, Standing | undefined>();
-  for (const step of target.steps) {
+  for (let idx139 = 0, list139 = target.steps; idx139 < list139.length; idx139++) {
+    const step = list139[idx139] as (typeof list139)[number];
     if (!mapHas(first, step.ruleId)) mapSet(first, step.ruleId, mapGet(standings, ruleKey(step)));
   }
   return (id: string): Standing | undefined => mapGet(first, id);
@@ -352,7 +365,7 @@ export function combinationProblems(target: Target, context: Context): string[] 
   if (target.status === 'undetermined') return issues;
   const following = valueProblems(target, context, carrier, top);
   const hidden = following.length > 0 && arrayEvery(arrayMap(following, lifted), NativeBoolean);
-  return hidden ? issues : [...issues, ...following];
+  return hidden ? issues : arrayConcat(issues, following);
 }
 
 /**
@@ -382,9 +395,10 @@ function valueProblems(
   const has = target.value !== undefined;
   // A value off its declaration is reported by `offDeclarationValues`, and not compared.
   if (target.value !== undefined && !matchesValue(target.value, declaration)) return issues;
-  if ('value' in expected && !has) return [...issues, `settled output has no value: ${cite()}`];
+  if ('value' in expected && !has)
+    return arrayConcat(issues, [`settled output has no value: ${cite()}`]);
   if ('none' in expected && declaration.combine === 'all') {
-    return [...issues, `all output without contribution must be undetermined: ${cite()}`];
+    return arrayConcat(issues, [`all output without contribution must be undetermined: ${cite()}`]);
   }
   if (
     setHas(SELECTING, declaration.combine) &&

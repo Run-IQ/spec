@@ -3,13 +3,14 @@ import { isPlainObject, spendValues, tooLargeMessage } from '../values.js';
 import { incrementProblem, MAX_ROUNDING_SCALE, scaleOfIncrement } from './decimal.js';
 import {
   NativeMap,
-  NativeSet,
   arrayJoin,
   arraySome,
+  mapEntriesArray,
   mapSet,
   numberIsSafeInteger,
   objectKeys,
   setHas,
+  setOf,
 } from '../intrinsics.js';
 
 /**
@@ -50,7 +51,7 @@ const ROUNDING_MODES: readonly RoundingMode[] = [
   'floor',
 ];
 const ROUNDING_TARGETS: readonly NonNullable<OutputRounding['at']>[] = ['output', 'contribution'];
-const ROUNDING_KEYS = new NativeSet(['scale', 'increment', 'mode', 'at']);
+const ROUNDING_KEYS = setOf(['scale', 'increment', 'mode', 'at']);
 /** The output types a rounding applies to. */
 const ROUNDABLE: readonly string[] = ['number', 'decimal'];
 
@@ -91,7 +92,8 @@ export function checkRounding(rounding: unknown, path: string, add: Add): Roundi
     add(where, message);
   };
   const members = new NativeMap<string, unknown>();
-  for (const key of keys) {
+  for (let idx18 = 0, list18 = keys; idx18 < list18.length; idx18++) {
+    const key = list18[idx18] as (typeof list18)[number];
     try {
       mapSet(members, key, rounding[key]);
     } catch (error) {
@@ -101,7 +103,10 @@ export function checkRounding(rounding: unknown, path: string, add: Add): Roundi
     }
   }
   const copy: Record<string, unknown> = {};
-  for (const [key, member] of members) {
+  for (let idx19 = 0, list19 = mapEntriesArray(members); idx19 < list19.length; idx19++) {
+    const tuple1001 = list19[idx19] as (typeof list19)[number];
+    const key = tuple1001[0];
+    const member = tuple1001[1];
     if (member === undefined) continue;
     if (setHas(ROUNDING_KEYS, key)) copy[key] = member;
     else fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);

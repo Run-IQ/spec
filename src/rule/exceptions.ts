@@ -25,7 +25,7 @@ import {
 import { IssueList } from '../issues.js';
 import type { RuleValidationIssue } from '../issues.js';
 import {
-  NativeSet,
+  arrayConcat,
   arrayEvery,
   arrayFind,
   arrayForEach,
@@ -37,10 +37,12 @@ import {
   arraySome,
   arraySort,
   objectEntries,
-  objectFromEntries,
   objectHasOwn,
   objectKeys,
+  objectOfEntries,
   setHas,
+  setOf,
+  setValuesArray,
   stringIncludes,
 } from '../intrinsics.js';
 
@@ -136,14 +138,14 @@ function matches(rule: unknown, selector: unknown, carrier: unknown): boolean {
   requireRuleSet(carrier, 'carrier ruleSet');
   if (!constrains(wanted)) return false;
   const { ids, tags, dimensions, outputs, models } = wanted;
-  const targeted = new NativeSet(wanted.ruleSets?.length ? wanted.ruleSets : [carrier]);
+  const targeted = setOf(wanted.ruleSets?.length ? wanted.ruleSets : [carrier]);
   if (!setHas(targeted, ruleSet)) return false;
   if (ids?.length) {
     const id = qualifyName(ruleSet, target.id);
     if (!arraySome(ids, (name) => qualifiedFrom(carrier, name) === id)) return false;
   }
   if (tags?.length) {
-    const own = new NativeSet(target.tags);
+    const own = setOf(target.tags);
     if (!arraySome(tags, (tag) => setHas(own, tag))) return false;
   }
   if (outputs?.length) {
@@ -152,7 +154,10 @@ function matches(rule: unknown, selector: unknown, carrier: unknown): boolean {
   }
   if (models?.length && !arrayIncludes(models, target.model)) return false;
   if (dimensions) {
-    for (const [key, value] of objectEntries(dimensions)) {
+    for (let idx23 = 0, list23 = objectEntries(dimensions); idx23 < list23.length; idx23++) {
+      const tuple1002 = list23[idx23] as (typeof list23)[number];
+      const key = tuple1002[0];
+      const value = tuple1002[1];
       if (!objectHasOwn(target.dimensions, key)) return false;
       if (!sameDimensionSpec(target.dimensions[key], value)) return false;
     }
@@ -217,7 +222,12 @@ function copySelector(selector: unknown): RuleSelector {
     selectorError(`selector must be an object, got a value of type ${typeName(selector)}`);
   }
   const copy: RuleSelector = {};
-  for (const field of [...SELECTOR_LISTS, 'ruleSets'] as const) {
+  for (
+    let idx1003 = 0, list1003 = arrayConcat(SELECTOR_LISTS, ['ruleSets'] as const);
+    idx1003 < list1003.length;
+    idx1003++
+  ) {
+    const field = list1003[idx1003] as (typeof list1003)[number];
     const value = selector[field];
     if (value === undefined) continue;
     copy[field] = stringList(value, `selector.${field}`);
@@ -236,7 +246,7 @@ function copySelector(selector: unknown): RuleSelector {
 
 /** A shallow copy of the own enumerable entries of `value`, as data (`__proto__` included). */
 function copyEntries(value: Record<string, unknown>): Record<string, unknown> {
-  return objectFromEntries(arrayMap(objectKeys(value), (key) => [key, value[key]]));
+  return objectOfEntries(arrayMap(objectKeys(value), (key) => [key, value[key]]));
 }
 
 /**
@@ -391,7 +401,7 @@ function checkReach(
   path: string,
   fail: Add,
 ): void {
-  const targeted = new NativeSet(targetedList);
+  const targeted = setOf(targetedList);
   const packTargeted = arraySome(targetedList, (set) => set !== LOCAL_RULE_SET);
   arrayForEach(lists.ids ?? [], (name, i) => {
     const set = ruleSetOf(carrier, name);
@@ -441,7 +451,8 @@ function readException(
     valid = false;
     add(at, message);
   };
-  for (const key of objectKeys(item)) {
+  for (let idx25 = 0, list25 = objectKeys(item); idx25 < list25.length; idx25++) {
+    const key = list25[idx25] as (typeof list25)[number];
     if (!arrayIncludes(KEYS_BY_KIND[kind], key)) {
       fail(
         `${path}.${key}`,
@@ -505,7 +516,8 @@ function readSelector(
     valid = false;
     add(at, message);
   };
-  for (const key of objectKeys(value)) {
+  for (let idx26 = 0, list26 = objectKeys(value); idx26 < list26.length; idx26++) {
+    const key = list26[idx26] as (typeof list26)[number];
     if (!arrayIncludes(SELECTOR_KEYS, key)) {
       fail(`${path}.${key}`, `${citeName(path)} has an unknown key ${quoteText(key)}`);
     }
@@ -513,7 +525,8 @@ function readSelector(
 
   const ruleSets = readRuleSets(value.ruleSets, `${path}.ruleSets`, fail);
   const lists: Partial<Record<(typeof SELECTOR_LISTS)[number], string[]>> = {};
-  for (const field of SELECTOR_LISTS) {
+  for (let idx27 = 0, list27 = SELECTOR_LISTS; idx27 < list27.length; idx27++) {
+    const field = list27[idx27] as (typeof list27)[number];
     const list = readList(value[field], `${path}.${field}`, true, fail);
     if (list === undefined) continue;
     if (field === 'ids' || field === 'outputs') {
@@ -530,18 +543,19 @@ function readSelector(
   }
 
   const selector: RuleSelector = {};
-  for (const field of SELECTOR_LISTS) {
+  for (let idx28 = 0, list28 = SELECTOR_LISTS; idx28 < list28.length; idx28++) {
+    const field = list28[idx28] as (typeof list28)[number];
     let list = lists[field];
     if (list === undefined || list.length === 0) continue;
     if (carrier !== undefined && (field === 'ids' || field === 'outputs')) {
       list = arrayMap(list, (name) => shortestFrom(carrier, name));
     }
-    selector[field] = arraySort([...new NativeSet(list)]);
+    selector[field] = arraySort(arrayConcat(setValuesArray(setOf(list))));
   }
   const dimensions = readDimensions(value.dimensions, `${path}.dimensions`, fail);
   if (dimensions && objectKeys(dimensions).length > 0) selector.dimensions = dimensions;
   if (ruleSets !== undefined && ruleSets.length > 0) {
-    const sorted = arraySort([...new NativeSet(ruleSets)]);
+    const sorted = arraySort(arrayConcat(setValuesArray(setOf(ruleSets))));
     // Listing only the carrier's rule set is the default: one meaning, one spelling.
     if (!(sorted.length === 1 && sorted[0] === carrier)) selector.ruleSets = sorted;
   }
@@ -608,7 +622,8 @@ function readDimensions(
     return undefined;
   }
   const entries: [string, DimensionSpec][] = [];
-  for (const key of arraySort(objectKeys(value))) {
+  for (let idx29 = 0, list29 = arraySort(objectKeys(value)); idx29 < list29.length; idx29++) {
+    const key = list29[idx29] as (typeof list29)[number];
     if (isUnnamable(key)) {
       fail(path, unnamableNameMessage(path, 'dimension', key));
       continue;
@@ -621,7 +636,7 @@ function readDimensions(
     if (spec !== undefined) arrayPush(entries, [key, spec]);
   }
   // `Object.fromEntries` defines own properties: a `__proto__` key stays data.
-  return objectFromEntries(entries);
+  return objectOfEntries(entries);
 }
 
 function readNonEmptyString(

@@ -377,13 +377,15 @@ function readNeighbourCopy(
   if (mapHas(fields.values, 'pointer') && typeof pointer !== 'string') {
     add(`${at}/pointer`, `${at}/pointer must be a string`);
   }
-  const [salt, commitment] = arrayMap(['salt', 'commitment'], (key) => {
+  const tuple196 = arrayMap(['salt', 'commitment'], (key) => {
     const hex = mapGet(fields.values, key);
     if (isHexHash(hex)) return hex;
     if (mapHas(fields.values, key))
       add(`${at}/${key}`, `${at}/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
+  const salt = tuple196[0];
+  const commitment = tuple196[1];
   const place = readPlace(fields.values, at, size, reader);
   if (reader.issues.length > 0 || place === undefined || typeof pointer !== 'string') {
     return undefined;

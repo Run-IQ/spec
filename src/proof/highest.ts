@@ -42,7 +42,8 @@ export function topOf(
 ): Top | undefined {
   let best: Standing | undefined;
   const standing = new NativeMap<ProofStep, Standing>();
-  for (const step of steps) {
+  for (let idx132 = 0, list132 = steps; idx132 < list132.length; idx132++) {
+    const step = list132[idx132] as (typeof list132)[number];
     const found = mapGet(standings, ruleKey(step));
     if (found === undefined) return undefined;
     mapSet(standing, step, found);
@@ -54,7 +55,8 @@ export function topOf(
   if (best === undefined) return { ids, winners, problems };
   // In the order of `applied`, the steps of one level are in identity order, by rule.
   const groups: ProofStep[][] = [];
-  for (const step of steps) {
+  for (let idx133 = 0, list133 = steps; idx133 < list133.length; idx133++) {
+    const step = list133[idx133] as (typeof list133)[number];
     const found = mapGet(standing, step);
     if (found === undefined || !sameLevel(found, best)) continue;
     setAdd(ids, step.ruleId);
@@ -62,8 +64,10 @@ export function topOf(
     if (last !== undefined && ruleKey(last[0] ?? step) === ruleKey(step)) arrayPush(last, step);
     else arrayPush(groups, [step]);
   }
-  for (const group of groups) {
-    const [first] = group;
+  for (let idx134 = 0, list134 = groups; idx134 < list134.length; idx134++) {
+    const group = list134[idx134] as (typeof list134)[number];
+    const tuple135 = group;
+    const first = tuple135[0];
     if (first === undefined) continue;
     if (group.length === 1 && (first.subject === undefined || !competing)) {
       arrayPush(winners, first);

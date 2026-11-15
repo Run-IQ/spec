@@ -9,17 +9,19 @@ import { isLifted, LIFTS } from './lifts.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayFilter,
   arrayFlat,
   arrayMap,
   arrayPush,
   mapGet,
   mapHas,
-  mapKeys,
+  mapKeysArray,
   mapSet,
   objectHasOwn,
   setAdd,
   setHas,
+  setOf,
   stringIndexOf,
   stringSlice,
 } from '../intrinsics.js';
@@ -55,7 +57,8 @@ export function strataProblems(
 ): string[] {
   const issues: string[] = [];
   const placed = new NativeSet<string>();
-  for (const name of arrayFlat(p.strata)) {
+  for (let idx140 = 0, list140 = arrayFlat(p.strata); idx140 < list140.length; idx140++) {
+    const name = list140[idx140] as (typeof list140)[number];
     if (!mapHas(listed, name)) {
       const message = `stratum output unknown: ${citeName(name)}`;
       const output = { output: name };
@@ -64,10 +67,11 @@ export function strataProblems(
     if (setHas(placed, name)) arrayPush(issues, `stratum output repeated: ${citeName(name)}`);
     setAdd(placed, name);
   }
-  for (const name of mapKeys(listed)) {
+  for (let idx141 = 0, list141 = mapKeysArray(listed); idx141 < list141.length; idx141++) {
+    const name = list141[idx141] as (typeof list141)[number];
     if (!setHas(placed, name)) arrayPush(issues, `output not in strata: ${citeName(name)}`);
   }
-  const members = arrayMap(p.strata, (names) => new NativeSet(names));
+  const members = arrayMap(p.strata, (names) => setOf(names));
   const place = (entry: { ruleId: string; version: number; stratum: number }, output?: string) => {
     const names = members[entry.stratum];
     if (!names) arrayPush(issues, `stratum out of range: ${citeName(key(entry))}`);
@@ -75,8 +79,18 @@ export function strataProblems(
       arrayPush(issues, `step stratum mismatch: ${citeName(key(entry))}`);
     }
   };
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending]) place(entry, entry.output);
-  for (const exception of p.exceptions) place(exception);
+  for (
+    let idx1042 = 0, list1042 = arrayConcat(p.applied, p.skipped, p.pending);
+    idx1042 < list1042.length;
+    idx1042++
+  ) {
+    const entry = list1042[idx1042] as (typeof list1042)[number];
+    place(entry, entry.output);
+  }
+  for (let idx1043 = 0, list1043 = p.exceptions; idx1043 < list1043.length; idx1043++) {
+    const exception = list1043[idx1043] as (typeof list1043)[number];
+    place(exception);
+  }
   return issues;
 }
 
@@ -88,11 +102,17 @@ export function strataProblems(
  */
 export function feedProblems(p: ProofView): string[] {
   const imports = new NativeMap<string, Set<string>>();
-  for (const set of p.ruleSets) {
-    if (set.kind === 'pack') mapSet(imports, set.id, new NativeSet(set.imports ?? []));
+  for (let idx142 = 0, list142 = p.ruleSets; idx142 < list142.length; idx142++) {
+    const set = list142[idx142] as (typeof list142)[number];
+    if (set.kind === 'pack') mapSet(imports, set.id, setOf(set.imports ?? []));
   }
   const issues: string[] = [];
-  for (const entry of [...p.applied, ...p.skipped, ...p.pending]) {
+  for (
+    let idx1044 = 0, list1044 = arrayConcat(p.applied, p.skipped, p.pending);
+    idx1044 < list1044.length;
+    idx1044++
+  ) {
+    const entry = list1044[idx1044] as (typeof list1044)[number];
     if (entry.output === undefined) continue;
     const own = ruleSetOf(entry.ruleId);
     const target = ruleSetOf(entry.output);
@@ -125,7 +145,8 @@ export function unroundedProblems(
   listed: ReadonlyMap<string, ProofOutput>,
 ): string[] {
   const issues: string[] = [];
-  for (const step of p.applied) {
+  for (let idx144 = 0, list144 = p.applied; idx144 < list144.length; idx144++) {
+    const step = list144[idx144] as (typeof list144)[number];
     const output = mapGet(listed, step.output);
     if (step.unrounded === undefined || output === undefined) continue;
     const { rounding } = declarationOf(output);
@@ -159,10 +180,10 @@ function roundsTo(step: ProofStep, rounding: Parameters<typeof roundDecimal>[1])
  * or exception is `determined`: it is at best `provisional`.
  */
 export function undeclaredReadProblems(p: ProofView): string[] {
-  const undeclared = new NativeSet(arrayMap(p.readsUndeclared, key));
+  const undeclared = setOf(arrayMap(p.readsUndeclared, key));
   return arrayMap(
     arrayFilter(
-      [...p.applied, ...p.skipped, ...p.exceptions],
+      arrayConcat(p.applied, p.skipped, p.exceptions),
       (entry) => entry.status === 'determined' && setHas(undeclared, key(entry)),
     ),
     (entry) => `rule with undeclared reads cannot be determined: ${citeName(key(entry))}`,

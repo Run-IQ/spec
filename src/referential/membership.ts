@@ -13,8 +13,8 @@ import type { ReferentialLimits } from './limits.js';
 import type { Membership, Referential, ReferentialMember } from './types.js';
 import {
   NativeMap,
-  NativeSet,
   NativeString,
+  arrayConcat,
   arrayFilter,
   arrayFind,
   arrayForEach,
@@ -29,6 +29,8 @@ import {
   mapGet,
   mapSet,
   objectHasOwn,
+  setOf,
+  setValuesArray,
 } from '../intrinsics.js';
 
 /**
@@ -153,7 +155,7 @@ export function matchDimension(
       if (referential === undefined) {
         throw newSpecError('INVALID_REFERENTIAL', `unknown referential ${citeName(ref)}`);
       }
-      const targets = arrayMap([...anyOf, ...except], (t) => readTarget(referential, t));
+      const targets = arrayMap(arrayConcat(anyOf, except), (t) => readTarget(referential, t));
       const resolver = new Resolver(referential, at, maxDepth);
       const of = (value: ReadValue, from: number, to: number): Membership =>
         anyMember(
@@ -219,7 +221,7 @@ function checkInput(list: readonly unknown[], input: unknown): string[] {
     );
     if (problem !== undefined) throw newSpecError('INVALID_INPUT', problem);
   });
-  return arraySort([...new NativeSet(arrayMap(list, NativeString))]);
+  return arraySort(arrayConcat(setValuesArray(setOf(arrayMap(list, NativeString)))));
 }
 
 /**
@@ -313,10 +315,14 @@ function combine(
   if (all && unknown?.result === 'unknown') return { result: 'unknown', why: unknown.why };
   const values: string[] = [];
   const via: string[] = [];
-  for (const { value, membership } of judged) {
+  for (let idx30 = 0, list30 = judged; idx30 < list30.length; idx30++) {
+    const { value, membership } = list30[idx30] as (typeof list30)[number];
     if (membership.result !== true) continue;
     arrayPush(values, value);
-    for (const group of membership.via) if (!arrayIncludes(via, group)) arrayPush(via, group);
+    for (let idx1004 = 0, list1004 = membership.via; idx1004 < list1004.length; idx1004++) {
+      const group = list1004[idx1004] as (typeof list1004)[number];
+      if (!arrayIncludes(via, group)) arrayPush(via, group);
+    }
   }
   return { result: true, values, via };
 }
@@ -364,7 +370,11 @@ class Resolver {
         // `result` answers the nested group `frame.nested[frame.next]`.
         frame.next++;
         if (result.result === true) {
-          result = this.close(frame, { result: true, via: [frame.group, ...result.via] }, memo);
+          result = this.close(
+            frame,
+            { result: true, via: arrayConcat([frame.group], result.via) },
+            memo,
+          );
           arrayPop(stack);
           continue;
         }
@@ -402,7 +412,7 @@ class Resolver {
       return direct;
     }
     const nested = arraySort(
-      arrayFilter([...new NativeSet(arrayMap(active, (m) => m.value))], (name) =>
+      arrayFilter(arrayConcat(setValuesArray(setOf(arrayMap(active, (m) => m.value)))), (name) =>
         objectHasOwn(groups, name),
       ),
     );

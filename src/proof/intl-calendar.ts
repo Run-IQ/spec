@@ -9,7 +9,9 @@ import {
   arrayFind,
   dateTimeFormatFormatToParts,
   dateTimeFormatResolvedOptions,
+  functionHasInstance,
   isoOf,
+  loadTimeTzdata,
   mapClear,
   mapDelete,
   mapGet,
@@ -119,7 +121,8 @@ function requireZoneSupport(): void {
   try {
     makeFormatter(PROBE_ZONE);
   } catch (error) {
-    if (error instanceof NativeRangeError) throw new RuntimeHasNoZoneData('no time zone data');
+    if (functionHasInstance(NativeRangeError, error))
+      throw new RuntimeHasNoZoneData('no time zone data');
     throw new RuntimeCannotReadOffsets(`cannot build the formatter of ${PROBE_ZONE}`);
   }
 }
@@ -139,7 +142,7 @@ export function isKnownZone(zone: string): boolean {
     formatter(zone);
     return true;
   } catch (error) {
-    if (error instanceof NativeRangeError) return false;
+    if (functionHasInstance(NativeRangeError, error)) return false;
     throw new RuntimeCannotReadOffsets(
       `cannot build a formatter for the zone: ${NativeString(error)}`,
     );
@@ -151,14 +154,10 @@ export function isKnownZone(zone: string): boolean {
  * not name it. Node.js names it in `process.versions.tz`.
  */
 export function runtimeTzdata(): string | undefined {
-  try {
-    const release = (globalThis as { process?: { versions?: { tz?: unknown } } }).process?.versions
-      ?.tz;
-    return typeof release === 'string' && release !== '' ? release : undefined;
-  } catch {
-    // `process.versions` that cannot be read: the release is not known, which the notice says.
-    return undefined;
-  }
+  // Read once when the package loads (`loadTimeTzdata`): a later redefinition of
+  // `process.versions` changes no verdict. A host that does not name it gives `undefined`,
+  // which the notice says.
+  return loadTimeTzdata;
 }
 
 /**
@@ -168,7 +167,11 @@ export function runtimeTzdata(): string | undefined {
 export function parseOffset(text: string): number | undefined {
   const match = regExpExec(/^GMT(?:([+\-\u2212])(\d{2}):(\d{2})(?::(\d{2}))?)?$/, text);
   if (!match) return undefined;
-  const [, sign, hours, minutes, seconds] = match;
+  const tuple5008 = match;
+  const sign = tuple5008[1];
+  const hours = tuple5008[2];
+  const minutes = tuple5008[3];
+  const seconds = tuple5008[4];
   if (sign === undefined) return 0;
   const total =
     (NativeNumber(hours) * 60 + NativeNumber(minutes)) * 60 + NativeNumber(seconds ?? 0);

@@ -17,7 +17,7 @@ import {
   NativeMap,
   NativeSet,
   NativeString,
-  arrayEntries,
+  arrayConcat,
   arrayFilter,
   arrayIsArray,
   arrayMap,
@@ -26,12 +26,14 @@ import {
   arraySort,
   jsonStringify,
   mapDelete,
+  mapEntriesArray,
   mapGet,
-  mapKeys,
+  mapKeysArray,
   mapSet,
-  mapValues,
+  mapValuesArray,
   setAdd,
   setHas,
+  setOf,
   setSize,
   stringStartsWith,
 } from '../intrinsics.js';
@@ -148,9 +150,19 @@ function scan(
     state.steps += 1;
     return compareText(a, b);
   };
-  scanning: for (const ruleSet of arraySort([...mapKeys(groups)], byText)) {
+  scanning: for (
+    let idx1011 = 0, list1011 = arraySort(arrayConcat(mapKeysArray(groups)), byText);
+    idx1011 < list1011.length;
+    idx1011++
+  ) {
+    const ruleSet = list1011[idx1011] as (typeof list1011)[number];
     const ids = mapGet(groups, ruleSet) ?? new NativeMap<string, Version[]>();
-    for (const id of arraySort([...mapKeys(ids)], byText)) {
+    for (
+      let idx1012 = 0, list1012 = arraySort(arrayConcat(mapKeysArray(ids)), byText);
+      idx1012 < list1012.length;
+      idx1012++
+    ) {
+      const id = list1012[idx1012] as (typeof list1012)[number];
       const listed = new NativeSet<string>();
       const emit = (a: Version, b: Version, kind: VersionOverlap['kind']): boolean => {
         state.steps += 1;
@@ -194,20 +206,30 @@ function scanGroup(
   emit: Emit,
 ): boolean {
   const parts = new NativeMap<string | undefined, Version[]>();
-  for (const version of versions) {
+  for (let idx65 = 0, list65 = versions; idx65 < list65.length; idx65++) {
+    const version = list65[idx65] as (typeof list65)[number];
     const part = mapGet(parts, version.effectiveOn);
     if (part === undefined) mapSet(parts, version.effectiveOn, [version]);
     else arrayPush(part, version);
   }
-  const list = [...mapValues(parts)];
-  for (const [i, part] of arrayEntries(list)) {
-    for (const other of arraySlice(list, i + 1)) {
-      for (const a of part) {
-        for (const b of other) if (!emit(a, b, 'effectiveOn')) return false;
+  const list = arrayConcat(mapValuesArray(parts));
+  for (let i = 0; i < list.length; i++) {
+    const part = list[i] as (typeof list)[number];
+    for (let idx66 = 0, list66 = arraySlice(list, i + 1); idx66 < list66.length; idx66++) {
+      const other = list66[idx66] as (typeof list66)[number];
+      for (let idx67 = 0, list67 = part; idx67 < list67.length; idx67++) {
+        const a = list67[idx67] as (typeof list67)[number];
+        for (let idx1013 = 0, list1013 = other; idx1013 < list1013.length; idx1013++) {
+          const b = list1013[idx1013] as (typeof list1013)[number];
+          if (!emit(a, b, 'effectiveOn')) return false;
+        }
       }
     }
   }
-  for (const part of list) if (!sweepOverlaps(part, calendar, state, emit)) return false;
+  for (let idx1014 = 0, list1014 = list; idx1014 < list1014.length; idx1014++) {
+    const part = list1014[idx1014] as (typeof list1014)[number];
+    if (!sweepOverlaps(part, calendar, state, emit)) return false;
+  }
   return true;
 }
 
@@ -237,19 +259,24 @@ function sweepOverlaps(
 ): boolean {
   const kindOf = (v: Version): string =>
     `${isCivilDate(v.window.from) ? 'c' : 'i'}:${v.window.zone}`;
-  const mixed = setSize(new NativeSet(arrayMap(versions, kindOf))) > 1;
+  const mixed = setSize(setOf(arrayMap(versions, kindOf))) > 1;
   const instants: Entry[] = [];
   const days: Entry[] = [];
-  for (const version of versions) {
+  for (let idx68 = 0, list68 = versions; idx68 < list68.length; idx68++) {
+    const version = list68[idx68] as (typeof list68)[number];
     const { window } = version;
     const kind = kindOf(version);
     const civil = isCivilDate(window.from);
     if (!civil || mixed) {
-      const [from, until] = instantSpan(window, calendar);
+      const tuple69 = instantSpan(window, calendar);
+      const from = tuple69[0];
+      const until = tuple69[1];
       arrayPush(instants, { version, from, until, kind });
     }
     if (civil || mixed) {
-      const [from, until] = civilDays(window, calendar);
+      const tuple70 = civilDays(window, calendar);
+      const from = tuple70[0];
+      const until = tuple70[1];
       arrayPush(days, { version, from, until, kind });
     }
   }
@@ -279,12 +306,17 @@ function sweep(
     },
   );
   const active = new NativeMap<string, Entry[]>();
-  for (const entry of sorted) {
-    for (const [kind, bucket] of active) {
+  for (let idx71 = 0, list71 = sorted; idx71 < list71.length; idx71++) {
+    const entry = list71[idx71] as (typeof list71)[number];
+    for (let idx72 = 0, list72 = mapEntriesArray(active); idx72 < list72.length; idx72++) {
+      const tuple1015 = list72[idx72] as (typeof list72)[number];
+      const kind = tuple1015[0];
+      const bucket = tuple1015[1];
       state.steps += 1;
       if (kind === entry.kind && skip(kind)) continue;
       const kept: Entry[] = [];
-      for (const other of bucket) {
+      for (let idx73 = 0, list73 = bucket; idx73 < list73.length; idx73++) {
+        const other = list73[idx73] as (typeof list73)[number];
         state.steps += 1;
         if (other.until !== null && other.until <= entry.from) continue;
         arrayPush(kept, other);
@@ -327,7 +359,8 @@ export function readVersionGroups(
     throw newSpecError('INVALID_RULE', unreadableMessage('rules', error));
   }
 
-  for (const [index, item] of arrayEntries(items)) {
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index] as (typeof items)[number];
     const rule = readRule(item, index, zone);
     const key = jsonStringify([rule.ruleSet, rule.id, rule.version.version]);
     if (setHas(seen, key)) {
@@ -429,7 +462,7 @@ export function versionsOverlap(
       end(a.until, a.zone),
       start(b.from, b.zone),
       end(b.until, b.zone),
-    ) || intervalsMeet(...civilDays(a, calendar), ...civilDays(b, calendar))
+    ) || intervalsMeetDays(civilDays(a, calendar), civilDays(b, calendar))
   );
 }
 
@@ -456,6 +489,10 @@ function civilDays(window: ResolvedWindow, calendar: CivilCalendar): [string, st
 function intervalsMeet(f1: string, u1: string | null, f2: string, u2: string | null): boolean {
   const nonEmpty = (u1 === null || f1 < u1) && (u2 === null || f2 < u2);
   return nonEmpty && (u2 === null || f1 < u2) && (u1 === null || f2 < u1);
+}
+
+function intervalsMeetDays(a: [string, string | null], b: [string, string | null]): boolean {
+  return intervalsMeet(a[0], a[1], b[0], b[1]);
 }
 
 function compareText(a: string, b: string): number {

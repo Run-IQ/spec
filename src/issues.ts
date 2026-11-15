@@ -1,4 +1,5 @@
 import {
+  arrayConcat,
   arrayFilter,
   arrayMap,
   arrayPush,
@@ -70,7 +71,10 @@ export class IssueList {
 
   /** Lists the problems of `other` after these, and its limit notice if it reached it. */
   merge(other: IssueList): void {
-    for (const entry of other.entries) this.add(entry.path, entry.message);
+    for (let idx1000 = 0, list1000 = other.entries; idx1000 < list1000.length; idx1000++) {
+      const entry = list1000[idx1000] as (typeof list1000)[number];
+      this.add(entry.path, entry.message);
+    }
     if (other.dropped) this.dropped = true;
   }
 
@@ -86,7 +90,7 @@ export class IssueList {
 
   /** The problems, then the limit notice when a problem was not listed. */
   toArray(): RuleValidationIssue[] {
-    const list = [...this.entries];
+    const list = arrayConcat(this.entries);
     if (this.dropped) arrayPush(list, { path: '', message: ISSUE_LIMIT_MESSAGE });
     return list;
   }
@@ -98,10 +102,10 @@ export class IssueList {
 }
 
 /** `messages` bounded as an `IssueList` bounds them (path `''`), for lists of messages. */
-export function boundMessages(messages: Iterable<string>): string[] {
+export function boundMessages(messages: readonly string[]): string[] {
   const list = new IssueList();
-  for (const message of messages) {
-    if (!list.add('', message)) break;
+  for (let i = 0; i < messages.length; i++) {
+    if (!list.add('', messages[i] as string)) break;
   }
   return list.messages();
 }
@@ -126,7 +130,8 @@ export function boundWithFixed(items: readonly { message: string; fixed?: true }
   let room = mathMax(0, MAX_ISSUES - kept - 1);
   let left = 0;
   const out: string[] = [];
-  for (const item of items) {
+  for (let idx0 = 0, list0 = items; idx0 < list0.length; idx0++) {
+    const item = list0[idx0] as (typeof list0)[number];
     if (item.fixed === true) arrayPush(out, item.message);
     else if (room > 0) {
       room--;

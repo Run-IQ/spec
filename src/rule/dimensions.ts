@@ -9,7 +9,7 @@ import {
   tooLargeMessage,
 } from '../values.js';
 import {
-  NativeSet,
+  arrayConcat,
   arrayEvery,
   arrayFind,
   arrayForEach,
@@ -17,6 +17,8 @@ import {
   arrayIsArray,
   arraySort,
   objectKeys,
+  setOf,
+  setValuesArray,
   stringIncludes,
   stringIndexOf,
   stringSlice,
@@ -131,7 +133,8 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     return undefined;
   }
   const fields: Record<string, unknown> = {};
-  for (const key of keys) {
+  for (let idx3 = 0, list3 = keys; idx3 < list3.length; idx3++) {
+    const key = list3[idx3] as (typeof list3)[number];
     const member = value[key];
     // A member whose value is `undefined` is absent, known or not.
     if (member === undefined) continue;
@@ -218,7 +221,7 @@ function readValues(
       fail(at, `${citeName(at)} must not be qualified: the referential fixes the code system`);
     }
   });
-  return valid ? arraySort([...new NativeSet(items as string[])]) : undefined;
+  return valid ? arraySort(arrayConcat(setValuesArray(setOf(items as string[])))) : undefined;
 }
 
 function normalForm(
@@ -227,7 +230,8 @@ function normalForm(
   except: string[],
   match: 'any' | 'all',
 ): DimensionSpec {
-  const [single] = anyOf;
+  const tuple4 = anyOf;
+  const single = tuple4[0];
   if (ref === undefined && anyOf.length === 1 && except.length === 0 && match === 'any') {
     if (single !== undefined) return single;
   }
@@ -245,7 +249,8 @@ function normalForm(
 export function normalizeDimensionSpec(spec: unknown, path = 'dimension'): DimensionSpec {
   const problems = new IssueList();
   const normal = readDimensionSpec(spec, path, (at, message) => problems.add(at, message));
-  const [first] = problems.messages();
+  const tuple5 = problems.messages();
+  const first = tuple5[0];
   if (first !== undefined || normal === undefined) {
     throw newSpecError('INVALID_RULE', first ?? `${citeName(path)} must be ${SPEC_SHAPE}`);
   }

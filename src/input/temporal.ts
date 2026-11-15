@@ -149,7 +149,8 @@ function readPeriod(value: unknown, path: string, reader: Reader): Omit<Span, 'i
 function checkOrder(spans: readonly Span[], path: string, reader: Reader): void {
   let previous: Span | undefined;
   let end: CivilDate | null | undefined;
-  for (const span of spans) {
+  for (let idx210 = 0, list210 = spans; idx210 < list210.length; idx210++) {
+    const span = list210[idx210] as (typeof list210)[number];
     const at = `${path}/${span.index}`;
     if (previous !== undefined && span.from < previous.from) {
       reader.add(

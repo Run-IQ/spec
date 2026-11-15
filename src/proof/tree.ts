@@ -12,14 +12,16 @@ import { readProofContent, readProofLeaf } from './validate.js';
 import type { ProofLeaf } from './validate.js';
 import {
   NativeMap,
-  NativeSet,
   NativeString,
+  NativeTextEncoder,
   NativeUint8Array,
+  arrayConcat,
   arrayForEach,
-  arrayFrom,
   arrayIsArray,
   arrayJoin,
   arraySort,
+  bytesFromNumbers,
+  bytesToArray,
   jsonStringify,
   mapGet,
   mapSet,
@@ -27,7 +29,8 @@ import {
   objectKeys,
   regExpTest,
   setHas,
-  uint8ArrayFrom,
+  setOf,
+  textEncoderEncodeInto,
   uint8ArrayLength,
   uint8ArraySet,
   uint8ArraySubarray,
@@ -44,13 +47,13 @@ export type { ProofLeaf } from './validate.js';
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The keys that are not in the header leaf: the ten sections, `digest` and `signature`. */
-const NOT_HEADER: ReadonlySet<string> = new NativeSet([...PROOF_SECTIONS, 'digest', 'signature']);
+const NOT_HEADER: ReadonlySet<string> = setOf(arrayConcat(PROOF_SECTIONS, ['digest', 'signature']));
 
 /** The start of every leaf of a proof of `format`: `0x00 ‖ utf8(format) ‖ 0x00`, built once. */
 function leafPrefix(format: string): Uint8Array {
   let prefix = mapGet(LEAF_PREFIXES, format);
   if (prefix === undefined) {
-    prefix = uint8ArrayFrom([0, ...utf8ToBytes(format), 0]);
+    prefix = bytesFromNumbers(arrayConcat([0], bytesToArray(utf8ToBytes(format)), [0]));
     mapSet(LEAF_PREFIXES, format, prefix);
   }
   return prefix;
@@ -66,7 +69,10 @@ export function isRedacted(entry: object): entry is Redacted {
 /** Internal: the header of `p` (a snapshot): every member but the sections, digest, signature. */
 export function headerOf(p: object): Record<string, unknown> {
   const header: Record<string, unknown> = {};
-  for (const [key, value] of objectEntries(p)) {
+  for (let idx186 = 0, list186 = objectEntries(p); idx186 < list186.length; idx186++) {
+    const tuple1070 = list186[idx186] as (typeof list186)[number];
+    const key = tuple1070[0];
+    const value = tuple1070[1];
     if (!setHas(NOT_HEADER, key)) header[key] = value;
   }
   return header;
@@ -170,7 +176,8 @@ function hashShortInto(out: Uint8Array, prefix: Uint8Array, text: string): void 
   const room = uint8ArrayLength(prefix) + 3 * text.length;
   if (room > uint8ArrayLength(shortBuffer)) shortBuffer = new NativeUint8Array(room);
   uint8ArraySet(shortBuffer, prefix);
-  const { written } = SHORT_ENCODER.encodeInto(
+  const { written } = textEncoderEncodeInto(
+    SHORT_ENCODER,
     text,
     uint8ArraySubarray(shortBuffer, uint8ArrayLength(prefix)),
   );
@@ -182,7 +189,7 @@ function hashShortInto(out: Uint8Array, prefix: Uint8Array, text: string): void 
   hashWork.bytes += bytes;
 }
 
-const SHORT_ENCODER = new TextEncoder();
+const SHORT_ENCODER = new NativeTextEncoder();
 
 /**
  * Internal: the leaf hashes of `p`, a plain-JSON snapshot of a proof `validateProof` accepts (its
@@ -193,11 +200,15 @@ const SHORT_ENCODER = new TextEncoder();
 export function packedLeafHashes(p: UnsignedProof): PackedHashes {
   const record = p as unknown as Record<string, readonly object[]>;
   let count = 1;
-  for (const section of PROOF_SECTIONS) count += record[section]?.length ?? 0;
+  for (let idx1071 = 0, list1071 = PROOF_SECTIONS; idx1071 < list1071.length; idx1071++) {
+    const section = list1071[idx1071] as (typeof list1071)[number];
+    count += record[section]?.length ?? 0;
+  }
   const hashes = new PackedHashes(count);
   hashLeafInto(hashes.next(), p.format, 'header', undefined, headerOf(p));
   hashes.push();
-  for (const section of PROOF_SECTIONS) {
+  for (let idx187 = 0, list187 = PROOF_SECTIONS; idx187 < list187.length; idx187++) {
+    const section = list187[idx187] as (typeof list187)[number];
     arrayForEach(record[section] ?? [], (entry, i) => {
       const out = hashes.next();
       if (isRedacted(entry)) uint8ArraySet(out, hexToBytes(entry.redacted));
@@ -237,7 +248,9 @@ export function proofLeafHashes(p: DecisionProof | UnsignedProof): Uint8Array[] 
     const { proof, errors } = readProofContent(p);
     if (!proof) throw newSpecError('INVALID_PROOF', `Cannot hash the proof: ${errors[0]}`);
     const hashes = packedLeafHashes(proof);
-    return arrayFrom({ length: hashes.length }, (_, i) => hashes.copyAt(i));
+    const copies: Uint8Array[] = [];
+    for (let i = 0; i < hashes.length; i++) copies[i] = hashes.copyAt(i);
+    return copies;
   });
 }
 

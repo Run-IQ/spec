@@ -6,6 +6,7 @@ import {
   NativeMap,
   NativeSet,
   NativeString,
+  arrayConcat,
   arrayEvery,
   arrayFill,
   arrayFilter,
@@ -18,8 +19,9 @@ import {
   arraySort,
   jsonStringify,
   mapClear,
+  mapEntriesArray,
   mapGet,
-  mapKeys,
+  mapKeysArray,
   mapSet,
   mathLog2,
   mathMax,
@@ -27,7 +29,9 @@ import {
   objectValues,
   setAdd,
   setHas,
+  setOf,
   setSize,
+  setValuesArray,
 } from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the consistency checks a redacted entry can keep from being made
@@ -294,7 +298,7 @@ export function hiddenSections(counts: ReadonlyMap<ProofSection, number>): Hidde
     pairs: [],
     failed: false,
   };
-  return objectAssign(new NativeSet(mapKeys(counts)), { ledger });
+  return objectAssign(setOf(mapKeysArray(counts)), { ledger });
 }
 
 /**
@@ -347,7 +351,10 @@ export function isLifted<N extends Need>(
   });
   if (present.length === 0 || ledger === undefined || ledger.failed) return false;
   const sections = mapGet(ledger.lifted, row) ?? new NativeSet<ProofSection>();
-  for (const section of present) setAdd(sections, section);
+  for (let idx1016 = 0, list1016 = present; idx1016 < list1016.length; idx1016++) {
+    const section = list1016[idx1016] as (typeof list1016)[number];
+    setAdd(sections, section);
+  }
   mapSet(ledger.lifted, row, sections);
   arrayPush(ledger.problems, asked.message);
   if (arraySome(present, (section) => needOf(row, asked, section) === 'free')) return true;
@@ -360,7 +367,8 @@ export function isLifted<N extends Need>(
   const rules: Alternative[] = [];
   const outputs: Alternative[] = [];
   const pairs: Alternative[] = [];
-  for (const section of present) {
+  for (let idx75 = 0, list75 = present; idx75 < list75.length; idx75++) {
+    const section = list75[idx75] as (typeof list75)[number];
     const need = needOf(row, asked, section);
     const at = bit(section);
     if (ruleFields !== undefined && (need === 'rule' || need === 'both')) {
@@ -370,15 +378,23 @@ export function isLifted<N extends Need>(
       const place = need === 'output' ? undefined : output.item;
       arrayPush(outputs, { bit: at, fields: [output.output, place] });
       if (ruleFields !== undefined && need === 'both') {
-        arrayPush(pairs, { bit: at, fields: [...ruleFields, output.output, place] });
+        arrayPush(pairs, { bit: at, fields: arrayConcat(ruleFields, [output.output, place]) });
       }
     }
   }
-  for (const [list, alternatives] of [
-    [ledger.rules, rules],
-    [ledger.outputs, outputs],
-    [ledger.pairs, pairs],
-  ] as const) {
+  for (
+    let idx76 = 0,
+      list76 = [
+        [ledger.rules, rules],
+        [ledger.outputs, outputs],
+        [ledger.pairs, pairs],
+      ] as const;
+    idx76 < list76.length;
+    idx76++
+  ) {
+    const tuple1017 = list76[idx76] as (typeof list76)[number];
+    const list = tuple1017[0];
+    const alternatives = tuple1017[1];
     if (alternatives.length === 0) continue;
     const mask = arrayReduce(alternatives, (all, alternative) => all | alternative.bit, 0);
     arrayPush(list, { alternatives, mask });
@@ -396,15 +412,23 @@ export function unexplained(hidden: HiddenSections): string[] {
   const ledger = ledgerOf(hidden);
   if (ledger === undefined || ledger.failed) return [];
   const capacity = arrayFill(new NativeArray<number>(PROOF_SECTIONS.length), 0);
-  for (const [section, count] of ledger.counts)
+  for (
+    let idx1018 = 0, list1018 = mapEntriesArray(ledger.counts);
+    idx1018 < list1018.length;
+    idx1018++
+  ) {
+    const tuple2000 = list1018[idx1018] as (typeof list1018)[number];
+    const section = tuple2000[0];
+    const count = tuple2000[1];
     capacity[arrayIndexOf(PROOF_SECTIONS, section)] = count;
+  }
   const explained = arrayEvery([ledger.rules, ledger.outputs, ledger.pairs], (parts) =>
     matched(counted(parts), capacity),
   );
   if (explained) return [];
   ledger.failed = true;
   mapClear(ledger.lifted);
-  return [...new NativeSet(ledger.problems)];
+  return arrayConcat(setValuesArray(setOf(ledger.problems)));
 }
 
 /**
@@ -415,7 +439,8 @@ export function unexplained(hidden: HiddenSections): string[] {
 export function liftedChecks(hidden: HiddenSections): LiftedCheck[] {
   const ledger = ledgerOf(hidden);
   const lifted: LiftedCheck[] = [];
-  for (const entry of objectValues(LIFTS) as Lift[]) {
+  for (let idx77 = 0, list77 = objectValues(LIFTS) as Lift[]; idx77 < list77.length; idx77++) {
+    const entry = list77[idx77] as (typeof list77)[number];
     const sections = ledger === undefined ? undefined : mapGet(ledger.lifted, entry);
     if (sections === undefined) continue;
     arrayPush(lifted, {
@@ -438,9 +463,10 @@ export function liftedOnSteps(
 ): string[] {
   const issues = check(applied);
   const without = check([]);
-  const kept = new NativeSet(without);
+  const kept = setOf(without);
   const lifted = arrayFilter(issues, (message) => !setHas(kept, message));
-  for (const message of lifted) {
+  for (let idx78 = 0, list78 = lifted; idx78 < list78.length; idx78++) {
+    const message = list78[idx78] as (typeof list78)[number];
     if (!isLifted(hidden, LIFTS.decisionsAgainstExceptions, { message })) return issues;
   }
   return without;
@@ -454,7 +480,10 @@ export function liftedOnSteps(
 export function matched(masks: readonly number[], capacity: readonly number[]): boolean {
   const size = 1 << capacity.length;
   const need = arrayFill(new NativeArray<number>(size), 0);
-  for (const mask of masks) need[mask] = (need[mask] ?? 0) + 1;
+  for (let idx1019 = 0, list1019 = masks; idx1019 < list1019.length; idx1019++) {
+    const mask = list1019[idx1019] as (typeof list1019)[number];
+    need[mask] = (need[mask] ?? 0) + 1;
+  }
   const room = arrayFill(new NativeArray<number>(size), 0);
   for (let set = 1; set < size; set++) {
     const low = mathLog2(set & -set);
@@ -535,8 +564,13 @@ function keyOf(
  * then in the order asked. Linear in the parts times their alternatives times 2^5.
  */
 function counted(parts: readonly Part[]): number[] {
-  const specificity = (part: Part): number =>
-    mathMax(...arrayMap(part.alternatives, (alternative) => weight(alternative.fields)));
+  const specificity = (part: Part): number => {
+    let best = -Infinity;
+    for (let i = 0; i < part.alternatives.length; i++) {
+      best = mathMax(best, weight((part.alternatives[i] as Part['alternatives'][number]).fields));
+    }
+    return best;
+  };
   const order = arraySort(
     arrayMap(parts, (part, i) => ({
       part,
@@ -548,13 +582,18 @@ function counted(parts: readonly Part[]): number[] {
   );
   const filed = new NativeSet<string>();
   const masks: number[] = [];
-  for (const { part } of order) {
+  for (let idx79 = 0, list79 = order; idx79 < list79.length; idx79++) {
+    const { part } = list79[idx79] as (typeof list79)[number];
     const met = arraySome(part.alternatives, ({ bit: at, fields }) =>
       arraySome(agreeing(at, fields), (key) => setHas(filed, key)),
     );
     if (met) continue;
-    for (const { bit: at, fields } of part.alternatives) {
-      for (const key of keysOf(at, fields)) setAdd(filed, key);
+    for (let idx80 = 0, list80 = part.alternatives; idx80 < list80.length; idx80++) {
+      const { bit: at, fields } = list80[idx80] as (typeof list80)[number];
+      for (let idx1020 = 0, list1020 = keysOf(at, fields); idx1020 < list1020.length; idx1020++) {
+        const key = list1020[idx1020] as (typeof list1020)[number];
+        setAdd(filed, key);
+      }
     }
     arrayPush(masks, part.mask);
   }

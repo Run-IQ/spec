@@ -145,7 +145,8 @@ export function readProofInput(value: unknown): {
  */
 export function readValidInput(value: unknown): ProofInput {
   const { issues, snapshot } = readProofInput(value);
-  const [first] = issues;
+  const tuple101 = issues;
+  const first = tuple101[0];
   if (first !== undefined || snapshot === undefined) {
     throw newSpecError(
       'INVALID_INPUT',
@@ -298,7 +299,8 @@ function eachMember<T>(
   announce(reader, keys.length, path);
   const copy: Record<string, T> = {};
   let members = 0;
-  for (const key of keys) {
+  for (let idx102 = 0, list102 = keys; idx102 < list102.length; idx102++) {
+    const key = list102[idx102] as (typeof list102)[number];
     const at = childPointer(path, key);
     const read = readMember(value, key, at, add);
     if (read === 'failed' || read.value === undefined) continue;
@@ -504,12 +506,21 @@ function readAssertions(
     const read = readAssertion(assertion, at, reader);
     // Its fields are its leaves (D-15); `source` holds the leaves of its own fields.
     if (read !== undefined) {
-      for (const [field, member] of objectEntries(read)) {
+      for (let idx103 = 0, list103 = objectEntries(read); idx103 < list103.length; idx103++) {
+        const tuple1023 = list103[idx103] as (typeof list103)[number];
+        const field = tuple1023[0];
+        const member = tuple1023[1];
         const fieldAt = `${at}/${field}`;
         if (typeof member !== 'object') countText(reader, fieldAt.length);
         else
-          for (const name of objectKeys(member))
+          for (
+            let idx1024 = 0, list1024 = objectKeys(member);
+            idx1024 < list1024.length;
+            idx1024++
+          ) {
+            const name = list1024[idx1024] as (typeof list1024)[number];
             countText(reader, fieldAt.length + 1 + name.length);
+          }
       }
     }
     return read;

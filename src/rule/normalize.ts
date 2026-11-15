@@ -50,13 +50,15 @@ import {
   readRuleWindow,
 } from './window.js';
 import {
-  NativeSet,
+  arrayConcat,
   arrayForEach,
   arrayIsArray,
   arraySort,
   numberIsFinite,
   objectDefineProperty,
   objectKeys,
+  setOf,
+  setValuesArray,
   stringIncludes,
 } from '../intrinsics.js';
 
@@ -160,7 +162,10 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
   if (!spendValues(objectKeys(input).length)) invalidRule(tooLargeMessage('rule definition'));
 
   // The keys alone, before any value: an unknown field is refused whatever it holds.
-  for (const key of unknownRuleKeys(input)) invalidRule(unknownRuleFieldMessage(key));
+  for (let idx1010 = 0, list1010 = unknownRuleKeys(input); idx1010 < list1010.length; idx1010++) {
+    const key = list1010[idx1010] as (typeof list1010)[number];
+    invalidRule(unknownRuleFieldMessage(key));
+  }
   const untilInput = input.effectiveUntil;
   if (!stored) {
     if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
@@ -192,7 +197,12 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     effectiveOnInput === undefined ? undefined : readEffectiveOn(effectiveOnInput);
   const condition = given(input.condition, 'condition');
   if (condition !== undefined) out.condition = normalizeCondition(condition);
-  for (const field of ['output', 'dominanceGroup', 'sourceRef'] as const) {
+  for (
+    let idx57 = 0, list57 = ['output', 'dominanceGroup', 'sourceRef'] as const;
+    idx57 < list57.length;
+    idx57++
+  ) {
+    const field = list57[idx57] as (typeof list57)[number];
     const value = given(input[field], field);
     if (value !== undefined) out[field] = requireString(value, field);
   }
@@ -271,7 +281,8 @@ function readExtensions(value: unknown): Record<string, JsonValue> | undefined {
   const keys = objectKeys(json);
   // A name with no value is written by omitting it: `null` at the first level is refused, as
   // at the top level of the rule. Deeper, `null` is data.
-  for (const key of keys) {
+  for (let idx58 = 0, list58 = keys; idx58 < list58.length; idx58++) {
+    const key = list58[idx58] as (typeof list58)[number];
     if (json[key] === null) invalidRule(nullFieldMessage(`extensions.${key}`));
   }
   return keys.length === 0 ? undefined : json;
@@ -315,7 +326,8 @@ function normalizeCondition(value: unknown): { dsl: string; value: unknown } {
   if (!isPlainObject(value)) invalidRule('condition must be an object { dsl, value }');
   const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('condition'));
-  for (const key of keys) {
+  for (let idx59 = 0, list59 = keys; idx59 < list59.length; idx59++) {
+    const key = list59[idx59] as (typeof list59)[number];
     // A member whose value is `undefined` is absent, known or not.
     if (key !== 'dsl' && key !== 'value' && value[key] !== undefined) {
       invalidRule(`condition has an unknown key ${quoteText(key)}`);
@@ -335,7 +347,8 @@ function normalizeDimensions(input: unknown): Record<string, DimensionSpec> {
   const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('dimensions'));
   const out: Record<string, DimensionSpec> = {};
-  for (const key of arraySort(keys)) {
+  for (let idx60 = 0, list60 = arraySort(keys); idx60 < list60.length; idx60++) {
+    const key = list60[idx60] as (typeof list60)[number];
     const v = value[key];
     if (isUnnamable(key)) invalidRule(unnamableNameMessage('dimensions', 'dimension', key));
     if (isReservedName(key)) invalidRule(reservedDimensionNameMessage(`dimensions.${key}`));
@@ -358,7 +371,8 @@ function normalizeTags(input: unknown): string[] {
   if (!arrayIsArray(value)) invalidRule('tags must be an array of strings');
   const tags = readList(value, 'tags');
   if (!arrayIsArray(tags)) invalidRule(tags.message);
-  for (const tag of tags) {
+  for (let idx61 = 0, list61 = tags; idx61 < list61.length; idx61++) {
+    const tag = list61[idx61] as (typeof list61)[number];
     if (typeof tag !== 'string') invalidRule('tags must be an array of strings');
   }
   arrayForEach(tags, (tag, i) => {
@@ -367,7 +381,7 @@ function normalizeTags(input: unknown): string[] {
       invalidRule(loneSurrogateMessage(`tags[${i}]`));
     }
   });
-  return arraySort([...new NativeSet(tags as string[])]);
+  return arraySort(arrayConcat(setValuesArray(setOf(tags as string[]))));
 }
 
 function requireString(value: unknown, field: string): string {
@@ -402,7 +416,8 @@ function defineField(target: Record<string, unknown>, key: string, value: unknow
 
 /** Throws the first issue as `INVALID_RULE`; its message already names the path. */
 function throwFirst(issues: readonly RuleValidationIssue[]): void {
-  const [first] = issues;
+  const tuple62 = issues;
+  const first = tuple62[0];
   if (first) invalidRule(first.message);
 }
 

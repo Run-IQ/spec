@@ -21,6 +21,7 @@ import {
   mapSet,
   mathMax,
   setHas,
+  setOf,
   setSize,
   stringStartsWith,
 } from '../intrinsics.js';
@@ -135,8 +136,8 @@ export function completenessProblems(
 
 /** True when the rule ids `pending` are, as a set, the rules listed in `named`. */
 export function samePending(named: readonly string[], pending: readonly string[]): boolean {
-  const expected = new NativeSet(pending);
-  const given = new NativeSet(named);
+  const expected = setOf(pending);
+  const given = setOf(named);
   return (
     setSize(given) === named.length &&
     setSize(given) === setSize(expected) &&
@@ -151,7 +152,8 @@ export function pendingInOrder(
   standings: Standings,
 ): boolean {
   const first = new NativeMap<string, Standing | undefined>();
-  for (const entry of feed.waiting) {
+  for (let idx145 = 0, list145 = feed.waiting; idx145 < list145.length; idx145++) {
+    const entry = list145[idx145] as (typeof list145)[number];
     if (!mapHas(first, entry.ruleId))
       mapSet(first, entry.ruleId, mapGet(standings, ruleKey(entry)));
   }
@@ -173,13 +175,15 @@ export function rankProblems(
   const issues: string[] = [];
   const instances = new NativeMap<string, number>();
   if (competing) {
-    for (const step of target.steps) {
+    for (let idx146 = 0, list146 = target.steps; idx146 < list146.length; idx146++) {
+      const step = list146[idx146] as (typeof list146)[number];
       if (step.subject !== undefined) {
         mapSet(instances, ruleKey(step), (mapGet(instances, ruleKey(step)) ?? 0) + 1);
       }
     }
   }
-  for (const step of target.steps) {
+  for (let idx147 = 0, list147 = target.steps; idx147 < list147.length; idx147++) {
+    const step = list147[idx147] as (typeof list147)[number];
     const cited = (): string => citeName(instanceKey(step));
     if (!competing || step.subject === undefined) {
       if (step.rank !== undefined)
@@ -216,7 +220,10 @@ export function causeProblems(
   const issues: string[] = [];
   const rank = rankOf(target.status);
   let steps = -1;
-  for (const step of feed.steps) steps = mathMax(steps, rankOf(step.status));
+  for (let idx1045 = 0, list1045 = feed.steps; idx1045 < list1045.length; idx1045++) {
+    const step = list1045[idx1045] as (typeof list1045)[number];
+    steps = mathMax(steps, rankOf(step.status));
+  }
   if (steps > rank)
     arrayPush(issues, `output status weaker than its contributions: ${target.cite()}`);
   if (feed.candidates > rank) {

@@ -28,19 +28,22 @@ import { optionsLimits, ownCopy, withValueBudget } from '../values.js';
 import { ATTESTATION_FORMAT } from './types.js';
 import type { Attestation, AttestationSubject } from './types.js';
 import {
-  NativeSet,
+  arrayConcat,
   arrayFilter,
   arrayIncludes,
   arrayMap,
   arrayPush,
+  arrayPushAll,
   arraySome,
   mapGet,
   mapHas,
-  mapKeys,
+  mapKeysArray,
   mapSize,
   regExpTest,
   setHas,
+  setOf,
   setSize,
+  setValuesArray,
 } from '../intrinsics.js';
 
 /** Internal: a proof digest as `sealProof` writes it: 64 lowercase hex characters. */
@@ -59,7 +62,7 @@ const KEYS: readonly string[] = [
   'at',
   'signature',
 ];
-const OPTIONAL: ReadonlySet<string> = new NativeSet(['role', 'claims']);
+const OPTIONAL: ReadonlySet<string> = setOf(['role', 'claims']);
 const REQUIRED: readonly string[] = arrayFilter(KEYS, (key) => !setHas(OPTIONAL, key));
 const SUBJECT_KEYS: readonly string[] = ['proofDigest', 'keyId'];
 const SHAPE = 'an object { format, kind, subject, keyId, role?, claims?, at, signature }';
@@ -174,7 +177,7 @@ function verify(a: unknown, proofDigest: string, keys: Map<string, Uint8Array>):
   } else if (read.subject.proofDigest !== proofDigest) {
     arrayPush(findings, { message: 'attestation for another proof', level: 'invalid' });
   }
-  arrayPush(findings, ...signatureFinding(read, keys));
+  arrayPushAll(findings, signatureFinding(read, keys));
   const messages = arrayMap(findings, (finding) => finding.message);
   if (arraySome(findings, (finding) => finding.level === 'invalid')) return invalid(messages);
   return { status: findings.length > 0 ? 'consistent' : 'authentic', issues: messages };
@@ -299,7 +302,8 @@ function readSubject(value: unknown, reader: Reader): AttestationSubject | undef
   // The subject may be reachable from `claims` too: the claims walk takes this read, and the
   // same copy of it, instead of reading it a second time. It is marked under a member it holds
   // (read or failed to read); an object with no known member is not marked.
-  const [member] = [...mapKeys(fields.values), ...fields.failed];
+  const tuple1093 = arrayConcat(mapKeysArray(fields.values), setValuesArray(fields.failed));
+  const member = tuple1093[0];
   if (member !== undefined) {
     markRead(reader, value, member, subject === undefined ? undefined : { ...subject });
   }

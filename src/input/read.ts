@@ -23,6 +23,7 @@ import {
   NativeMap,
   NativeSet,
   NativeString,
+  arrayConcat,
   arrayForEach,
   arrayIncludes,
   arrayIsArray,
@@ -344,7 +345,8 @@ export function readFields(
   announce(reader, keys.length, path);
   const values = new NativeMap<string, unknown>();
   const failed = new NativeSet<string>();
-  for (const key of keys) {
+  for (let idx90 = 0, list90 = keys; idx90 < list90.length; idx90++) {
+    const key = list90[idx90] as (typeof list90)[number];
     const at = hasLoneSurrogate(key) ? path : join(path, key);
     const read = readMember(value, key, at, add);
     if (read !== 'failed' && read.value === undefined) continue;
@@ -364,7 +366,8 @@ export function requireFields(
   add: Add,
   join: (path: string, key: string) => string = childPointer,
 ): void {
-  for (const key of required) {
+  for (let idx91 = 0, list91 = required; idx91 < list91.length; idx91++) {
+    const key = list91[idx91] as (typeof list91)[number];
     if (!mapHas(fields.values, key) && !setHas(fields.failed, key)) {
       add(join(path, key), `${citeName(join(path, key))} is required`);
     }
@@ -616,13 +619,16 @@ function scalarCopy(value: unknown): JsonValue | undefined {
 function containerCopy(frame: Frame): JsonValue | undefined {
   if (frame.parts.length !== frame.length) return undefined;
   const copies: JsonValue[] = [];
-  for (const [, , copy] of frame.parts) {
+  for (let idx92 = 0, list92 = frame.parts; idx92 < list92.length; idx92++) {
+    const tuple1022 = list92[idx92] as (typeof list92)[number];
+    const copy = tuple1022[2];
     if (copy === undefined) return undefined;
     arrayPush(copies, copy);
   }
   if (frame.keys === undefined) return copies;
   const out: { [k: string]: JsonValue } = {};
-  arrayForEach(frame.parts, ([key], i) => {
+  arrayForEach(frame.parts, (part, i) => {
+    const key = part[0];
     // Plain assignment would turn a `__proto__` key into a prototype change.
     objectDefineProperty(out, NativeString(key), {
       value: copies[i],
@@ -640,15 +646,19 @@ function containerCopy(frame: Frame): JsonValue | undefined {
  * scalar's JSON text); `undefined` when a member has none (a problem was reported).
  */
 function containerEncoding(frame: Frame): string | undefined {
-  if (arraySome(frame.parts, ([, encoding]) => encoding === undefined)) return undefined;
+  if (arraySome(frame.parts, (part) => part[1] === undefined)) return undefined;
   if (frame.parts.length !== frame.length) return undefined;
   const parts =
     frame.keys === undefined
       ? frame.parts
-      : arraySort([...frame.parts], ([a], [b]) => (NativeString(a) < NativeString(b) ? -1 : 1));
+      : arraySort(arrayConcat(frame.parts), (x, y) =>
+          NativeString(x[0]) < NativeString(y[0]) ? -1 : 1,
+        );
   const hash = hashOfText((stream) => {
     stream.text(frame.keys === undefined ? '[' : '{');
-    arrayForEach(parts, ([key, encoding], i) => {
+    arrayForEach(parts, (part, i) => {
+      const key = part[0];
+      const encoding = part[1];
       if (i > 0) stream.text(',');
       if (frame.keys !== undefined) {
         writeJsonString(stream, NativeString(key));
@@ -776,7 +786,8 @@ function checkKeys(
   reservedRoot: boolean,
 ): string[] {
   const kept: string[] = [];
-  for (const key of keys) {
+  for (let idx93 = 0, list93 = keys; idx93 < list93.length; idx93++) {
+    const key = list93[idx93] as (typeof list93)[number];
     if (hasLoneSurrogate(key)) add(path, surrogateKeyMessage(path, key));
     else if (reservedRoot && stringStartsWith(key, '$')) {
       const at = childPointer(path, key);

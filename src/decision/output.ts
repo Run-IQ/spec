@@ -248,7 +248,8 @@ export function emptyOutput(declaration: OutputDeclaration): {
  */
 export function validDeclaration(declaration: unknown): OutputDeclaration {
   const { issues, normal } = readDeclaration(declaration, 'output');
-  const [first] = issues;
+  const tuple21 = issues;
+  const first = tuple21[0];
   if (first !== undefined || normal === undefined) {
     const message = first?.message ?? 'unreadable';
     throw newSpecError('INVALID_RULE', `invalid output declaration: ${message}`, first?.path);

@@ -32,7 +32,8 @@ function oneEditApart(a: string, b: string): boolean {
       a[i] === b[i + 1] && a[i + 1] === b[i] && stringSlice(a, i + 2) === stringSlice(b, i + 2)
     );
   }
-  const [longer, shorter] = a.length > b.length ? [a, b] : [b, a];
+  const longer = a.length > b.length ? a : b;
+  const shorter = a.length > b.length ? b : a;
   return stringSlice(longer, i + 1) === stringSlice(shorter, i);
 }
 
@@ -45,7 +46,7 @@ export function misspellingOf(
   names: ReadonlyArray<readonly [string, string]> = LOWERCASE,
 ): string | undefined {
   const lower = stringToLowerCase(key);
-  return arrayFind(names, ([, candidate]) => oneEditApart(candidate, lower))?.[0];
+  return arrayFind(names, (entry) => oneEditApart(entry[1], lower))?.[0];
 }
 
 /**
@@ -66,7 +67,8 @@ export function unknownRuleFieldMessage(key: string): string {
  */
 export function unknownRuleKeys(rule: object): string[] {
   const out: string[] = [];
-  for (const key of reflectOwnKeys(rule)) {
+  for (let idx50 = 0, list50 = reflectOwnKeys(rule); idx50 < list50.length; idx50++) {
+    const key = list50[idx50] as (typeof list50)[number];
     if (typeof key === 'symbol') arrayPush(out, symbolToString(key));
     else if (!arrayIncludes(RESERVED_RULE_FIELDS, key)) arrayPush(out, key);
   }

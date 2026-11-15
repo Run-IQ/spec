@@ -1,11 +1,13 @@
 import { hmac } from '@noble/hashes/hmac.js';
 import { sha256 } from '@noble/hashes/sha2.js';
 import {
+  NativeTextEncoder,
   NativeUint8Array,
   jsonStringify,
   mathMin,
   stringCharCodeAt,
   stringSlice,
+  textEncoderEncodeInto,
   uint8ArrayLength,
   uint8ArraySet,
   uint8ArraySubarray,
@@ -29,7 +31,7 @@ const TEXT_PIECE = 16_384;
 /** Short texts are joined (a rope, no copy) up to this length before they are encoded. */
 const PENDING_UNITS = 4_096;
 
-const encoder = new TextEncoder();
+const encoder = new NativeTextEncoder();
 
 /**
  * Internal: the hash work this package has done since it was loaded: `calls`, the sha256 and
@@ -152,7 +154,11 @@ export class HashStream implements TextOut {
       if (end < text.length && last >= 0xd800 && last <= 0xdbff) end -= 1;
       if (STREAM_BUFFER_BYTES - this.used < (end - at) * 3) this.flush();
       const piece = at === 0 && end === text.length ? text : stringSlice(text, at, end);
-      this.used += encoder.encodeInto(piece, uint8ArraySubarray(this.buffer, this.used)).written;
+      this.used += textEncoderEncodeInto(
+        encoder,
+        piece,
+        uint8ArraySubarray(this.buffer, this.used),
+      ).written;
       at = end;
     }
   }

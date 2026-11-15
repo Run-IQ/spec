@@ -25,10 +25,13 @@ import { readValidInput } from './validate.js';
 import {
   NativeString,
   NativeUint8Array,
+  arrayConcat,
   arrayIncludes,
   arrayJoin,
   arrayMap,
   arrayPush,
+  bytesFromNumbers,
+  bytesToArray,
   mapGet,
   mapHas,
   mathAbs,
@@ -36,7 +39,6 @@ import {
   numberIsSafeInteger,
   objectIs,
   regExpTest,
-  uint8ArrayFrom,
   uint8ArraySet,
 } from '../intrinsics.js';
 
@@ -69,9 +71,13 @@ export interface InputLeaf {
 const DIGEST_HEX = /^[0-9a-f]{64}$/;
 
 /** The fixed start of every leaf hash: `0x00 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
-const LEAF_PREFIX = uint8ArrayFrom([0, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+const LEAF_PREFIX = bytesFromNumbers(
+  arrayConcat([0], bytesToArray(utf8ToBytes(INPUT_TREE_TAG)), [0]),
+);
 /** The fixed start of every content commitment: `0x03 ‖ utf8(INPUT_TREE_TAG) ‖ 0x00`. */
-const COMMITMENT_PREFIX = uint8ArrayFrom([3, ...utf8ToBytes(INPUT_TREE_TAG), 0]);
+const COMMITMENT_PREFIX = bytesFromNumbers(
+  arrayConcat([3], bytesToArray(utf8ToBytes(INPUT_TREE_TAG)), [0]),
+);
 
 /**
  * The leaves of `input` under `seed` (D-14, D-15), sorted by `comparePointers`: decoded
@@ -316,7 +322,8 @@ function readLeaf(value: unknown): ReadLeaf {
     },
     (error) => ({ path: '', message: unreadableMessage('input leaf', error) }),
   );
-  const [first] = issues;
+  const tuple104 = issues;
+  const first = tuple104[0];
   if (first !== undefined || read === undefined) {
     throw newSpecError(
       'INVALID_INPUT',
@@ -376,12 +383,14 @@ function readLeafFields(value: unknown, reader: Reader): ReadLeaf | undefined {
       } else if (pointer !== undefined) content = { pointer, kind, length };
     }
   }
-  const [salt, valueSalt] = arrayMap(['salt', 'valueSalt'], (key) => {
+  const tuple105 = arrayMap(['salt', 'valueSalt'], (key) => {
     const hex = mapGet(fields.values, key);
     if (typeof hex === 'string' && regExpTest(SALT_HEX, hex)) return hex;
     if (has(key)) add(`/${key}`, `/${key} must be 64 lowercase hex characters`);
     return undefined;
   });
+  const salt = tuple105[0];
+  const valueSalt = tuple105[1];
   if (content === undefined || salt === undefined || valueSalt === undefined) return undefined;
   if (reader.issues.length > 0) return undefined;
   return { content, salt, valueSalt };
@@ -413,7 +422,8 @@ function readLeafPointer(
     add('/pointer', invalid);
     return undefined;
   }
-  const [head] = segments;
+  const tuple106 = segments;
+  const head = tuple106[0];
   if (head !== 'data' && head !== 'meta') {
     add('/pointer', invalid);
     return undefined;

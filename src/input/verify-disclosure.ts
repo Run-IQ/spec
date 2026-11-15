@@ -24,6 +24,7 @@ import {
   NativeMap,
   NativeNumber,
   NativeUint8Array,
+  arrayConcat,
   arrayEvery,
   arrayFlatMap,
   arrayForEach,
@@ -32,10 +33,12 @@ import {
   arrayPush,
   arraySome,
   arraySort,
+  mapEntriesArray,
   mapGet,
   mapHas,
+  mapOf,
   mapSet,
-  mapValues,
+  mapValuesArray,
   regExpTest,
 } from '../intrinsics.js';
 
@@ -119,10 +122,11 @@ function verify(d: unknown, inputDigest: unknown): FactDisclosureVerification {
   checkOrder(read, problems);
   checkFacts(read, verified, problems);
   checkAbsences(read, inputDigest, verified, problems);
-  checkContradictions([...mapValues(verified)], read.absent, problems);
+  checkContradictions(arrayConcat(mapValuesArray(verified)), read.absent, problems);
   const facts: Record<JsonPointer, JsonValue> = {};
   const lists: Record<JsonPointer, number> = {};
-  for (const fact of read.facts) {
+  for (let idx200 = 0, list200 = read.facts; idx200 < list200.length; idx200++) {
+    const fact = list200[idx200] as (typeof list200)[number];
     if (problems.length > 0) break;
     const value = rebuild(fact, lists);
     // Pointers start with `/` (or are ``): no key of the prototype can be one.
@@ -157,8 +161,10 @@ function checkLeaves(
   const keep = (leaf: Verified): void => {
     if (mapGet(byIndex, leaf.index)?.kind === undefined) mapSet(byIndex, leaf.index, leaf);
   };
-  for (const fact of copy.facts) {
-    for (const leaf of fact.leaves) {
+  for (let idx201 = 0, list201 = copy.facts; idx201 < list201.length; idx201++) {
+    const fact = list201[idx201] as (typeof list201)[number];
+    for (let idx202 = 0, list202 = fact.leaves; idx202 < list202.length; idx202++) {
+      const leaf = list202[idx202] as (typeof list202)[number];
       if (problems.full) break;
       const problem = leafProblem(leaf, copy.size, inputDigest);
       if (problem !== undefined) problems.add('', problem);
@@ -175,11 +181,12 @@ function checkLeaves(
       }
     }
   }
-  const neighbours = arrayFlatMap([...copy.facts, ...copy.absent], (entry) => [
+  const neighbours = arrayFlatMap(arrayConcat(copy.facts, copy.absent), (entry) => [
     entry.before,
     entry.after,
   ]);
-  for (const neighbour of neighbours) {
+  for (let idx203 = 0, list203 = neighbours; idx203 < list203.length; idx203++) {
+    const neighbour = list203[idx203] as (typeof list203)[number];
     if (problems.full) break;
     if (neighbour === undefined) continue;
     const problem = neighbourProblem(neighbour, copy.size, inputDigest);
@@ -189,7 +196,7 @@ function checkLeaves(
       keep({ index, pointer, segments: parsePointer(pointer) });
     }
   }
-  return new NativeMap(arraySort([...byIndex], ([a], [b]) => a - b));
+  return mapOf(arraySort(mapEntriesArray(byIndex), (x, y) => x[0] - y[0]));
 }
 
 /** Why the shown `leaf` is not the leaf at its index of the tree of `inputDigest`. */
@@ -263,15 +270,21 @@ function checkFacts(
   verified: ReadonlyMap<number, Verified>,
   problems: IssueList,
 ): void {
-  for (const fact of copy.facts) {
+  for (let idx204 = 0, list204 = copy.facts; idx204 < list204.length; idx204++) {
+    const fact = list204[idx204] as (typeof list204)[number];
     if (problems.full) return;
     const shown = arrayEvery(
-      [...fact.leaves, fact.before, fact.after],
+      arrayConcat(fact.leaves, [fact.before, fact.after]),
       (leaf) => leaf === undefined || mapHas(verified, leaf.index),
     );
     if (!shown) continue;
     const cited = citeName(fact.pointer);
-    for (const reason of factReasons(fact, copy.size, verified)) {
+    for (
+      let idx205 = 0, list205 = factReasons(fact, copy.size, verified);
+      idx205 < list205.length;
+      idx205++
+    ) {
+      const reason = list205[idx205] as (typeof list205)[number];
       problems.add('', `fact not shown whole: ${cited} (${reason})`);
     }
   }
@@ -284,13 +297,15 @@ function factReasons(
   verified: ReadonlyMap<number, Verified>,
 ): string[] {
   const reasons: string[] = [];
-  const [first] = fact.leaves;
+  const tuple206 = fact.leaves;
+  const first = tuple206[0];
   const last = fact.leaves[fact.leaves.length - 1];
   if (first === undefined || last === undefined) return reasons;
   if (arraySome(fact.leaves, (leaf, k) => leaf.index !== first.index + k)) {
     arrayPush(reasons, 'its leaves are not at consecutive indices');
   }
-  for (const leaf of fact.leaves) {
+  for (let idx207 = 0, list207 = fact.leaves; idx207 < list207.length; idx207++) {
+    const leaf = list207[idx207] as (typeof list207)[number];
     const segments = mapGet(verified, leaf.index)?.segments ?? [];
     if (!isWithin(fact.segments, segments)) {
       arrayPush(reasons, `the leaf ${citeName(leaf.leaf.pointer)} is not at or below it`);
@@ -319,7 +334,14 @@ function factReasons(
   } else if (after !== undefined) {
     if (after.index !== last.index + 1)
       arrayPush(reasons, 'the after leaf is not just after its last leaf');
-    for (const reason of afterReasons(segmentsOf(after), fact.segments)) arrayPush(reasons, reason);
+    for (
+      let idx1077 = 0, list1077 = afterReasons(segmentsOf(after), fact.segments);
+      idx1077 < list1077.length;
+      idx1077++
+    ) {
+      const reason = list1077[idx1077] as (typeof list1077)[number];
+      arrayPush(reasons, reason);
+    }
   }
   return reasons;
 }
@@ -340,7 +362,8 @@ function checkAbsences(
   verified: ReadonlyMap<number, Verified>,
   problems: IssueList,
 ): void {
-  for (const entry of copy.absent) {
+  for (let idx208 = 0, list208 = copy.absent; idx208 < list208.length; idx208++) {
+    const entry = list208[idx208] as (typeof list208)[number];
     if (problems.full) return;
     const { before, after } = entry;
     const beforeSegments = before && mapGet(verified, before.index)?.segments;
@@ -351,7 +374,14 @@ function checkAbsences(
       arrayPush(reasons, 'the before leaf does not come before it');
     }
     if (afterSegments) {
-      for (const reason of afterReasons(afterSegments, entry.segments)) arrayPush(reasons, reason);
+      for (
+        let idx1078 = 0, list1078 = afterReasons(afterSegments, entry.segments);
+        idx1078 < list1078.length;
+        idx1078++
+      ) {
+        const reason = list1078[idx1078] as (typeof list1078)[number];
+        arrayPush(reasons, reason);
+      }
     }
     if (before && after) {
       if (after.index !== before.index + 1) {
@@ -366,7 +396,10 @@ function checkAbsences(
       arrayPush(reasons, 'no neighbour leaf, and the tree is not empty');
     }
     const cited = citeName(entry.pointer);
-    for (const reason of reasons) problems.add('', `absence not proven: ${cited} (${reason})`);
+    for (let idx1079 = 0, list1079 = reasons; idx1079 < list1079.length; idx1079++) {
+      const reason = list1079[idx1079] as (typeof list1079)[number];
+      problems.add('', `absence not proven: ${cited} (${reason})`);
+    }
   }
 }
 
@@ -403,10 +436,10 @@ function checkContradictions(
       );
     }
   });
-  const items: Item[] = [
-    ...arrayMap(absent, (absence) => ({ absence })),
-    ...arrayMap(leaves, (leaf) => ({ leaf })),
-  ];
+  const items: Item[] = arrayConcat(
+    arrayMap(absent, (absence) => ({ absence })),
+    arrayMap(leaves, (leaf) => ({ leaf })),
+  );
   const segmentsOf = (item: Item): string[] => (item.leaf ?? item.absence).segments;
   // Stable: at the same pointer, an absence stays before a leaf.
   arraySort(items, (a, b) => compareSegments(segmentsOf(a), segmentsOf(b)));
@@ -417,7 +450,8 @@ function checkContradictions(
     // An absence holds what is at it too; a leaf only what is strictly below it.
     return top.absence !== undefined ? isWithin(a, b) : isAncestor(a, b);
   };
-  for (const item of items) {
+  for (let idx209 = 0, list209 = items; idx209 < list209.length; idx209++) {
+    const item = list209[idx209] as (typeof list209)[number];
     if (problems.full) return;
     let top = stack[stack.length - 1];
     while (top !== undefined && !holds(top, item)) {

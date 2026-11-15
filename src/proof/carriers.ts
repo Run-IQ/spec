@@ -6,7 +6,6 @@ import { instanceKey } from './output-values.js';
 import type { ProofPending, ProofView } from './types.js';
 import {
   NativeMap,
-  NativeSet,
   arrayPop,
   arrayPush,
   mapGet,
@@ -14,6 +13,7 @@ import {
   mapSet,
   objectFreeze,
   setHas,
+  setOf,
   stringIndexOf,
   stringSlice,
 } from '../intrinsics.js';
@@ -48,7 +48,7 @@ export const ERROR_CAUSES = objectFreeze([
 /** One cause of `ERROR_CAUSES`. */
 export type ErrorCause = (typeof ERROR_CAUSES)[number];
 
-const CAUSES: ReadonlySet<string> = new NativeSet<string>(ERROR_CAUSES);
+const CAUSES: ReadonlySet<string> = setOf<string>(ERROR_CAUSES);
 
 /** The cause of an `ERROR` `detail`: the text before its first `:`, if any. */
 function causeOf(detail: string): string | undefined {
@@ -63,10 +63,7 @@ export function hasErrorCause(detail: string): boolean {
 }
 
 /** The causes of a pending `ERROR` after which a carrier fired: its condition held (R18). */
-const FIRING_CAUSES: ReadonlySet<string> = new NativeSet<ErrorCause>([
-  'INVALID_PARAMS',
-  'MODEL_ERROR',
-]);
+const FIRING_CAUSES: ReadonlySet<string> = setOf<ErrorCause>(['INVALID_PARAMS', 'MODEL_ERROR']);
 
 /**
  * The causes of a pending `ERROR` after which a carrier did not fire: its condition failed
@@ -74,7 +71,7 @@ const FIRING_CAUSES: ReadonlySet<string> = new NativeSet<ErrorCause>([
  * `INVALID_RULE`, `TEMPORAL_OVERLAP`; `NOT_A_COLLECTION` and `INVALID_GROUP_VALUE`, its
  * instances not formed, D-2).
  */
-const UNFIRING_CAUSES: ReadonlySet<string> = new NativeSet<ErrorCause>([
+const UNFIRING_CAUSES: ReadonlySet<string> = setOf<ErrorCause>([
   'DSL_ERROR',
   'TIMEOUT',
   'DSL_NOT_FOUND',
@@ -110,7 +107,8 @@ function firedOf(entry: ProofPending): boolean | undefined {
  * pending entry whose `fired` is not the value its reason fixes (`firedOf`).
  */
 export function firedProblems(p: ProofView, problems: string[]): void {
-  for (const entry of p.pending) {
+  for (let idx88 = 0, list88 = p.pending; idx88 < list88.length; idx88++) {
+    const entry = list88[idx88] as (typeof list88)[number];
     if (full(problems)) return;
     if (entry.fired === undefined) continue;
     const fixed = firedOf(entry);
@@ -173,9 +171,13 @@ export function pendingCarrierProblems(
       }
       entry = carrier;
     }
-    for (const passed of path) mapSet(holds, passed, last);
+    for (let idx1021 = 0, list1021 = path; idx1021 < list1021.length; idx1021++) {
+      const passed = list1021[idx1021] as (typeof list1021)[number];
+      mapSet(holds, passed, last);
+    }
   };
-  for (const entry of p.pending) {
+  for (let idx89 = 0, list89 = p.pending; idx89 < list89.length; idx89++) {
+    const entry = list89[idx89] as (typeof list89)[number];
     if (full(problems)) return;
     if (entry.reason !== 'PENDING_CARRIER') continue;
     if (!mapHas(holds, entry)) follow(entry);

@@ -52,7 +52,8 @@ export function readTrustedKeys(
     const all = reflectOwnKeys(record);
     // Every key counts against the options budget, the keys of a huge object included.
     if (!spendValues(all.length)) fail(option, tooLargeMessage(option));
-    for (const key of all) {
+    for (let idx238 = 0, list238 = all; idx238 < list238.length; idx238++) {
+      const key = list238[idx238] as (typeof list238)[number];
       if (typeof key === 'symbol') {
         const path = citeName(`${option}.${symbolToString(key)}`);
         return fail(path, `${path} is not a key id: a symbol`);
@@ -67,7 +68,8 @@ export function readTrustedKeys(
     if (isOwnOptionsError(error)) throw error;
     return fail(option, unreadableMessage(option, error));
   }
-  for (const id of ids) {
+  for (let idx239 = 0, list239 = ids; idx239 < list239.length; idx239++) {
+    const id = list239[idx239] as (typeof list239)[number];
     const path = citeName(`${option}.${id}`);
     let value: unknown;
     try {

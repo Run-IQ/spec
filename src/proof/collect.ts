@@ -13,14 +13,14 @@ export const ISSUE_CAP = MAX_ISSUES + 1;
 export const full = (issues: readonly string[]): boolean => issues.length >= ISSUE_CAP;
 
 /** Appends the problems of `source` to `issues`, one by one, up to `ISSUE_CAP`. */
-export function append(issues: string[], source: Iterable<string>): void {
-  for (const issue of source) {
+export function append(issues: string[], source: readonly string[]): void {
+  for (let i = 0; i < source.length; i++) {
     if (full(issues)) return;
-    arrayPush(issues, issue);
+    arrayPush(issues, source[i] as string);
   }
 }
 
 /** Appends `source` to `target` one by one (any length): never through call arguments. */
-export function extend<T>(target: T[], source: Iterable<T>): void {
-  for (const item of source) arrayPush(target, item);
+export function extend<T>(target: T[], source: readonly T[]): void {
+  for (let i = 0; i < source.length; i++) arrayPush(target, source[i] as T);
 }

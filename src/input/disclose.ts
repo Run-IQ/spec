@@ -19,10 +19,9 @@ import { createLeafHasher, inputDigestOf } from './tree.js';
 import type { ProofInput } from './types.js';
 import { readValidInput } from './validate.js';
 import {
-  NativeMap,
-  NativeSet,
   NativeUint8Array,
   arrayAt,
+  arrayConcat,
   arrayFlatMap,
   arrayForEach,
   arrayIsArray,
@@ -31,6 +30,9 @@ import {
   arrayPush,
   arraySort,
   mapGet,
+  mapOf,
+  setOf,
+  setValuesArray,
   uint8ArrayEvery,
   uint8ArraySet,
   uint8ArraySubarray,
@@ -102,10 +104,10 @@ interface Found {
 
 /** The requests of both lists, sorted by `comparePointers`, each pointer once. */
 function readRequests(present: readonly string[], absent: readonly string[]): Request[] {
-  const requests = [
-    ...arrayMap(readPointers(present, 'present'), (p) => ({ ...p, present: true })),
-    ...arrayMap(readPointers(absent, 'absent'), (p) => ({ ...p, present: false })),
-  ];
+  const requests = arrayConcat(
+    arrayMap(readPointers(present, 'present'), (p) => ({ ...p, present: true })),
+    arrayMap(readPointers(absent, 'absent'), (p) => ({ ...p, present: false })),
+  );
   if (requests.length === 0) throw newSpecError('INVALID_DISCLOSURE', 'nothing to disclose');
   arraySort(requests, (a, b) => compareSegments(a.segments, b.segments));
   arrayForEach(requests, (request, i) => {
@@ -216,7 +218,8 @@ function walkLeaves(
       else setAfter(entry, seen());
       next += 1;
     }
-    for (const k of open) {
+    for (let idx194 = 0, list194 = open; idx194 < list194.length; idx194++) {
+      const k = list194[idx194] as (typeof list194)[number];
       const entry = found[k];
       if (entry !== undefined) arrayPush(entry.leaves, seen());
     }
@@ -254,7 +257,8 @@ function buildDisclosure(
   arrayForEach(requests, (request, i) => {
     const { leaves, before, after } = found[i] ?? { leaves: [] };
     const cited = citeName(request.pointer);
-    const [first] = leaves;
+    const tuple195 = leaves;
+    const first = tuple195[0];
     if (!request.present) {
       if (first !== undefined) {
         throw newSpecError('INVALID_DISCLOSURE', `pointer is present: ${cited}`);
@@ -286,17 +290,19 @@ function buildDisclosure(
       ...(mayGrow(atPointer, content.kind, length) && after && { after }),
     });
   });
-  const shown = [
-    ...arrayFlatMap(facts, (fact) => [...fact.leaves, fact.before, fact.after]),
-    ...arrayFlatMap(absences, (absence) => [absence.before, absence.after]),
-  ];
-  const indices = [...new NativeSet(arrayFlatMap(shown, (seen) => (seen ? [seen.index] : [])))];
+  const shown = arrayConcat(
+    arrayFlatMap(facts, (fact) => arrayConcat(fact.leaves, [fact.before, fact.after])),
+    arrayFlatMap(absences, (absence) => [absence.before, absence.after]),
+  );
+  const indices = arrayConcat(
+    setValuesArray(setOf(arrayFlatMap(shown, (seen) => (seen ? [seen.index] : [])))),
+  );
   const size = hashes.length;
   const { paths, root } = hashes.pathsAndRoot(indices);
-  const pathOf = new NativeMap(
+  const pathOf = mapOf(
     arrayMap(indices, (index, k) => [index, arrayMap(paths[k] ?? [], bytesToHex)]),
   );
-  const path = (seen: Seen): string[] => [...(mapGet(pathOf, seen.index) ?? [])];
+  const path = (seen: Seen): string[] => arrayConcat(mapGet(pathOf, seen.index) ?? []);
   const disclosed = (seen: Seen): DisclosedLeaf => ({
     ...seen.content,
     salt: seen.salt,

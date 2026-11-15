@@ -31,6 +31,7 @@ import {
   NativeNumber,
   NativeRegExp,
   NativeSet,
+  arrayConcat,
   arrayFilter,
   arrayFlatMap,
   arrayForEach,
@@ -41,13 +42,14 @@ import {
   arraySome,
   mapGet,
   mapHas,
-  mapKeys,
+  mapKeysArray,
   mapSet,
   mapSize,
   objectEntries,
   regExpExec,
   setAdd,
   setHas,
+  setOf,
   stringIndexOf,
   stringSlice,
 } from '../intrinsics.js';
@@ -140,7 +142,11 @@ export function placeInProof(
   if (mapSize(positions) === 0) return message;
   const found = regExpExec(PLACE, message);
   if (found === null) return message;
-  const [whole, section = '', link = '', index = ''] = found;
+  const tuple5007 = found;
+  const whole = tuple5007[0];
+  const section = tuple5007[1] === undefined ? '' : tuple5007[1];
+  const link = tuple5007[2] === undefined ? '' : tuple5007[2];
+  const index = tuple5007[3] === undefined ? '' : tuple5007[3];
   const place = mapGet(positions, section as ProofSection)?.[NativeNumber(index)];
   if (place === undefined) return message;
   return `${section}${link}${place}${stringSlice(message, whole.length)}`;
@@ -189,9 +195,11 @@ export function inconsistencies(
   // Each problem once, in the order found, up to what `verifyProof` lists.
   const issues: string[] = [];
   const seen = new NativeSet<string>();
-  for (const check of checks) {
+  for (let idx166 = 0, list166 = checks; idx166 < list166.length; idx166++) {
+    const check = list166[idx166] as (typeof list166)[number];
     if (full(issues)) break;
-    for (const issue of check()) {
+    for (let idx167 = 0, list167 = check(); idx167 < list167.length; idx167++) {
+      const issue = list167[idx167] as (typeof list167)[number];
       if (full(issues)) break;
       const message = placeInProof(issue, positions);
       if (setHas(seen, message)) continue;
@@ -205,8 +213,10 @@ export function inconsistencies(
 /** Each output name of `p`, with its first entry. */
 function listedOutputs(p: ProofView): Map<string, ProofOutput> {
   const listed = new NativeMap<string, ProofOutput>();
-  for (const output of p.outputs)
+  for (let idx1052 = 0, list1052 = p.outputs; idx1052 < list1052.length; idx1052++) {
+    const output = list1052[idx1052] as (typeof list1052)[number];
     if (!mapHas(listed, output.name)) mapSet(listed, output.name, output);
+  }
   return listed;
 }
 
@@ -229,14 +239,17 @@ function forEachUnresolved(
 ): void {
   const keys = new NativeSet<string>();
   const ids = new NativeSet<string>();
-  for (const rule of p.rules) {
+  for (let idx168 = 0, list168 = p.rules; idx168 < list168.length; idx168++) {
+    const rule = list168[idx168] as (typeof list168)[number];
     const id = qualifyName(rule.ruleSet, rule.id);
     setAdd(ids, id);
     setAdd(keys, `${id}@${rule.version}`);
   }
   const sections = [p.applied, p.skipped, p.pending, p.exceptions, p.readsUndeclared];
-  for (const section of sections) {
-    for (const entry of section) {
+  for (let idx169 = 0, list169 = sections; idx169 < list169.length; idx169++) {
+    const section = list169[idx169] as (typeof list169)[number];
+    for (let idx170 = 0, list170 = section; idx170 < list170.length; idx170++) {
+      const entry = list170[idx170] as (typeof list170)[number];
       if (report.stop()) return;
       if (!setHas(keys, key(entry))) {
         report.rule(citeName(key(entry)), { id: entry.ruleId, version: entry.version });
@@ -246,22 +259,54 @@ function forEachUnresolved(
   const cite = (id: string): void => {
     if (!setHas(ids, id) && !report.stop()) report.rule(citeName(id), { id });
   };
-  for (const entry of [...p.outputs, ...p.items]) {
-    for (const id of entry.contributors) cite(id);
-    for (const id of entry.pending) cite(id);
+  for (
+    let idx1053 = 0, list1053 = arrayConcat(p.outputs, p.items);
+    idx1053 < list1053.length;
+    idx1053++
+  ) {
+    const entry = list1053[idx1053] as (typeof list1053)[number];
+    for (let idx1054 = 0, list1054 = entry.contributors; idx1054 < list1054.length; idx1054++) {
+      const id = list1054[idx1054] as (typeof list1054)[number];
+      cite(id);
+    }
+    for (let idx1055 = 0, list1055 = entry.pending; idx1055 < list1055.length; idx1055++) {
+      const id = list1055[idx1055] as (typeof list1055)[number];
+      cite(id);
+    }
     if (entry.selected !== undefined) cite(entry.selected.ruleId);
   }
-  for (const exception of p.exceptions) for (const { ruleId } of exception.affected) cite(ruleId);
+  for (let idx1056 = 0, list1056 = p.exceptions; idx1056 < list1056.length; idx1056++) {
+    const exception = list1056[idx1056] as (typeof list1056)[number];
+    for (let idx1057 = 0, list1057 = exception.affected; idx1057 < list1057.length; idx1057++) {
+      const { ruleId } = list1057[idx1057] as (typeof list1057)[number];
+      cite(ruleId);
+    }
+  }
   const output = (name: string | undefined): void => {
     if (name !== undefined && !mapHas(listed, name) && !report.stop()) {
       report.output(citeName(name), name);
     }
   };
-  for (const item of p.items) output(item.output);
-  for (const step of p.applied) output(step.output);
-  for (const entry of p.skipped) output(entry.output);
-  for (const entry of p.pending) output(entry.output);
-  for (const exception of p.exceptions) output(exception.output);
+  for (let idx1058 = 0, list1058 = p.items; idx1058 < list1058.length; idx1058++) {
+    const item = list1058[idx1058] as (typeof list1058)[number];
+    output(item.output);
+  }
+  for (let idx1059 = 0, list1059 = p.applied; idx1059 < list1059.length; idx1059++) {
+    const step = list1059[idx1059] as (typeof list1059)[number];
+    output(step.output);
+  }
+  for (let idx1060 = 0, list1060 = p.skipped; idx1060 < list1060.length; idx1060++) {
+    const entry = list1060[idx1060] as (typeof list1060)[number];
+    output(entry.output);
+  }
+  for (let idx1061 = 0, list1061 = p.pending; idx1061 < list1061.length; idx1061++) {
+    const entry = list1061[idx1061] as (typeof list1061)[number];
+    output(entry.output);
+  }
+  for (let idx1062 = 0, list1062 = p.exceptions; idx1062 < list1062.length; idx1062++) {
+    const exception = list1062[idx1062] as (typeof list1062)[number];
+    output(exception.output);
+  }
 }
 
 /**
@@ -293,14 +338,13 @@ export function citationProblems(
     },
     stop: () => full(issues),
   });
-  const packs = new NativeSet(
-    arrayFlatMap(p.ruleSets, (set) => (set.kind === 'pack' ? [set.id] : [])),
+  const packs = setOf(arrayFlatMap(p.ruleSets, (set) => (set.kind === 'pack' ? [set.id] : [])));
+  const sets = arrayConcat(
+    arrayMap(p.rules, (rule) => rule.ruleSet),
+    arrayMap(arrayConcat(mapKeysArray(listed)), ruleSetOf),
   );
-  const sets = [
-    ...arrayMap(p.rules, (rule) => rule.ruleSet),
-    ...arrayMap([...mapKeys(listed)], ruleSetOf),
-  ];
-  for (const set of sets) {
+  for (let idx172 = 0, list172 = sets; idx172 < list172.length; idx172++) {
+    const set = list172[idx172] as (typeof list172)[number];
     if (full(issues)) break;
     if (set !== LOCAL_RULE_SET && !setHas(packs, set)) {
       arrayPush(issues, `rule set not listed: ${citeName(set)}`);
@@ -318,7 +362,8 @@ export function ruleSetProblems(p: ProofView): string[] {
   const issues: string[] = [];
   const seen = new NativeSet<string>();
   const packs = new NativeSet<string>();
-  for (const set of p.ruleSets) {
+  for (let idx173 = 0, list173 = p.ruleSets; idx173 < list173.length; idx173++) {
+    const set = list173[idx173] as (typeof list173)[number];
     const name = set.kind === 'local' ? LOCAL_RULE_SET : set.id;
     const id = `${set.kind === 'referential' ? 'referential' : 'rule set'}:${name}`;
     if (setHas(seen, id)) arrayPush(issues, `rule set listed twice: ${citeName(name)}`);
@@ -389,11 +434,19 @@ export function orderProblems(
       (i) => `duplicate item: ${citeItem(p.items[i]?.output ?? '', p.items[i]?.subject ?? '')}`,
     ),
   );
-  for (const [section, list] of [
-    ['applied', p.applied],
-    ['skipped', p.skipped],
-    ['pending', p.pending],
-  ] as const) {
+  for (
+    let idx174 = 0,
+      list174 = [
+        ['applied', p.applied],
+        ['skipped', p.skipped],
+        ['pending', p.pending],
+      ] as const;
+    idx174 < list174.length;
+    idx174++
+  ) {
+    const pair = list174[idx174] as (typeof list174)[number];
+    const section = pair[0];
+    const list = pair[1];
     push(
       sortProblems<(typeof list)[number]>(list, byInstance, (i) => `${section} not sorted at ${i}`),
     );
@@ -446,7 +499,12 @@ function decidedTwice(
 ): string[] {
   const issues: string[] = [];
   const decided = new NativeMap<string, { whole: boolean; subjects: Set<string> }>();
-  for (const entry of [...steps, ...p.skipped, ...p.pending]) {
+  for (
+    let idx1063 = 0, list1063 = arrayConcat(steps, p.skipped, p.pending);
+    idx1063 < list1063.length;
+    idx1063++
+  ) {
+    const entry = list1063[idx1063] as (typeof list1063)[number];
     if (full(issues)) break;
     // The step a short circuit imposed is the effect of an exception, not a decision.
     if ('model' in entry && setHas(imposed, imposedKey(entry, entry.output))) continue;
@@ -483,15 +541,15 @@ function requestedProblems(
     (name) =>
       !mapHas(listed, name) && !outputsHidden(`requested output absent: ${citeName(name)}`, name),
   );
-  return [
-    ...sortProblems(
+  return arrayConcat(
+    sortProblems(
       requested,
       byText,
       (i) => `requested not sorted at ${i}`,
       (i) => `requested repeats ${citeName(requested[i] ?? '')}`,
     ),
-    ...arrayMap(absent, (name) => `requested output absent: ${citeName(name)}`),
-  ];
+    arrayMap(absent, (name) => `requested output absent: ${citeName(name)}`),
+  );
 }
 
 function innerOrderProblems(p: ProofView): string[] {
@@ -541,8 +599,20 @@ function innerOrderProblems(p: ProofView): string[] {
     );
   });
   arrayForEach(p.applied, (step, i) => {
-    for (const [name, match] of objectEntries(step.matches ?? {})) {
-      for (const member of ['values', 'via'] as const) {
+    for (
+      let idx176 = 0, list176 = objectEntries(step.matches ?? {});
+      idx176 < list176.length;
+      idx176++
+    ) {
+      const tuple1064 = list176[idx176] as (typeof list176)[number];
+      const name = tuple1064[0];
+      const match = tuple1064[1];
+      for (
+        let idx177 = 0, list177 = ['values', 'via'] as const;
+        idx177 < list177.length;
+        idx177++
+      ) {
+        const member = list177[idx177] as (typeof list177)[number];
         const list = match[member];
         const at = `applied[${i}].matches.${name}.${member}`;
         append(

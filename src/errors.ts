@@ -186,8 +186,8 @@ export function isOwnError(error: unknown): error is SpecError {
  */
 export function describeError(error: unknown): string {
   try {
-    if (error instanceof NativeError) {
-      const message: unknown = error.message;
+    if (functionHasInstance(NativeError, error)) {
+      const message: unknown = (error as Error).message;
       if (typeof message === 'string') return message;
     }
   } catch {
@@ -242,7 +242,10 @@ export function unreadableMessage(subject: string, error: unknown): string {
 /** Internal: true for the `RangeError` a call stack overflow throws; never throws. */
 export function isStackOverflow(error: unknown): boolean {
   try {
-    return error instanceof NativeRangeError && regExpTest(/call stack/i, error.message);
+    return (
+      functionHasInstance(NativeRangeError, error) &&
+      regExpTest(/call stack/i, (error as Error).message)
+    );
   } catch {
     return false;
   }

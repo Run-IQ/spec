@@ -19,6 +19,7 @@ import {
   mapSet,
   setAdd,
   setHas,
+  setValuesArray,
 } from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the ties `onConflict: 'first'` settled among exceptions, as a
@@ -123,7 +124,8 @@ export class Scope {
     }
     let node: Node = root;
     node.below = true;
-    for (const segment of segmentsOf(entry.subject)) {
+    for (let idx109 = 0, list109 = segmentsOf(entry.subject); idx109 < list109.length; idx109++) {
+      const segment = list109[idx109] as (typeof list109)[number];
       let child = mapGet(node.children, segment);
       if (child === undefined) {
         child = newNode();
@@ -140,7 +142,8 @@ export class Scope {
   covers(entry: { ruleId: string; subject?: string }): boolean {
     let node = mapGet(this.roots, entry.ruleId);
     if (node?.marked === true) return true;
-    for (const segment of segmentsOf(entry.subject)) {
+    for (let idx110 = 0, list110 = segmentsOf(entry.subject); idx110 < list110.length; idx110++) {
+      const segment = list110[idx110] as (typeof list110)[number];
       node = node === undefined ? undefined : mapGet(node.children, segment);
       if (node === undefined) return false;
       if (node.marked) return true;
@@ -151,8 +154,14 @@ export class Scope {
   /** True when a marked entry is at `entry`'s subject or below it (`entry` covers it). */
   within(entry: { ruleId: string; subject?: string }): boolean {
     let node = mapGet(this.roots, entry.ruleId);
-    for (const segment of segmentsOf(entry.subject))
+    for (
+      let idx1025 = 0, list1025 = segmentsOf(entry.subject);
+      idx1025 < list1025.length;
+      idx1025++
+    ) {
+      const segment = list1025[idx1025] as (typeof list1025)[number];
       node = node === undefined ? undefined : mapGet(node.children, segment);
+    }
     return node?.below === true;
   }
 }
@@ -191,9 +200,15 @@ export function tiesOf(
   hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): Ties {
   const excluded = new NativeMap<string, ProofSkip>();
-  for (const skip of p.skipped) mapSet(excluded, instanceKey(skip), skip);
+  for (let idx1026 = 0, list1026 = p.skipped; idx1026 < list1026.length; idx1026++) {
+    const skip = list1026[idx1026] as (typeof list1026)[number];
+    mapSet(excluded, instanceKey(skip), skip);
+  }
   const waiting = new NativeMap<string, ProofPending>();
-  for (const entry of p.pending) mapSet(waiting, instanceKey(entry), entry);
+  for (let idx1027 = 0, list1027 = p.pending; idx1027 < list1027.length; idx1027++) {
+    const entry = list1027[idx1027] as (typeof list1027)[number];
+    mapSet(waiting, instanceKey(entry), entry);
+  }
   const discarded = new NativeSet<number>();
   const losers = new NativeSet<string>();
   const shortCircuits = new NativeSet<string>();
@@ -248,7 +263,10 @@ export function tiesOf(
         tieProblem(`exception status differs from its carrier's decision: ${cited()}`);
       }
       if (r15) {
-        for (const entry of exception.affected) tied.mark(entry);
+        for (let idx1028 = 0, list1028 = exception.affected; idx1028 < list1028.length; idx1028++) {
+          const entry = list1028[idx1028] as (typeof list1028)[number];
+          tied.mark(entry);
+        }
       } else if (output !== undefined) {
         setAdd(shortCircuits, output);
         if (exception.affected.length > 0) {
@@ -270,19 +288,22 @@ export function tiesOf(
     else arrayPush(list, claim);
   });
   const recorded = new NativeMap<string, number>();
-  for (const exception of p.exceptions) {
+  for (let idx111 = 0, list111 = p.exceptions; idx111 < list111.length; idx111++) {
+    const exception = list111[idx111] as (typeof list111)[number];
     const key = instanceKey(exception);
     mapSet(recorded, key, (mapGet(recorded, key) ?? 0) + 1);
   }
   // A tie loser fired nothing: its tie record is its only one (one decision, one proof).
-  for (const key of losers) {
+  for (let idx112 = 0, list112 = setValuesArray(losers); idx112 < list112.length; idx112++) {
+    const key = list112[idx112] as (typeof list112)[number];
     if (full(problems)) break;
     if ((mapGet(recorded, key) ?? 0) > 1) {
       tieProblem(`tie loser recorded other exceptions: ${citeName(key)}`);
     }
   }
   // The exceptions of a carrier that fired may be redacted.
-  for (const entry of p.pending) {
+  for (let idx113 = 0, list113 = p.pending; idx113 < list113.length; idx113++) {
+    const entry = list113[idx113] as (typeof list113)[number];
     if (full(problems)) break;
     if (entry.fired !== true || mapHas(recorded, instanceKey(entry))) continue;
     const message = `pending carrier fired without its exceptions: ${citeName(instanceKey(entry))}`;
@@ -325,8 +346,10 @@ export function sourceProblems(
   const statuses = [p.applied, p.skipped, p.exceptions, p.outputs, p.items];
   let provisional = false;
   let conflict = false;
-  for (const list of statuses) {
-    for (const entry of list) {
+  for (let idx114 = 0, list114 = statuses; idx114 < list114.length; idx114++) {
+    const list = list114[idx114] as (typeof list114)[number];
+    for (let idx115 = 0, list115 = list; idx115 < list115.length; idx115++) {
+      const entry = list115[idx115] as (typeof list115)[number];
       provisional ||= entry.status === 'provisional';
       conflict ||= entry.status === 'conflict';
     }

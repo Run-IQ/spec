@@ -8,6 +8,7 @@ import {
   arrayPop,
   arrayPush,
   arraySort,
+  functionHasInstance,
   isoOf,
   numberIsFinite,
   numberIsNaN,
@@ -239,7 +240,8 @@ class StringOut implements TextOut {
     try {
       this.value += piece;
     } catch (error) {
-      if (error instanceof NativeRangeError) fail(this.path, 'too long to write as one string');
+      if (functionHasInstance(NativeRangeError, error))
+        fail(this.path, 'too long to write as one string');
       throw error;
     }
   }

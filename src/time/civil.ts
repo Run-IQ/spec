@@ -92,7 +92,13 @@ export function isInstant(value: unknown): value is Instant {
   if (typeof value !== 'string') return false;
   const match = regExpExec(CANONICAL_INSTANT, value);
   if (match === null) return false;
-  const [, year = '', month = '', day = '', hour, minute, second] = match;
+  const tuple5000 = match;
+  const year = tuple5000[1] === undefined ? '' : tuple5000[1];
+  const month = tuple5000[2] === undefined ? '' : tuple5000[2];
+  const day = tuple5000[3] === undefined ? '' : tuple5000[3];
+  const hour = tuple5000[4];
+  const minute = tuple5000[5];
+  const second = tuple5000[6];
   return (
     isRealDay(year, month, day) &&
     NativeNumber(hour) <= 23 &&
@@ -141,7 +147,15 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
 
   const match = regExpExec(DATE_TIME, value);
   if (match === null) invalidDate(field, quoteText(value));
-  const [, year = '', month = '', day = '', hour, minute, second, fraction, zone = 'Z'] = match;
+  const tuple5001 = match;
+  const year = tuple5001[1] === undefined ? '' : tuple5001[1];
+  const month = tuple5001[2] === undefined ? '' : tuple5001[2];
+  const day = tuple5001[3] === undefined ? '' : tuple5001[3];
+  const hour = tuple5001[4];
+  const minute = tuple5001[5];
+  const second = tuple5001[6];
+  const fraction = tuple5001[7];
+  const zone = tuple5001[8] === undefined ? 'Z' : tuple5001[8];
   const offset = zone === 'Z' ? 0 : offsetMinutes(zone);
   if (
     !isRealDay(year, month, day) ||
@@ -171,7 +185,10 @@ export function readReferenceDate(value: unknown, field: string): CivilDate | In
 function offsetMinutes(offset: string): number | undefined {
   const match = regExpExec(OFFSET, offset);
   if (match === null) return undefined;
-  const [, sign, hours, minutes] = match;
+  const tuple5002 = match;
+  const sign = tuple5002[1];
+  const hours = tuple5002[2];
+  const minutes = tuple5002[3];
   if (NativeNumber(hours) > 23 || NativeNumber(minutes) > 59) return undefined;
   return (sign === '-' ? -1 : 1) * (NativeNumber(hours) * 60 + NativeNumber(minutes));
 }
@@ -245,7 +262,14 @@ function beyondOf(value: unknown, form: RegExp): Beyond | undefined {
   if (typeof value !== 'string') return undefined;
   const match = regExpExec(form, value);
   if (match === null) return undefined;
-  const [, sign = '', digits = '', month = '', day = '', hour, minute, second] = match;
+  const tuple5003 = match;
+  const sign = tuple5003[1] === undefined ? '' : tuple5003[1];
+  const digits = tuple5003[2] === undefined ? '' : tuple5003[2];
+  const month = tuple5003[3] === undefined ? '' : tuple5003[3];
+  const day = tuple5003[4] === undefined ? '' : tuple5003[4];
+  const hour = tuple5003[5];
+  const minute = tuple5003[6];
+  const second = tuple5003[7];
   const year = `${sign}${digits}`;
   if (!isRealDay(year, month, day)) return undefined;
   if (

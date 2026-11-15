@@ -8,10 +8,10 @@ import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
 import {
   arrayPush,
+  bytesFromNumbers,
   regExpTest,
   stringCharAt,
   stringIndexOf,
-  uint8ArrayFrom,
   uint8ArrayLength,
 } from '../intrinsics.js';
 
@@ -55,7 +55,8 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
   }
   const { view, redactions } = proofView(proof);
   const context = contextOf(view, redactions.hidden);
-  const [inconsistency] = inconsistencies(view, context, redactions.positions);
+  const tuple211 = inconsistencies(view, context, redactions.positions);
+  const inconsistency = tuple211[0];
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot sign the proof: ${inconsistency}`);
   }
@@ -133,7 +134,8 @@ function fromBase64Url(text: string): Uint8Array | undefined {
   const bytes: number[] = [];
   let buffer = 0;
   let bits = 0;
-  for (const char of text) {
+  for (let at = 0; at < text.length; at++) {
+    const char = stringCharAt(text, at);
     const digit = stringIndexOf(BASE64URL, char);
     if (digit < 0) return undefined;
     buffer = ((buffer << 6) | digit) & 0xffff;
@@ -144,5 +146,5 @@ function fromBase64Url(text: string): Uint8Array | undefined {
     }
   }
   if ((buffer & ((1 << bits) - 1)) !== 0) return undefined;
-  return uint8ArrayFrom(bytes);
+  return bytesFromNumbers(bytes);
 }

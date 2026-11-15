@@ -39,24 +39,21 @@ import {
   arrayPush,
   arraySlice,
   arraySome,
+  mapEntriesArray,
   mapGet,
   mapHas,
   mapSet,
-  mapValues,
+  mapValuesArray,
   mathMax,
   setAdd,
   setHas,
+  setOf,
   setSize,
+  setValuesArray,
 } from '../intrinsics.js';
 
 /** The types whose values are ordered, so that bounds can hold them. */
-const ORDERED: ReadonlySet<string> = new NativeSet([
-  'number',
-  'decimal',
-  'enum',
-  'date',
-  'dateTime',
-]);
+const ORDERED: ReadonlySet<string> = setOf(['number', 'decimal', 'enum', 'date', 'dateTime']);
 
 const rankOf = (status: OutputStatus): number => arrayIndexOf(OUTPUT_STATUSES, status);
 
@@ -135,20 +132,31 @@ class ItemTrie {
   settle(): void {
     const stack: [Node, number, boolean][] = [[this.root, this.everywhere, this.tiedEverywhere]];
     for (let next = arrayPop(stack); next !== undefined; next = arrayPop(stack)) {
-      const [node, above, tiedAbove] = next;
+      const tuple148 = next;
+      const node = tuple148[0];
+      const above = tuple148[1];
+      const tiedAbove = tuple148[2];
       const rank = mathMax(above, node.skip);
       const tie = tiedAbove || node.tie;
       if (node.item !== undefined) {
         node.item.candidates = mathMax(node.item.candidates, rank);
         node.item.tie ||= tie;
       }
-      for (const child of mapValues(node.children)) arrayPush(stack, [child, rank, tie]);
+      for (
+        let idx1046 = 0, list1046 = mapValuesArray(node.children);
+        idx1046 < list1046.length;
+        idx1046++
+      ) {
+        const child = list1046[idx1046] as (typeof list1046)[number];
+        arrayPush(stack, [child, rank, tie]);
+      }
     }
   }
 
   private walk(subject: string, create: boolean, visit?: (node: Node) => void): Node | undefined {
     let node = this.root;
-    for (const segment of parsePointer(subject)) {
+    for (let idx149 = 0, list149 = parsePointer(subject); idx149 < list149.length; idx149++) {
+      const segment = list149[idx149] as (typeof list149)[number];
       let child = mapGet(node.children, segment);
       if (child === undefined) {
         if (!create) return undefined;
@@ -178,11 +186,15 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
   const outputs = new NativeMap<string, Feed>();
   const items = new NativeMap<ProofItem, Feed>();
   const tries = new NativeMap<string, ItemTrie>();
-  for (const [name, output] of listed) {
+  for (let idx150 = 0, list150 = mapEntriesArray(listed); idx150 < list150.length; idx150++) {
+    const tuple1047 = list150[idx150] as (typeof list150)[number];
+    const name = tuple1047[0];
+    const output = tuple1047[1];
     if (output.per === undefined) mapSet(outputs, name, newFeed());
     else mapSet(tries, name, new ItemTrie());
   }
-  for (const item of p.items) {
+  for (let idx151 = 0, list151 = p.items; idx151 < list151.length; idx151++) {
+    const item = list151[idx151] as (typeof list151)[number];
     const trie = mapGet(tries, item.output);
     if (trie === undefined) continue;
     const feed = newFeed();
@@ -207,13 +219,15 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     }
     return feed;
   };
-  for (const step of p.applied) {
+  for (let idx152 = 0, list152 = p.applied; idx152 < list152.length; idx152++) {
+    const step = list152[idx152] as (typeof list152)[number];
     const feed = route(step, step.output, 'step');
     if (feed === undefined) continue;
     arrayPush(feed.steps, step);
     feed.tie ||= ties.reaches(step);
   }
-  for (const entry of p.pending) {
+  for (let idx153 = 0, list153 = p.pending; idx153 < list153.length; idx153++) {
+    const entry = list153[idx153] as (typeof list153)[number];
     if (entry.output === undefined) continue;
     const feed = route(entry, entry.output, 'pending rule');
     if (feed === undefined) continue;
@@ -221,7 +235,8 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     arrayPush(feed.waiting, entry);
     feed.tie ||= ties.reaches(entry);
   }
-  for (const skip of p.skipped) {
+  for (let idx154 = 0, list154 = p.skipped; idx154 < list154.length; idx154++) {
+    const skip = list154[idx154] as (typeof list154)[number];
     // A per output is fed by instances (D-21): an exclusion without subject is grouped.
     const perOutput = skip.output !== undefined && mapHas(tries, skip.output);
     if (perOutput && skip.subject === undefined && skip.instances === undefined) {
@@ -230,12 +245,20 @@ function feedsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, ties: T
     }
     exclude(skip, outputs, tries, ties.reaches(skip));
   }
-  for (const name of ties.shortCircuits) {
+  for (
+    let idx155 = 0, list155 = setValuesArray(ties.shortCircuits);
+    idx155 < list155.length;
+    idx155++
+  ) {
+    const name = list155[idx155] as (typeof list155)[number];
     const direct = mapGet(outputs, name);
     if (direct !== undefined) direct.tie = true;
     mapGet(tries, name)?.exclude(undefined, -1, true);
   }
-  for (const trie of mapValues(tries)) trie.settle();
+  for (let idx1048 = 0, list1048 = mapValuesArray(tries); idx1048 < list1048.length; idx1048++) {
+    const trie = list1048[idx1048] as (typeof list1048)[number];
+    trie.settle();
+  }
   return { outputs, items, strays };
 }
 
@@ -323,7 +346,10 @@ export function outputProblems(
 ): string[] {
   const issues: string[] = [];
   const nonPer = new NativeSet<string>();
-  for (const [name, output] of listed) {
+  for (let idx156 = 0, list156 = mapEntriesArray(listed); idx156 < list156.length; idx156++) {
+    const tuple1049 = list156[idx156] as (typeof list156)[number];
+    const name = tuple1049[0];
+    const output = tuple1049[1];
     const cited = (): string => citeName(name);
     if (output.per === undefined) {
       append(issues, entryProblems(output, cited, output));
@@ -337,7 +363,8 @@ export function outputProblems(
       arrayPush(issues, `per output carries contributors: ${cited()}`);
     }
   }
-  for (const item of p.items) {
+  for (let idx157 = 0, list157 = p.items; idx157 < list157.length; idx157++) {
+    const item = list157[idx157] as (typeof list157)[number];
     const output = mapGet(listed, item.output);
     if (output === undefined) continue;
     if (output.per === undefined) {
@@ -357,13 +384,15 @@ export function outputProblems(
   const { hidden } = context;
   const feeds = feedsOf(p, listed, context.ties);
   // The item a stray step or pending rule feeds may be redacted.
-  for (const { message, output } of feeds.strays) {
+  for (let idx158 = 0, list158 = feeds.strays; idx158 < list158.length; idx158++) {
+    const { message, output } = list158[idx158] as (typeof list158)[number];
     if (output === undefined || !isLifted(hidden, LIFTS.itemsOfCollection, { message, output })) {
       arrayPush(issues, message);
     }
   }
   const targets = targetsOf(p, listed, feeds);
-  for (const { target, feed, pending } of targets) {
+  for (let idx159 = 0, list159 = targets; idx159 < list159.length; idx159++) {
+    const { target, feed, pending } = list159[idx159] as (typeof list159)[number];
     append(issues, combinationProblems(target, context));
     // A pending rule of the target may be redacted: its own pending rules are then a superset.
     if (!samePending(pending, feed.pending)) {
@@ -418,9 +447,9 @@ function pendingHidden(
   fed: readonly string[],
   hidden: (id: string) => boolean,
 ): boolean {
-  const listed = new NativeSet(named);
+  const listed = setOf(named);
   if (setSize(listed) !== named.length || arraySome(fed, (id) => !setHas(listed, id))) return false;
-  const found = new NativeSet(fed);
+  const found = setOf(fed);
   return arrayEvery(
     arrayFilter(named, (id) => !setHas(found, id)),
     hidden,
@@ -436,13 +465,17 @@ interface Fed {
 /** The outputs without `per` and the items, as targets of combination, with their feeds. */
 function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds: Feeds): Fed[] {
   const itemsOf = new NativeMap<string, ProofItem[]>();
-  for (const item of p.items) {
+  for (let idx160 = 0, list160 = p.items; idx160 < list160.length; idx160++) {
+    const item = list160[idx160] as (typeof list160)[number];
     const list = mapGet(itemsOf, item.output);
     if (list === undefined) mapSet(itemsOf, item.output, [item]);
     else arrayPush(list, item);
   }
   const fed: Fed[] = [];
-  for (const [name, output] of listed) {
+  for (let idx161 = 0, list161 = mapEntriesArray(listed); idx161 < list161.length; idx161++) {
+    const tuple1050 = list161[idx161] as (typeof list161)[number];
+    const name = tuple1050[0];
+    const output = tuple1050[1];
     const declaration = declarationOf(output);
     const direct = mapGet(feeds.outputs, name);
     if (direct !== undefined) {
@@ -460,7 +493,8 @@ function targetsOf(p: ProofView, listed: ReadonlyMap<string, ProofOutput>, feeds
       });
       continue;
     }
-    for (const item of mapGet(itemsOf, name) ?? []) {
+    for (let idx162 = 0, list162 = mapGet(itemsOf, name) ?? []; idx162 < list162.length; idx162++) {
+      const item = list162[idx162] as (typeof list162)[number];
       const feed = mapGet(feeds.items, item);
       if (feed === undefined) continue;
       const target: Target = {
@@ -487,7 +521,8 @@ function statusProblems(
   const { hidden } = context;
   const issues: string[] = [];
   const strongest = new NativeMap<string, number>();
-  for (const item of p.items) {
+  for (let idx163 = 0, list163 = p.items; idx163 < list163.length; idx163++) {
+    const item = list163[idx163] as (typeof list163)[number];
     if (!mapHas(feeds.items, item)) continue;
     mapSet(
       strongest,
@@ -496,7 +531,10 @@ function statusProblems(
     );
   }
   // A redacted item may be the strongest.
-  for (const [name, output] of listed) {
+  for (let idx164 = 0, list164 = mapEntriesArray(listed); idx164 < list164.length; idx164++) {
+    const tuple1051 = list164[idx164] as (typeof list164)[number];
+    const name = tuple1051[0];
+    const output = tuple1051[1];
     if (output.per === undefined) continue;
     const differs = rankOf(output.status) !== (mapGet(strongest, name) ?? 0);
     const message = `per output status differs from its items: ${citeName(name)}`;
@@ -505,7 +543,8 @@ function statusProblems(
       arrayPush(issues, message);
     }
   }
-  for (const { target, feed } of targets) {
+  for (let idx165 = 0, list165 = targets; idx165 < list165.length; idx165++) {
+    const { target, feed } = list165[idx165] as (typeof list165)[number];
     append(issues, causeProblems(target, feed, hidden, context.ties.uncertain));
   }
   return issues;

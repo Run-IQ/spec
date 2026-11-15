@@ -41,7 +41,8 @@ export function standingsOf(p: ProofView): Map<string, Standing> {
     if (name !== undefined && !mapHas(places, name)) mapSet(places, name, i);
   });
   const standings = new NativeMap<string, Standing>();
-  for (const rule of p.rules) {
+  for (let idx107 = 0, list107 = p.rules; idx107 < list107.length; idx107++) {
+    const rule = list107[idx107] as (typeof list107)[number];
     const key = `${qualifyName(rule.ruleSet, rule.id)}@${rule.version}`;
     if (mapHas(standings, key)) continue;
     mapSet(standings, key, {
@@ -86,7 +87,8 @@ export function inStandingOrder(
   standingOf: (id: string) => Standing | undefined,
 ): boolean {
   let previous: Standing | undefined;
-  for (const id of ids) {
+  for (let idx108 = 0, list108 = ids; idx108 < list108.length; idx108++) {
+    const id = list108[idx108] as (typeof list108)[number];
     const standing = standingOf(id);
     if (standing === undefined) {
       previous = undefined;

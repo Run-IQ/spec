@@ -9,6 +9,7 @@ import { isLifted, LIFTS } from './lifts.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayEvery,
   arrayFlatMap,
   arrayPush,
@@ -16,7 +17,7 @@ import {
   mapGet,
   mapHas,
   mapSet,
-  mapValues,
+  mapValuesArray,
   numberIsFinite,
   setAdd,
   setHas,
@@ -60,23 +61,27 @@ interface Fed {
  */
 function fedOutputs(p: ProofView): Fed[] {
   const byName = new NativeMap<string, Fed>();
-  for (const output of p.outputs) {
+  for (let idx81 = 0, list81 = p.outputs; idx81 < list81.length; idx81++) {
+    const output = list81[idx81] as (typeof list81)[number];
     if (!mapHas(byName, output.name)) mapSet(byName, output.name, { output, held: [], steps: [] });
   }
-  for (const output of p.outputs) {
+  for (let idx82 = 0, list82 = p.outputs; idx82 < list82.length; idx82++) {
+    const output = list82[idx82] as (typeof list82)[number];
     const fed = mapGet(byName, output.name);
     if (fed !== undefined) extend(fed.held, heldValues(output));
   }
-  for (const item of p.items) {
+  for (let idx83 = 0, list83 = p.items; idx83 < list83.length; idx83++) {
+    const item = list83[idx83] as (typeof list83)[number];
     // An item of an output without `per` is reported by `outputProblems`.
     const fed = mapGet(byName, item.output);
     if (fed?.output.per !== undefined) extend(fed.held, heldValues(item));
   }
-  for (const step of p.applied) {
+  for (let idx84 = 0, list84 = p.applied; idx84 < list84.length; idx84++) {
+    const step = list84[idx84] as (typeof list84)[number];
     const found = mapGet(byName, step.output);
     if (found !== undefined) arrayPush(found.steps, step);
   }
-  return [...mapValues(byName)];
+  return arrayConcat(mapValuesArray(byName));
 }
 
 /** The key of a rule instance: its qualified id, version and subject. */
@@ -99,7 +104,8 @@ export function imposedKey(
  */
 export function imposedSteps(p: ProofView): Set<string> {
   const imposed = new NativeSet<string>();
-  for (const exception of p.exceptions) {
+  for (let idx85 = 0, list85 = p.exceptions; idx85 < list85.length; idx85++) {
+    const exception = list85[idx85] as (typeof list85)[number];
     if (exception.kind === 'shortCircuit' && exception.output !== undefined) {
       setAdd(imposed, imposedKey(exception, exception.output));
     }
@@ -134,7 +140,8 @@ export function offDeclarationValues(
 ): string[] {
   const imposed = imposedSteps(p);
   const issues: string[] = [];
-  for (const { output, held, steps } of fedOutputs(p)) {
+  for (let idx86 = 0, list86 = fedOutputs(p); idx86 < list86.length; idx86++) {
+    const { output, held, steps } = list86[idx86] as (typeof list86)[number];
     const declaration = declarationOf(output);
     const cited = citeName(output.name);
     if (arraySome(held, (value) => !hasForm(value, declaration))) {
@@ -178,14 +185,15 @@ export function nonCanonicalDecimals(p: ProofView): string[] {
   const canonical = (value: JsonValue): boolean =>
     typeof value === 'string' && isCanonicalDecimal(value);
   const issues: string[] = [];
-  for (const { output, held, steps } of fedOutputs(p)) {
+  for (let idx87 = 0, list87 = fedOutputs(p); idx87 < list87.length; idx87++) {
+    const { output, held, steps } = list87[idx87] as (typeof list87)[number];
     if (output.type !== 'decimal') continue;
-    const values = [
-      ...held,
-      ...arrayFlatMap(steps, (step) =>
+    const values = arrayConcat(
+      held,
+      arrayFlatMap(steps, (step) =>
         step.unrounded === undefined ? [step.contribution] : [step.contribution, step.unrounded],
       ),
-    ];
+    );
     if (!arrayEvery(values, canonical))
       arrayPush(issues, `decimal value not canonical: ${citeName(output.name)}`);
   }

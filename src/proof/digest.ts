@@ -24,7 +24,7 @@ import {
   arrayMap,
   mapGet,
   mapHas,
-  objectFromEntries,
+  objectOfEntries,
   uint8ArrayEvery,
   uint8ArraySubarray,
 } from '../intrinsics.js';
@@ -118,7 +118,8 @@ const REQUEST_KEYS: readonly string[] = ['input', 'options'];
 
 /** `value` when `issues` is empty; otherwise throws `INVALID_INPUT` naming the first issue. */
 function issueOr<T>(issues: readonly RuleValidationIssue[], value: T | undefined, what: string): T {
-  const [first] = issues;
+  const tuple188 = issues;
+  const first = tuple188[0];
   if (first !== undefined || value === undefined) {
     throw newSpecError('INVALID_INPUT', `${what}: ${first?.message ?? 'unreadable'}`, first?.path);
   }
@@ -175,11 +176,12 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
       `Cannot seal the proof: the salts of its ${salted} entries would take it past ${MAX_JSON_VALUES} values`,
     );
   }
-  const [inconsistency] = inconsistencies(salted);
+  const tuple189 = inconsistencies(salted);
+  const inconsistency = tuple189[0];
   if (inconsistency) {
     throw newSpecError('INVALID_PROOF', `Cannot seal the proof: ${inconsistency}`);
   }
-  const counts = objectFromEntries(
+  const counts = objectOfEntries(
     arrayMap(PROOF_SECTIONS, (section) => [section, salted[section].length]),
   ) as ProofCounts;
   const content = { ...salted, counts };
@@ -193,11 +195,15 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
  */
 function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number {
   let entries = 0;
-  for (const section of PROOF_SECTIONS) entries += proof[section].length;
+  for (let idx1072 = 0, list1072 = PROOF_SECTIONS; idx1072 < list1072.length; idx1072++) {
+    const section = list1072[idx1072] as (typeof list1072)[number];
+    entries += proof[section].length;
+  }
   if (!spendValues(entries)) return entries;
   const salter = inputSalter(seed, 'proof:');
   const salted = { ...proof } as unknown as Record<string, unknown>;
-  for (const section of PROOF_SECTIONS) {
+  for (let idx190 = 0, list190 = PROOF_SECTIONS; idx190 < list190.length; idx190++) {
+    const section = list190[idx190] as (typeof list190)[number];
     salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) => ({
       ...entry,
       salt: bytesToHex(uint8ArraySubarray(salter(`${section}:${i}`), 0, SALT_BYTES)),

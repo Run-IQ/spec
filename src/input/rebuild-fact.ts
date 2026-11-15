@@ -11,6 +11,7 @@ import {
   arrayPop,
   arrayPush,
   arraySlice,
+  mapEntriesArray,
   mapGet,
   mapHas,
   mapSet,
@@ -48,7 +49,8 @@ export function rebuild(
   const depth = fact.segments.length;
   const arrays: Extract<Node, { kind: 'array' }>[] = [];
   let root: Node | undefined;
-  for (const { leaf } of fact.leaves) {
+  for (let idx197 = 0, list197 = fact.leaves; idx197 < list197.length; idx197++) {
+    const { leaf } = list197[idx197] as (typeof list197)[number];
     const node = nodeOf(leaf);
     if (node.kind === 'array') arrayPush(arrays, node);
     const segments = arraySlice(parsePointer(leaf.pointer), depth);
@@ -59,7 +61,8 @@ export function rebuild(
       parent = childOf(parent, segment, child);
     });
   }
-  for (const list of arrays) {
+  for (let idx198 = 0, list198 = arrays; idx198 < list198.length; idx198++) {
+    const list = list198[idx198] as (typeof list198)[number];
     if (mapSize(list.items) === list.length) continue;
     let missing = 0;
     while (mapHas(list.items, missing)) missing += 1;
@@ -68,7 +71,10 @@ export function rebuild(
       `(${citeName(list.pointer)} lacks element ${missing})`
     );
   }
-  for (const list of arrays) lists[list.pointer] = list.length;
+  for (let idx1075 = 0, list1075 = arrays; idx1075 < list1075.length; idx1075++) {
+    const list = list1075[idx1075] as (typeof list1075)[number];
+    lists[list.pointer] = list.length;
+  }
   return { value: root === undefined ? null : jsonOf(root) };
 }
 
@@ -140,7 +146,14 @@ function jsonOf(node: Node): JsonValue {
       }
       continue;
     }
-    for (const [key, member] of task.node.members) {
+    for (
+      let idx199 = 0, list199 = mapEntriesArray(task.node.members);
+      idx199 < list199.length;
+      idx199++
+    ) {
+      const tuple1076 = list199[idx199] as (typeof list199)[number];
+      const key = tuple1076[0];
+      const member = tuple1076[1];
       // Plain assignment would turn a `__proto__` key into a prototype change.
       objectDefineProperty(task.out, key, {
         value: open(member),

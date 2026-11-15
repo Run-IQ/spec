@@ -68,7 +68,7 @@ function membersOf(node: object): [string, unknown][] {
 
 /** The members of a list or an object, keys sorted in UTF-16 code units. */
 function sortedMembers(node: object): [string, unknown][] {
-  return arraySort(membersOf(node), ([a], [b]) => (a < b ? -1 : a > b ? 1 : 0));
+  return arraySort(membersOf(node), (x, y) => (x[0] < y[0] ? -1 : x[0] > y[0] ? 1 : 0));
 }
 
 /**
@@ -81,7 +81,9 @@ export function forEachLeaf(root: unknown, visit: (leaf: LeafContent) => void): 
   const sorted = new NativeMap<object, [string, unknown][]>();
   const stack: [unknown, string][] = [[root, '']];
   for (let top = arrayPop(stack); top !== undefined; top = arrayPop(stack)) {
-    const [value, pointer] = top;
+    const tuple95 = top;
+    const value = tuple95[0];
+    const pointer = tuple95[1];
     if (isScalar(value)) {
       visit({ pointer, kind: 'value', value });
       continue;

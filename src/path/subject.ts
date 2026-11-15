@@ -87,7 +87,9 @@ function isSubjectSegment(segment: string): boolean {
   if (stringStartsWith(segment, GROUP_PREFIX)) return true;
   const period = regExpExec(SEGMENT, segment);
   if (!period) return false;
-  const [, from, until] = period;
+  const tuple5004 = period;
+  const from = tuple5004[1];
+  const until = tuple5004[2];
   return (
     from !== undefined &&
     until !== undefined &&
@@ -99,7 +101,10 @@ function isSubjectSegment(segment: string): boolean {
 
 /** A `YYYY-MM-DD` text (already matched) that names a real day. */
 function isRealDate(text: string): boolean {
-  const [year, month, day] = arrayMap(stringSplit(text, '-'), NativeNumber);
+  const tuple2 = arrayMap(stringSplit(text, '-'), NativeNumber);
+  const year = tuple2[0];
+  const month = tuple2[1];
+  const day = tuple2[2];
   if (year === undefined || month === undefined || day === undefined) return false;
   return month >= 1 && month <= 12 && day >= 1 && day <= daysInMonth(year, month);
 }

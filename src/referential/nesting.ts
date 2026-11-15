@@ -3,6 +3,7 @@ import type { CivilDate } from '../time/civil.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayForEach,
   arrayJoin,
   arrayPop,
@@ -15,11 +16,15 @@ import {
   mapHas,
   mapIteratorNext,
   mapKeys,
+  mapKeysArray,
+  mapOf,
   mapSet,
   mathMax,
   setAdd,
   setDelete,
   setHas,
+  setOf,
+  setValuesArray,
 } from '../intrinsics.js';
 
 /** The start of a period with no `from`: before every civil date. */
@@ -88,20 +93,30 @@ function sweep(
 ): void {
   const starts = new NativeMap<CivilDate, Edge[]>();
   const ends = new NativeMap<CivilDate, Edge[]>();
-  for (const edge of edges) {
+  for (let idx31 = 0, list31 = edges; idx31 < list31.length; idx31++) {
+    const edge = list31[idx31] as (typeof list31)[number];
     pushTo(starts, edge.from, edge);
     if (edge.until !== null) pushTo(ends, edge.until, edge);
   }
-  const dates = arraySort([...new NativeSet([...mapKeys(starts), ...mapKeys(ends)])]);
+  const dates = arraySort(
+    arrayConcat(setValuesArray(setOf(arrayConcat(mapKeysArray(starts), mapKeysArray(ends))))),
+  );
   const graph = new Graph(work);
   const added = new NativeSet<Edge>();
-  for (const date of dates) {
-    for (const edge of mapGet(ends, date) ?? []) {
+  for (let idx32 = 0, list32 = dates; idx32 < list32.length; idx32++) {
+    const date = list32[idx32] as (typeof list32)[number];
+    for (let idx33 = 0, list33 = mapGet(ends, date) ?? []; idx33 < list33.length; idx33++) {
+      const edge = list33[idx33] as (typeof list33)[number];
       graph.step();
       if (setDelete(added, edge)) graph.remove(edge.group, edge.member);
     }
     const starting: Edge[] = [];
-    for (const edge of arraySort(mapGet(starts, date) ?? [], compareEdges)) {
+    for (
+      let idx34 = 0, list34 = arraySort(mapGet(starts, date) ?? [], compareEdges);
+      idx34 < list34.length;
+      idx34++
+    ) {
+      const edge = list34[idx34] as (typeof list34)[number];
       graph.step();
       const cycle = graph.cycle(edge.group, edge.member);
       if (cycle !== undefined) {
@@ -114,7 +129,8 @@ function sweep(
     }
     // Depth once every membership of the date is in: a new longest chain goes through one of
     // them, and each height is marked and recomputed at most once per date.
-    for (const edge of problems.tooDeep ? [] : starting) {
+    for (let idx35 = 0, list35 = problems.tooDeep ? [] : starting; idx35 < list35.length; idx35++) {
+      const edge = list35[idx35] as (typeof list35)[number];
       if (graph.above(edge.group) + graph.below(edge.member) > maxDepth) {
         problems.tooDeep = true;
         break;
@@ -142,9 +158,9 @@ function cycleMessage(cycle: readonly string[], date: CivilDate): string {
   arrayForEach(cycle, (name, i) => {
     if (name < (cycle[start] ?? name)) start = i;
   });
-  const rotated = [...arraySlice(cycle, start), ...arraySlice(cycle, 0, start)];
+  const rotated = arrayConcat(arraySlice(cycle, start), arraySlice(cycle, 0, start));
   const when = date === ALWAYS ? 'from the beginning' : `from ${date}`;
-  return `cycle ${citeName(arrayJoin([...rotated, rotated[0] ?? ''], ' > '))} ${when}`;
+  return `cycle ${citeName(arrayJoin(arrayConcat(rotated, [rotated[0] ?? '']), ' > '))} ${when}`;
 }
 
 /** Adjacency of one direction: node -> neighbour -> number of active memberships. */
@@ -206,7 +222,12 @@ class Graph {
       if (setHas(stale, node)) continue;
       setAdd(stale, node);
       const adjacent = mapGet(next, node);
-      for (const neighbour of adjacent === undefined ? [] : mapKeys(adjacent)) {
+      for (
+        let idx7000 = 0, list7000 = adjacent === undefined ? [] : mapKeysArray(adjacent);
+        idx7000 < list7000.length;
+        idx7000++
+      ) {
+        const neighbour = list7000[idx7000] as (typeof list7000)[number];
         this.step();
         if (!setHas(stale, neighbour)) arrayPush(queue, neighbour);
       }
@@ -318,7 +339,7 @@ function neighbours(next: Adjacency, node: string): Iterator<string> {
 function side(next: Adjacency, start: string): Side {
   return {
     next,
-    from: new NativeMap([[start, null]]),
+    from: mapOf([[start, null]]),
     queue: [start],
     head: 0,
     pending: undefined,
@@ -338,7 +359,7 @@ function closeCycle(group: string, forward: Side, backward: Side, meet: string):
   for (let at = mapGet(backward.from, meet); at != null; at = mapGet(backward.from, at))
     arrayPush(up, at);
   // `down` runs member..meet; `up` runs from after meet to group.
-  const path = [group, ...down, ...up];
+  const path = arrayConcat([group], down, up);
   arrayPop(path); // the closing `group`
   return path;
 }

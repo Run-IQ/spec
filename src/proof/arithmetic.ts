@@ -203,13 +203,15 @@ export function sumDecimals(values: readonly string[]): string {
   const terms = arrayMap(values, partsOf);
   let lowest = 0;
   let highest = 0;
-  for (const { integer, fraction } of terms) {
+  for (let idx130 = 0, list130 = terms; idx130 < list130.length; idx130++) {
+    const { integer, fraction } = list130[idx130] as (typeof list130)[number];
     lowest = mathMin(lowest, mathFloor(-fraction.length / LIMB));
     highest = mathMax(highest, mathFloor((integer.length - 1) / LIMB));
   }
   // One limb more for the carry of the sum of many terms, and one for its own carry.
   const limbs = new NativeFloat64Array(highest - lowest + 3);
-  for (const { negative, integer, fraction } of terms) {
+  for (let idx131 = 0, list131 = terms; idx131 < list131.length; idx131++) {
+    const { negative, integer, fraction } = list131[idx131] as (typeof list131)[number];
     const sign = negative ? -1 : 1;
     work.digits += integer.length + fraction.length;
     const add = (digit: string | undefined, position: number): void => {
@@ -303,7 +305,10 @@ function textOf({ coefficient, exponent }: Scaled): string {
  */
 export function sumNumbers(values: readonly number[], rounding: Rounding | undefined): number {
   let total: Scaled = { coefficient: 0n, exponent: 0 };
-  for (const value of values) total = addRounded(total, scaledOf(value));
+  for (let idx1039 = 0, list1039 = values; idx1039 < list1039.length; idx1039++) {
+    const value = list1039[idx1039] as (typeof list1039)[number];
+    total = addRounded(total, scaledOf(value));
+  }
   const text = textOf(total);
   const sum = NativeNumber(rounding === undefined ? text : roundDecimal(text, rounding));
   return sum === 0 ? 0 : sum;

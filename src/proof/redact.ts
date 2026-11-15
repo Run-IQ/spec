@@ -11,12 +11,15 @@ import { readDecisionProof } from './validate.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayForEach,
   arrayMap,
   arrayPush,
   arraySome,
   mapSet,
   setAdd,
+  setOf,
+  setValuesArray,
   uint8ArraySubarray,
 } from '../intrinsics.js';
 
@@ -54,7 +57,8 @@ export function proofView(p: UnsignedProof): { view: ProofView; redactions: Reda
   const bySection = new NativeMap<ProofSection, number>();
   const positions = new NativeMap<ProofSection, number[]>();
   let count = 0;
-  for (const section of PROOF_SECTIONS) {
+  for (let idx191 = 0, list191 = PROOF_SECTIONS; idx191 < list191.length; idx191++) {
+    const section = list191[idx191] as (typeof list191)[number];
     const list: readonly object[] = p[section];
     if (!arraySome(list, isRedacted)) continue;
     const left: object[] = [];
@@ -124,7 +128,8 @@ export function redactProof(
     }
     const chosen: [ProofSection, number, string][] = [];
     let leaf = 1;
-    for (const section of PROOF_SECTIONS) {
+    for (let idx192 = 0, list192 = PROOF_SECTIONS; idx192 < list192.length; idx192++) {
+      const section = list192[idx192] as (typeof list192)[number];
       arrayForEach(proof[section] as readonly object[], (entry, i) => {
         const at = leaf++;
         if (isRedacted(entry) || !askHide(hide, section, i)) return;
@@ -136,10 +141,21 @@ export function redactProof(
       });
     }
     const copy = { ...proof } as unknown as Record<ProofSection, object[]>;
-    for (const section of new NativeSet(arrayMap(chosen, ([section]) => section))) {
-      copy[section] = [...copy[section]];
+    for (
+      let idx1073 = 0, list1073 = setValuesArray(setOf(arrayMap(chosen, (entry) => entry[0])));
+      idx1073 < list1073.length;
+      idx1073++
+    ) {
+      const section = list1073[idx1073] as (typeof list1073)[number];
+      copy[section] = arrayConcat(copy[section]);
     }
-    for (const [section, i, redacted] of chosen) copy[section][i] = { redacted };
+    for (let idx1074 = 0, list1074 = chosen; idx1074 < list1074.length; idx1074++) {
+      const tuple2001 = list1074[idx1074] as (typeof list1074)[number];
+      const section = tuple2001[0];
+      const i = tuple2001[1];
+      const redacted = tuple2001[2];
+      copy[section][i] = { redacted };
+    }
     return copy as unknown as DecisionProof;
   });
 }

@@ -22,17 +22,12 @@ import {
 import * as canonicalEntry from '../src/canonical-entry.js';
 import type { RuleDefinitionInput } from '../src/index.js';
 import { definitionFindings, WINDOW_KINDS } from '../src/proof/definition-checks.js';
-import {
-  clearIntlCaches,
-  intlRuntime,
-  parseOffset,
-  runtimeTzdata,
-} from '../src/proof/intl-calendar.js';
+import { clearIntlCaches, intlRuntime, parseOffset } from '../src/proof/intl-calendar.js';
+import { tzdataReleaseOf } from '../src/intrinsics.js';
 import { LIFTS } from '../src/proof/lifts.js';
 import type { ProofView } from '../src/proof/types.js';
 import { dateTimeOf, hasDateSlot, notADateMessage } from '../src/values.js';
 import { handSealed, optionError } from './helpers.js';
-import { withRuntimeTzdata } from './notices.js';
 import { RFC_PUBLIC, RFC_SECRET, ruleA, ruleB, unsalted, unsigned } from './proof-cases.js';
 
 const TRUSTED = { 'executor-1': RFC_PUBLIC };
@@ -287,28 +282,36 @@ describe('Y2: a fault of the runtime is a notice naming what could not be checke
     ]);
   });
 
-  it('process.versions that throws: the release is not known, said in a notice', () => {
-    const real = Object.getOwnPropertyDescriptor(process, 'versions')!;
-    const content = withRuntimeTzdata(unsigned());
-    content.evaluatedAt = near;
-    content.rules = content.rules.map((r) =>
-      r.id === 'r1' ? { ...r, checksum: computeRuleChecksum(paris) } : r,
-    );
-    const sealed = signProof(sealProof(unsalted(content)), RFC_SECRET, 'executor-1');
-    Object.defineProperty(process, 'versions', {
-      configurable: true,
-      get: () => boom('versions boom'),
-    });
-    try {
-      expect(runtimeTzdata()).toBeUndefined();
-      const out = verifyProof(sealed, { trustedKeys: TRUSTED, rules: [paris, ruleB] });
-      expect(out.status).not.toBe('invalid');
-      expect(out.issues).toContain(
-        'window not checked: r1@1 (this runtime does not name its tzdata)',
-      );
-    } finally {
-      Object.defineProperty(process, 'versions', real);
+  it('a host that cannot name its release gives none, and the verdict says so', () => {
+    // The release is read once at load (AF1): the reading itself is a pure function of the host.
+    const throwing = {
+      get process(): never {
+        return boom('process boom');
+      },
+    };
+    const versionsThrow = {
+      process: {
+        get versions(): never {
+          return boom('versions boom');
+        },
+      },
+    };
+    for (const host of [
+      throwing,
+      versionsThrow,
+      {},
+      { process: {} },
+      { process: { versions: {} } },
+    ]) {
+      expect(tzdataReleaseOf(host)).toBeUndefined();
     }
+    expect(tzdataReleaseOf({ process: { versions: { tz: '2025c' } } })).toBe('2025c');
+    expect(tzdataReleaseOf({ process: { versions: { tz: '' } } })).toBeUndefined();
+    expect(tzdataReleaseOf({ process: { versions: { tz: 5 } } })).toBeUndefined();
+    // And a runtime that does not name its release is a notice (the stub in W1 above).
+    expect(run([paris], near, [engine('2025c')], undefined).unchecked).toEqual([
+      'window not checked: r1@1 (this runtime does not name its tzdata)',
+    ]);
   });
 });
 

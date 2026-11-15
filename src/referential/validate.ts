@@ -23,14 +23,16 @@ import {
   NativeMap,
   NativeSet,
   NativeString,
+  arrayConcat,
   arrayIncludes,
   arrayIsArray,
   arrayMap,
   arrayPush,
   arraySort,
+  mapEntriesArray,
   mapGet,
   mapSet,
-  mapValues,
+  mapValuesArray,
   mathMax,
   numberIsSafeInteger,
   objectDefineProperty,
@@ -38,6 +40,8 @@ import {
   objectKeys,
   setAdd,
   setHas,
+  setOf,
+  setValuesArray,
   stringIncludes,
 } from '../intrinsics.js';
 
@@ -128,7 +132,8 @@ export function normalizeReferential(
   options: ReferentialLimits = {},
 ): Referential {
   const { issues, normal } = check(referential, readLimits(options));
-  const [first] = issues;
+  const tuple36 = issues;
+  const first = tuple36[0];
   if (first !== undefined || normal === undefined) {
     throw newSpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
   }
@@ -215,7 +220,12 @@ function readReferential(
   if (fields.format !== REFERENTIAL_FORMAT) {
     add('format', `format must be ${quoteText(REFERENTIAL_FORMAT)}`);
   }
-  for (const key of ['id', 'version', 'dimension'] as const) {
+  for (
+    let idx37 = 0, list37 = ['id', 'version', 'dimension'] as const;
+    idx37 < list37.length;
+    idx37++
+  ) {
+    const key = list37[idx37] as (typeof list37)[number];
     checkText(fields[key], key, add);
   }
   checkSourceRef(fields, '', add);
@@ -240,8 +250,18 @@ function readReferential(
   const codes = fields.codes === undefined ? undefined : readCodeLists(fields.codes, codeKeys, add);
   const groups = readGroups(fields.groups, groupKeys, add);
   let nodes = 0;
-  for (const periods of codes === undefined ? [] : mapValues(codes)) nodes += periods?.length ?? 0;
-  for (const group of groups ?? []) nodes += 1 + group.length;
+  for (
+    let idx7001 = 0, list7001 = codes === undefined ? [] : mapValuesArray(codes);
+    idx7001 < list7001.length;
+    idx7001++
+  ) {
+    const periods = list7001[idx7001] as (typeof list7001)[number];
+    nodes += periods?.length ?? 0;
+  }
+  for (let idx1005 = 0, list1005 = groups ?? []; idx1005 < list1005.length; idx1005++) {
+    const group = list1005[idx1005] as (typeof list1005)[number];
+    nodes += 1 + group.length;
+  }
   if (nodes > limits.maxNodes) {
     add('', `referential too large: ${nodes} nodes`);
     return undefined;
@@ -251,7 +271,10 @@ function readReferential(
   const codeNames = new NativeSet<string>();
   const normalCodes: Record<string, Period[]> = {};
   if (codes !== undefined) {
-    for (const [code, periods] of codes) {
+    for (let idx38 = 0, list38 = mapEntriesArray(codes); idx38 < list38.length; idx38++) {
+      const tuple1006 = list38[idx38] as (typeof list38)[number];
+      const code = tuple1006[0];
+      const periods = tuple1006[1];
       setAdd(codeNames, code);
       if (periods !== undefined) {
         defineField(normalCodes, code, checkPeriods(periods, `codes.${code}`, add));
@@ -259,8 +282,9 @@ function readReferential(
     }
   }
   if (groups === undefined) return undefined;
-  const groupNames = new NativeSet(arrayMap(groups, (g) => g.name));
-  for (const name of groupNames) {
+  const groupNames = setOf(arrayMap(groups, (g) => g.name));
+  for (let idx39 = 0, list39 = setValuesArray(groupNames); idx39 < list39.length; idx39++) {
+    const name = list39[idx39] as (typeof list39)[number];
     if (setHas(codeNames, name))
       add(`groups.${name}`, `${citeName(name)} is both a code and a group`);
   }
@@ -268,7 +292,8 @@ function readReferential(
   const edges: Edge[] = [];
   let membersValid = true;
   const normalGroups: Referential['groups'] = {};
-  for (const group of groups) {
+  for (let idx40 = 0, list40 = groups; idx40 < list40.length; idx40++) {
+    const group = list40[idx40] as (typeof list40)[number];
     const members =
       group.members === undefined
         ? undefined
@@ -341,7 +366,12 @@ function compareSpans(
 function sortedUnique<T>(entries: readonly T[], compare: (a: T, b: T) => number): T[] {
   const out: T[] = [];
   let last: string | undefined;
-  for (const entry of arraySort([...entries], compare)) {
+  for (
+    let idx1007 = 0, list1007 = arraySort(arrayConcat(entries), compare);
+    idx1007 < list1007.length;
+    idx1007++
+  ) {
+    const entry = list1007[idx1007] as (typeof list1007)[number];
     // An entry of the normal form: this package's copy.
     const key = ownCopy(() => canonicalSha256Hex(entry));
     if (key !== last) arrayPush(out, entry);
@@ -365,7 +395,8 @@ function readFields(
 ): Record<string, unknown> | undefined {
   const out: Record<string, unknown> = {};
   let readable = true;
-  for (const key of objectKeys(value)) {
+  for (let idx42 = 0, list42 = objectKeys(value); idx42 < list42.length; idx42++) {
+    const key = list42[idx42] as (typeof list42)[number];
     const path = `${prefix}${key}`;
     let member: unknown;
     try {
@@ -441,7 +472,8 @@ function readCodeLists(
     add('codes', 'codes must be an object of period lists');
     return codes;
   }
-  for (const code of keys) {
+  for (let idx43 = 0, list43 = keys; idx43 < list43.length; idx43++) {
+    const code = list43[idx43] as (typeof list43)[number];
     const path = `codes.${code}`;
     let periods: unknown;
     try {
@@ -491,7 +523,8 @@ function readGroups(value: unknown, keys: readonly string[], add: Add): RawGroup
     return undefined;
   }
   const groups: RawGroup[] = [];
-  for (const name of keys) {
+  for (let idx44 = 0, list44 = keys; idx44 < list44.length; idx44++) {
+    const name = list44[idx44] as (typeof list44)[number];
     const path = `groups.${name}`;
     let group: unknown;
     try {
@@ -642,10 +675,13 @@ function checkSpan(
 
 /** The start of the first overlap between two spans, or `undefined`. */
 function firstOverlap(spans: readonly Span[]): CivilDate | undefined {
-  const sorted = arraySort([...spans], (a, b) => (a.from < b.from ? -1 : a.from > b.from ? 1 : 0));
+  const sorted = arraySort(arrayConcat(spans), (a, b) =>
+    a.from < b.from ? -1 : a.from > b.from ? 1 : 0,
+  );
   let end: CivilDate | null | undefined;
   let found: CivilDate | undefined;
-  for (const span of sorted) {
+  for (let idx45 = 0, list45 = sorted; idx45 < list45.length; idx45++) {
+    const span = list45[idx45] as (typeof list45)[number];
     if (end !== undefined && (end === null || span.from < end)) {
       if (found === undefined || span.from < found) found = span.from;
     }
@@ -691,7 +727,8 @@ function checkMembers(
   }
   const normal = sortedUnique(read, (a, b) => compareText(a.value, b.value) || compareSpans(a, b));
   const byValue = new NativeMap<string, Span[]>();
-  for (const member of normal) {
+  for (let idx46 = 0, list46 = normal; idx46 < list46.length; idx46++) {
+    const member = list46[idx46] as (typeof list46)[number];
     const span = { from: member.from ?? ALWAYS, until: member.until ?? null };
     const spans = mapGet(byValue, member.value) ?? [];
     arrayPush(spans, span);
@@ -700,7 +737,10 @@ function checkMembers(
       arrayPush(edges, { group: group.name, member: member.value, ...span });
     }
   }
-  for (const [value, spans] of byValue) {
+  for (let idx47 = 0, list47 = mapEntriesArray(byValue); idx47 < list47.length; idx47++) {
+    const tuple1008 = list47[idx47] as (typeof list47)[number];
+    const value = tuple1008[0];
+    const spans = tuple1008[1];
     const overlap = spans.length > 1 ? firstOverlap(spans) : undefined;
     if (overlap !== undefined) {
       const when = overlap === ALWAYS ? 'from the beginning' : `from ${overlap}`;
@@ -718,7 +758,8 @@ function mergeAdjacent<T extends { value?: string; from?: string; until?: string
   sorted: readonly (T & { sourceRef?: string })[],
 ): T[] {
   const out: (T & { sourceRef?: string })[] = [];
-  for (const entry of sorted) {
+  for (let idx48 = 0, list48 = sorted; idx48 < list48.length; idx48++) {
+    const entry = list48[idx48] as (typeof list48)[number];
     const last = out[out.length - 1];
     if (
       last !== undefined &&

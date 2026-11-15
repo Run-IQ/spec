@@ -23,6 +23,7 @@ import type { OutputRounding } from './rounding.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayForEach,
   arrayIncludes,
   arrayIsArray,
@@ -36,7 +37,9 @@ import {
   regExpTest,
   setAdd,
   setHas,
+  setOf,
   setSize,
+  setValuesArray,
 } from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: the one reader of output declarations, shared by
@@ -99,7 +102,7 @@ export function article(type: string): string {
 }
 
 const KEYS = ['type', 'combine', 'values', 'rounding', 'unit', 'empty', 'per', 'dimension', 'sign'];
-const KEY_SET = new NativeSet(KEYS);
+const KEY_SET = setOf(KEYS);
 /** The members of a declaration, as a message lists them: `{ type, combine, values?, … }`. */
 const SHAPE = `{ ${arrayJoin(
   arrayMap(KEYS, (key, i) => (i < 2 ? key : `${key}?`)),
@@ -148,7 +151,8 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
     add(at, message);
   };
   const members = new NativeMap<string, unknown>();
-  for (const key of keys) {
+  for (let idx20 = 0, list20 = keys; idx20 < list20.length; idx20++) {
+    const key = list20[idx20] as (typeof list20)[number];
     const member = declaration[key];
     // A member whose value is `undefined` is absent, known or not.
     if (member === undefined) continue;
@@ -342,7 +346,7 @@ function enumValues(
       if (problem !== undefined) fail(at, problem);
     }
   });
-  return setSize(seen) === items.length ? [...seen] : undefined;
+  return setSize(seen) === items.length ? arrayConcat(setValuesArray(seen)) : undefined;
 }
 
 function isOneOf<T extends string>(value: unknown, allowed: readonly T[]): value is T {

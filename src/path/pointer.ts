@@ -1,10 +1,12 @@
 import { isOwnError, newSpecError, quoteText, unreadableMessage } from '../errors.js';
 import { hasLoneSurrogate, loneSurrogateMessage, readList, typeName } from '../values.js';
 import {
+  arrayConcat,
   arrayForEach,
   arrayIncludes,
   arrayIsArray,
   arrayMap,
+  arraySlice,
   objectHasOwn,
   regExpTest,
   stringReplace,
@@ -133,11 +135,13 @@ const INPUT_VARIABLES: Readonly<Record<string, string>> = {
  */
 export function contextToInputPointer(pointer: JsonPointer): JsonPointer | undefined {
   const segments = parseReadPointer(pointer);
-  const [head, ...rest] = segments;
+  const tuple1 = segments;
+  const head = tuple1[0];
+  const rest = arraySlice(tuple1, 1);
   if (head === undefined) return undefined;
-  if (!stringStartsWith(head, '$')) return formatPointer(['data', ...segments]);
+  if (!stringStartsWith(head, '$')) return formatPointer(arrayConcat(['data'], segments));
   const field = objectHasOwn(INPUT_VARIABLES, head) ? INPUT_VARIABLES[head] : undefined;
-  return field === undefined ? undefined : formatPointer(['meta', field, ...rest]);
+  return field === undefined ? undefined : formatPointer(arrayConcat(['meta', field], rest));
 }
 
 /**

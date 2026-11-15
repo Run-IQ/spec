@@ -170,7 +170,8 @@ function definitionIssues(
     return result(errors);
   }
 
-  for (const key of unknownRuleKeys(value)) {
+  for (let idx52 = 0, list52 = unknownRuleKeys(value); idx52 < list52.length; idx52++) {
+    const key = list52[idx52] as (typeof list52)[number];
     errors.add(citeName(key), unknownRuleFieldMessage(key));
   }
   checkNonEmptyString(value.id, 'id', errors);
@@ -217,7 +218,8 @@ function definitionIssues(
   const condition = given(value.condition, 'condition', errors);
   if (condition !== undefined) checkCondition(condition, errors);
   let output: unknown;
-  for (const field of OPTIONAL_STRINGS) {
+  for (let idx53 = 0, list53 = OPTIONAL_STRINGS; idx53 < list53.length; idx53++) {
+    const field = list53[idx53] as (typeof list53)[number];
     const text = given(value[field], field, errors);
     if (text !== undefined) checkNonEmptyString(text, field, errors);
     if (field === 'output') output = text;
@@ -237,7 +239,10 @@ function definitionIssues(
     output: normalizedOutput(output, ruleSet),
     exceptions,
   });
-  for (const issue of modelIssues) errors.add(issue.path, issue.message);
+  for (let idx1009 = 0, list1009 = modelIssues; idx1009 < list1009.length; idx1009++) {
+    const issue = list1009[idx1009] as (typeof list1009)[number];
+    errors.add(issue.path, issue.message);
+  }
 
   // `forEach` is read once, and `effectiveOn` checked against the copy normalize would keep.
   const forEachValue = given(value.forEach, 'forEach', errors);
@@ -273,7 +278,8 @@ function checkExtensions(value: unknown, errors: Issues): void {
   }
   const json = toJsonOrIssue(value, 'extensions', errors);
   if (!isPlainObject(json)) return;
-  for (const key of objectKeys(json)) {
+  for (let idx54 = 0, list54 = objectKeys(json); idx54 < list54.length; idx54++) {
+    const key = list54[idx54] as (typeof list54)[number];
     if (json[key] === null) errors.add(`extensions.${key}`, nullFieldMessage(`extensions.${key}`));
   }
 }
@@ -373,7 +379,8 @@ function checkCondition(value: unknown, errors: Issues): void {
     errors.add('condition', tooLargeMessage('condition'));
     return;
   }
-  for (const key of keys) {
+  for (let idx55 = 0, list55 = keys; idx55 < list55.length; idx55++) {
+    const key = list55[idx55] as (typeof list55)[number];
     // A member whose value is `undefined` is absent, known or not.
     if (key !== 'dsl' && key !== 'value' && value[key] !== undefined) {
       errors.add(`condition.${key}`, `condition has an unknown key ${quoteText(key)}`);
@@ -394,7 +401,8 @@ function checkDimensions(value: unknown, errors: Issues): void {
     errors.add('dimensions', tooLargeMessage('dimensions'));
     return;
   }
-  for (const key of keys) {
+  for (let idx56 = 0, list56 = keys; idx56 < list56.length; idx56++) {
+    const key = list56[idx56] as (typeof list56)[number];
     const v = value[key];
     if (isUnnamable(key)) {
       errors.add('dimensions', unnamableNameMessage('dimensions', 'dimension', key));

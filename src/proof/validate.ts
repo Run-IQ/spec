@@ -35,10 +35,11 @@ import {
   numberIsSafeInteger,
   setAdd,
   setHas,
+  setOf,
   stringIncludes,
 } from '../intrinsics.js';
 
-const SEAL_KEYS: ReadonlySet<string> = new NativeSet(['digest', 'signature']);
+const SEAL_KEYS: ReadonlySet<string> = setOf(['digest', 'signature']);
 
 /**
  * Checks a decision proof without throwing and reports every problem found, each with its path
@@ -315,7 +316,8 @@ function checkUniqueRules(rules: unknown, add: Add): void {
 function checkCounts(content: Record<string, unknown> | undefined, add: Add): void {
   const counts = content?.counts;
   if (!isPlainObject(counts)) return;
-  for (const section of PROOF_SECTIONS) {
+  for (let idx184 = 0, list184 = PROOF_SECTIONS; idx184 < list184.length; idx184++) {
+    const section = list184[idx184] as (typeof list184)[number];
     const list = content?.[section];
     const count = counts[section];
     if (!arrayIsArray(list) || typeof count !== 'number' || count === list.length) continue;
@@ -333,7 +335,8 @@ function checkCounts(content: Record<string, unknown> | undefined, add: Add): vo
 function checkRepeatedLeaves(content: Record<string, unknown> | undefined, add: Add): void {
   if (content === undefined) return;
   const first = new NativeMap<string, string>();
-  for (const section of PROOF_SECTIONS) {
+  for (let idx185 = 0, list185 = PROOF_SECTIONS; idx185 < list185.length; idx185++) {
+    const section = list185[idx185] as (typeof list185)[number];
     const list = content[section];
     if (!arrayIsArray(list)) continue;
     arrayForEach(list, (entry: unknown, i) => {

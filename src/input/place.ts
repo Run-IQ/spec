@@ -131,7 +131,12 @@ const FIELD_VALUES: Readonly<Record<string, (value: JsonScalar) => string | unde
  * - nothing is ever below a scalar of `meta`; an index is written `0|[1-9][0-9]*`.
  */
 export function leafPlace(segments: readonly string[]): LeafPlace | string {
-  const [head, part, name, field, sub] = segments;
+  const tuple99 = segments;
+  const head = tuple99[0];
+  const part = tuple99[1];
+  const name = tuple99[2];
+  const field = tuple99[3];
+  const sub = tuple99[4];
   if (head === 'data') {
     if (part === undefined) return place(['object'], '/data');
     if (stringStartsWith(part, '$')) return 'a root key of /data starting with "$" is reserved';
@@ -181,7 +186,11 @@ function assertionPlace(
   partPointer: string,
   depth: number,
 ): LeafPlace | string {
-  const [key = '', field, sub, below] = rest;
+  const tuple100 = rest;
+  const key = tuple100[0] === undefined ? '' : tuple100[0];
+  const field = tuple100[1];
+  const sub = tuple100[2];
+  const below = tuple100[3];
   const problem = assertionKeyProblem(key);
   if (problem !== undefined) return problem;
   if (field === undefined) {

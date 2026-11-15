@@ -20,6 +20,7 @@ import type { Problem, RuleIdentity } from './lifts.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayForEach,
   arrayIndexOf,
   arrayPop,
@@ -27,11 +28,13 @@ import {
   arraySort,
   mapGet,
   mapHas,
+  mapOf,
   mapSet,
-  mapValues,
+  mapValuesArray,
   mathMax,
   setAdd,
   setHas,
+  setOf,
 } from '../intrinsics.js';
 
 // Internal to `@run-iq/spec`: what the decisions of a proof owe each other and the exceptions
@@ -51,11 +54,20 @@ export function undecidedRules(
   hidden: ReadonlySet<ProofSection> = new NativeSet(),
 ): string[] {
   const decided = new NativeSet<string>();
-  for (const list of [p.applied, p.skipped, p.pending, p.exceptions]) {
-    for (const entry of list) setAdd(decided, ruleKey(entry));
+  for (
+    let idx116 = 0, list116 = [p.applied, p.skipped, p.pending, p.exceptions];
+    idx116 < list116.length;
+    idx116++
+  ) {
+    const list = list116[idx116] as (typeof list116)[number];
+    for (let idx1029 = 0, list1029 = list; idx1029 < list1029.length; idx1029++) {
+      const entry = list1029[idx1029] as (typeof list1029)[number];
+      setAdd(decided, ruleKey(entry));
+    }
   }
   const issues: string[] = [];
-  for (const rule of p.rules) {
+  for (let idx117 = 0, list117 = p.rules; idx117 < list117.length; idx117++) {
+    const rule = list117[idx117] as (typeof list117)[number];
     if (full(issues)) break;
     const id = qualifyName(rule.ruleSet, rule.id);
     const key = `${id}@${rule.version}`;
@@ -107,12 +119,20 @@ function decisionsOf(
       arrayPush(issues, `rule feeds two outputs: ${citeName(key)}`);
     }
   };
-  for (const step of steps) {
+  for (let idx118 = 0, list118 = steps; idx118 < list118.length; idx118++) {
+    const step = list118[idx118] as (typeof list118)[number];
     if (!setHas(imposed, imposedKey(step, step.output))) feeds(step, step.output);
   }
-  for (const skip of p.skipped) feeds(skip, skip.output);
-  for (const entry of p.pending) feeds(entry, entry.output);
-  for (const skip of p.skipped) {
+  for (let idx1030 = 0, list1030 = p.skipped; idx1030 < list1030.length; idx1030++) {
+    const skip = list1030[idx1030] as (typeof list1030)[number];
+    feeds(skip, skip.output);
+  }
+  for (let idx1031 = 0, list1031 = p.pending; idx1031 < list1031.length; idx1031++) {
+    const entry = list1031[idx1031] as (typeof list1031)[number];
+    feeds(entry, entry.output);
+  }
+  for (let idx119 = 0, list119 = p.skipped; idx119 < list119.length; idx119++) {
+    const skip = list119[idx119] as (typeof list119)[number];
     if (full(issues)) break;
     if (skip.reason === 'RULE_CONFLICT' && skip.status !== 'conflict') {
       arrayPush(issues, `tie loser not in conflict: ${citeName(instanceKey(skip))}`);
@@ -129,7 +149,7 @@ function decisionsOf(
  * is decided by the rule's own evaluation after the exceptions (D-8: a plugin may still give
  * `INVALID_PARAMS`, `OUTPUT_MISMATCH`, …).
  */
-export const BEFORE_EXCEPTIONS: ReadonlySet<string> = new NativeSet([
+export const BEFORE_EXCEPTIONS: ReadonlySet<string> = setOf([
   'INACTIVE_DATE',
   'TAG_MISMATCH',
   'DIMENSION_MISMATCH',
@@ -148,7 +168,7 @@ const VERB: Readonly<Record<ProofException['kind'], string>> = {
 };
 
 /** The exclusions only an exception explains, and the problem of one that none reached. */
-const UNEXPLAINED: ReadonlyMap<string, string> = new NativeMap([
+const UNEXPLAINED: ReadonlyMap<string, string> = mapOf([
   ['INHIBITED', 'inhibited without an exception'],
   ['SHORT_CIRCUITED', 'short-circuited without an exception'],
 ]);
@@ -241,7 +261,10 @@ export function exceptionProblems(
   const report = (add: (message: string) => void, message: string): void => {
     if (!isLifted(hidden, LIFTS.firedExceptions, { message, ties: uncertain })) add(message);
   };
-  for (const problem of ties.problems) push(problem);
+  for (let idx1032 = 0, list1032 = ties.problems; idx1032 < list1032.length; idx1032++) {
+    const problem = list1032[idx1032] as (typeof list1032)[number];
+    push(problem);
+  }
   carrierProblems(p, imposed, ties, {
     status: (message, rule) => {
       if (!isLifted(hidden, LIFTS.carrierStatus, { message, rule })) push(message);
@@ -257,10 +280,17 @@ export function exceptionProblems(
       exception.kind === 'shortCircuit'
         ? `shortCircuit\u0000${exception.output ?? ''}`
         : exception.kind;
-    for (const affected of exception.affected) {
+    for (let idx120 = 0, list120 = exception.affected; idx120 < list120.length; idx120++) {
+      const affected = list120[idx120] as (typeof list120)[number];
       let node: Node = mapGet(tries, affected.ruleId) ?? newNode();
       mapSet(tries, affected.ruleId, node);
-      for (const segment of affected.subject === undefined ? [] : parsePointer(affected.subject)) {
+      for (
+        let idx121 = 0,
+          list121 = affected.subject === undefined ? [] : parsePointer(affected.subject);
+        idx121 < list121.length;
+        idx121++
+      ) {
+        const segment = list121[idx121] as (typeof list121)[number];
         let child: Node | undefined = mapGet(node.children, segment);
         if (child === undefined) {
           child = newNode();
@@ -278,8 +308,9 @@ export function exceptionProblems(
   const weaker: string[] = [];
   const uncovered: string[] = [];
   const early: string[] = [];
-  const decisions: Decision[] = [...p.applied, ...p.skipped, ...p.pending];
-  for (const decision of decisions) {
+  const decisions: Decision[] = arrayConcat(p.applied, p.skipped, p.pending);
+  for (let idx122 = 0, list122 = decisions; idx122 < list122.length; idx122++) {
+    const decision = list122[idx122] as (typeof list122)[number];
     if (full(issues)) break;
     const kinds = groupOf(decision, imposed);
     let strongest = -1;
@@ -288,7 +319,8 @@ export function exceptionProblems(
     let latest = -1;
     const visit = (node: Node): void => {
       latest = mathMax(latest, node.latest);
-      for (const kind of kinds) {
+      for (let idx123 = 0, list123 = kinds; idx123 < list123.length; idx123++) {
+        const kind = list123[idx123] as (typeof list123)[number];
         const group = mapGet(node.groups, kind);
         if (group === undefined) continue;
         group.produced = true;
@@ -299,7 +331,13 @@ export function exceptionProblems(
     };
     let node = mapGet(tries, decision.ruleId);
     if (node !== undefined) visit(node);
-    for (const segment of decision.subject === undefined ? [] : parsePointer(decision.subject)) {
+    for (
+      let idx124 = 0,
+        list124 = decision.subject === undefined ? [] : parsePointer(decision.subject);
+      idx124 < list124.length;
+      idx124++
+    ) {
+      const segment = list124[idx124] as (typeof list124)[number];
       node = node === undefined ? undefined : mapGet(node.children, segment);
       if (node === undefined) break;
       visit(node);
@@ -334,12 +372,23 @@ export function exceptionProblems(
     }
   }
   const unproduced: [number, string][] = [];
-  const stack = [...mapValues(tries)];
+  const stack = arrayConcat(mapValuesArray(tries));
   for (let node = arrayPop(stack); node !== undefined; node = arrayPop(stack)) {
-    for (const child of mapValues(node.children)) arrayPush(stack, child);
-    for (const group of mapValues(node.groups)) {
+    for (
+      let idx1033 = 0, list1033 = mapValuesArray(node.children);
+      idx1033 < list1033.length;
+      idx1033++
+    ) {
+      const child = list1033[idx1033] as (typeof list1033)[number];
+      arrayPush(stack, child);
+    }
+    for (let idx125 = 0, list125 = mapValuesArray(node.groups); idx125 < list125.length; idx125++) {
+      const group = list125[idx125] as (typeof list125)[number];
       if (group.produced) continue;
-      for (const [index, affected] of group.entries) {
+      for (let idx126 = 0, list126 = group.entries; idx126 < list126.length; idx126++) {
+        const tuple1034 = list126[idx126] as (typeof list126)[number];
+        const index = tuple1034[0];
+        const affected = tuple1034[1];
         const exception = p.exceptions[index];
         if (exception === undefined) continue;
         const at = affected.subject === undefined ? '' : ` at ${affected.subject}`;
@@ -355,12 +404,23 @@ export function exceptionProblems(
   // In the order of the exceptions, then of their affected entries.
   arraySort(unproduced, (a, b) => a[0] - b[0]);
   // The decision an exception produced may be redacted.
-  for (const [, message] of unproduced) {
+  for (let idx127 = 0, list127 = unproduced; idx127 < list127.length; idx127++) {
+    const tuple1035 = list127[idx127] as (typeof list127)[number];
+    const message = tuple1035[1];
     if (!isLifted(hidden, LIFTS.affectedFound, { message, ties: uncertain })) push(message);
   }
-  for (const message of uncovered) push(message);
-  for (const message of weaker) push(message);
-  for (const message of early) push(message);
+  for (let idx1036 = 0, list1036 = uncovered; idx1036 < list1036.length; idx1036++) {
+    const message = list1036[idx1036] as (typeof list1036)[number];
+    push(message);
+  }
+  for (let idx1037 = 0, list1037 = weaker; idx1037 < list1037.length; idx1037++) {
+    const message = list1037[idx1037] as (typeof list1037)[number];
+    push(message);
+  }
+  for (let idx1038 = 0, list1038 = early; idx1038 < list1038.length; idx1038++) {
+    const message = list1038[idx1038] as (typeof list1038)[number];
+    push(message);
+  }
   return issues;
 }
 
@@ -384,11 +444,13 @@ function carrierProblems(
   found: CarrierFound,
 ): void {
   const steps = new NativeMap<string, ProofStep>();
-  for (const step of p.applied) {
+  for (let idx128 = 0, list128 = p.applied; idx128 < list128.length; idx128++) {
+    const step = list128[idx128] as (typeof list128)[number];
     if (!setHas(imposed, imposedKey(step, step.output))) mapSet(steps, instanceKey(step), step);
   }
   const won = new NativeSet<string>();
-  for (const step of p.applied) {
+  for (let idx129 = 0, list129 = p.applied; idx129 < list129.length; idx129++) {
+    const step = list129[idx129] as (typeof list129)[number];
     if (setHas(imposed, imposedKey(step, step.output))) {
       mapSet(steps, imposedKey(step, step.output), step);
       setAdd(won, step.output);

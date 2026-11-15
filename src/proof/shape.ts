@@ -53,6 +53,7 @@ import {
 import {
   NativeSet,
   NativeString,
+  arrayConcat,
   arrayFilter,
   arrayJoin,
   arrayMap,
@@ -61,8 +62,8 @@ import {
   mapGet,
   numberIsSafeInteger,
   objectEntries,
-  objectFromEntries,
   objectHasOwn,
+  objectOfEntries,
   regExpTest,
   stringReplace,
   stringStartsWith,
@@ -203,7 +204,7 @@ const OUTPUT: Shape = {
     bounds: objectOf(BOUNDS),
     selected: objectOf(SELECTION),
     // Read here, checked as a declaration by `outputOf`.
-    ...objectFromEntries(arrayMap(DECLARATION_KEYS, (key) => [key, document])),
+    ...objectOfEntries(arrayMap(DECLARATION_KEYS, (key) => [key, document])),
     salt,
   },
   optional: [
@@ -233,14 +234,18 @@ function outputOf(shape: Shape): Check {
     const { copy } = read;
     if (mapGet(read.members, 'redacted') !== undefined) return copy;
     const declaration: Record<string, unknown> = {};
-    for (const key of DECLARATION_KEYS) {
+    for (let idx182 = 0, list182 = DECLARATION_KEYS; idx182 < list182.length; idx182++) {
+      const key = list182[idx182] as (typeof list182)[number];
       if (copy[key] !== undefined) declaration[key] = copy[key];
     }
     // A missing type or strategy was reported as required.
     if (copy.type === undefined || copy.combine === undefined) return copy;
     // The copy was counted when it was read.
     const { issues, normal } = ownCopy(() => readDeclaration(declaration, path));
-    for (const issue of issues) add(issue.path, issue.message);
+    for (let idx1068 = 0, list1068 = issues; idx1068 < list1068.length; idx1068++) {
+      const issue = list1068[idx1068] as (typeof list1068)[number];
+      add(issue.path, issue.message);
+    }
     if (normal === undefined) return copy;
     if (copy.empty === false) {
       add(`${path}.empty`, `${citeName(path)}.empty must be absent: false is the default`);
@@ -531,7 +536,10 @@ const ENTRIES: Readonly<Record<Exclude<ProofSection, 'outputs'>, Shape>> = {
 /** The check of an entry of each section, as `variant` reads it. */
 function entryChecks(variant: (shape: Shape) => Shape): Record<ProofSection, Check> {
   const checks = { outputs: outputOf(variant(OUTPUT)) } as Record<ProofSection, Check>;
-  for (const [section, shape] of objectEntries(ENTRIES)) {
+  for (let idx183 = 0, list183 = objectEntries(ENTRIES); idx183 < list183.length; idx183++) {
+    const tuple1069 = list183[idx183] as (typeof list183)[number];
+    const section = tuple1069[0];
+    const shape = tuple1069[1];
     checks[section as ProofSection] = objectOf(variant(shape));
   }
   return checks;
@@ -545,7 +553,7 @@ const UNSALTED_ENTRY = entryChecks(unsalted);
 /** `counts`: the number of entries of each section, each a safe integer from 0. */
 const COUNTS: Shape = {
   summary: `{ ${arrayJoin(PROOF_SECTIONS, ', ')} }`,
-  fields: objectFromEntries(arrayMap(PROOF_SECTIONS, (section) => [section, stratum])),
+  fields: objectOfEntries(arrayMap(PROOF_SECTIONS, (section) => [section, stratum])),
 };
 
 /** The fields of the header of a proof before sealing (`UnsaltedProof`): without `counts`. */
@@ -572,7 +580,7 @@ const HEADER_FIELDS: Readonly<Record<string, Check>> = {
 
 /** The section fields: each a list of entries checked by `entries`. */
 function sectionFields(entries: Readonly<Record<ProofSection, Check>>): Record<string, Check> {
-  return objectFromEntries(
+  return objectOfEntries(
     arrayMap(PROOF_SECTIONS, (section) => [section, listOf(entries[section])]),
   ) as Record<string, Check>;
 }
@@ -611,6 +619,6 @@ export const UNSALTED_PROOF: Shape = {
 export const DECISION_PROOF: Shape = {
   summary: '',
   fields: { ...CONTENT_FIELDS, digest: sha256, signature: objectOf(SIGNATURE) },
-  optional: [...OPTIONAL_HEADER, 'signature'],
+  optional: arrayConcat(OPTIONAL_HEADER, ['signature']),
   gate: formatGate,
 };

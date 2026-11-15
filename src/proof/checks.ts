@@ -25,6 +25,7 @@ import {
   arrayJoin,
   arrayMap,
   arraySome,
+  mapEntriesArray,
   mapGet,
   mapSet,
   objectDefineProperty,
@@ -189,7 +190,8 @@ function readMembers(
     return undefined;
   }
   const members = new NativeMap<string, unknown>();
-  for (const key of keys) {
+  for (let idx178 = 0, list178 = keys; idx178 < list178.length; idx178++) {
+    const key = list178[idx178] as (typeof list178)[number];
     try {
       mapSet(members, key, value[key]);
     } catch (error) {
@@ -220,7 +222,10 @@ export function mapOf(
     if (members === undefined) return undefined;
     const copy: Record<string, unknown> = {};
     let count = 0;
-    for (const [name, entry] of members) {
+    for (let idx179 = 0, list179 = mapEntriesArray(members); idx179 < list179.length; idx179++) {
+      const tuple1065 = list179[idx179] as (typeof list179)[number];
+      const name = tuple1065[0];
+      const entry = tuple1065[1];
       if (entry === undefined) continue;
       count++;
       const at = `${path}.${name}`;
@@ -297,7 +302,10 @@ export function checkObject(
   }
   if (gated !== undefined) shape = gated;
   const at = (key: string): string => (path ? `${path}.${key}` : key);
-  for (const [key, member] of members) {
+  for (let idx180 = 0, list180 = mapEntriesArray(members); idx180 < list180.length; idx180++) {
+    const tuple1066 = list180[idx180] as (typeof list180)[number];
+    const key = tuple1066[0];
+    const member = tuple1066[1];
     // A member whose value is `undefined` is absent, known or not.
     if (member === undefined || setHas(ignored, key) || objectHasOwn(shape.fields, key)) continue;
     add(at(key), `${citeName(path || 'proof')} has an unknown key ${quoteText(key)}`);
@@ -308,7 +316,10 @@ export function checkObject(
     failed = true;
     add(where, message);
   };
-  for (const [key, check] of fieldsOf(shape)) {
+  for (let idx181 = 0, list181 = fieldsOf(shape); idx181 < list181.length; idx181++) {
+    const tuple1067 = list181[idx181] as (typeof list181)[number];
+    const key = tuple1067[0];
+    const check = tuple1067[1];
     const field = mapGet(members, key);
     if (field !== undefined) copy[key] = check(field, at(key), fieldAdd);
     else if (!(shape.optional !== undefined && arrayIncludes(shape.optional, key)))

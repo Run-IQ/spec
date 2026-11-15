@@ -156,7 +156,9 @@ export function citedNameProblem(
   if (parts.length > 2) {
     return `${citeName(path)} name must hold at most one ":": <rule set>:<name>`;
   }
-  const [set = '', bare = ''] = parts;
+  const tuple22 = parts;
+  const set = tuple22[0] === undefined ? '' : tuple22[0];
+  const bare = tuple22[1] === undefined ? '' : tuple22[1];
   if (set === LOCAL_RULE_SET) {
     return `${citeName(path)} name must not be qualified by "local": a local name is written bare`;
   }

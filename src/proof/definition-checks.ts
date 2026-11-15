@@ -2,13 +2,16 @@ import { DEFAULT_OUTPUT } from '../decision/output.js';
 import {
   NativeMap,
   NativeSet,
+  arrayConcat,
   arrayFind,
   arrayIncludes,
   arrayJoin,
   arrayMap,
   arrayPush,
+  arrayPushAll,
   arraySlice,
   isoOf,
+  mapEntriesArray,
   mapGet,
   mapSet,
   objectKeys,
@@ -16,7 +19,9 @@ import {
   regExpTest,
   setAdd,
   setHas,
+  setOf,
   setSize,
+  setValuesArray,
   stringSlice,
   stringStartsWith,
 } from '../intrinsics.js';
@@ -50,7 +55,7 @@ import type { ProofView } from './types.js';
  * `SHORT_CIRCUITED`, `RULE_CONFLICT`: against the exceptions and the ties). Every other reason,
  * unknown ones included, is named in a notice: it was not checked against its definition.
  */
-const CHECKED_REASONS: ReadonlySet<string> = new NativeSet([
+const CHECKED_REASONS: ReadonlySet<string> = setOf([
   'INACTIVE_DATE',
   'CONDITION_FALSE',
   'DIMENSION_MISMATCH',
@@ -81,8 +86,9 @@ export interface DefinitionFindings {
  */
 function outputsOf(definition: RuleDefinition): Set<string> {
   const own = definition.ruleSet ?? LOCAL_RULE_SET;
-  const outputs = new NativeSet([qualifiedFrom(own, definition.output ?? DEFAULT_OUTPUT)]);
-  for (const exception of definition.exceptions ?? []) {
+  const outputs = setOf([qualifiedFrom(own, definition.output ?? DEFAULT_OUTPUT)]);
+  for (let idx230 = 0, list230 = definition.exceptions ?? []; idx230 < list230.length; idx230++) {
+    const exception = list230[idx230] as (typeof list230)[number];
     if (exception.kind === 'shortCircuit') setAdd(outputs, qualifiedFrom(own, exception.output));
   }
   return outputs;
@@ -91,7 +97,8 @@ function outputsOf(definition: RuleDefinition): Set<string> {
 /** The time zone the window of `definition` is read in: its own, its rule set's, the decision's. */
 function zoneOf(proof: ProofView, definition: RuleDefinition): string {
   const ruleSet = definition.ruleSet ?? LOCAL_RULE_SET;
-  for (const entry of proof.ruleSets) {
+  for (let idx231 = 0, list231 = proof.ruleSets; idx231 < list231.length; idx231++) {
+    const entry = list231[idx231] as (typeof list231)[number];
     if (entry.kind === 'referential') continue;
     const own = entry.kind === 'local' ? LOCAL_RULE_SET : entry.id;
     if (own === ruleSet) return entry.timeZone ?? proof.timeZone;
@@ -344,7 +351,8 @@ export function definitionFindings(
     return typeof held === 'boolean' ? held : undefined;
   };
 
-  for (const step of proof.applied) {
+  for (let idx232 = 0, list232 = proof.applied; idx232 < list232.length; idx232++) {
+    const step = list232[idx232] as (typeof list232)[number];
     const key = ruleKey(step);
     const definition = mapGet(matched, key);
     if (definition === undefined) continue;
@@ -356,7 +364,8 @@ export function definitionFindings(
       report.invalid(`applied output differs from its rule: ${at}`);
     }
   }
-  for (const entry of proof.pending) {
+  for (let idx233 = 0, list233 = proof.pending; idx233 < list233.length; idx233++) {
+    const entry = list233[idx233] as (typeof list233)[number];
     const key = ruleKey(entry);
     const definition = mapGet(matched, key);
     if (definition === undefined) continue;
@@ -364,7 +373,8 @@ export function definitionFindings(
       report.invalid(`rule pending outside its window: ${citeName(instanceKey(entry))}`);
     }
   }
-  for (const skip of proof.skipped) {
+  for (let idx234 = 0, list234 = proof.skipped; idx234 < list234.length; idx234++) {
+    const skip = list234[idx234] as (typeof list234)[number];
     const key = ruleKey(skip);
     const definition = mapGet(matched, key);
     if (definition === undefined) continue;
@@ -411,7 +421,10 @@ export function definitionFindings(
     string,
     { causes: Set<string>; details: Set<string>; keys: string[] }
   >();
-  for (const [why, keys] of undecided) {
+  for (let idx235 = 0, list235 = mapEntriesArray(undecided); idx235 < list235.length; idx235++) {
+    const tuple1086 = list235[idx235] as (typeof list235)[number];
+    const why = tuple1086[0];
+    const keys = tuple1086[1];
     const { kind, detail } = windowKind(why);
     const group = mapGet(kinds, kind) ?? {
       causes: new NativeSet<string>(),
@@ -420,23 +433,33 @@ export function definitionFindings(
     };
     setAdd(group.causes, why);
     if (detail !== undefined) setAdd(group.details, detail);
-    arrayPush(group.keys, ...keys);
+    arrayPushAll(group.keys, keys);
     mapSet(kinds, kind, group);
   }
-  for (const [kind, { causes, details, keys }] of kinds) {
+  for (let idx236 = 0, list236 = mapEntriesArray(kinds); idx236 < list236.length; idx236++) {
+    const tuple1087 = list236[idx236] as (typeof list236)[number];
+    const kind = tuple1087[0];
+    const { causes, details, keys } = tuple1087[1];
     if (keys.length === 1) {
-      report.unchecked(`window not checked: ${citeName(keys[0]!)} (${[...causes][0]})`);
+      report.unchecked(
+        `window not checked: ${citeName(keys[0]!)} (${arrayConcat(setValuesArray(causes))[0]})`,
+      );
       continue;
     }
     const named = arrayJoin(arrayMap(arraySlice(keys, 0, MAX_NAMED_RULES), citeName), ', ');
     const more = keys.length > MAX_NAMED_RULES ? ` and ${keys.length - MAX_NAMED_RULES} more` : '';
-    const shown = arraySlice([...details], 0, MAX_NAMED_DETAILS);
+    const shown = arraySlice(arrayConcat(setValuesArray(details)), 0, MAX_NAMED_DETAILS);
     const extra =
       setSize(details) > shown.length ? `, and ${setSize(details) - shown.length} more` : '';
     const what = shown.length > 0 ? `${kind}: ${arrayJoin(shown, ', ')}${extra}` : kind;
     report.unchecked(`window not checked for ${keys.length} rules (${what}): ${named}${more}`);
   }
-  for (const reason of arraySlice(unnamed, 0, MAX_NAMED_REASONS)) {
+  for (
+    let idx237 = 0, list237 = arraySlice(unnamed, 0, MAX_NAMED_REASONS);
+    idx237 < list237.length;
+    idx237++
+  ) {
+    const reason = list237[idx237] as (typeof list237)[number];
     report.unchecked(`reason not checked: ${citeName(reason)}`);
   }
   if (unnamed.length > MAX_NAMED_REASONS) {

@@ -36,6 +36,33 @@ export const mapIteratorNext = uncurryThis(getPrototypeOf(new Map().keys())?.['n
   self: Iterator<T>,
 ) => IteratorResult<T, undefined>;
 
+/** `TextEncoder`, captured: the class, `encode` and `encodeInto` (uncurried). */
+export const NativeTextEncoder = TextEncoder;
+export const textEncoderEncode = uncurryThis(TextEncoder.prototype.encode) as (
+  self: InstanceType<typeof TextEncoder>,
+  text: string,
+) => Uint8Array;
+export const textEncoderEncodeInto = uncurryThis(TextEncoder.prototype.encodeInto) as (
+  self: InstanceType<typeof TextEncoder>,
+  text: string,
+  into: Uint8Array,
+) => { read: number; written: number };
+
+/**
+ * The release of the time zone database a host names (`process.versions.tz` of Node.js), or
+ * `undefined` when it names none or cannot be read. A pure reading, so that it can be tested.
+ */
+export function tzdataReleaseOf(host: unknown): string | undefined {
+  try {
+    const release = (host as { process?: { versions?: { tz?: unknown } } }).process?.versions?.tz;
+    return typeof release === 'string' && release !== '' ? release : undefined;
+  } catch {
+    return undefined;
+  }
+}
+/** The release of this runtime, read once when the module loads: a later redefinition changes nothing. */
+export const loadTimeTzdata: string | undefined = tzdataReleaseOf(globalThis);
+
 /** `Date.parse`, captured. */
 export const parseTime: (text: string) => number = Date.parse;
 /** The `Date` class of this realm, as it was when the package loaded. */
@@ -330,6 +357,16 @@ export const mapSet: <K, V>(self: Map<K, V>, key: K, value: V) => Map<K, V> = un
 export const mapValues: <K, V>(self: Map<K, V>) => MapIterator<V> = uncurryThis(
   Map.prototype.values,
 ) as never;
+export const mapEntries: <K, V>(self: ReadonlyMap<K, V>) => MapIterator<[K, V]> = uncurryThis(
+  Map.prototype.entries,
+) as never;
+export const setValues: <T>(self: ReadonlySet<T>) => SetIterator<T> = uncurryThis(
+  Set.prototype.values,
+) as never;
+/** `next()` of the iterators of a `Set`, captured. */
+export const setIteratorNext = uncurryThis(
+  getPrototypeOf(new Set().values())?.['next' as never],
+) as <T>(self: Iterator<T>) => IteratorResult<T, undefined>;
 export const regExpExec: (self: RegExp, string: string) => RegExpExecArray | null = uncurryThis(
   RegExp.prototype.exec,
 ) as never;
@@ -529,6 +566,10 @@ export const CAPTURED: readonly (readonly [object, string])[] = [
   [Map.prototype, 'keys'],
   [Map.prototype, 'set'],
   [Map.prototype, 'values'],
+  [Map.prototype, 'entries'],
+  [Set.prototype, 'values'],
+  [getPrototypeOf(new Map().keys()) as object, 'next'],
+  [getPrototypeOf(new Set().values()) as object, 'next'],
   [RegExp.prototype, 'exec'],
   [RegExp.prototype, 'test'],
   [Set.prototype, 'add'],
@@ -566,3 +607,94 @@ export const CAPTURED: readonly (readonly [object, string])[] = [
   [Object, 'getPrototypeOf'],
   [Intl, 'DateTimeFormat'],
 ];
+
+// Collections without the iteration protocol. `for ... of`, spread, array destructuring and the
+// constructors of `Map`, `Set` and `Uint8Array` read `Symbol.iterator` and the `next` of the
+// array iterator: a patch of either could change what they see. Everything below uses indexed
+// loops, own properties and the captured `next` of the `Map` and `Set` iterators.
+
+/** The values `iterator` yields, in order, drained with the captured `next` of `step`. */
+function drain<T>(
+  iterator: Iterator<T>,
+  step: (self: Iterator<T>) => IteratorResult<T, undefined>,
+): T[] {
+  const out: T[] = [];
+  for (let result = step(iterator); result.done !== true; result = step(iterator)) {
+    out[out.length] = result.value as T;
+  }
+  return out;
+}
+
+/** The keys of `map`, in insertion order, as an array. */
+export function mapKeysArray<K, V>(map: ReadonlyMap<K, V>): K[] {
+  return drain<K>(mapKeys(map), mapIteratorNext);
+}
+/** The values of `map`, in insertion order, as an array. */
+export function mapValuesArray<K, V>(map: Map<K, V>): V[] {
+  return drain<V>(mapValues(map), mapIteratorNext);
+}
+/** The `[key, value]` pairs of `map`, in insertion order, as an array. */
+export function mapEntriesArray<K, V>(map: ReadonlyMap<K, V>): [K, V][] {
+  return drain<[K, V]>(mapEntries(map), mapIteratorNext);
+}
+/** The members of `set`, in insertion order, as an array. */
+export function setValuesArray<T>(set: ReadonlySet<T>): T[] {
+  return drain<T>(setValues(set), setIteratorNext);
+}
+/** The bytes of `bytes` as an array of numbers. */
+export function bytesToArray(bytes: Uint8Array): number[] {
+  const out: number[] = [];
+  for (let i = 0; i < bytes.length; i++) out[i] = bytes[i] as number;
+  return out;
+}
+/** The lists put end to end in one new array (no `concat`, no spread). */
+export function arrayConcat<L extends readonly (readonly unknown[])[]>(
+  ...lists: L
+): L[number][number][] {
+  const out: L[number][number][] = [];
+  for (let l = 0; l < lists.length; l++) {
+    const list = lists[l] as readonly unknown[];
+    for (let i = 0; i < list.length; i++) out[out.length] = list[i] as L[number][number];
+  }
+  return out;
+}
+/** `self.push(...items)` without a spread; returns the new length. */
+export function arrayPushAll<T>(self: T[], items: readonly T[]): number {
+  for (let i = 0; i < items.length; i++) self[self.length] = items[i] as T;
+  return self.length;
+}
+/** `new Set(items)` without the iteration protocol. */
+export function setOf<T>(items: readonly T[]): Set<T> {
+  const out = new NativeSet<T>();
+  for (let i = 0; i < items.length; i++) setAdd(out, items[i] as T);
+  return out;
+}
+/** `new Map(entries)` without the iteration protocol. */
+export function mapOf<K, V>(entries: readonly (readonly [K, V])[]): Map<K, V> {
+  const out = new NativeMap<K, V>();
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] as readonly [K, V];
+    mapSet(out, entry[0], entry[1]);
+  }
+  return out;
+}
+/** `Uint8Array.from(numbers)` without the iteration protocol. */
+export function bytesFromNumbers(numbers: ArrayLike<number>): Uint8Array {
+  const out = new NativeUint8Array(numbers.length);
+  for (let i = 0; i < numbers.length; i++) out[i] = numbers[i] as number;
+  return out;
+}
+/** `Object.fromEntries(entries)` without the iteration protocol (own data properties). */
+export function objectOfEntries<V>(entries: readonly (readonly [string, V])[]): Record<string, V> {
+  const out: Record<string, V> = {};
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i] as readonly [string, V];
+    objectDefineProperty(out, entry[0], {
+      value: entry[1],
+      enumerable: true,
+      writable: true,
+      configurable: true,
+    });
+  }
+  return out;
+}

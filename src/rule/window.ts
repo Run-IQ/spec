@@ -12,7 +12,7 @@ import {
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
 import { typeName } from '../values.js';
 import type { ForEach } from './forEach.js';
-import { arrayIncludes, stringStartsWith } from '../intrinsics.js';
+import { arrayIncludes, arraySlice, stringStartsWith } from '../intrinsics.js';
 
 /**
  * The validity window of a rule, as `windowContains` reads it: the bounds in any form
@@ -201,7 +201,9 @@ export function effectiveOnProblem(value: string): string | undefined {
   } catch (error) {
     return `effectiveOn must be a JSON pointer: ${reasonOf(error)}`;
   }
-  const [head, ...rest] = segments;
+  const tuple51 = segments;
+  const head = tuple51[0];
+  const rest = arraySlice(tuple51, 1);
   if (head !== '$dates' && head !== '$item' && head !== '$segment') return EFFECTIVE_ON_START;
   if (arrayIncludes(rest, '-'))
     return "effectiveOn must not hold a '-' segment: '-' is not an index";

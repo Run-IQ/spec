@@ -21,6 +21,7 @@ import {
   arrayFilter,
   arrayIncludes,
   arrayJoin,
+  arraySlice,
   arraySome,
   arraySort,
   mapGet,
@@ -81,7 +82,8 @@ export function governingAssertion(
     arrayFilter(keys, (key): key is string => typeof key === 'string' && covers(key, pointer)),
     (a, b) => b.length - a.length,
   );
-  for (const key of covering) {
+  for (let idx96 = 0, list96 = covering; idx96 < list96.length; idx96++) {
+    const key = list96[idx96] as (typeof list96)[number];
     const found = guarded('assertions', () => assertions[key]);
     if (found !== undefined) return { pointer: key, assertion: found };
   }
@@ -141,7 +143,8 @@ function assertionDigest(assertion: FactAssertion): string {
     },
     (error) => ({ path: '', message: unreadableMessage('assertion', error) }),
   );
-  const [first] = issues;
+  const tuple97 = issues;
+  const first = tuple97[0];
   if (first !== undefined || snapshot === undefined) {
     throw newSpecError('INVALID_INPUT', `invalid assertion: ${first?.message ?? 'unreadable'}`);
   }
@@ -168,7 +171,9 @@ export function assertionKeyProblem(key: string): string | undefined {
   if (arrayIncludes(segments, '-')) {
     return `assertion key ${quoted} must not hold "-": it is not an index`;
   }
-  const [head, ...rest] = segments;
+  const tuple98 = segments;
+  const head = tuple98[0];
+  const rest = arraySlice(tuple98, 1);
   if (head === undefined || !stringStartsWith(head, '$')) return undefined;
   const name = rest[0];
   // A date or dimension name is never empty and never starts with `$` (ruling 9G round 2).

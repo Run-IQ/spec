@@ -38,7 +38,8 @@ export function compareOutputValues(
         'only number, decimal, enum, date and dateTime do',
     );
   }
-  for (const value of [a, b]) {
+  for (let idx74 = 0, list74 = [a, b]; idx74 < list74.length; idx74++) {
+    const value = list74[idx74] as (typeof list74)[number];
     if (!matchesValue(value, normal)) {
       const cited =
         typeof value === 'string' ? quoteText(value) : `a value of type ${typeName(value)}`;

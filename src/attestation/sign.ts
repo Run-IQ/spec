@@ -77,7 +77,8 @@ function readOptions(o: unknown): { role?: string; at?: string } {
     },
     (error) => ({ path: '', message: unreadableMessage('options', error) }),
   );
-  const [first] = issues;
+  const tuple248 = issues;
+  const first = tuple248[0];
   if (first !== undefined) {
     throw newSpecError('INVALID_ATTESTATION', `Cannot attest: ${first.message}`);
   }

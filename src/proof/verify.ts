@@ -47,6 +47,7 @@ import {
   arraySome,
   functionCall,
   jsonParse,
+  mapEntriesArray,
   mapGet,
   mapHas,
   mapSet,
@@ -55,6 +56,7 @@ import {
   reflectOwnKeys,
   setAdd,
   setHas,
+  setOf,
   setSize,
   stringToLowerCase,
   symbolToString,
@@ -188,9 +190,11 @@ function verify(p: unknown, options: Options): ProofVerification {
   const findings: Finding[] = [];
   if (treeDigest(proof) !== proof.digest) arrayPush(findings, invalidFinding('digest mismatch'));
   const { view, redactions } = proofView(proof);
-  const zones = new NativeSet<string>([proof.timeZone]);
-  for (const set of proof.ruleSets)
+  const zones = setOf<string>([proof.timeZone]);
+  for (let idx1088 = 0, list1088 = proof.ruleSets; idx1088 < list1088.length; idx1088++) {
+    const set = list1088[idx1088] as (typeof list1088)[number];
     if (set.kind !== 'referential' && set.timeZone) setAdd(zones, set.timeZone);
+  }
   if (setSize(zones) > options.maxProofTimeZones) {
     arrayPush(
       findings,
@@ -200,7 +204,12 @@ function verify(p: unknown, options: Options): ProofVerification {
     );
   }
   const context = contextOf(view, redactions.hidden);
-  for (const message of inconsistencies(view, context, redactions.positions)) {
+  for (
+    let idx240 = 0, list240 = inconsistencies(view, context, redactions.positions);
+    idx240 < list240.length;
+    idx240++
+  ) {
+    const message = list240[idx240] as (typeof list240)[number];
     arrayPush(findings, invalidFinding(message));
   }
   if (redactions.count > 0) {
@@ -216,10 +225,17 @@ function verify(p: unknown, options: Options): ProofVerification {
   const unchecked: string[] = [];
   extend(findings, optionFindings(view, proof, options, context, redactions, unchecked));
   // Every problem lifted, when the redacted entries cannot explain them all with the rules given.
-  for (const message of unexplained(redactions.hidden))
+  for (
+    let idx1089 = 0, list1089 = unexplained(redactions.hidden);
+    idx1089 < list1089.length;
+    idx1089++
+  ) {
+    const message = list1089[idx1089] as (typeof list1089)[number];
     arrayPush(findings, invalidFinding(message));
+  }
   const lifted = liftedChecks(redactions.hidden);
-  for (const { check, redacted } of lifted) {
+  for (let idx241 = 0, list241 = lifted; idx241 < list241.length; idx241++) {
+    const { check, redacted } = list241[idx241] as (typeof list241)[number];
     const message = `check lifted: ${check} (${arrayJoin(redacted, ', ')} redacted)`;
     arrayPush(findings, { message, level: 'notice', fixed: true });
   }
@@ -230,7 +246,10 @@ function verify(p: unknown, options: Options): ProofVerification {
   if (!refused) {
     arrayPush(unchecked, NOT_REPLAYED);
     // Fixed in number (a handful of kinds, never one per rule), so never cut.
-    for (const message of unchecked) arrayPush(findings, { message, level: 'notice' });
+    for (let idx1090 = 0, list1090 = unchecked; idx1090 < list1090.length; idx1090++) {
+      const message = list1090[idx1090] as (typeof list1090)[number];
+      arrayPush(findings, { message, level: 'notice' });
+    }
   }
   const issues = boundWithFixed(findings);
   const trusted = !arraySome(findings, (finding) => finding.level === 'warning');
@@ -298,7 +317,8 @@ function readOptions(o: unknown): Options {
     );
   }
   try {
-    for (const key of reflectOwnKeys(record)) {
+    for (let idx242 = 0, list242 = reflectOwnKeys(record); idx242 < list242.length; idx242++) {
+      const key = list242[idx242] as (typeof list242)[number];
       if (typeof key === 'string' && arrayIncludes(OPTION_KEYS, key)) continue;
       const name = typeof key === 'symbol' ? symbolToString(key) : key;
       const wanted = typeof key === 'symbol' ? undefined : misspellingOf(key, OPTION_NAMES);
@@ -437,7 +457,8 @@ function ruleFindings(
 
   const cited = new NativeSet<string>();
   const matched = new NativeMap<string, RuleDefinition>();
-  for (const ref of p.rules) {
+  for (let idx243 = 0, list243 = p.rules; idx243 < list243.length; idx243++) {
+    const ref = list243[idx243] as (typeof list243)[number];
     const key = `${qualifyName(ref.ruleSet, ref.id)}@${ref.version}`;
     setAdd(cited, key);
     const checksum = mapGet(checksums, key);
@@ -453,9 +474,13 @@ function ruleFindings(
   // compared by number (D-16).
   const hiddenRules = mapGet(redactions.bySection, 'rules') ?? 0;
   // The keys of `given`, with their rules.
-  const uncited = arrayFilter([...identities], ([key]) => !setHas(cited, key));
+  const uncited = arrayFilter(mapEntriesArray(identities), (entry) => !setHas(cited, entry[0]));
   if (hiddenRules === 0) {
-    for (const [key] of uncited) invalid(`unexpected rule: ${citeName(key)}`);
+    for (let idx1091 = 0, list1091 = uncited; idx1091 < list1091.length; idx1091++) {
+      const tuple2002 = list1091[idx1091] as (typeof list1091)[number];
+      const key = tuple2002[0];
+      invalid(`unexpected rule: ${citeName(key)}`);
+    }
   } else {
     const plural = hiddenRules === 1 ? 'rule' : 'rules';
     arrayPush(findings, {
@@ -468,7 +493,10 @@ function ruleFindings(
       );
     } else {
       // Each a hidden rules entry of that rule, one each.
-      for (const [key, rule] of uncited) {
+      for (let idx244 = 0, list244 = uncited; idx244 < list244.length; idx244++) {
+        const tuple1092 = list244[idx244] as (typeof list244)[number];
+        const key = tuple1092[0];
+        const rule = tuple1092[1];
         const message = `unexpected rule: ${citeName(key)}`;
         if (!isLifted(redactions.hidden, LIFTS.givenRules, { message, rule })) invalid(message);
       }
@@ -479,7 +507,8 @@ function ruleFindings(
   }
   // `fired` is on the pending entries of the rules that carry exceptions, only (R18):
   // only their definitions say which rules those are.
-  for (const entry of p.pending) {
+  for (let idx245 = 0, list245 = p.pending; idx245 < list245.length; idx245++) {
+    const entry = list245[idx245] as (typeof list245)[number];
     const key = `${entry.ruleId}@${entry.version}`;
     if (!mapHas(checksums, key)) continue;
     const at = citeName(instanceKey(entry));
@@ -497,7 +526,12 @@ function ruleFindings(
     calendar,
   );
   // A redacted entry has no rule to compare with its definition: say so, never skip it.
-  for (const section of ['applied', 'skipped', 'pending'] as const) {
+  for (
+    let idx246 = 0, list246 = ['applied', 'skipped', 'pending'] as const;
+    idx246 < list246.length;
+    idx246++
+  ) {
+    const section = list246[idx246] as (typeof list246)[number];
     const hidden = mapGet(redactions.bySection, section) ?? 0;
     if (hidden > 0) {
       const entries = hidden === 1 ? 'entry' : 'entries';

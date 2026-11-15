@@ -27,7 +27,10 @@ const NON_CONTENT_FIELDS = [
 export function computeRuleFingerprint(input: RuleDefinitionInput): string {
   return withValueBudget(() => {
     const content: Record<string, unknown> = { ...normalizeStoredRuleDefinition(input) };
-    for (const field of NON_CONTENT_FIELDS) delete content[field];
+    for (let idx1094 = 0, list1094 = NON_CONTENT_FIELDS; idx1094 < list1094.length; idx1094++) {
+      const field = list1094[idx1094] as (typeof list1094)[number];
+      delete content[field];
+    }
     // The normalized copy's values were counted when they were read from `input`.
     return ownCopy(() => canonicalSha256Hex(content));
   });
