@@ -675,7 +675,7 @@ function drain<T>(
 ): T[] {
   const out: T[] = [];
   for (let result = step(iterator); result.done !== true; result = step(iterator)) {
-    defineValue(out, out.length, result.value as T, true);
+    append(out, result.value as T);
   }
   return out;
 }
@@ -709,13 +709,13 @@ export function elementOf<T extends readonly unknown[]>(
 /** `Array(length).fill(value)` by definition of each element (no assignment, no hole). */
 export function filledArray<T>(length: number, value: T): T[] {
   const out: T[] = [];
-  for (let i = 0; i < length; i++) defineValue(out, i, value, true);
+  for (let i = 0; i < length; i++) append(out, value);
   return out;
 }
 /** The bytes of `bytes` as an array of numbers. */
 export function bytesToArray(bytes: Uint8Array): number[] {
   const out: number[] = [];
-  for (let i = 0; i < bytes.length; i++) defineValue(out, i, bytes[i] as number, true);
+  for (let i = 0; i < bytes.length; i++) append(out, bytes[i] as number);
   return out;
 }
 /** The lists put end to end in one new array (no `concat`, no spread). */
@@ -726,7 +726,7 @@ export function arrayConcat<L extends readonly (readonly unknown[])[]>(
   for (let l = 0; l < lists.length; l++) {
     const list = lists[l] as readonly unknown[];
     for (let i = 0; i < list.length; i++) {
-      defineValue(out, out.length, list[i] as L[number][number], true);
+      append(out, list[i] as L[number][number]);
     }
   }
   return out;
@@ -736,12 +736,29 @@ export function arrayConcat<L extends readonly (readonly unknown[])[]>(
  * next index reaches a setter that `Array.prototype` holds. Returns the new length.
  */
 export function arrayPush<T>(self: T[], ...items: T[]): number {
-  for (let i = 0; i < items.length; i++) defineValue(self, self.length, items[i] as T, true);
+  for (let i = 0; i < items.length; i++) append(self, items[i] as T);
   return self.length;
+}
+
+const ARRAY_PROTOTYPE: object = Array.prototype;
+const OBJECT_PROTOTYPE: object = Object.prototype;
+
+/**
+ * Adds `value` after the last element of `self` as an own element. A plain assignment is the
+ * fast path; it is used only when neither prototype holds the next index (an inherited setter, or
+ * a read-only one, would catch an assignment), otherwise the element is defined.
+ */
+export function append<T>(self: T[], value: T): void {
+  const index = self.length;
+  if (objectHasOwn(ARRAY_PROTOTYPE, index) || objectHasOwn(OBJECT_PROTOTYPE, index)) {
+    defineValue(self, index, value, true);
+  } else {
+    self[index] = value;
+  }
 }
 /** `self.push(...items)` for an array of items (no spread of arguments). */
 export function arrayPushAll<T>(self: T[], items: readonly T[]): number {
-  for (let i = 0; i < items.length; i++) defineValue(self, self.length, items[i] as T, true);
+  for (let i = 0; i < items.length; i++) append(self, items[i] as T);
   return self.length;
 }
 /** `new Set(items)` without the iteration protocol. */
