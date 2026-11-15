@@ -188,14 +188,23 @@ export function defineValue(
   value: unknown,
   visible: boolean,
 ): void {
-  const descriptor = {
-    __proto__: null,
+  // The fast path: a plain assignment makes the same property when the key is new and nothing on
+  // the chain holds it (an inherited setter, a read-only one or `__proto__` would catch it).
+  if (visible && !objectHasOwn(target, key)) {
+    let holder = getPrototypeOf(target);
+    while (holder !== null && !objectHasOwn(holder, key)) holder = getPrototypeOf(holder);
+    if (holder === null) {
+      (target as Record<PropertyKey, unknown>)[key] = value;
+      return;
+    }
+  }
+  const descriptor = bare({
     value,
     enumerable: visible,
     writable: visible,
     configurable: visible,
-  };
-  objectDefineProperty(target, key, descriptor as PropertyDescriptor);
+  });
+  objectDefineProperty(target, key, descriptor);
 }
 
 export const objectGetOwnPropertyDescriptor: typeof Object.getOwnPropertyDescriptor =
