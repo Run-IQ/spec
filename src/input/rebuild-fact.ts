@@ -11,12 +11,13 @@ import {
   arrayPop,
   arrayPush,
   arraySlice,
+  bare,
+  defineValue,
   mapEntriesArray,
   mapGet,
   mapHas,
   mapSet,
   mapSize,
-  objectDefineProperty,
 } from '../intrinsics.js';
 
 /**
@@ -133,7 +134,7 @@ function jsonOf(node: Node): JsonValue {
       arrayPush(pending, { kind: 'array', node: child, out });
       return out;
     }
-    const out: { [key: string]: JsonValue } = {};
+    const out: { [key: string]: JsonValue } = bare({});
     arrayPush(pending, { kind: 'object', node: child, out });
     return out;
   };
@@ -155,12 +156,7 @@ function jsonOf(node: Node): JsonValue {
       const key = tuple1076[0];
       const member = tuple1076[1];
       // Plain assignment would turn a `__proto__` key into a prototype change.
-      objectDefineProperty(task.out, key, {
-        value: open(member),
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      defineValue(task.out, key, open(member), true);
     }
   }
   return value;

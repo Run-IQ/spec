@@ -7,6 +7,8 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  ordinary,
+  own,
   ownCopy,
   readList,
   spendValues,
@@ -54,8 +56,9 @@ import {
   arrayForEach,
   arrayIsArray,
   arraySort,
+  bare,
+  defineValue,
   numberIsFinite,
-  objectDefineProperty,
   objectKeys,
   setOf,
   setValuesArray,
@@ -127,6 +130,11 @@ import {
  * exactly as `validateRuleDefinition` cuts its issues: both give the same first message.
  */
 export function normalizeRuleDefinition(input: RuleDefinitionInput): RuleDefinition {
+  return ordinary(normalizeForm(input, false));
+}
+
+/** Internal: `normalizeRuleDefinition` without the copy for the caller (no prototype). */
+export function normalizeRuleBare(input: RuleDefinitionInput): RuleDefinition {
   return normalizeForm(input, false);
 }
 
@@ -166,36 +174,36 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     const key = list1010[idx1010] as (typeof list1010)[number];
     invalidRule(unknownRuleFieldMessage(key));
   }
-  const untilInput = input.effectiveUntil;
+  const untilInput = own(input, 'effectiveUntil');
   if (!stored) {
     if (untilInput === null) invalidRule(nullFieldMessage('effectiveUntil'));
   }
-  const checksum = input.checksum;
+  const checksum = own(input, 'checksum');
   if (checksum === null || (checksum !== undefined && typeof checksum !== 'string')) {
     invalidRule(checksum === null ? nullFieldMessage('checksum') : CHECKSUM_NOT_STRING);
   }
-  const { from, until } = readRuleWindow(input.effectiveFrom, untilInput);
+  const { from, until } = readRuleWindow(own(input, 'effectiveFrom'), untilInput);
 
-  const ruleSet = readRuleSet(input.ruleSet);
-  const out: Record<string, unknown> = {
-    id: requireId(input.id),
-    version: requireVersion(input.version),
-    model: requireString(input.model, 'model'),
-    params: requireParams(input.params),
-    priority: requireNumber(input.priority, 'priority'),
+  const ruleSet = readRuleSet(own(input, 'ruleSet'));
+  const out: Record<string, unknown> = bare({
+    id: requireId(own(input, 'id')),
+    version: requireVersion(own(input, 'version')),
+    model: requireString(own(input, 'model'), 'model'),
+    params: requireParams(own(input, 'params')),
+    priority: requireNumber(own(input, 'priority'), 'priority'),
     effectiveFrom: from,
     effectiveUntil: until,
-    dimensions: normalizeDimensions(input.dimensions),
-    tags: normalizeTags(input.tags),
-  };
+    dimensions: normalizeDimensions(own(input, 'dimensions')),
+    tags: normalizeTags(own(input, 'tags')),
+  });
 
   if (ruleSet !== LOCAL_RULE_SET) out.ruleSet = ruleSet;
-  const timeZone = given(input.timeZone, 'timeZone');
+  const timeZone = given(own(input, 'timeZone'), 'timeZone');
   if (timeZone !== undefined) out.timeZone = requireTimeZone(timeZone, 'INVALID_RULE');
-  const effectiveOnInput = given(input.effectiveOn, 'effectiveOn');
+  const effectiveOnInput = given(own(input, 'effectiveOn'), 'effectiveOn');
   const effectiveOn =
     effectiveOnInput === undefined ? undefined : readEffectiveOn(effectiveOnInput);
-  const condition = given(input.condition, 'condition');
+  const condition = given(own(input, 'condition'), 'condition');
   if (condition !== undefined) out.condition = normalizeCondition(condition);
   for (
     let idx57 = 0, list57 = ['output', 'dominanceGroup', 'sourceRef'] as const;
@@ -203,7 +211,7 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     idx57++
   ) {
     const field = list57[idx57] as (typeof list57)[number];
-    const value = given(input[field], field);
+    const value = given(own(input, field), field);
     if (value !== undefined) out[field] = requireString(value, field);
   }
   if (typeof out.output === 'string') {
@@ -214,7 +222,7 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     if (output === DEFAULT_OUTPUT) delete out.output;
     else out.output = output;
   }
-  const exceptions = given(input.exceptions, 'exceptions');
+  const exceptions = given(own(input, 'exceptions'), 'exceptions');
   if (exceptions !== undefined) {
     const json = readJson(exceptions, 'exceptions', exceptionFreeForm);
     // The copy's values were counted when they were read from the rule.
@@ -222,12 +230,12 @@ function normalize(input: RuleDefinitionInput, stored: boolean): RuleDefinition 
     throwFirst(read.issues.toArray());
     if (read.exceptions.length > 0) out.exceptions = read.exceptions;
   }
-  throwFirst(exceptionModelIssues({ model: input.model, output: out.output, exceptions }));
-  const forEachInput = given(input.forEach, 'forEach');
+  throwFirst(exceptionModelIssues({ model: out.model as string, output: out.output, exceptions }));
+  const forEachInput = given(own(input, 'forEach'), 'forEach');
   const forEach = forEachInput === undefined ? undefined : readForEachField(forEachInput);
   if (forEach !== undefined) out.forEach = forEach;
 
-  const extensions = given(input.extensions, 'extensions');
+  const extensions = given(own(input, 'extensions'), 'extensions');
   if (extensions !== undefined) {
     const read = readExtensions(extensions);
     if (read !== undefined) out.extensions = read;
@@ -346,7 +354,7 @@ function normalizeDimensions(input: unknown): Record<string, DimensionSpec> {
   if (!isPlainObject(value)) invalidRule('dimensions must be an object of dimension specs');
   const keys = objectKeys(value);
   if (!spendValues(keys.length)) invalidRule(tooLargeMessage('dimensions'));
-  const out: Record<string, DimensionSpec> = {};
+  const out: Record<string, DimensionSpec> = bare({});
   for (let idx60 = 0, list60 = arraySort(keys); idx60 < list60.length; idx60++) {
     const key = list60[idx60] as (typeof list60)[number];
     const v = value[key];
@@ -406,12 +414,7 @@ function requireNumber(value: unknown, field: string): number {
 
 /** Plain assignment would turn a `__proto__` key into a prototype change. */
 function defineField(target: Record<string, unknown>, key: string, value: unknown): void {
-  objectDefineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  defineValue(target, key, value, true);
 }
 
 /** Throws the first issue as `INVALID_RULE`; its message already names the path. */

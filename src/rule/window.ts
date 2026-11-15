@@ -10,7 +10,7 @@ import {
   startOfDayIn,
 } from '../time/civil.js';
 import type { Beyond, CivilCalendar, CivilDate, Instant } from '../time/civil.js';
-import { typeName } from '../values.js';
+import { own, typeName } from '../values.js';
 import type { ForEach } from './forEach.js';
 import { arrayIncludes, arraySlice, stringStartsWith } from '../intrinsics.js';
 
@@ -61,7 +61,11 @@ export function windowContains(
   const zone = requireTimeZone(timeZone, 'INVALID_DATE');
   let fields: { from: unknown; until: unknown; timeZone: unknown };
   try {
-    fields = { from: rule.effectiveFrom, until: rule.effectiveUntil, timeZone: rule.timeZone };
+    fields = {
+      from: own(rule, 'effectiveFrom'),
+      until: own(rule, 'effectiveUntil'),
+      timeZone: own(rule, 'timeZone'),
+    };
   } catch (error) {
     throw newSpecError('INVALID_RULE', unreadableMessage('rule', error));
   }

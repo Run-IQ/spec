@@ -19,9 +19,10 @@ import { inconsistencies } from './consistency.js';
 import { readUnsaltedProof } from './validate.js';
 import { treeDigest } from './tree.js';
 import { inputSalter, readSeed, UNSALTED_SEED } from '../input/seed.js';
-import { MAX_JSON_VALUES, ownCopy, spendValues, withValueBudget } from '../values.js';
+import { MAX_JSON_VALUES, ordinary, ownCopy, spendValues, withValueBudget } from '../values.js';
 import {
   arrayMap,
+  bare,
   mapGet,
   mapHas,
   objectOfEntries,
@@ -185,7 +186,7 @@ function seal(p: UnsaltedProof, seed: Uint8Array): DecisionProof {
     arrayMap(PROOF_SECTIONS, (section) => [section, salted[section].length]),
   ) as ProofCounts;
   const content = { ...salted, counts };
-  return { ...content, digest: treeDigest(content) };
+  return ordinary({ ...content, digest: treeDigest(content) });
 }
 
 /**
@@ -201,7 +202,7 @@ function saltEntries(proof: UnsaltedProof, seed: Uint8Array): ProofView | number
   }
   if (!spendValues(entries)) return entries;
   const salter = inputSalter(seed, 'proof:');
-  const salted = { ...proof } as unknown as Record<string, unknown>;
+  const salted = bare({ ...proof }) as unknown as Record<string, unknown>;
   for (let idx190 = 0, list190 = PROOF_SECTIONS; idx190 < list190.length; idx190++) {
     const section = list190[idx190] as (typeof list190)[number];
     salted[section] = arrayMap(proof[section] as readonly object[], (entry: object, i) => ({

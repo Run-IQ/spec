@@ -5,6 +5,7 @@ import {
   NativeMap,
   arrayJoin,
   arraySome,
+  bare,
   mapEntriesArray,
   mapSet,
   numberIsSafeInteger,
@@ -102,7 +103,7 @@ export function checkRounding(rounding: unknown, path: string, add: Add): Roundi
       return undefined;
     }
   }
-  const copy: Record<string, unknown> = {};
+  const copy: Record<string, unknown> = bare({});
   for (let idx19 = 0, list19 = mapEntriesArray(members); idx19 < list19.length; idx19++) {
     const tuple1001 = list19[idx19] as (typeof list19)[number];
     const key = tuple1001[0];

@@ -10,6 +10,7 @@ import {
   holeMessage,
   isPlainObject,
   loneSurrogateMessage,
+  ordinary,
   ownCopy,
   undefinedMessage,
 } from '../values.js';
@@ -29,13 +30,14 @@ import {
   arrayMap,
   arrayPush,
   arraySort,
+  bare,
+  defineValue,
   mapEntriesArray,
   mapGet,
   mapSet,
   mapValuesArray,
   mathMax,
   numberIsSafeInteger,
-  objectDefineProperty,
   objectHasOwn,
   objectKeys,
   setAdd,
@@ -137,7 +139,7 @@ export function normalizeReferential(
   if (first !== undefined || normal === undefined) {
     throw newSpecError('INVALID_REFERENTIAL', first?.message ?? 'invalid referential');
   }
-  return normal;
+  return ordinary(normal);
 }
 
 /**
@@ -269,7 +271,7 @@ function readReferential(
   work.limit = limits.maxSteps ?? STEPS_PER_NODE * mathMax(nodes, 1);
 
   const codeNames = new NativeSet<string>();
-  const normalCodes: Record<string, Period[]> = {};
+  const normalCodes: Record<string, Period[]> = bare({});
   if (codes !== undefined) {
     for (let idx38 = 0, list38 = mapEntriesArray(codes); idx38 < list38.length; idx38++) {
       const tuple1006 = list38[idx38] as (typeof list38)[number];
@@ -291,7 +293,7 @@ function readReferential(
 
   const edges: Edge[] = [];
   let membersValid = true;
-  const normalGroups: Referential['groups'] = {};
+  const normalGroups: Referential['groups'] = bare({});
   for (let idx40 = 0, list40 = groups; idx40 < list40.length; idx40++) {
     const group = list40[idx40] as (typeof list40)[number];
     const members =
@@ -330,12 +332,7 @@ function readReferential(
 
 /** Plain assignment would turn a `__proto__` key into a prototype change. */
 function defineField<T>(target: Record<string, T>, key: string, value: T): void {
-  objectDefineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  defineValue(target, key, value, true);
 }
 
 /** Code-unit order, `undefined` first. */
@@ -393,7 +390,7 @@ function readFields(
   unknownMessage: string,
   add: Add,
 ): Record<string, unknown> | undefined {
-  const out: Record<string, unknown> = {};
+  const out: Record<string, unknown> = bare({});
   let readable = true;
   for (let idx42 = 0, list42 = objectKeys(value); idx42 < list42.length; idx42++) {
     const key = list42[idx42] as (typeof list42)[number];

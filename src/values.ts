@@ -1,13 +1,20 @@
 import { citeName } from './errors.js';
 import {
+  NativeMap,
+  NativeString,
   NativeUint8Array,
   arrayIsArray,
+  arrayPop,
   arrayPush,
   datePrototype,
+  defineValue,
   functionCall,
   getPrototypeOf,
+  mapGet,
+  mapSet,
   numberIsSafeInteger,
   objectGetOwnPropertyDescriptor,
+  objectHasOwn,
   objectKeys,
   objectPrototype,
   regExpTest,
@@ -364,4 +371,61 @@ export function bytesOf(value: unknown): Uint8Array | undefined {
   } catch {
     return undefined;
   }
+}
+
+/**
+ * The own value of `record[key]`, or `undefined` when `record` has no such own property: a field
+ * of a caller's object (or of a parsed one) is never read through its prototype chain, so an
+ * absent optional field stays absent whatever `Object.prototype` holds.
+ */
+export function own<T extends object, K extends keyof T>(record: T, key: K): T[K] {
+  return objectHasOwn(record, key) ? record[key] : (undefined as T[K]);
+}
+
+/**
+ * A deep copy of `value` (plain JSON data) whose objects and arrays have the ordinary
+ * prototypes, for what spec hands back to a caller: inside, spec reads objects without a
+ * prototype, but a caller expects `result.hasOwnProperty(...)` and the like to work. Values that
+ * are not plain objects or arrays (a `Uint8Array`, a function) are kept as they are. Iterative,
+ * so depth costs no stack.
+ */
+export function ordinary<T>(value: T): T {
+  if (typeof value !== 'object' || value === null) return value;
+  const fresh = (source: object): object => (arrayIsArray(source) ? [] : {});
+  const copies = new NativeMap<object, object>();
+  const root = fresh(value);
+  const pending: [object, object][] = [[value, root]];
+  mapSet(copies, value, root);
+  while (pending.length > 0) {
+    const next = arrayPop(pending) as [object, object];
+    const source = next[0];
+    const target = next[1];
+    const keys = arrayIsArray(source) ? indexKeys(source) : objectKeys(source);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i] as string;
+      const child = (source as Record<string, unknown>)[key];
+      let out: unknown = child;
+      if (
+        typeof child === 'object' &&
+        child !== null &&
+        (arrayIsArray(child) || isPlainObject(child))
+      ) {
+        let copy = mapGet(copies, child);
+        if (copy === undefined) {
+          copy = fresh(child);
+          mapSet(copies, child, copy);
+          arrayPush(pending, [child, copy]);
+        }
+        out = copy;
+      }
+      defineValue(target, key, out, true);
+    }
+  }
+  return root as T;
+}
+
+function indexKeys(list: readonly unknown[]): string[] {
+  const keys: string[] = [];
+  for (let i = 0; i < list.length; i++) keys[i] = NativeString(i);
+  return keys;
 }

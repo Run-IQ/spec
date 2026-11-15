@@ -1,12 +1,12 @@
 import { canonicalize, isCanonicalText, canonicalSha256Hex } from '../canonical.js';
 import { citeName, isOwnError, newSpecError, reasonOf, unreadableMessage } from '../errors.js';
 import { sha256Hex } from '../hash.js';
-import { NativeDate, NativeString, jsonParse } from '../intrinsics.js';
+import { NativeDate, NativeString, jsonParseBare } from '../intrinsics.js';
 import { isCivilDate } from '../time/civil.js';
 import { isPlainObject, ownCopy, withValueBudget } from '../values.js';
 import type { RuleDefinition, RuleDefinitionInput } from './definition.js';
 import type { ExecutableRule } from './executable.js';
-import { normalizeRuleDefinition, normalizeStoredRuleDefinition } from './normalize.js';
+import { normalizeRuleBare, normalizeStoredRuleDefinition } from './normalize.js';
 import type { StoredRuleRecord } from './stored.js';
 
 /**
@@ -23,7 +23,7 @@ export function toStoredPayload(input: RuleDefinitionInput): { payload: string; 
   // What an author writes: the authored path, so a `null` that would widen the rule is refused
   // here, before it is stored. Read back, the payload goes through `fromStoredRecord`.
   const payload = withValueBudget(() => {
-    const definition = normalizeRuleDefinition(input);
+    const definition = normalizeRuleBare(input);
     return ownCopy(() => canonicalize(definition));
   });
   return { payload, checksum: sha256Hex(payload) };
@@ -82,7 +82,7 @@ function fromRecord(record: StoredRuleRecord): ExecutableRule {
 
   let parsed: unknown;
   try {
-    parsed = jsonParse(payload as string);
+    parsed = jsonParseBare(payload as string);
   } catch (error) {
     fail(`payload is not valid JSON (${reasonOf(error)})`);
   }

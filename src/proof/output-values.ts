@@ -14,6 +14,7 @@ import {
   arrayFlatMap,
   arrayPush,
   arraySome,
+  bare,
   mapGet,
   mapHas,
   mapSet,
@@ -26,7 +27,7 @@ import {
 /** The declaration a proof output carries, in its normal form (`validateProof` checked it). */
 export function declarationOf(output: ProofOutput): OutputDeclaration {
   const { type, combine, values, rounding, unit, empty, per, dimension, sign } = output;
-  const declaration: OutputDeclaration = { type, combine };
+  const declaration: OutputDeclaration = bare({ type, combine });
   if (values !== undefined) declaration.values = values;
   if (rounding !== undefined) declaration.rounding = rounding;
   if (unit !== undefined) declaration.unit = unit;

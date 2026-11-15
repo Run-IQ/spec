@@ -6,7 +6,7 @@ import {
   NativeWeakSet,
   functionHasInstance,
   jsonStringify,
-  objectDefineProperty,
+  defineValue,
   regExpTest,
   stringCharCodeAt,
   stringSlice,
@@ -62,7 +62,7 @@ export class SpecError extends NativeError {
     this.name = 'SpecError';
     this.code = code;
     if (path !== undefined) this.path = path;
-    objectDefineProperty(this, BRAND, { value: true });
+    defineValue(this, BRAND, true, false);
   }
 
   static [symbolHasInstance](value: unknown): boolean {
@@ -92,7 +92,7 @@ export class VerifyOptionsError extends SpecError {
     super('INVALID_OPTIONS', message, option);
     this.name = 'VerifyOptionsError';
     this.option = option;
-    objectDefineProperty(this, OPTIONS_BRAND, { value: true });
+    defineValue(this, OPTIONS_BRAND, true, false);
   }
 
   /**

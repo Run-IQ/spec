@@ -30,6 +30,7 @@ import {
   arrayJoin,
   arrayMap,
   arraySome,
+  bare,
   mapGet,
   mapHas,
   mapSet,
@@ -186,7 +187,7 @@ function readMembers(declaration: unknown, path: string, add: Add): OutputDeclar
   if (failed || !isOneOf(type, OUTPUT_TYPES) || !isOneOf(combine, COMBINE_STRATEGIES)) {
     return undefined;
   }
-  const normal: OutputDeclaration = { type, combine };
+  const normal: OutputDeclaration = bare({ type, combine });
   if (values !== undefined) normal.values = values;
   if (rounding !== undefined) normal.rounding = rounding;
   if (unit !== undefined) normal.unit = unit;

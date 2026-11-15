@@ -12,6 +12,7 @@ import {
   hasLoneSurrogate,
   isPlainObject,
   loneSurrogateMessage,
+  own,
   readList,
   spendValues,
   tooLargeMessage,
@@ -25,10 +26,11 @@ import {
   arrayJoin,
   arrayMap,
   arraySome,
+  bare,
+  defineValue,
   mapEntriesArray,
   mapGet,
   mapSet,
-  objectDefineProperty,
   objectEntries,
   objectHasOwn,
   objectKeys,
@@ -220,7 +222,7 @@ export function mapOf(
     }
     const members = readMembers(value, path, add);
     if (members === undefined) return undefined;
-    const copy: Record<string, unknown> = {};
+    const copy: Record<string, unknown> = bare({});
     let count = 0;
     for (let idx179 = 0, list179 = mapEntriesArray(members); idx179 < list179.length; idx179++) {
       const tuple1065 = list179[idx179] as (typeof list179)[number];
@@ -235,7 +237,7 @@ export function mapOf(
       // Plain assignment would turn a `__proto__` key into a prototype change.
       else defineMember(copy, name, item(entry, at, add));
     }
-    if (count === 0 && options.nonEmpty !== undefined) {
+    if (count === 0 && own(options, 'nonEmpty') !== undefined) {
       add(path, `${citeName(path)} must not be empty: ${options.nonEmpty}`);
     }
     return copy;
@@ -243,12 +245,7 @@ export function mapOf(
 }
 
 function defineMember(target: Record<string, unknown>, key: string, value: unknown): void {
-  objectDefineProperty(target, key, {
-    value,
-    enumerable: true,
-    writable: true,
-    configurable: true,
-  });
+  defineValue(target, key, value, true);
 }
 
 /** The fields of each shape in order, listed once: a proof checks thousands of objects. */
@@ -295,7 +292,7 @@ export function checkObject(
     return undefined;
   }
   let shape = given;
-  const gated = shape.gate?.(members, path);
+  const gated = own(shape, 'gate')?.(members, path);
   if (gated !== undefined && 'message' in gated) {
     add(gated.path, gated.message);
     return undefined;
@@ -310,7 +307,7 @@ export function checkObject(
     if (member === undefined || setHas(ignored, key) || objectHasOwn(shape.fields, key)) continue;
     add(at(key), `${citeName(path || 'proof')} has an unknown key ${quoteText(key)}`);
   }
-  const copy: Record<string, unknown> = {};
+  const copy: Record<string, unknown> = bare({});
   let failed = false;
   const fieldAdd: Add = (where, message) => {
     failed = true;
@@ -325,6 +322,6 @@ export function checkObject(
     else if (!(shape.optional !== undefined && arrayIncludes(shape.optional, key)))
       fieldAdd(at(key), `${citeName(at(key))} is required`);
   }
-  if (!failed) shape.refine?.(copy, path, add);
+  if (!failed) own(shape, 'refine')?.(copy, path, add);
   return { members, copy };
 }

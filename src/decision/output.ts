@@ -6,7 +6,7 @@ import type { RuleValidationIssue } from '../issues.js';
 import { isReservedName } from '../reserved.js';
 import { dimensionValueProblem } from '../rule/dimensions.js';
 import { isCivilDate, isInstant } from '../time/civil.js';
-import { hasLoneSurrogate, ownCopy, withValueBudget } from '../values.js';
+import { hasLoneSurrogate, ordinary, ownCopy, withValueBudget } from '../values.js';
 import { isCanonicalDecimal } from './decimal.js';
 import { readDeclaration } from './read-declaration.js';
 import type { OutputRounding } from './rounding.js';
@@ -158,7 +158,7 @@ export function validateOutputDeclaration(
  * problem's path as `path`) for a declaration `validateOutputDeclaration` refuses.
  */
 export function normalizeOutputDeclaration(declaration: OutputDeclaration): OutputDeclaration {
-  return withValueBudget(() => validDeclaration(declaration));
+  return ordinary(withValueBudget(() => validDeclaration(declaration)));
 }
 
 /**

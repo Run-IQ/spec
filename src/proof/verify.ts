@@ -17,6 +17,7 @@ import {
   optionsLimits,
   readList,
   withValueBudget,
+  own,
 } from '../values.js';
 import { misspellingOf } from '../rule/fields.js';
 import { extend } from './collect.js';
@@ -46,7 +47,7 @@ import {
   arrayPush,
   arraySome,
   functionCall,
-  jsonParse,
+  jsonParseBare,
   mapEntriesArray,
   mapGet,
   mapHas,
@@ -331,7 +332,7 @@ function readOptions(o: unknown): Options {
   }
   const read = (name: string): unknown => {
     try {
-      return record[name];
+      return own(record, name);
     } catch (error) {
       return fail(`options.${name}`, unreadableMessage(`options.${name}`, error));
     }
@@ -383,7 +384,7 @@ function readGivenRules(rules: unknown, fail: Fail): GivenRules | undefined {
       // rule exactly when `computeRuleChecksum` does.
       const payload = canonicalRulePayload(rule as RuleDefinitionInput);
       // The payload is the canonical JSON of a normalized definition.
-      definition = jsonParse(payload) as RuleDefinition;
+      definition = jsonParseBare(payload) as RuleDefinition;
       id = qualifyName(definition.ruleSet ?? LOCAL_RULE_SET, definition.id);
       key = `${id}@${definition.version}`;
       checksum = sha256Hex(payload);

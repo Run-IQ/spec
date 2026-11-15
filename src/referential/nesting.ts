@@ -11,6 +11,7 @@ import {
   arraySlice,
   arraySort,
   arrayUnshift,
+  bare,
   mapDelete,
   mapGet,
   mapHas,
@@ -75,7 +76,7 @@ export function sweepNesting(
   maxDepth: number,
   work: Work,
 ): NestingProblems {
-  const problems: NestingProblems = {};
+  const problems: NestingProblems = bare({});
   try {
     sweep(edges, maxDepth, work, problems);
   } catch (error) {

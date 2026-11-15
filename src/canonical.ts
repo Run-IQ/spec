@@ -8,12 +8,13 @@ import {
   arrayPop,
   arrayPush,
   arraySort,
+  bare,
+  defineValue,
   functionHasInstance,
   isoOf,
   numberIsFinite,
   numberIsNaN,
   numberIsSafeInteger,
-  objectDefineProperty,
   objectIs,
   objectKeys,
   setAdd,
@@ -93,7 +94,7 @@ export function canonicalizeAt(value: unknown, path: string): string {
 }
 
 /** How `canonicalize` reads a value. */
-const CANONICAL = { guarded: true, maxDepth: Infinity, freeForm: false };
+const CANONICAL = bare({ guarded: true, maxDepth: Infinity, freeForm: false });
 
 /**
  * Internal: the lowercase hex sha256 of the UTF-8 bytes of `canonicalize(value)`, with its
@@ -138,7 +139,7 @@ export function isCanonicalText(value: unknown, text: string): boolean {
  * every caller reads under its own guard, which names the field that could not be read.
  */
 export function toJsonValue(value: unknown, path: string): JsonValue {
-  const options = { guarded: false, maxDepth: MAX_JSON_DEPTH, freeForm: true };
+  const options = bare({ guarded: false, maxDepth: MAX_JSON_DEPTH, freeForm: true });
   return write(value, path, options, new ValueSink());
 }
 
@@ -154,7 +155,7 @@ export function toJsonDocument(
   freeFormAt: (depth: number, key: string) => boolean,
   guarded = false,
 ): JsonValue {
-  const options = { guarded, maxDepth: MAX_JSON_DEPTH, freeForm: false, freeFormAt };
+  const options = bare({ guarded, maxDepth: MAX_JSON_DEPTH, freeForm: false, freeFormAt });
   return write(value, path, options, new ValueSink());
 }
 
@@ -299,12 +300,7 @@ class ValueSink implements Sink<JsonValue> {
     else if (arrayIsArray(parent)) arrayPush(parent, value);
     else {
       // Plain assignment would turn a `__proto__` key into a prototype change.
-      objectDefineProperty(parent, this.pending, {
-        value,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      defineValue(parent, this.pending, value, true);
     }
   }
 }

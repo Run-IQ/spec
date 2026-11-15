@@ -16,6 +16,7 @@ import {
   arrayIncludes,
   arrayIsArray,
   arraySort,
+  bare,
   objectKeys,
   setOf,
   setValuesArray,
@@ -132,7 +133,7 @@ function readSpec(value: unknown, path: string, add: Add): DimensionSpec | undef
     fail(path, tooLargeMessage(path));
     return undefined;
   }
-  const fields: Record<string, unknown> = {};
+  const fields: Record<string, unknown> = bare({});
   for (let idx3 = 0, list3 = keys; idx3 < list3.length; idx3++) {
     const key = list3[idx3] as (typeof list3)[number];
     const member = value[key];

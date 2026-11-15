@@ -11,123 +11,14 @@
  * harness itself never runs under a patch.
  */
 import { describe, expect, it } from 'vitest';
-import {
-  canonicalize,
-  computeRuleChecksum,
-  createAttestation,
-  isEffectiveAt,
-  normalizeRuleDefinition,
-  sealProof,
-  signProof,
-  toReferenceDate,
-  validateProofInput,
-  verifyAttestation,
-  verifyProof,
-  VerifyOptionsError,
-} from '../src/index.js';
-import type { RuleDefinitionInput } from '../src/index.js';
 import { readFileSync } from 'node:fs';
 import { CAPTURED } from '../src/intrinsics.js';
-import { clearIntlCaches } from '../src/proof/intl-calendar.js';
-import { withRuntimeTzdata } from './notices.js';
-import { RFC_PUBLIC, RFC_SECRET, ruleA, ruleB, signed, unsalted, unsigned } from './proof-cases.js';
+import { VerifyOptionsError } from '../src/index.js';
+import { run } from './corpus.js';
 
-const stringify = JSON.stringify;
+import { RFC_PUBLIC } from './proof-cases.js';
 const define = Object.defineProperty;
 const describeProperty = Object.getOwnPropertyDescriptor;
-const TRUSTED = { 'executor-1': RFC_PUBLIC };
-
-// The Paris proof of the audit: honest verdict `invalid` (the rule is applied outside its window),
-// decided by `Intl` under the release the proof records.
-const paris = { ...ruleA, timeZone: 'Europe/Paris', effectiveFrom: '2025-01-01' };
-function parisProof() {
-  const content = withRuntimeTzdata(unsigned());
-  content.evaluatedAt = '2024-12-31T22:30:00.000Z';
-  content.rules = content.rules.map((r) =>
-    r.id === 'r1' ? { ...r, checksum: computeRuleChecksum(paris) } : r,
-  );
-  return signProof(sealProof(unsalted(content)), RFC_SECRET, 'executor-1');
-}
-
-const digest = 'a'.repeat(64);
-const attestation = createAttestation(digest, RFC_SECRET, 'reviewer');
-const signedProof = signed();
-const parisSigned = parisProof();
-const untrustedProof = signProof(sealProof(unsalted(unsigned())), RFC_SECRET, 'evil');
-const rule = { ...ruleA, params: { rates: [1, 2, { x: 'y' }] } };
-const forgedGetter = new Proxy({}, { ownKeys: () => [], getPrototypeOf: () => null });
-void forgedGetter;
-
-type Call = () => unknown;
-const CORPUS: [string, Call][] = [
-  [
-    'verifyProof authentic',
-    () => verifyProof(signedProof, { trustedKeys: TRUSTED, rules: [ruleA, ruleB] }),
-  ],
-  ['verifyProof untrusted key', () => verifyProof(untrustedProof, { trustedKeys: TRUSTED })],
-  [
-    'verifyProof Paris, rules',
-    () => verifyProof(parisSigned, { trustedKeys: TRUSTED, rules: [paris, ruleB] }),
-  ],
-  ['verifyProof malformed', () => verifyProof({ format: 'run-iq.proof/1' })],
-  ['verifyProof options throw', () => verifyProof(signedProof, { calender: 1 } as never)],
-  ['verifyProof key malformed', () => verifyProof(signedProof, { trustedKeys: { k: 'zz' } })],
-  [
-    'verifyAttestation authentic',
-    () => verifyAttestation(attestation, digest, { reviewer: RFC_PUBLIC }),
-  ],
-  ['verifyAttestation untrusted', () => verifyAttestation(attestation, digest, {})],
-  [
-    'verifyAttestation other proof',
-    () => verifyAttestation(attestation, 'b'.repeat(64), { reviewer: RFC_PUBLIC }),
-  ],
-  ['canonicalize', () => canonicalize({ a: [1, 2, { b: new Date(5) }], c: 'x' })],
-  [
-    'canonicalize Date under plain prototype',
-    () => canonicalize({ a: Object.setPrototypeOf(new Date(5), Object.prototype) }),
-  ],
-  ['checksum', () => computeRuleChecksum(rule)],
-  [
-    'normalize',
-    () => normalizeRuleDefinition({ ...ruleA, effectiveFrom: new Date(0) } as RuleDefinitionInput),
-  ],
-  ['toReferenceDate string', () => toReferenceDate('2025-01-01T00:00:00+01:00')],
-  ['toReferenceDate Date', () => toReferenceDate(new Date(86_400_000))],
-  [
-    'isEffectiveAt',
-    () => isEffectiveAt({ effectiveFrom: '2025-01-01' }, new Date(Date.UTC(2025, 5, 1))),
-  ],
-  [
-    'validateProofInput',
-    () =>
-      validateProofInput({
-        data: { a: [1, { b: 2 }] },
-        meta: { tenantId: 't', dates: {}, tags: [], dimensions: {}, context: {}, assertions: {} },
-      } as never),
-  ],
-  [
-    'createAttestation at',
-    () => createAttestation(digest, RFC_SECRET, 'reviewer', { at: '2026-01-01T00:00:00.000Z' }),
-  ],
-];
-
-/** Runs the corpus: each result is a string, an error name and message, or a thrown option. */
-function run(): string[] {
-  clearIntlCaches();
-  const results: string[] = [];
-  let i = 0;
-  for (const [, call] of CORPUS) {
-    let text: string;
-    try {
-      text = stringify(call());
-    } catch (error) {
-      const e = error as { name?: string; message?: string; code?: string; option?: string };
-      text = `threw ${e.name} ${e.code} ${e.option} ${e.message}`;
-    }
-    results[i++] = text;
-  }
-  return results;
-}
 
 const baseline = run();
 

@@ -1,4 +1,5 @@
 import {
+  bare,
   NativeDate,
   NativeError,
   NativeIntlDateTimeFormat,
@@ -71,11 +72,11 @@ export const intlRuntime: { DateTimeFormat: typeof Intl.DateTimeFormat } = {
 };
 
 function makeFormatter(zone: string): Intl.DateTimeFormat {
-  return new intlRuntime.DateTimeFormat('en-US', {
-    timeZone: zone,
-    timeZoneName: 'longOffset',
-    hour: 'numeric',
-  });
+  // No prototype: `Intl` reads the fields of its options through the chain.
+  return new intlRuntime.DateTimeFormat(
+    'en-US',
+    bare({ timeZone: zone, timeZoneName: 'longOffset', hour: 'numeric' } as const),
+  );
 }
 
 /**

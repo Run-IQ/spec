@@ -6,8 +6,10 @@ import { contentDigest } from './digest.js';
 import { proofView } from './redact.js';
 import type { DecisionProof } from './types.js';
 import { readDecisionProof } from './validate.js';
+import { ordinary } from '../values.js';
 import {
   arrayPush,
+  bare,
   bytesFromNumbers,
   regExpTest,
   stringCharAt,
@@ -71,7 +73,7 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
     );
   }
   const value = signText(proof.digest, secretKey);
-  return { ...proof, signature: { alg: 'ed25519', keyId, value } };
+  return ordinary({ ...proof, signature: { alg: 'ed25519', keyId, value } });
 }
 
 /**
@@ -79,7 +81,7 @@ export function signProof(p: DecisionProof, privateKeyHex: string, keyId: string
  * of a proof's digest (`signProof`), of an attestation's canonical text (`createAttestation`).
  */
 export function signText(text: string, secretKey: Uint8Array): string {
-  return toBase64Url(ed25519.sign(utf8ToBytes(text), secretKey));
+  return toBase64Url(ed25519.sign(utf8ToBytes(text), secretKey, bare({})));
 }
 
 /** Internal: the 32 bytes of a hex ed25519 key (either case), or `undefined` if malformed. */
@@ -111,7 +113,7 @@ export function publicKeyBytes(hex: unknown): Uint8Array | undefined {
 export function signatureMatches(message: string, value: string, publicKey: Uint8Array): boolean {
   const signature = fromBase64Url(value);
   if (!signature) return false;
-  return ed25519.verify(signature, utf8ToBytes(message), publicKey, { zip215: false });
+  return ed25519.verify(signature, utf8ToBytes(message), publicKey, bare({ zip215: false }));
 }
 
 function toBase64Url(bytes: Uint8Array): string {

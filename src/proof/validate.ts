@@ -29,6 +29,7 @@ import {
   arrayJoin,
   arrayMap,
   arraySome,
+  bare,
   mapGet,
   mapHas,
   mapSet,
@@ -197,7 +198,7 @@ export function readProofLeaf(value: unknown): { leaf?: ProofLeaf; errors: strin
           ? checkObject(entry, 'e', PROOF_HEADER, add, new NativeSet())?.copy
           : SECTION_ENTRY[s as ProofSection](entry, 'e', add);
       // Checked: a plain copy of a header or of an entry of `s`.
-      leaf = { ...read.copy, e: copy } as ProofLeaf;
+      leaf = bare({ ...read.copy, e: copy }) as ProofLeaf;
     });
   } catch (error) {
     return { errors: [unreadableMessage('leaf', error)] };

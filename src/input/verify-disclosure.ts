@@ -5,7 +5,7 @@ import { citeName, reasonOf, unreadableMessage } from '../errors.js';
 import { boundMessages, IssueList } from '../issues.js';
 import { compareSegments, parsePointer } from '../path/pointer.js';
 import type { JsonPointer } from '../path/pointer.js';
-import { ownCopy, withValueBudget } from '../values.js';
+import { ordinary, ownCopy, withValueBudget } from '../values.js';
 import { isAncestor, isWithin, mayGrow } from './disclosure.js';
 import type { FactDisclosureVerification } from './disclosure.js';
 import { runCheck } from './read.js';
@@ -33,6 +33,7 @@ import {
   arrayPush,
   arraySome,
   arraySort,
+  bare,
   mapEntriesArray,
   mapGet,
   mapHas,
@@ -123,8 +124,8 @@ function verify(d: unknown, inputDigest: unknown): FactDisclosureVerification {
   checkFacts(read, verified, problems);
   checkAbsences(read, inputDigest, verified, problems);
   checkContradictions(arrayConcat(mapValuesArray(verified)), read.absent, problems);
-  const facts: Record<JsonPointer, JsonValue> = {};
-  const lists: Record<JsonPointer, number> = {};
+  const facts: Record<JsonPointer, JsonValue> = bare({});
+  const lists: Record<JsonPointer, number> = bare({});
   for (let idx200 = 0, list200 = read.facts; idx200 < list200.length; idx200++) {
     const fact = list200[idx200] as (typeof list200)[number];
     if (problems.length > 0) break;
@@ -134,7 +135,13 @@ function verify(d: unknown, inputDigest: unknown): FactDisclosureVerification {
     else facts[fact.pointer] = value.value;
   }
   if (problems.length > 0) return refusedWith(problems.messages());
-  return { valid: true, issues: [], facts, lists, absent: arrayMap(read.absent, (a) => a.pointer) };
+  return ordinary({
+    valid: true,
+    issues: [],
+    facts,
+    lists,
+    absent: arrayMap(read.absent, (a) => a.pointer),
+  });
 }
 
 /** A leaf in the tree: its index, pointer and segments, and its kind when it is shown. */

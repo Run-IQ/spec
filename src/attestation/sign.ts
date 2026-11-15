@@ -1,5 +1,5 @@
 import { newSpecError, reasonOf, unreadableMessage } from '../errors.js';
-import { mapGet, mapHas, nowIso, regExpTest } from '../intrinsics.js';
+import { bare, mapGet, mapHas, nowIso, regExpTest } from '../intrinsics.js';
 import { checkText, childPointer, expectPlainObject, readFields, runCheck } from '../input/read.js';
 import { keyBytes, signText } from '../proof/sign.js';
 import type { Instant } from '../time/civil.js';
@@ -61,7 +61,7 @@ const OPTION_KEYS: readonly string[] = ['role', 'at'];
 /** The options, each member read once, or a thrown `INVALID_ATTESTATION`. */
 function readOptions(o: unknown): { role?: string; at?: string } {
   if (o === undefined) return {};
-  const read: { role?: string; at?: string } = {};
+  const read: { role?: string; at?: string } = bare({});
   const { issues } = runCheck(
     (reader) => {
       const { add } = reader;

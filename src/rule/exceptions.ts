@@ -36,6 +36,7 @@ import {
   arrayPush,
   arraySome,
   arraySort,
+  bare,
   objectEntries,
   objectHasOwn,
   objectKeys,
@@ -221,7 +222,7 @@ function copySelector(selector: unknown): RuleSelector {
   if (!isPlainObject(selector)) {
     selectorError(`selector must be an object, got a value of type ${typeName(selector)}`);
   }
-  const copy: RuleSelector = {};
+  const copy: RuleSelector = bare({});
   for (
     let idx1003 = 0, list1003 = arrayConcat(SELECTOR_LISTS, ['ruleSets'] as const);
     idx1003 < list1003.length;
@@ -524,7 +525,7 @@ function readSelector(
   }
 
   const ruleSets = readRuleSets(value.ruleSets, `${path}.ruleSets`, fail);
-  const lists: Partial<Record<(typeof SELECTOR_LISTS)[number], string[]>> = {};
+  const lists: Partial<Record<(typeof SELECTOR_LISTS)[number], string[]>> = bare({});
   for (let idx27 = 0, list27 = SELECTOR_LISTS; idx27 < list27.length; idx27++) {
     const field = list27[idx27] as (typeof list27)[number];
     const list = readList(value[field], `${path}.${field}`, true, fail);
@@ -542,7 +543,7 @@ function readSelector(
     checkReach(lists, ruleSets?.length ? ruleSets : [carrier], carrier, path, fail);
   }
 
-  const selector: RuleSelector = {};
+  const selector: RuleSelector = bare({});
   for (let idx28 = 0, list28 = SELECTOR_LISTS; idx28 < list28.length; idx28++) {
     const field = list28[idx28] as (typeof list28)[number];
     let list = lists[field];

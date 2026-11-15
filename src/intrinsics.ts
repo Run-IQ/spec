@@ -165,6 +165,39 @@ export const objectDefineProperty: typeof Object.defineProperty = Object.defineP
 export const objectEntries: typeof Object.entries = Object.entries;
 export const objectFreeze: typeof Object.freeze = Object.freeze;
 export const objectFromEntries: typeof Object.fromEntries = Object.fromEntries;
+export const objectSetPrototypeOf: typeof Object.setPrototypeOf = Object.setPrototypeOf;
+
+/**
+ * `fields` (a fresh object literal) with no prototype, for an options bag or a descriptor handed
+ * to a built-in: the built-in reads its fields through the chain, so a polluted
+ * `Object.prototype` must never reach it.
+ */
+export function bare<T extends object>(fields: T): T {
+  return objectSetPrototypeOf(fields, null) as T;
+}
+
+/**
+ * `Object.defineProperty(target, key, { value, ... })` with a descriptor that has no prototype:
+ * `defineProperty` reads `get`, `set` and the other fields of a descriptor through its chain, so
+ * a polluted `Object.prototype` must never reach it. `visible` gives an ordinary own data
+ * property (enumerable, writable, configurable); otherwise it is hidden and fixed.
+ */
+export function defineValue(
+  target: object,
+  key: PropertyKey,
+  value: unknown,
+  visible: boolean,
+): void {
+  const descriptor = {
+    __proto__: null,
+    value,
+    enumerable: visible,
+    writable: visible,
+    configurable: visible,
+  };
+  objectDefineProperty(target, key, descriptor as PropertyDescriptor);
+}
+
 export const objectGetOwnPropertyDescriptor: typeof Object.getOwnPropertyDescriptor =
   Object.getOwnPropertyDescriptor;
 export const objectHasOwn: typeof Object.hasOwn = Object.hasOwn;
@@ -519,6 +552,7 @@ export const CAPTURED: readonly (readonly [object, string])[] = [
   [Object, 'fromEntries'],
   [Object, 'getOwnPropertyDescriptor'],
   [Object, 'hasOwn'],
+  [Object, 'setPrototypeOf'],
   [Object, 'is'],
   [Object, 'keys'],
   [Object, 'values'],
@@ -692,12 +726,24 @@ export function objectOfEntries<V>(entries: readonly (readonly [string, V])[]): 
   const out: Record<string, V> = {};
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i] as readonly [string, V];
-    objectDefineProperty(out, entry[0], {
-      value: entry[1],
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
+    defineValue(out, entry[0], entry[1], true);
   }
   return out;
+}
+
+/**
+ * `JSON.parse(text)` with every object it builds given no prototype: a field the text leaves out
+ * reads as absent, whatever `Object.prototype` holds (arrays are unchanged).
+ */
+export function jsonParseBare(text: string): unknown {
+  return jsonParse(text, (_key: string, value: unknown): unknown => {
+    if (typeof value !== 'object' || value === null || arrayIsArray(value)) return value;
+    const copy = bare({} as Record<string, unknown>);
+    const keys = objectKeys(value);
+    for (let i = 0; i < keys.length; i++) {
+      const key = keys[i] as string;
+      defineValue(copy, key, (value as Record<string, unknown>)[key], true);
+    }
+    return copy;
+  });
 }

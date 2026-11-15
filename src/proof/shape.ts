@@ -59,6 +59,7 @@ import {
   arrayMap,
   arraySlice,
   arraySome,
+  bare,
   mapGet,
   numberIsSafeInteger,
   objectEntries,
@@ -233,7 +234,7 @@ function outputOf(shape: Shape): Check {
     if (read === undefined) return undefined;
     const { copy } = read;
     if (mapGet(read.members, 'redacted') !== undefined) return copy;
-    const declaration: Record<string, unknown> = {};
+    const declaration: Record<string, unknown> = bare({});
     for (let idx182 = 0, list182 = DECLARATION_KEYS; idx182 < list182.length; idx182++) {
       const key = list182[idx182] as (typeof list182)[number];
       if (copy[key] !== undefined) declaration[key] = copy[key];

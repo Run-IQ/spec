@@ -6,14 +6,15 @@ import type { RuleValidationIssue } from '../issues.js';
 import { withSha256, writeJsonString } from '../stream.js';
 import type { HashStream } from '../stream.js';
 import {
-  dateTimeOf,
-  notADateMessage,
-  hasLoneSurrogate,
-  isPlainObject,
-  holeMessage,
-  loneSurrogateMessage,
   MAX_INPUT_LEAF_TEXT,
   MAX_JSON_DEPTH,
+  dateTimeOf,
+  hasLoneSurrogate,
+  holeMessage,
+  isPlainObject,
+  loneSurrogateMessage,
+  notADateMessage,
+  own,
   spendValues,
   tooLargeMessage,
   undefinedMessage,
@@ -31,6 +32,8 @@ import {
   arrayPush,
   arraySome,
   arraySort,
+  bare,
+  defineValue,
   jsonStringify,
   mapDelete,
   mapGet,
@@ -41,7 +44,6 @@ import {
   mathMin,
   numberIsFinite,
   numberIsSafeInteger,
-  objectDefineProperty,
   objectIs,
   objectKeys,
   reflectGet,
@@ -157,11 +159,11 @@ function createReader(options: ReaderOptions): Reader {
     walked: new NativeMap(),
     leafText: 0,
   };
-  return {
+  return bare({
     ...reader,
-    ...(options.encode === true ? { encodings: new NativeMap() } : {}),
-    ...(options.copy === true ? { copies: new NativeMap() } : {}),
-  };
+    ...(own(options, 'encode') === true ? { encodings: new NativeMap() } : {}),
+    ...(own(options, 'copy') === true ? { copies: new NativeMap() } : {}),
+  });
 }
 
 /**
@@ -338,8 +340,8 @@ export function readFields(
   reader: Reader,
   options: { add?: Add; join?: (path: string, key: string) => string } = {},
 ): Fields | undefined {
-  const add = options.add ?? reader.add;
-  const join = options.join ?? childPointer;
+  const add = own(options, 'add') ?? reader.add;
+  const join = own(options, 'join') ?? childPointer;
   const keys = ownKeys(value, path, add);
   if (keys === undefined) return undefined;
   announce(reader, keys.length, path);
@@ -626,16 +628,11 @@ function containerCopy(frame: Frame): JsonValue | undefined {
     arrayPush(copies, copy);
   }
   if (frame.keys === undefined) return copies;
-  const out: { [k: string]: JsonValue } = {};
+  const out: { [k: string]: JsonValue } = bare({});
   arrayForEach(frame.parts, (part, i) => {
     const key = part[0];
     // Plain assignment would turn a `__proto__` key into a prototype change.
-    objectDefineProperty(out, NativeString(key), {
-      value: copies[i],
-      enumerable: true,
-      writable: true,
-      configurable: true,
-    });
+    defineValue(out, NativeString(key), copies[i], true);
   });
   return out;
 }

@@ -40,10 +40,11 @@ import type { FactAssertion, ProofInput } from './types.js';
 import {
   arrayIsArray,
   arrayPush,
+  bare,
+  defineValue,
   mapGet,
   mapHas,
   numberIsSafeInteger,
-  objectDefineProperty,
   objectEntries,
   objectKeys,
   stringStartsWith,
@@ -297,7 +298,7 @@ function eachMember<T>(
   const keys = ownKeys(value, path, add);
   if (keys === undefined) return undefined;
   announce(reader, keys.length, path);
-  const copy: Record<string, T> = {};
+  const copy: Record<string, T> = bare({});
   let members = 0;
   for (let idx102 = 0, list102 = keys; idx102 < list102.length; idx102++) {
     const key = list102[idx102] as (typeof list102)[number];
@@ -313,12 +314,7 @@ function eachMember<T>(
     // Plain assignment would turn a `__proto__` key into a prototype change.
     if (member !== undefined && reader.copies !== undefined) {
       copyWork.values += 1;
-      objectDefineProperty(copy, key, {
-        value: member,
-        enumerable: true,
-        writable: true,
-        configurable: true,
-      });
+      defineValue(copy, key, member, true);
     }
   }
   if (members === 0) countText(reader, path.length);

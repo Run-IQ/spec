@@ -20,6 +20,7 @@ import {
   arrayIsArray,
   arrayJoin,
   arraySort,
+  bare,
   bytesFromNumbers,
   bytesToArray,
   jsonStringify,
@@ -68,7 +69,7 @@ export function isRedacted(entry: object): entry is Redacted {
 
 /** Internal: the header of `p` (a snapshot): every member but the sections, digest, signature. */
 export function headerOf(p: object): Record<string, unknown> {
-  const header: Record<string, unknown> = {};
+  const header: Record<string, unknown> = bare({});
   for (let idx186 = 0, list186 = objectEntries(p); idx186 < list186.length; idx186++) {
     const tuple1070 = list186[idx186] as (typeof list186)[number];
     const key = tuple1070[0];

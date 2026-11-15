@@ -1,7 +1,7 @@
 import { bytesToHex } from '@noble/hashes/utils.js';
 import { newSpecError, reasonOf } from '../errors.js';
 import { sizedDigest } from '../merkle.js';
-import { typeName, withValueBudget } from '../values.js';
+import { ordinary, typeName, withValueBudget } from '../values.js';
 import { hiddenSections } from './lifts.js';
 import type { HiddenSections } from './lifts.js';
 import { isRedacted, packedLeafHashes } from './tree.js';
@@ -16,6 +16,7 @@ import {
   arrayMap,
   arrayPush,
   arraySome,
+  bare,
   mapSet,
   setAdd,
   setOf,
@@ -52,7 +53,7 @@ export const NO_REDACTION: Redactions = {
  * shared, not copied), and where the redacted ones were.
  */
 export function proofView(p: UnsignedProof): { view: ProofView; redactions: Redactions } {
-  const view = { ...p } as unknown as Record<string, unknown>;
+  const view = bare({ ...p }) as unknown as Record<string, unknown>;
   const hidden = new NativeSet<ProofSection>();
   const bySection = new NativeMap<ProofSection, number>();
   const positions = new NativeMap<ProofSection, number[]>();
@@ -140,7 +141,7 @@ export function redactProof(
         ]);
       });
     }
-    const copy = { ...proof } as unknown as Record<ProofSection, object[]>;
+    const copy = bare({ ...proof }) as unknown as Record<ProofSection, object[]>;
     for (
       let idx1073 = 0, list1073 = setValuesArray(setOf(arrayMap(chosen, (entry) => entry[0])));
       idx1073 < list1073.length;
@@ -156,7 +157,7 @@ export function redactProof(
       const redacted = tuple2001[2];
       copy[section][i] = { redacted };
     }
-    return copy as unknown as DecisionProof;
+    return ordinary(copy) as unknown as DecisionProof;
   });
 }
 
