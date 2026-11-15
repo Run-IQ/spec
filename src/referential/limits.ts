@@ -1,6 +1,6 @@
 import { citeName, newSpecError, unreadableMessage } from '../errors.js';
 import { MAX_JSON_VALUES } from '../values.js';
-import { numberIsSafeInteger, reflectGet } from '../intrinsics.js';
+import { numberIsSafeInteger, objectHasOwn, reflectGet } from '../intrinsics.js';
 
 /** Default bound on the nodes of a referential: its code periods, groups and members. */
 export const DEFAULT_MAX_REFERENTIAL_NODES = 100_000;
@@ -60,9 +60,11 @@ export function readLimits(options: unknown): Limits {
   let maxDepth: unknown;
   let maxSteps: unknown;
   try {
-    maxNodes = reflectGet(options, 'maxNodes');
-    maxDepth = reflectGet(options, 'maxDepth');
-    maxSteps = reflectGet(options, 'maxSteps');
+    // Own properties only: an option the caller leaves out is absent, whatever a polluted
+    // prototype holds.
+    maxNodes = objectHasOwn(options, 'maxNodes') ? reflectGet(options, 'maxNodes') : undefined;
+    maxDepth = objectHasOwn(options, 'maxDepth') ? reflectGet(options, 'maxDepth') : undefined;
+    maxSteps = objectHasOwn(options, 'maxSteps') ? reflectGet(options, 'maxSteps') : undefined;
   } catch (error) {
     throw newSpecError('INVALID_REFERENTIAL', unreadableMessage('options', error));
   }

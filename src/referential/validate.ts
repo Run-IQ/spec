@@ -13,6 +13,7 @@ import {
   ordinary,
   ownCopy,
   undefinedMessage,
+  own,
 } from '../values.js';
 import { readLimits, STEPS_PER_NODE } from './limits.js';
 import type { Limits, ReferentialLimits } from './limits.js';
@@ -619,7 +620,9 @@ function checkPeriods(periods: PeriodList, path: string, add: Add): Period[] {
     }
   }
   const normal = sortedUnique(read, compareSpans);
-  const overlap = firstOverlap(arrayMap(normal, (p) => ({ from: p.from, until: p.until ?? null })));
+  const overlap = firstOverlap(
+    arrayMap(normal, (p) => ({ from: p.from, until: own(p, 'until') ?? null })),
+  );
   if (overlap !== undefined) add(path, `${citeName(path)} has overlapping periods from ${overlap}`);
   return mergeAdjacent(normal);
 }
@@ -728,7 +731,7 @@ function checkMembers(
   const byValue = new NativeMap<string, Span[]>();
   for (let idx46 = 0, list46 = normal; idx46 < list46.length; idx46++) {
     const member = list46[idx46] as (typeof list46)[number];
-    const span = { from: member.from ?? ALWAYS, until: member.until ?? null };
+    const span = { from: own(member, 'from') ?? ALWAYS, until: own(member, 'until') ?? null };
     const spans = mapGet(byValue, member.value) ?? [];
     arrayPush(spans, span);
     mapSet(byValue, member.value, spans);

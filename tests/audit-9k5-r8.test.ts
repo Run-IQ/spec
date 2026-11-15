@@ -10,6 +10,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   fromStoredRecord,
+  resolveMembership,
   normalizeOutputDeclaration,
   normalizeReferential,
   computeReferentialDigest,
@@ -138,6 +139,41 @@ describe('data only: a read-only or writable plain value on the prototypes chang
       }
     }
   });
+});
+
+describe('data only: the referential reads its options and its members as own data', () => {
+  const calls = (): string =>
+    JSON.stringify([
+      validateReferential({
+        format: 'run-iq.referential/1',
+        id: 'cycle',
+        version: '1',
+        dimension: 'd',
+        groups: {
+          A: { exhaustive: true, members: [{ value: 'B', from: '2020-01-01' }] },
+          B: { exhaustive: true, members: [{ value: 'C' }] },
+          C: { exhaustive: true, members: [{ value: 'A' }] },
+        },
+      }),
+      resolveMembership(normalizeReferential(ueReferential()), 'UE', 'GB', '2019-06-01'),
+      computeReferentialDigest(ueReferential()),
+    ]);
+
+  it.each(['codes', 'from', 'until', 'maxNodes', 'maxDepth', 'maxSteps', 'sourceRef'])(
+    '%s planted on Object.prototype (a number, a string, read-only) changes no result',
+    (key) => {
+      const clean = calls();
+      expect(clean).toContain('A > B > C > A from 2020-01-01');
+      for (const descriptor of [
+        { value: 7, writable: true },
+        { value: 'x', writable: true },
+        { value: 7, writable: false },
+        { value: {}, writable: true },
+      ]) {
+        expect(planted(Object.prototype, key, descriptor, calls)).toBe(clean);
+      }
+    },
+  );
 });
 
 describe('code in the same realm: out of scope for phase 2 (ruling of round 8), kept as it.fails', () => {

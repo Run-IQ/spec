@@ -7,7 +7,7 @@ import {
 import type { DimensionSpec } from '../rule/dimensions.js';
 import { isCivilDate } from '../time/civil.js';
 import type { CivilDate } from '../time/civil.js';
-import { readList } from '../values.js';
+import { own, readList } from '../values.js';
 import { readLimits } from './limits.js';
 import type { ReferentialLimits } from './limits.js';
 import type { Membership, Referential, ReferentialMember } from './types.js';
@@ -250,7 +250,7 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
       `input value ${citeName(value)} is a group of ${citeName(referential.id)}`,
     );
   }
-  const codes = referential.codes;
+  const codes = own(referential, 'codes');
   if (codes === undefined) return { kind: 'code', code };
   if (!objectHasOwn(codes, code)) {
     return {
@@ -259,7 +259,10 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
     };
   }
   const periods = codes[code] ?? [];
-  const valid = arraySome(periods, (p) => p.from <= at && (p.until == null || at < p.until));
+  const valid = arraySome(
+    periods,
+    (p) => p.from <= at && (own(p, 'until') == null || at < (own(p, 'until') as string)),
+  );
   return valid
     ? { kind: 'code', code }
     : { kind: 'unknown', why: `code ${citeName(code)} not valid at ${citeName(at)}` };
@@ -271,7 +274,7 @@ function readValue(referential: Referential, value: string, at: CivilDate): Read
  */
 function readTarget(referential: Referential, target: string): Target {
   if (objectHasOwn(referential.groups, target)) return { kind: 'group', name: target };
-  const codes = referential.codes;
+  const codes = own(referential, 'codes');
   if (codes !== undefined && !objectHasOwn(codes, target)) {
     throw newSpecError(
       'INVALID_REFERENTIAL',
