@@ -289,6 +289,20 @@ describe('D4: divideDecimals takes an explicit rounding', () => {
     }
   });
 
+  it('is exact beyond what a JS number holds: 40-digit operands', () => {
+    const a = '123456789012345678901234567890123456789';
+    const b = '987654321098765432109876543210987654321';
+    // a / b at scale 20, rounded down, from scaled BigInt arithmetic.
+    const quotient = (BigInt(a) * 10n ** 20n) / BigInt(b);
+    const text = quotient.toString().padStart(21, '0');
+    const expected = `${text.slice(0, text.length - 20)}.${text.slice(text.length - 20)}`;
+    expect(divideDecimals(a, b, { scale: 20, mode: 'down' })).toBe(
+      expected.replace(/0+$/, '').replace(/\.$/, ''),
+    );
+    // The quotient has more significant digits than a JS number keeps (17).
+    expect(divideDecimals(a, b, { scale: 20, mode: 'down' }).length).toBeGreaterThan(20);
+  });
+
   it('refuses a division by zero, whatever its spelling, with DIVISION_BY_ZERO', () => {
     const error = thrown(() => divideDecimals('1', '0', { scale: 2, mode: 'halfUp' }));
     expect(error.code).toBe('DIVISION_BY_ZERO');
@@ -338,6 +352,15 @@ describe('D5: MAX_DECIMAL_DIGITS bounds every operand and result', () => {
       expect(error.code).toBe('LIMIT_EXCEEDED');
       expect(error.message).toContain('MAX_DECIMAL_DIGITS');
     }
+  });
+
+  it('refuses an operand past the limit even when the result is small', () => {
+    expect(thrown(() => multiplyDecimals(past, '0')).code).toBe('LIMIT_EXCEEDED');
+    expect(thrown(() => multiplyDecimals('0', past)).code).toBe('LIMIT_EXCEEDED');
+    expect(thrown(() => divideDecimals('0', past, { scale: 0, mode: 'down' })).code).toBe(
+      'LIMIT_EXCEEDED',
+    );
+    expect(thrown(() => subtractDecimals(past, past)).code).toBe('LIMIT_EXCEEDED');
   });
 
   it('counts the fraction digits too, and not the sign or the point', () => {
