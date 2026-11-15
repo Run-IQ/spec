@@ -26,6 +26,7 @@ import {
   VerifyOptionsError,
 } from '../src/index.js';
 import type { RuleDefinitionInput } from '../src/index.js';
+import { readFileSync } from 'node:fs';
 import { CAPTURED } from '../src/intrinsics.js';
 import { clearIntlCaches } from '../src/proof/intl-calendar.js';
 import { withRuntimeTzdata } from './notices.js';
@@ -129,6 +130,64 @@ function run(): string[] {
 }
 
 const baseline = run();
+
+describe('the table covers the captures', () => {
+  // Round 7, AF5: `mapIteratorNext` could be made live with no test failing, because `CAPTURED`
+  // had no row for it. The rows expected are read from the source of the module, so a capture
+  // added without its row fails here.
+  const source = readFileSync(new URL('../src/intrinsics.ts', import.meta.url), 'utf8');
+  const owners: Record<string, object> = {
+    Array: Array.prototype,
+    Map: Map.prototype,
+    Set: Set.prototype,
+    WeakSet: WeakSet.prototype,
+    WeakMap: WeakMap.prototype,
+    String: String.prototype,
+    RegExp: RegExp.prototype,
+    Object: Object.prototype,
+    Function: Function.prototype,
+    Number: Number.prototype,
+    Uint8Array: Uint8Array.prototype,
+    TextEncoder: TextEncoder.prototype,
+    Date: Date.prototype,
+    DataView: DataView.prototype,
+  };
+  const prototypeCaptures = [...source.matchAll(/uncurryThis\((\w+)\.prototype\.(\w+)\)/g)].map(
+    (m) => [m[1]!, m[2]!] as const,
+  );
+  const staticCaptures = [
+    ...source.matchAll(
+      /^export const \w+(?::[^=]+)? = (Object|Math|Number|JSON|Reflect|Array|String)\.(\w+);$/gm,
+    ),
+  ]
+    .map((m) => [m[1]!, m[2]!] as const)
+    .filter(([, key]) => key !== 'prototype' && !/^[A-Z_]+$/.test(key));
+
+  it('finds the captures it expects rows for', () => {
+    expect(prototypeCaptures.length).toBeGreaterThan(30);
+    expect(staticCaptures.length).toBeGreaterThan(5);
+  });
+
+  it.each(prototypeCaptures)('has a row for %s.prototype.%s', (name, key) => {
+    const owner = owners[name];
+    expect(owner, `no owner known for ${name}: add it to this test`).toBeDefined();
+    expect(CAPTURED.some(([o, k]) => o === owner && k === key)).toBe(true);
+  });
+
+  it.each(staticCaptures)('has a row for %s.%s', (name, key) => {
+    const owner = (globalThis as Record<string, unknown>)[name];
+    expect(CAPTURED.some(([o, k]) => o === owner && k === key)).toBe(true);
+  });
+
+  it('has a row for the next of the Map and Set iterators', () => {
+    for (const [owner, key] of [
+      [Object.getPrototypeOf(new Map().keys()), 'next'],
+      [Object.getPrototypeOf(new Set().values()), 'next'],
+    ] as const) {
+      expect(CAPTURED.some(([o, k]) => o === owner && k === key)).toBe(true);
+    }
+  });
+});
 
 describe('the corpus', () => {
   it('has the verdicts the patches must not change', () => {
